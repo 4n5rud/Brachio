@@ -1,0 +1,13 @@
+[package]
+name = "brachio-qa"
+description = "Dev server supervision and Playwright QA loop for Brachio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true

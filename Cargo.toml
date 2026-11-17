@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/brachio-core",
+    "crates/brachio-pty",
+    "crates/brachio-git",
+    "crates/brachio-agent",
+    "crates/brachio-qa",
+    "crates/brachio-store",
+    "crates/brachio-mcp",
+    "crates/brachio-cli",
+    "src-tauri",
+]
+# src-tauri needs WebView2 (Windows) or WKWebView (macOS) to build, so a plain
+# `cargo test` at the root only covers the platform-independent crates.
+default-members = [
+    "crates/brachio-core",
+    "crates/brachio-pty",
+    "crates/brachio-git",
+    "crates/brachio-agent",
+    "crates/brachio-qa",
+    "crates/brachio-store",
+    "crates/brachio-mcp",
+    "crates/brachio-cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/4n5rud/Brachio"
+
+[workspace.dependencies]
+brachio-core = { path = "crates/brachio-core" }
+brachio-pty = { path = "crates/brachio-pty" }
+brachio-git = { path = "crates/brachio-git" }
+brachio-agent = { path = "crates/brachio-agent" }
+brachio-qa = { path = "crates/brachio-qa" }
+brachio-store = { path = "crates/brachio-store" }
+brachio-mcp = { path = "crates/brachio-mcp" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+portable-pty = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+dbg_macro = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

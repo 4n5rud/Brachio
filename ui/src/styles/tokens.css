@@ -1,0 +1,60 @@
+/*
+ * Design tokens. Screens use only these variables, never raw colors or sizes.
+ * Values are a first pass; the design system work in M2 replaces them.
+ */
+:root {
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-surface-raised: #eef1f5;
+  --color-border: #dde2ea;
+  --color-text: #111827;
+  --color-text-muted: #5b6474;
+  --color-accent: #0e9f8e;
+  --color-accent-contrast: #ffffff;
+  --color-status-working: #2563eb;
+  --color-status-blocked: #d97706;
+  --color-status-idle: #059669;
+  --color-status-error: #dc2626;
+  --color-status-unknown: #6b7280;
+
+  --font-sans: "Pretendard", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, monospace;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --duration-fast: 120ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #0b0f14;
+    --color-surface: #11161d;
+    --color-surface-raised: #18202a;
+    --color-border: #242e3a;
+    --color-text: #e6e9ef;
+    --color-text-muted: #8b95a5;
+    --color-accent: #2dd4bf;
+    --color-accent-contrast: #062925;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #0b0f14;
+  --color-surface: #11161d;
+  --color-surface-raised: #18202a;
+  --color-border: #242e3a;
+  --color-text: #e6e9ef;
+  --color-text-muted: #8b95a5;
+  --color-accent: #2dd4bf;
+  --color-accent-contrast: #062925;
+}
