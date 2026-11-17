@@ -1,0 +1,13 @@
+[package]
+name = "brachio-mcp"
+description = "MCP server that agents call to reach Brachio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true
