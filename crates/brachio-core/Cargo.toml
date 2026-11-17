@@ -1,0 +1,14 @@
+[package]
+name = "brachio-core"
+description = "Session manager, event bus and agent status model for Brachio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
