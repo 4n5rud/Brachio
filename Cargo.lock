@@ -233,12 +233,14 @@ name = "brachio-agent"
 version = "0.0.1"
 dependencies = [
  "serde",
+ "tempfile",
 ]
 
 [[package]]
 name = "brachio-app"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "brachio-agent",
  "brachio-core",
  "brachio-git",
@@ -250,6 +252,7 @@ dependencies = [
  "tauri-build",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -287,6 +290,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "portable-pty",
+ "serde",
  "tracing",
 ]
 

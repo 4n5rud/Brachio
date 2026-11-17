@@ -1,3 +1,7 @@
+//! Coalescing PTY output into frames.
+
+use std::mem;
+
 /// When to flush buffered PTY output to the web view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BatchConfig {
@@ -20,17 +24,18 @@ impl Default for BatchConfig {
 /// messages instead of many small ones. Pure: the caller supplies the clock.
 #[derive(Debug)]
 pub struct OutputBatcher {
-    cfg: BatchConfig,
-    buf: Vec<u8>,
+    config: BatchConfig,
+    buffer: Vec<u8>,
     first_byte_ms: Option<u64>,
 }
 
 impl OutputBatcher {
+    /// An empty batcher.
     #[must_use]
-    pub fn new(cfg: BatchConfig) -> Self {
+    pub fn new(config: BatchConfig) -> Self {
         Self {
-            cfg,
-            buf: Vec::with_capacity(cfg.max_bytes),
+            config,
+            buffer: Vec::with_capacity(config.max_bytes),
             first_byte_ms: None,
         }
     }
@@ -41,19 +46,20 @@ impl OutputBatcher {
             return None;
         }
         self.first_byte_ms.get_or_insert(now_ms);
-        self.buf.extend_from_slice(bytes);
-        (self.buf.len() >= self.cfg.max_bytes).then(|| self.take())
+        self.buffer.extend_from_slice(bytes);
+        (self.buffer.len() >= self.config.max_bytes).then(|| self.take())
     }
 
     /// Returns a frame when the oldest buffered byte has waited long enough.
     pub fn tick(&mut self, now_ms: u64) -> Option<Vec<u8>> {
         let first = self.first_byte_ms?;
-        (now_ms.saturating_sub(first) >= self.cfg.max_delay_ms).then(|| self.take())
+        (now_ms.saturating_sub(first) >= self.config.max_delay_ms).then(|| self.take())
     }
 
     fn take(&mut self) -> Vec<u8> {
         self.first_byte_ms = None;
-        std::mem::replace(&mut self.buf, Vec::with_capacity(self.cfg.max_bytes))
+        let empty = Vec::with_capacity(self.config.max_bytes);
+        mem::replace(&mut self.buffer, empty)
     }
 }
 
@@ -61,32 +67,32 @@ impl OutputBatcher {
 mod tests {
     use super::*;
 
-    const CFG: BatchConfig = BatchConfig {
+    const CONFIG: BatchConfig = BatchConfig {
         max_delay_ms: 16,
         max_bytes: 8,
     };
 
     #[test]
     fn flushes_on_size() {
-        let mut b = OutputBatcher::new(CFG);
-        assert_eq!(b.push(b"abcd", 0), None);
-        assert_eq!(b.push(b"efgh", 1), Some(b"abcdefgh".to_vec()));
-        assert_eq!(b.tick(100), None);
+        let mut batcher = OutputBatcher::new(CONFIG);
+        assert_eq!(batcher.push(b"abcd", 0), None);
+        assert_eq!(batcher.push(b"efgh", 1), Some(b"abcdefgh".to_vec()));
+        assert_eq!(batcher.tick(100), None);
     }
 
     #[test]
     fn flushes_on_delay_measured_from_first_byte() {
-        let mut b = OutputBatcher::new(CFG);
-        b.push(b"a", 10);
-        b.push(b"b", 20);
-        assert_eq!(b.tick(25), None);
-        assert_eq!(b.tick(26), Some(b"ab".to_vec()));
+        let mut batcher = OutputBatcher::new(CONFIG);
+        batcher.push(b"a", 10);
+        batcher.push(b"b", 20);
+        assert_eq!(batcher.tick(25), None);
+        assert_eq!(batcher.tick(26), Some(b"ab".to_vec()));
     }
 
     #[test]
     fn empty_input_starts_no_timer() {
-        let mut b = OutputBatcher::new(CFG);
-        assert_eq!(b.push(b"", 0), None);
-        assert_eq!(b.tick(1_000), None);
+        let mut batcher = OutputBatcher::new(CONFIG);
+        assert_eq!(batcher.push(b"", 0), None);
+        assert_eq!(batcher.tick(1_000), None);
     }
 }

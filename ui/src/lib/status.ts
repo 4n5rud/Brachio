@@ -10,25 +10,25 @@ export type AgentState =
   | { state: "unknown" };
 
 const BLOCK_LABELS: Record<BlockReason, string> = {
-  permission: "승인 대기",
-  question: "답변 대기",
-  auth: "로그인 필요",
+  permission: "Needs approval",
+  question: "Needs an answer",
+  auth: "Sign-in needed",
 };
 
 export function statusLabel(s: AgentState): string {
   switch (s.state) {
     case "working":
-      return "작업 중";
+      return "Working";
     case "blocked":
       return BLOCK_LABELS[s.reason];
     case "idle":
-      return "입력 대기";
+      return "Waiting for input";
     case "error":
-      return "오류";
+      return "Error";
     case "exited":
-      return s.code === 0 ? "종료" : "비정상 종료";
+      return s.code === 0 ? "Exited" : "Exited with error";
     case "unknown":
-      return "확인 중";
+      return "Checking";
   }
 }
 

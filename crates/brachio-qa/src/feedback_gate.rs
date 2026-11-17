@@ -1,15 +1,18 @@
+//! Decides whether a QA failure goes back to the agent.
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// Identifies "the same failure": test id plus the first line of its error.
 #[must_use]
 pub fn failure_signature(test_id: &str, error: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    test_id.hash(&mut h);
-    error.lines().next().unwrap_or("").trim().hash(&mut h);
-    h.finish()
+    let mut hasher = DefaultHasher::new();
+    test_id.hash(&mut hasher);
+    error.lines().next().unwrap_or("").trim().hash(&mut hasher);
+    hasher.finish()
 }
 
+/// What to do with a new QA failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedbackDecision {
     /// Send the failure bundle to the agent.
@@ -30,6 +33,7 @@ pub struct FeedbackGate {
 }
 
 impl FeedbackGate {
+    /// A gate that allows `max_attempts` automatic fixes.
     #[must_use]
     pub fn new(max_attempts: u32) -> Self {
         Self {
@@ -40,6 +44,7 @@ impl FeedbackGate {
         }
     }
 
+    /// Records a failure and decides what to do with it.
     pub fn decide(&mut self, signature: u64) -> FeedbackDecision {
         self.repeats = if self.last_signature == Some(signature) {
             self.repeats + 1
@@ -64,24 +69,24 @@ mod tests {
 
     #[test]
     fn signature_ignores_stack_after_first_line() {
-        let a = failure_signature("login.spec:3", "Expected 200\n at a.ts:1");
-        let b = failure_signature("login.spec:3", "Expected 200\n at b.ts:9");
-        assert_eq!(a, b);
+        let first = failure_signature("login.spec:3", "Expected 200\n at a.ts:1");
+        let second = failure_signature("login.spec:3", "Expected 200\n at b.ts:9");
+        assert_eq!(first, second);
     }
 
     #[test]
     fn same_failure_twice_stops() {
-        let mut g = FeedbackGate::new(3);
-        assert_eq!(g.decide(1), FeedbackDecision::Send);
-        assert_eq!(g.decide(1), FeedbackDecision::StopNoProgress);
+        let mut gate = FeedbackGate::new(3);
+        assert_eq!(gate.decide(1), FeedbackDecision::Send);
+        assert_eq!(gate.decide(1), FeedbackDecision::StopNoProgress);
     }
 
     #[test]
     fn different_failures_stop_at_limit() {
-        let mut g = FeedbackGate::new(3);
-        assert_eq!(g.decide(1), FeedbackDecision::Send);
-        assert_eq!(g.decide(2), FeedbackDecision::Send);
-        assert_eq!(g.decide(3), FeedbackDecision::Send);
-        assert_eq!(g.decide(4), FeedbackDecision::StopLimit);
+        let mut gate = FeedbackGate::new(3);
+        assert_eq!(gate.decide(1), FeedbackDecision::Send);
+        assert_eq!(gate.decide(2), FeedbackDecision::Send);
+        assert_eq!(gate.decide(3), FeedbackDecision::Send);
+        assert_eq!(gate.decide(4), FeedbackDecision::StopLimit);
     }
 }

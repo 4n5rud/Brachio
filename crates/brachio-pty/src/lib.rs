@@ -3,8 +3,11 @@
 //! The emulator state (`alacritty_terminal`) and replay on re-attach land in
 //! M1.
 
-mod batch;
-mod session;
+mod exit_watch;
+mod output_batcher;
+mod pty_session;
+mod session_manager;
 
-pub use batch::{BatchConfig, OutputBatcher};
-pub use session::{PtySession, SpawnSpec};
+pub use output_batcher::{BatchConfig, OutputBatcher};
+pub use pty_session::{PtySession, SpawnSpec};
+pub use session_manager::{EventSink, PtyEvent, SessionId, SessionManager};
