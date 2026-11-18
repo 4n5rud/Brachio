@@ -55,6 +55,7 @@ pub fn run() {
             workspace::task_delete_preview,
             workspace::task_delete,
             workspace::task_changes,
+            workspace::task_merge_preview,
             workspace::task_git_action,
         ])
         .run(tauri::generate_context!())

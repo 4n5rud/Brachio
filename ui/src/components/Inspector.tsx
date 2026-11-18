@@ -5,6 +5,7 @@ import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
 import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
+import { TaskMergePreview } from "./TaskMergePreview";
 
 type Pane = "changes" | "qa" | "activity";
 
@@ -54,6 +55,9 @@ export function Inspector(props: {
             </h3>
             <Show when={props.task.worktreePath}>
               <p class="muted">{t("inspector.diffBase")}</p>
+              <Show when={props.task.worktreePath && props.task.id} keyed>
+                {(id) => <TaskMergePreview taskId={id} />}
+              </Show>
               <Show when={changes.loading}>
                 <p role="status">{t("inspector.loadingChanges")}</p>
               </Show>
