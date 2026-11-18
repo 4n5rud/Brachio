@@ -619,6 +619,17 @@ kbd {
   font-weight: 600;
   color: var(--color-text-2);
 }
+.inspector-changes {
+  min-width: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.inspector-patch {
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  font: 12px/1.5 var(--font-mono);
+}
 .qa-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;

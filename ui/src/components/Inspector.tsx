@@ -1,6 +1,7 @@
-import { Match, Show, Switch, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
+import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
 
 type Pane = "changes" | "qa" | "activity";
@@ -8,6 +9,17 @@ type Pane = "changes" | "qa" | "activity";
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: { task: TaskRow }) {
   const [pane, setPane] = createSignal<Pane>("changes");
+  const [changes, { refetch }] = createResource(
+    () => pane() === "changes" && props.task.worktreePath && props.task.id,
+    async (id) => {
+      try {
+        return { id, data: await readTaskChanges(id) };
+      } catch (error) {
+        return { id, error: String(error) };
+      }
+    },
+  );
+  const currentChanges = () => changes()?.id === props.task.id ? changes() : undefined;
   const tab = (id: Pane, label: string) => (
     <button type="button" aria-pressed={pane() === id} onClick={() => setPane(id)}>
       {label}
@@ -24,11 +36,45 @@ export function Inspector(props: { task: TaskRow }) {
       </div>
       <Switch>
         <Match when={pane() === "changes"}>
-          <section class="inspector-section">
+          <section class="inspector-section inspector-changes">
             <h3>
               {t("inspector.changedFiles")}
-              <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+              <Show when={props.task.worktreePath} fallback={
+                <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+              }>
+                <button type="button" disabled={changes.loading} onClick={() => void refetch()}>
+                  {t("inspector.refresh")}
+                </button>
+              </Show>
             </h3>
+            <Show when={props.task.worktreePath}>
+              <p class="muted">{t("inspector.diffBase")}</p>
+              <Show when={changes.loading}>
+                <p role="status">{t("inspector.loadingChanges")}</p>
+              </Show>
+              <Show when={currentChanges()?.error}>
+                {(error) => <p role="alert">{error()}</p>}
+              </Show>
+              <Show when={currentChanges()?.data}>
+                {(data) => (
+                  <>
+                    <Show when={data().patch}>
+                      <pre class="inspector-patch" tabIndex={0}>{data().patch}</pre>
+                    </Show>
+                    <Show when={data().truncated}>
+                      <p class="muted">{t("inspector.truncated")}</p>
+                    </Show>
+                    <Show when={data().untracked.length > 0}>
+                      <h4>{t("inspector.untracked")}</h4>
+                      <ul><For each={data().untracked}>{(path) => <li>{path}</li>}</For></ul>
+                    </Show>
+                    <Show when={!data().patch && data().untracked.length === 0}>
+                      <p class="muted">{t("inspector.noChanges")}</p>
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </Show>
           </section>
         </Match>
         <Match when={pane() === "qa"}>

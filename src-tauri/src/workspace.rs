@@ -9,7 +9,7 @@ use brachio_agent::AgentKind;
 use brachio_git::{AddWorktree, Git};
 use brachio_store::{NewRepo, NewTask, RepoRecord, TaskRecord};
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 /// App state that owns the database connection.
@@ -129,6 +129,68 @@ pub async fn task_create(
 #[tauri::command]
 pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), String> {
     TaskRecord::archive(&*database.lock()?, &id, now_ms()).map_err(to_text)
+}
+
+/// Changes in a task worktree relative to its base.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskChanges {
+    patch: String,
+    untracked: Vec<String>,
+    truncated: bool,
+}
+
+/// Reads branch and working-tree changes without modifying the repository.
+#[tauri::command]
+pub async fn task_changes(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<TaskChanges, String> {
+    let (task, repo) = {
+        let connection = database.lock()?;
+        let task = TaskRecord::get(&connection, &id).map_err(to_text)?;
+        let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
+        (task, repo)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        const PATCH_LIMIT: usize = 256 * 1024;
+        let git = Git::new(&task.worktree_path);
+        let base_ref = format!("refs/heads/{}", repo.default_branch);
+        let base = git
+            .run(&["merge-base", "HEAD", &base_ref])
+            .map_err(to_text)?;
+        let mut patch = git
+            .run_text(&[
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-color",
+                &base,
+                "--",
+            ])
+            .map_err(to_text)?;
+        let truncated = patch.len() > PATCH_LIMIT;
+        if truncated {
+            let mut end = PATCH_LIMIT;
+            while !patch.is_char_boundary(end) {
+                end -= 1;
+            }
+            patch.truncate(end);
+        }
+        let untracked = git
+            .run_text(&["ls-files", "--others", "--exclude-standard", "-z"])
+            .map_err(to_text)?
+            .split_terminator('\0')
+            .map(str::to_owned)
+            .collect();
+        Ok(TaskChanges {
+            patch,
+            untracked,
+            truncated,
+        })
+    })
+    .await
+    .map_err(to_text)?
 }
 
 /// Errors cross the IPC boundary as display strings.

@@ -62,6 +62,14 @@ impl Git {
     /// # Errors
     /// Fails when git cannot be started or exits with a failure status.
     pub fn run(&self, args: &[&str]) -> Result<String, GitError> {
+        Ok(self.run_text(args)?.trim().to_owned())
+    }
+
+    /// Runs git and preserves whitespace in successful stdout.
+    ///
+    /// # Errors
+    /// Fails when git cannot be started or exits with a failure status.
+    pub fn run_text(&self, args: &[&str]) -> Result<String, GitError> {
         let output = self.output(args)?;
         if !output.status.success() {
             return Err(GitError::Failed {
@@ -70,6 +78,6 @@ impl Git {
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             });
         }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 }
