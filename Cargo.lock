@@ -404,6 +404,7 @@ dependencies = [
  "brachio-pty",
  "brachio-runtime",
  "brachio-store",
+ "interprocess",
  "rusqlite",
  "serde",
  "serde_json",

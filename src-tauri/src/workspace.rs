@@ -16,7 +16,7 @@ use tauri::State;
 pub struct Database(pub Mutex<Connection>);
 
 impl Database {
-    fn lock(&self) -> Result<MutexGuard<'_, Connection>, String> {
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, Connection>, String> {
         self.0
             .lock()
             .map_err(|_| "database lock poisoned".to_owned())
