@@ -45,6 +45,13 @@ export function App() {
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const draftWriters = new Map<string, (text: string) => Promise<boolean>>();
+  const registerDraftWriter = (id: string, writer: (text: string) => Promise<boolean>) => {
+    draftWriters.set(id, writer);
+    return () => {
+      if (draftWriters.get(id) === writer) draftWriters.delete(id);
+    };
+  };
 
   // One repository at a time for now. The title bar switcher picks among them later.
   const repo = createMemo(() => repos()[0]);
@@ -186,8 +193,15 @@ export function App() {
                     takePrompt={takePrompt}
                     shouldResume={shouldResume}
                     onStatus={onStatus}
+                    registerDraftWriter={registerDraftWriter}
                   />
-                  <Inspector task={task()} />
+                  <Inspector task={task()} onDraft={(id, text) => {
+                    const current = selected();
+                    if (current?.id !== id || current.status.state === "blocked") {
+                      return Promise.resolve(false);
+                    }
+                    return draftWriters.get(id)?.(text) ?? Promise.resolve(false);
+                  }} />
                 </>
               )}
             </Show>

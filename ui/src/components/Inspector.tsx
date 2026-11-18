@@ -1,13 +1,18 @@
-import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
+import { Match, Show, Switch, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
+import { DiffReview } from "./DiffReview";
+import { TaskGitActions } from "./TaskGitActions";
 
 type Pane = "changes" | "qa" | "activity";
 
 /** Right column: a compact summary of the selected task. */
-export function Inspector(props: { task: TaskRow }) {
+export function Inspector(props: {
+  task: TaskRow;
+  onDraft: (taskId: string, text: string) => Promise<boolean>;
+}) {
   const [pane, setPane] = createSignal<Pane>("changes");
   const [changes, { refetch }] = createResource(
     () => pane() === "changes" && props.task.worktreePath && props.task.id,
@@ -58,18 +63,20 @@ export function Inspector(props: { task: TaskRow }) {
               <Show when={currentChanges()?.data}>
                 {(data) => (
                   <>
-                    <Show when={data().patch}>
-                      <pre class="inspector-patch" tabIndex={0}>{data().patch}</pre>
+                    <Show when={data().patch ? currentChanges() : undefined} keyed>
+                      {(snapshot) => <DiffReview patch={snapshot.data?.patch ?? ""}
+                        onDraft={(text) => props.onDraft(snapshot.id, text)} />}
                     </Show>
                     <Show when={data().truncated}>
                       <p class="muted">{t("inspector.truncated")}</p>
                     </Show>
-                    <Show when={data().untracked.length > 0}>
-                      <h4>{t("inspector.untracked")}</h4>
-                      <ul><For each={data().untracked}>{(path) => <li>{path}</li>}</For></ul>
-                    </Show>
-                    <Show when={!data().patch && data().untracked.length === 0}>
+                    <Show when={!data().patch && data().untracked.length === 0 && data().staged.length === 0}>
                       <p class="muted">{t("inspector.noChanges")}</p>
+                    </Show>
+                    <Show when={currentChanges()?.id} keyed>
+                      {(id) => <TaskGitActions taskId={id} staged={data().staged}
+                        untracked={data().untracked}
+                        onChanged={async () => { if (props.task.id === id) await refetch(); }} />}
                     </Show>
                   </>
                 )}

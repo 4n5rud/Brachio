@@ -25,6 +25,7 @@ export function TaskView(props: {
   takePrompt?: (taskId: string) => string | undefined;
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
+  registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
 }) {
   // Called once per terminal: the first prompt goes only to the first session.
   const sessionFor = (id: string): TerminalSession | undefined => {
@@ -97,6 +98,7 @@ export function TaskView(props: {
                   session={sessionFor(id)}
                   active={id === props.task.id}
                   onStatus={(status, message) => props.onStatus?.(id, status, message)}
+                  registerDraftWriter={(writer) => props.registerDraftWriter(id, writer)}
                 />
               </div>
             )}

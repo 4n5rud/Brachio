@@ -48,6 +48,7 @@ export function TerminalPane(props: {
   active?: boolean;
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
+  registerDraftWriter?: (writer: (text: string) => Promise<boolean>) => () => void;
 }) {
   let host!: HTMLDivElement;
   onMount(() => {
@@ -92,6 +93,7 @@ export function TerminalPane(props: {
     fitVisible();
 
     let handle: TerminalHandle | null = null;
+    let exited = false;
     let disposed = false;
     const session = props.session;
     let typeInPrompt: string | null = null;
@@ -123,6 +125,7 @@ export function TerminalPane(props: {
           return;
         }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
+        exited = true;
         term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
         props.onStatus?.({ state: "exited", code: message.exitCode }, null);
       })
@@ -140,6 +143,20 @@ export function TerminalPane(props: {
         .catch((error: unknown) => term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`));
     };
     start(session?.resume === true && session.agent !== null);
+    const unregister = props.registerDraftWriter?.(async (text) => {
+      if (!handle || !session?.agent || exited || disposed || !props.active
+        || !term.modes.bracketedPasteMode) {
+        return false;
+      }
+      // Send printable text as a paste, without a key that submits the prompt.
+      const draft = Array.from(text, (character) => {
+        const code = character.charCodeAt(0);
+        return code < 32 || (code >= 127 && code <= 159) ? " " : character;
+      }).join("");
+      await handle.write(`\x1b[200~${draft}\x1b[201~`);
+      term.focus();
+      return true;
+    });
 
     function sendTypeInPrompt() {
       const prompt = typeInPrompt;
@@ -164,6 +181,7 @@ export function TerminalPane(props: {
     observer.observe(host);
     onCleanup(() => {
       disposed = true;
+      unregister?.();
       observer.disconnect();
       input.dispose();
       resized.dispose();

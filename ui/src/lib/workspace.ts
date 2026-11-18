@@ -43,10 +43,17 @@ export const archiveTask = (id: string) => invoke<void>("task_archive", { id });
 interface TaskChanges {
   patch: string;
   untracked: string[];
+  staged: string[];
   truncated: boolean;
 }
 
 export const readTaskChanges = (id: string) => invoke<TaskChanges>("task_changes", { id });
+export type TaskGitAction =
+  | { action: "stageTracked" | "push" }
+  | { action: "stageFile"; path: string }
+  | { action: "commit"; message: string };
+export const runTaskGitAction = (id: string, request: TaskGitAction) =>
+  invoke<void>("task_git_action", { id, request });
 
 const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "codex" };
 
