@@ -1,5 +1,6 @@
 //! Brachio terminal runtime: the wire protocol, the local transport and a client for the app.
 
+pub mod approval;
 pub mod client;
 pub mod endpoint;
 pub mod paths;
