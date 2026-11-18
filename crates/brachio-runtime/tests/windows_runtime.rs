@@ -298,7 +298,7 @@ fn versions_are_negotiated_per_request() {
 
     let hello = response(send(&name, &["hello"]));
     assert_eq!(hello["runtime"]["oldest_version"], 1);
-    assert_eq!(hello["runtime"]["current_version"], 3);
+    assert_eq!(hello["runtime"]["current_version"], 4);
 
     let old = send(&name, &["--protocol", "1", "inspect", "missing"]);
     let old: Value = serde_json::from_slice(&old.stdout).expect("decode old reply");
@@ -306,7 +306,7 @@ fn versions_are_negotiated_per_request() {
     assert_eq!(old["error"], "no active terminal for missing");
 
     let future = refusal(send(&name, &["--protocol", "9", "hello"]));
-    assert!(future.contains("speaks 1 through 3"), "{future}");
+    assert!(future.contains("speaks 1 through 4"), "{future}");
     let early = refusal(send(&name, &["--protocol", "1", "hello"]));
     assert!(early.contains("needs protocol version 2"), "{early}");
 }

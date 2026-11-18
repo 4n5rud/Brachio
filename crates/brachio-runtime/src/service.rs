@@ -10,13 +10,14 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
+use brachio_core::status::AgentState;
 use brachio_pty::{PtyEvent, SessionId, SessionManager, SpawnSpec};
 use brachio_runtime::endpoint::{self, Liveness};
 use brachio_runtime::protocol;
 use brachio_runtime::transport;
 use brachio_runtime::wire::{
     accepted, read_message, write_message, Action, LostInfo, OutputPage, Request, Response,
-    ResponseResult, RuntimeInfo, ScreenSnapshot, SessionInfo, IO_TIMEOUT, MAX_MESSAGE,
+    ResponseResult, RuntimeInfo, ScreenSnapshot, SessionInfo, StatusInfo, IO_TIMEOUT, MAX_MESSAGE,
     MAX_RESPONSE,
 };
 use clap::{Parser, Subcommand};
@@ -223,26 +224,35 @@ impl Runtime {
                 Ok(self.hello())
             }
             Action::Ensure { key, cwd } => {
-                let cwd = cwd
-                    .canonicalize()
-                    .context("resolve shell working directory")?;
-                if !cwd.is_dir() || key.is_empty() {
-                    bail!("a session key and working directory are required");
-                }
-                if let Some(existing) = sessions.get(&key) {
-                    if existing.cwd != cwd {
-                        bail!("session key already belongs to a different working directory");
-                    }
-                    return existing.describe(None);
-                }
-                if self.draining.load(Ordering::SeqCst) {
-                    bail!("runtime is draining and takes no new terminals");
-                }
-                let session = self.start_shell(cwd)?;
-                self.forget(&key)?;
-                let info = session.describe(None)?;
-                sessions.insert(key, session);
-                Ok(info)
+                let (program, args) = shell_command();
+                let spec = SpawnSpec {
+                    program,
+                    args,
+                    cwd,
+                    env: Vec::new(),
+                    rows: ROWS.get(),
+                    cols: COLS.get(),
+                };
+                self.launch(&mut sessions, key, spec)
+            }
+            Action::Launch {
+                key,
+                cwd,
+                program,
+                args,
+                env,
+                rows,
+                cols,
+            } => {
+                let spec = SpawnSpec {
+                    program,
+                    args,
+                    cwd,
+                    env: parse_env(env)?,
+                    rows: rows.max(1),
+                    cols: cols.max(1),
+                };
+                self.launch(&mut sessions, key, spec)
             }
             Action::Inspect { key } => get(&sessions, &key)?.describe(None),
             Action::Read { key, after } => get(&sessions, &key)?.describe(Some(after)),
@@ -273,22 +283,44 @@ impl Runtime {
         }
     }
 
-    fn start_shell(&self, cwd: PathBuf) -> Result<Session> {
-        let shell = shell_command();
-        let spec = SpawnSpec {
-            program: shell.0,
-            args: shell.1,
-            cwd: cwd.clone(),
-            env: Vec::new(),
-            rows: ROWS.get(),
-            cols: COLS.get(),
-        };
+    /// Start the program for `key` unless it already runs, in which case describe that one.
+    fn launch(
+        &self,
+        sessions: &mut HashMap<String, Session>,
+        key: String,
+        mut spec: SpawnSpec,
+    ) -> Result<ResponseResult> {
+        spec.cwd = spec
+            .cwd
+            .canonicalize()
+            .context("resolve working directory")?;
+        if !spec.cwd.is_dir() || key.is_empty() || spec.program.is_empty() {
+            bail!("a session key, a program and a working directory are required");
+        }
+        if let Some(existing) = sessions.get(&key) {
+            if existing.cwd != spec.cwd {
+                bail!("session key already belongs to a different working directory");
+            }
+            return existing.describe(None);
+        }
+        if self.draining.load(Ordering::SeqCst) {
+            bail!("runtime is draining and takes no new terminals");
+        }
+        let session = self.start_program(&spec)?;
+        self.forget(&key)?;
+        let info = session.describe(None)?;
+        sessions.insert(key, session);
+        Ok(info)
+    }
+
+    fn start_program(&self, spec: &SpawnSpec) -> Result<Session> {
+        let cwd = spec.cwd.clone();
         let output = Arc::new(Mutex::new(StartupOutput::default()));
         let received = Arc::clone(&output);
         let (updates, receiver) = watch::channel(());
         let manager = Arc::downgrade(&self.manager);
         let id = self.manager.spawn(
-            &spec,
+            spec,
             Arc::new(move |event| match event {
                 PtyEvent::Output(bytes) => {
                     let reply = lock(&received)
@@ -306,7 +338,16 @@ impl Runtime {
                     }
                     updates.send_replace(());
                 }
-                PtyEvent::Status(_) => {}
+                PtyEvent::Status(report) => {
+                    if let Ok(mut state) = lock(&received) {
+                        state.status =
+                            (report.state != AgentState::Unknown).then_some(StatusInfo {
+                                state: report.state,
+                                message: report.message,
+                            });
+                    }
+                    updates.send_replace(());
+                }
             }),
         )?;
         let reply = {
@@ -396,12 +437,14 @@ impl Session {
             output_bytes: state.history.end(),
             exited: state.exited,
             exit_code: state.exit_code,
+            status: state.status.clone(),
         }
     }
 }
 
 #[derive(Default)]
 struct StartupOutput {
+    status: Option<StatusInfo>,
     id: Option<SessionId>,
     history: OutputHistory,
     screen: TerminalScreen,
@@ -438,6 +481,20 @@ impl StartupOutput {
         self.answered = true;
         Some(id)
     }
+}
+
+/// Split `NAME=value` entries into pairs.
+fn parse_env(entries: Vec<String>) -> Result<Vec<(String, String)>> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            entry
+                .split_once('=')
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .filter(|(name, _)| !name.is_empty())
+                .with_context(|| format!("environment entry must look like NAME=value: {entry}"))
+        })
+        .collect()
 }
 
 #[cfg(windows)]
@@ -651,22 +708,24 @@ async fn follow(
     mut offset: u64,
 ) -> Result<()> {
     let mut first = true;
+    let mut last_status: Option<StatusInfo> = None;
     loop {
         // Mark updates before reading the journal. A write that arrives after
         // the snapshot remains observable when we begin waiting.
         session.updates.borrow_and_update();
         let result = session.describe(Some(offset));
-        let (next, end, exited) = match &result {
+        let (next, end, exited, status) = match &result {
             Ok(ResponseResult::Success {
                 session,
                 output: Some(page),
-            }) => (page.next, page.end, session.exited),
+            }) => (page.next, page.end, session.exited, session.status.clone()),
             _ => return send_response(stream, instance, version, result).await,
         };
-        if first || next != offset || exited {
+        if first || next != offset || exited || status != last_status {
             send_response(stream, instance, version, result).await?;
         }
         first = false;
+        last_status = status;
         offset = next;
         if offset < end {
             continue;
