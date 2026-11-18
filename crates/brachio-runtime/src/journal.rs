@@ -1,6 +1,5 @@
 //! Keeps the last known screen of every shell on disk, so a dead runtime can be recovered from.
 
-use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -106,23 +105,7 @@ fn file_stem(key: &str) -> String {
 
 /// Where a runtime keeps its journal unless told otherwise.
 pub(crate) fn default_directory() -> io::Result<PathBuf> {
-    let missing =
-        |name: &str| io::Error::new(io::ErrorKind::NotFound, format!("{name} is not set"));
-    #[cfg(windows)]
-    let base = PathBuf::from(env::var_os("LOCALAPPDATA").ok_or_else(|| missing("LOCALAPPDATA"))?)
-        .join("Brachio");
-    #[cfg(target_os = "macos")]
-    let base = PathBuf::from(env::var_os("HOME").ok_or_else(|| missing("HOME"))?)
-        .join("Library/Application Support/Brachio");
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let base = match env::var_os("XDG_STATE_HOME") {
-        Some(state) => PathBuf::from(state),
-        None => {
-            PathBuf::from(env::var_os("HOME").ok_or_else(|| missing("HOME"))?).join(".local/state")
-        }
-    }
-    .join("brachio");
-    Ok(base.join("runtime"))
+    brachio_runtime::paths::state_directory()
 }
 
 #[cfg(test)]

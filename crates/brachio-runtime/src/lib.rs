@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod endpoint;
+pub mod paths;
 pub mod protocol;
 pub mod transport;
 pub mod wire;
