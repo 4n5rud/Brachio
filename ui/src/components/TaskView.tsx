@@ -2,7 +2,7 @@ import { For, Show } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
-import { statusTone } from "../lib/status";
+import { statusTone, type AgentState } from "../lib/status";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
 import { StatusBadge } from "./StatusBadge";
@@ -21,6 +21,7 @@ export function TaskView(props: {
   /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
   openIds: readonly string[];
   findTask: (id: string) => TaskRow | undefined;
+  onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
 }) {
   // Called once per terminal: the first prompt goes only to the first session.
@@ -84,7 +85,11 @@ export function TaskView(props: {
           <For each={props.openIds}>
             {(id) => (
               <div class="terminal-slot" hidden={id !== props.task.id}>
-                <TerminalPane session={sessionFor(id)} active={id === props.task.id} />
+                <TerminalPane
+                  session={sessionFor(id)}
+                  active={id === props.task.id}
+                  onStatus={(status, message) => props.onStatus?.(id, status, message)}
+                />
               </div>
             )}
           </For>

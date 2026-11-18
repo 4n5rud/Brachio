@@ -23,6 +23,7 @@ pub fn run() {
     tracing_subscriber::fmt().with_env_filter("info").init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
         .setup(open_database)
         .invoke_handler(tauri::generate_handler![

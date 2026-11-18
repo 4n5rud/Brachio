@@ -11,7 +11,9 @@ import { TitleBar, type View } from "./components/TitleBar";
 import { t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
+import { notificationKey, notifyIfAway } from "./lib/notify";
 import { isNewTaskShortcut } from "./lib/shortcut";
+import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
 import { addRepo, createTask, listRepos, listTasks, toTaskRow, type RepoRecord } from "./lib/workspace";
 
@@ -19,10 +21,26 @@ import { addRepo, createTask, listRepos, listTasks, toTaskRow, type RepoRecord }
 // show example tasks so the layout can be reviewed.
 const inTauri = "__TAURI_INTERNALS__" in window;
 
+interface LiveStatus {
+  status: AgentState;
+  message: string | null;
+  /** UTC milliseconds of the report. */
+  at: number;
+}
+
 export function App() {
-  const [now] = createSignal(Date.now());
+  const [now, setNow] = createSignal(Date.now());
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
+  // Live state per task, as its agent last reported it in this run.
+  const [live, setLive] = createSignal<ReadonlyMap<string, LiveStatus>>(new Map());
+  const rows = createMemo(() =>
+    tasks().map((task) => {
+      const report = live().get(task.id);
+      if (!report) return task;
+      return { ...task, status: report.status, note: report.message ?? undefined, updatedAt: report.at };
+    }),
+  );
   const [view, setView] = createSignal<View>("tasks");
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
@@ -30,7 +48,7 @@ export function App() {
 
   // One repository at a time for now. The title bar switcher picks among them later.
   const repo = createMemo(() => repos()[0]);
-  const selected = createMemo(() => tasks().find((task) => task.id === selectedId()));
+  const selected = createMemo(() => rows().find((task) => task.id === selectedId()));
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
   createEffect(() => {
@@ -38,7 +56,7 @@ export function App() {
     if (id !== undefined && !openIds().includes(id)) setOpenIds((ids) => [...ids, id]);
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
-  const needsYou = createMemo(() => tasks().filter((task) => taskGroup(task.status) === "needs").length);
+  const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
 
   // First prompts of tasks created in this run. Each is handed to the
   // task's terminal once, then dropped.
@@ -50,6 +68,14 @@ export function App() {
   };
 
   const report = (failure: unknown) => setError(String(failure));
+
+  const onStatus = (taskId: string, status: AgentState, message: string | null) => {
+    const previous = live().get(taskId)?.status ?? { state: "unknown" };
+    setLive((map) => new Map(map).set(taskId, { status, message, at: Date.now() }));
+    const key = notificationKey(previous, status);
+    const task = tasks().find((row) => row.id === taskId);
+    if (key && task) notifyIfAway(key, task.title, message).catch(report);
+  };
 
   const load = async () => {
     const [storedRepos, storedTasks] = await Promise.all([listRepos(), listTasks()]);
@@ -85,6 +111,9 @@ export function App() {
 
   onMount(() => {
     if (inTauri) load().catch(report);
+    // Keeps "2m ago" labels current.
+    const clock = setInterval(() => setNow(Date.now()), 30_000);
+    onCleanup(() => clearInterval(clock));
     const onKey = (event: KeyboardEvent) => {
       if (isNewTaskShortcut(event) && canCreate()) {
         event.preventDefault();
@@ -133,13 +162,13 @@ export function App() {
       <Switch>
         <Match when={view() === "board"}>
           <main class="layout layout-full">
-            <Board tasks={tasks()} now={now()} onOpen={open} />
+            <Board tasks={rows()} now={now()} onOpen={open} />
           </main>
         </Match>
         <Match when={view() === "tasks"}>
           <main class="layout" classList={{ "layout-no-inspector": !selected() }}>
             <TaskList
-              tasks={tasks()}
+              tasks={rows()}
               selectedId={selectedId()}
               onSelect={setSelectedId}
               onNewTask={canCreate() ? () => setDialogOpen(true) : undefined}
@@ -148,7 +177,10 @@ export function App() {
             <Show when={selected()} fallback={noTask()}>
               {(task) => (
                 <>
-                  <TaskView task={task()} openIds={openIds()} findTask={findTask} takePrompt={takePrompt} />
+                  <TaskView task={task()} openIds={openIds()} findTask={findTask}
+                    takePrompt={takePrompt}
+                    onStatus={onStatus}
+                  />
                   <Inspector task={task()} />
                 </>
               )}

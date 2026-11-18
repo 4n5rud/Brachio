@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use brachio_agent::{AgentKind, Installed, PromptDelivery, ResolvedCommand};
+use brachio_core::status::AgentState;
 use brachio_pty::{EventSink, PtyEvent, SessionId, SessionManager, SpawnSpec};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -41,11 +42,17 @@ pub struct Opened {
     pub prompt_delivery: PromptDelivery,
 }
 
-/// Sent as JSON on the channel when the child exits. Output frames are raw.
+/// Sent as JSON on the channel. Output frames are raw bytes instead.
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExitMessage {
-    exit_code: Option<u32>,
+#[serde(untagged, rename_all_fields = "camelCase")]
+enum ChannelMessage {
+    /// The child exited.
+    Exit { exit_code: Option<u32> },
+    /// The agent reported its state.
+    Status {
+        status: AgentState,
+        message: Option<String>,
+    },
 }
 
 /// Errors cross the IPC boundary as display strings.
@@ -141,19 +148,27 @@ fn shell_command() -> ResolvedCommand {
 
 fn sink_for(channel: Channel<InvokeResponseBody>) -> EventSink {
     Arc::new(move |event| {
-        let body = match event {
-            PtyEvent::Output(bytes) => InvokeResponseBody::Raw(bytes),
-            PtyEvent::Exit(exit_code) => {
-                let Ok(json) = serde_json::to_string(&ExitMessage { exit_code }) else {
-                    return;
-                };
-                InvokeResponseBody::Json(json)
+        let message = match event {
+            PtyEvent::Output(bytes) => {
+                send(&channel, InvokeResponseBody::Raw(bytes));
+                return;
             }
+            PtyEvent::Exit(exit_code) => ChannelMessage::Exit { exit_code },
+            PtyEvent::Status(report) => ChannelMessage::Status {
+                status: report.state,
+                message: report.message,
+            },
         };
-        if let Err(error) = channel.send(body) {
-            tracing::debug!("terminal channel closed: {error}");
+        if let Ok(json) = serde_json::to_string(&message) {
+            send(&channel, InvokeResponseBody::Json(json));
         }
     })
+}
+
+fn send(channel: &Channel<InvokeResponseBody>, body: InvokeResponseBody) {
+    if let Err(error) = channel.send(body) {
+        tracing::debug!("terminal channel closed: {error}");
+    }
 }
 
 fn default_shell() -> PathBuf {
@@ -173,4 +188,23 @@ fn terminal_env() -> Vec<(String, String)> {
         ("COLORTERM".to_owned(), "truecolor".to_owned()),
         ("TERM_PROGRAM".to_owned(), "Brachio".to_owned()),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_messages_use_camel_case_json() {
+        let exit = serde_json::to_string(&ChannelMessage::Exit { exit_code: Some(3) })
+            .expect("serialize exit");
+        assert_eq!(exit, r#"{"exitCode":3}"#);
+
+        let status = serde_json::to_string(&ChannelMessage::Status {
+            status: AgentState::Working,
+            message: None,
+        })
+        .expect("serialize status");
+        assert_eq!(status, r#"{"status":{"state":"working"},"message":null}"#);
+    }
 }

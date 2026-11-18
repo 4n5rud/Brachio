@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+brachio-core.workspace = true
 portable-pty.workspace = true
 serde.workspace = true
 tracing.workspace = true

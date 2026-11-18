@@ -5,6 +5,7 @@ export const en = {
   "status.blocked.permission": "Needs approval",
   "status.blocked.question": "Has a question",
   "status.blocked.auth": "Sign-in needed",
+  "status.blocked.other": "Waiting for you",
   "status.idle": "Ready",
   "status.error": "Error",
   "status.exited": "Exited",
@@ -78,6 +79,14 @@ export const en = {
   "empty.task.body": "Create a task to start an agent in its own worktree.",
   "error.dismiss": "Dismiss",
   "error.title": "Something went wrong",
+
+  "notify.permission": "Approval needed",
+  "notify.question": "Question for you",
+  "notify.auth": "Sign in needed",
+  "notify.other": "Waiting for you",
+  "notify.error": "Something went wrong",
+  "notify.finished": "Finished",
+  "notify.crashed": "Crashed",
 
   "time.now": "now",
 } as const;

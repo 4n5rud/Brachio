@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
+use brachio_core::status::{OscScanner, ProgramStatus, ProgramStatusMessage, QUERY_REPLY};
 use serde::{Deserialize, Serialize};
 
 use crate::exit_watch::ExitWatch;
@@ -34,6 +35,8 @@ pub enum PtyEvent {
     Output(Vec<u8>),
     /// The child exited. `None` when the exit code could not be read.
     Exit(Option<u32>),
+    /// The program reported its state through OSC 7501.
+    Status(ProgramStatus),
 }
 
 /// Receives events for one session. Called from background threads.
@@ -75,9 +78,14 @@ impl SessionManager {
         self.table()?.insert(id, Arc::clone(&shared));
 
         let (chunk_sender, chunk_receiver) = mpsc::channel();
+        let status = StatusWatch {
+            session: Arc::clone(&shared),
+            sink: Arc::clone(&sink),
+            scanner: OscScanner::new(),
+        };
         thread::Builder::new()
             .name(format!("pty-read-{id}"))
-            .spawn(move || read_until_closed(reader, &chunk_sender))
+            .spawn(move || read_until_closed(reader, &chunk_sender, status))
             .context("start pty reader")?;
 
         let manager = Arc::clone(self);
@@ -155,13 +163,49 @@ pub(crate) fn lock_session(session: &SharedSession) -> Result<MutexGuard<'_, Pty
     session.lock().map_err(|_| anyhow!("pty session poisoned"))
 }
 
-fn read_until_closed(mut reader: Box<dyn Read + Send>, chunks: &Sender<Vec<u8>>) {
+/// Reads OSC 7501 status out of the raw output, before batching.
+///
+/// Runs on the reader thread so a query is answered ahead of the bytes that
+/// follow it. Programs send a device attributes request right after the
+/// query and expect this answer to arrive first.
+struct StatusWatch {
+    session: SharedSession,
+    sink: EventSink,
+    scanner: OscScanner,
+}
+
+impl StatusWatch {
+    fn inspect(&mut self, bytes: &[u8]) {
+        let Self {
+            session,
+            sink,
+            scanner,
+        } = self;
+        scanner.feed(bytes, |body| match ProgramStatusMessage::parse(body) {
+            Some(ProgramStatusMessage::Query) => {
+                if let Ok(mut session) = lock_session(session) {
+                    // A failed write means the PTY is closing; the exit event follows.
+                    let _ = session.write_input(QUERY_REPLY);
+                }
+            }
+            Some(ProgramStatusMessage::Report(status)) => sink(PtyEvent::Status(status)),
+            None => {}
+        });
+    }
+}
+
+fn read_until_closed(
+    mut reader: Box<dyn Read + Send>,
+    chunks: &Sender<Vec<u8>>,
+    mut status: StatusWatch,
+) {
     let mut buffer = vec![0u8; 16 * 1024];
     loop {
         let read = match reader.read(&mut buffer) {
             Ok(0) | Err(_) => return,
             Ok(read) => read,
         };
+        status.inspect(&buffer[..read]);
         if chunks.send(buffer[..read].to_vec()).is_err() {
             return;
         }
@@ -240,6 +284,7 @@ mod tests {
             match events.recv_timeout(TIMEOUT).expect("session ends in time") {
                 PtyEvent::Output(bytes) => output.extend(bytes),
                 PtyEvent::Exit(code) => return (String::from_utf8_lossy(&output).into(), code),
+                PtyEvent::Status(_) => {}
             }
         }
     }
@@ -279,6 +324,47 @@ mod tests {
         assert!(
             manager.write(id, b"x").is_err(),
             "a killed session takes no input"
+        );
+    }
+
+    #[test]
+    fn reports_program_status() {
+        let manager = Arc::new(SessionManager::default());
+        let script = spec(
+            "/bin/sh",
+            &["-c", r"printf '\033]7501;state=working\033\\'"],
+        );
+        let (_, events) = spawn_collecting(&manager, &script);
+
+        let status = loop {
+            match events.recv_timeout(TIMEOUT).expect("status in time") {
+                PtyEvent::Status(status) => break status,
+                PtyEvent::Exit(_) => panic!("exited without a status"),
+                PtyEvent::Output(_) => {}
+            }
+        };
+
+        assert_eq!(status.state, brachio_core::status::AgentState::Working);
+    }
+
+    #[test]
+    fn answers_a_program_status_query() {
+        let manager = Arc::new(SessionManager::default());
+        // Ask, then read the first bytes of the answer from the terminal input.
+        let script = spec(
+            "/bin/sh",
+            &[
+                "-c",
+                r"stty raw -echo; printf '\033]7501;?\033\\'; dd bs=1 count=8 2>/dev/null | od -An -c",
+            ],
+        );
+        let (_, events) = spawn_collecting(&manager, &script);
+
+        let (output, _) = wait_for_exit(&events);
+
+        assert!(
+            output.contains("7   5   0   1"),
+            "no answer read: {output:?}"
         );
     }
 }
