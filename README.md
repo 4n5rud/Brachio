@@ -20,7 +20,7 @@ Brachio supports macOS and Windows. It runs entirely on your machine with no ser
 
 ## Performance
 
-Numbers we have measured. Each row says where and how, and the scripts are in the PRs that changed them. Rows marked "not measured" are open work, not claims.
+Numbers we have measured, with where and how in each row. Rows marked "not measured" are open work, not claims.
 
 | What | Brachio | Comparison | How it was measured |
 | --- | --- | --- | --- |
