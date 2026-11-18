@@ -21,7 +21,8 @@ export const en = {
   "titlebar.view": "View",
   "view.tasks": "Tasks",
   "view.board": "Board",
-  "titlebar.notifications": "Notifications",
+  "activity.title": "Activity",
+  "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 
   "sidebar.title": "Tasks",

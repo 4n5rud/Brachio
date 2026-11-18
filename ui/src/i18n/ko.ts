@@ -23,7 +23,8 @@ export const ko: Messages = {
   "titlebar.view": "보기",
   "view.tasks": "작업",
   "view.board": "보드",
-  "titlebar.notifications": "알림",
+  "activity.title": "활동",
+  "activity.empty": "이번 세션의 활동이 아직 없습니다.",
   "titlebar.settings": "설정",
 
   "sidebar.title": "작업",

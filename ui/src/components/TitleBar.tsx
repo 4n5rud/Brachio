@@ -19,6 +19,7 @@ export function TitleBar(props: {
   view: View;
   onView: (view: View) => void;
   needsYou: number;
+  onActivity: () => void;
   onQuickOpen: () => void;
   onSettings: () => void;
 }) {
@@ -54,7 +55,8 @@ export function TitleBar(props: {
             {t("view.board")}
           </button>
         </div>
-        <button class="icon-button" type="button" aria-label={`${t("titlebar.notifications")}: ${props.needsYou}`}>
+        <button class="icon-button" type="button" aria-haspopup="dialog"
+          aria-label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity}>
           <Icon name="bell" />
           {props.needsYou > 0 && <span class="count-badge">{props.needsYou}</span>}
         </button>
