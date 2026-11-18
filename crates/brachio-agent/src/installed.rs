@@ -155,18 +155,20 @@ pub fn find_on_path(
     None
 }
 
-/// Suffixes to try after a program name. The bare name always comes first.
+/// Suffixes to try after a program name. On Windows, use executable extensions
+/// so an extensionless npm shell shim cannot shadow its Windows counterpart.
 fn executable_extensions(pathext_var: Option<&OsStr>) -> Vec<String> {
-    let mut extensions = vec![String::new()];
     if cfg!(windows) {
-        let pathext = pathext_var.map_or_else(
-            || ".COM;.EXE;.BAT;.CMD".to_owned(),
-            |value| value.to_string_lossy().into_owned(),
-        );
-        let listed = pathext.split(';').filter(|extension| !extension.is_empty());
-        extensions.extend(listed.map(str::to_ascii_lowercase));
+        let pathext = pathext_var
+            .filter(|value| !value.is_empty())
+            .map_or_else(|| ".COM;.EXE;.BAT;.CMD".into(), OsStr::to_string_lossy);
+        return pathext
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect();
     }
-    extensions
+    vec![String::new()]
 }
 
 fn is_batch_file(path: &Path) -> bool {
@@ -198,6 +200,30 @@ fn read_version(path: &Path) -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let first_line = stdout.lines().next()?.trim();
     (!first_line.is_empty()).then(|| first_line.to_owned())
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::ffi::OsStr;
+    use std::fs;
+
+    use super::find_on_path;
+
+    #[test]
+    fn npm_shell_shim_does_not_shadow_the_windows_launcher() {
+        let bin = tempfile::tempdir().expect("create PATH directory");
+        fs::write(bin.path().join("codex"), "#!/bin/sh\n").expect("write Unix shim");
+        let launcher = bin.path().join("codex.cmd");
+        fs::write(&launcher, "@echo off\r\n").expect("write Windows shim");
+
+        let found = find_on_path(
+            "codex",
+            Some(bin.path().as_os_str()),
+            Some(OsStr::new(".EXE;.CMD")),
+        );
+
+        assert_eq!(found, Some(launcher));
+    }
 }
 
 #[cfg(all(test, unix))]
