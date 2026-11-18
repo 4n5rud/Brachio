@@ -45,6 +45,7 @@ brachio-runtime = { path = "crates/brachio-runtime" }
 anyhow = "1"
 base64 = "0.22"
 thiserror = "2"
+toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }

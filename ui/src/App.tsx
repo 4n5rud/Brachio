@@ -16,6 +16,7 @@ import { notificationKey, notifyIfAway } from "./lib/notify";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
+import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTasks,
   previewTaskDeletion, restoreTask,
   toTaskRow, type RepoRecord } from "./lib/workspace";
@@ -99,6 +100,14 @@ export function App() {
   // the app restarted, so their agent picks up its last conversation.
   const createdThisRun = new Set<string>();
   const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
+  // Setup commands of tasks created in this run, typed into the task's shell once.
+  const setupInputs = new Map<string, string>();
+  const hasSetupInput = (taskId: string) => setupInputs.has(taskId);
+  const takeSetupInput = (taskId: string) => {
+    const input = setupInputs.get(taskId);
+    setupInputs.delete(taskId);
+    return input;
+  };
   const takePrompt = (taskId: string) => {
     const prompt = firstPrompts.get(taskId);
     firstPrompts.delete(taskId);
@@ -150,6 +159,20 @@ export function App() {
     switchRepo(added.id);
   };
 
+  // A repository can ask for commands to run, so the user agrees once per exact list.
+  const approveSetup = async (repoId: string, commands: readonly string[]) => {
+    const entry = [repoId, ...commands].join("\n");
+    const approved = loadApprovedSetups();
+    if (approved.includes(entry)) return true;
+    const agreed = await confirm([t("setup.body"), ...commands].join("\n\n"), {
+      title: t("setup.title"),
+      okLabel: t("setup.run"),
+      cancelLabel: t("workspace.close"),
+    });
+    if (agreed) saveApprovedSetups([...approved, entry]);
+    return agreed;
+  };
+
   const create = async (input: NewTaskInput) => {
     const current = repo();
     if (!current) return;
@@ -161,6 +184,9 @@ export function App() {
     });
     createdThisRun.add(record.id);
     if (input.prompt !== "") firstPrompts.set(record.id, input.prompt);
+    if (record.setupCommands.length > 0 && await approveSetup(current.id, record.setupCommands)) {
+      setupInputs.set(record.id, record.setupCommands.join("\r"));
+    }
     setTasks((list) => [toTaskRow(record), ...list]);
     setSelectedId(record.id);
     setView("tasks");
@@ -313,6 +339,8 @@ export function App() {
               openIds={openIds()}
               findTask={findTask}
               takePrompt={takePrompt}
+              hasSetupInput={hasSetupInput}
+              takeSetupInput={takeSetupInput}
               shouldResume={shouldResume}
               onStatus={onStatus}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
