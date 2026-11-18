@@ -1,5 +1,5 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { open as openFolder } from "@tauri-apps/plugin-dialog";
+import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { confirm, open as openFolder } from "@tauri-apps/plugin-dialog";
 import { Board } from "./components/Board";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { Inspector } from "./components/Inspector";
@@ -16,7 +16,8 @@ import { notificationKey, notifyIfAway } from "./lib/notify";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
-import { addRepo, createTask, listRepos, listTasks, toTaskRow, type RepoRecord } from "./lib/workspace";
+import { addRepo, archiveTask, createTask, listArchivedTasks, listRepos, listTasks, restoreTask,
+  toTaskRow, type RepoRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
 // show example tasks so the layout can be reviewed.
@@ -33,6 +34,7 @@ export function App() {
   const [now, setNow] = createSignal(Date.now());
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
+  const [archived, setArchived] = createSignal<TaskRow[]>([]);
   // Live state per task, as its agent last reported it in this run.
   const [live, setLive] = createSignal<ReadonlyMap<string, LiveStatus>>(new Map());
   const rows = createMemo(() =>
@@ -45,7 +47,8 @@ export function App() {
   const [view, setView] = createSignal<View>("tasks");
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
-  const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings">();
+  const [archiving, setArchiving] = createSignal(false);
+  const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived">();
   const savedTheme = localStorage.getItem("brachio.theme");
   const [theme, setTheme] = createSignal<Theme>(
     savedTheme === "light" || savedTheme === "dark" ? savedTheme : "system",
@@ -117,9 +120,12 @@ export function App() {
   };
 
   const load = async () => {
-    const [storedRepos, storedTasks] = await Promise.all([listRepos(), listTasks()]);
+    const [storedRepos, storedTasks, storedArchives] = await Promise.all([
+      listRepos(), listTasks(), listArchivedTasks(),
+    ]);
     setRepos(storedRepos);
     setTasks(storedTasks.map(toTaskRow));
+    setArchived(storedArchives.map(toTaskRow));
     restoreSelection();
   };
 
@@ -158,6 +164,44 @@ export function App() {
     setSelectedId(record.id);
     setView("tasks");
     setDialogOpen(false);
+  };
+
+  const archive = async (task: TaskRow) => {
+    if (archiving()) return;
+    setArchiving(true);
+    try {
+      if (!await confirm(t("task.archiveBody"), {
+        title: `${t("task.archive")} · ${task.title}`,
+        okLabel: t("task.archive"),
+        cancelLabel: t("workspace.close"),
+      })) return;
+      await archiveTask(task.id);
+      batch(() => {
+        setTasks((items) => items.filter((item) => item.id !== task.id));
+        setArchived((items) => [task, ...items]);
+        setLive((statuses) => {
+          const next = new Map(statuses);
+          next.delete(task.id);
+          return next;
+        });
+        setOpenIds((ids) => ids.filter((id) => id !== task.id));
+        if (selectedId() === task.id) setSelectedId(repoRows()[0]?.id);
+      });
+      firstPrompts.delete(task.id);
+      createdThisRun.delete(task.id);
+    } catch (failure) {
+      report(failure);
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const restore = async (id: string) => {
+    const task = toTaskRow(await restoreTask(id));
+    batch(() => {
+      setArchived((items) => items.filter((item) => item.id !== id));
+      setTasks((items) => [task, ...items].sort((a, b) => b.updatedAt - a.updatedAt));
+    });
   };
 
   const canCreate = () => inTauri && repo() !== undefined;
@@ -251,6 +295,7 @@ export function App() {
               takePrompt={takePrompt}
               shouldResume={shouldResume}
               onStatus={onStatus}
+              onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
               registerDraftWriter={registerDraftWriter}
             />
           )}
@@ -262,6 +307,8 @@ export function App() {
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} theme={theme()}
+          archived={archived()} onRestore={restore}
+          onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
       </Show>
