@@ -15,7 +15,8 @@ use interprocess::local_socket::{GenericNamespaced, ListenerOptions};
 use interprocess::os::windows::local_socket::ListenerOptionsExt;
 use interprocess::os::windows::security_descriptor::SecurityDescriptor;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::watch;
 use uuid::Uuid;
 use widestring::U16CString;
 
@@ -55,6 +56,8 @@ enum Action {
     Inspect { key: String },
     /// Read a page of output starting at the requested absolute byte offset.
     Read { key: String, after: u64 },
+    /// Replay and then follow output on the same connection.
+    Follow { key: String, after: u64 },
     /// Write text to the shell.
     Write { key: String, text: String },
     /// Stop one shell explicitly.
@@ -114,13 +117,17 @@ struct SessionInfo {
     session_id: SessionId,
     pid: u32,
     output_bytes: u64,
+    exited: bool,
+    exit_code: Option<u32>,
 }
 
+#[derive(Clone)]
 struct Session {
     id: SessionId,
     pid: u32,
     cwd: PathBuf,
     output: Arc<Mutex<StartupOutput>>,
+    updates: watch::Receiver<()>,
 }
 
 struct Runtime {
@@ -166,6 +173,7 @@ impl Runtime {
             }
             Action::Inspect { key } => get(&sessions, &key)?.describe(None),
             Action::Read { key, after } => get(&sessions, &key)?.describe(Some(after)),
+            Action::Follow { .. } => bail!("follow requires a streaming response"),
             Action::Write { key, text } => {
                 let session = get(&sessions, &key)?;
                 self.manager.write(session.id, text.as_bytes())?;
@@ -190,18 +198,28 @@ impl Runtime {
         };
         let output = Arc::new(Mutex::new(StartupOutput::default()));
         let received = Arc::clone(&output);
+        let (updates, receiver) = watch::channel(());
         let manager = Arc::downgrade(&self.manager);
         let id = self.manager.spawn(
             &spec,
-            Arc::new(move |event| {
-                if let PtyEvent::Output(bytes) = event {
+            Arc::new(move |event| match event {
+                PtyEvent::Output(bytes) => {
                     let reply = lock(&received)
                         .ok()
                         .and_then(|mut state| state.record(&bytes));
+                    updates.send_replace(());
                     if let (Some(id), Some(manager)) = (reply, manager.upgrade()) {
                         let _ = manager.write(id, b"\x1b[1;1R");
                     }
                 }
+                PtyEvent::Exit(code) => {
+                    if let Ok(mut state) = lock(&received) {
+                        state.exited = true;
+                        state.exit_code = code;
+                    }
+                    updates.send_replace(());
+                }
+                PtyEvent::Status(_) => {}
             }),
         )?;
         let reply = {
@@ -218,6 +236,7 @@ impl Runtime {
             pid,
             cwd,
             output,
+            updates: receiver,
         })
     }
 }
@@ -239,6 +258,8 @@ impl Session {
                 session_id: self.id,
                 pid: self.pid,
                 output_bytes: state.history.end(),
+                exited: state.exited,
+                exit_code: state.exit_code,
             },
             output,
         })
@@ -251,6 +272,8 @@ struct StartupOutput {
     history: OutputHistory,
     matched: usize,
     answered: bool,
+    exited: bool,
+    exit_code: Option<u32>,
 }
 
 impl StartupOutput {
@@ -310,10 +333,13 @@ pub(super) async fn run() -> Result<()> {
                 let stream = listener.accept().await?;
                 let runtime = Arc::clone(&runtime);
                 tokio::spawn(async move {
-                    if let Err(error) =
-                        tokio::time::timeout(IO_TIMEOUT, respond(stream, runtime)).await
-                    {
-                        eprintln!("runtime request timed out: {error}");
+                    if let Err(error) = respond(stream, runtime).await {
+                        let disconnected = error
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::BrokenPipe);
+                        if !disconnected {
+                            eprintln!("runtime connection ended: {error}");
+                        }
                     }
                 });
             }
@@ -322,71 +348,171 @@ pub(super) async fn run() -> Result<()> {
             let stream = Stream::connect(name)
                 .await
                 .context("connect to terminal runtime")?;
-            let response = tokio::time::timeout(IO_TIMEOUT, request(stream, action)).await??;
-            println!("{response}");
-            if let Some(error) = response.get("error") {
-                bail!("{error}");
-            }
-            Ok(())
+            request(stream, action).await
         }
     }
 }
 
 async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
-    let message = read_message(&mut stream).await?;
+    let message = tokio::time::timeout(IO_TIMEOUT, read_message(&mut BufReader::new(&mut stream)))
+        .await??
+        .context("connection closed before request")?;
     let result = match serde_json::from_slice::<Request>(&message) {
+        Ok(Request {
+            version: VERSION,
+            action: Action::Follow { key, after },
+        }) => {
+            let session =
+                lock(&runtime.sessions).and_then(|sessions| get(&sessions, &key).cloned());
+            match session {
+                Ok(session) => return follow(&mut stream, &runtime.instance, session, after).await,
+                Err(error) => Err(error),
+            }
+        }
         Ok(request) => {
-            tokio::task::spawn_blocking({
-                let runtime = Arc::clone(&runtime);
-                move || runtime.execute(request)
-            })
-            .await?
+            tokio::time::timeout(
+                IO_TIMEOUT,
+                tokio::task::spawn_blocking({
+                    let runtime = Arc::clone(&runtime);
+                    move || runtime.execute(request)
+                }),
+            )
+            .await??
         }
         Err(error) => Err(error.into()),
     };
+    send_response(&mut stream, &runtime.instance, result).await
+}
+
+async fn send_response(
+    stream: &mut Stream,
+    instance: &str,
+    result: Result<ResponseResult>,
+) -> Result<()> {
     let result = match result {
         Ok(result) => result,
         Err(error) => ResponseResult::Error {
             error: format!("{error:#}"),
         },
     };
-    write_message(
-        &mut stream,
-        &Response {
-            version: VERSION,
-            instance: &runtime.instance,
-            result,
-        },
+    tokio::time::timeout(
+        IO_TIMEOUT,
+        write_message(
+            stream,
+            &Response {
+                version: VERSION,
+                instance,
+                result,
+            },
+        ),
     )
-    .await
+    .await?
 }
 
-async fn request(mut stream: Stream, action: Action) -> Result<serde_json::Value> {
-    write_message(
-        &mut stream,
-        &Request {
-            version: VERSION,
-            action,
-        },
+async fn follow(
+    stream: &mut Stream,
+    instance: &str,
+    mut session: Session,
+    mut offset: u64,
+) -> Result<()> {
+    let mut first = true;
+    loop {
+        // Mark updates before reading the journal. A write that arrives after
+        // the snapshot remains observable when we begin waiting.
+        session.updates.borrow_and_update();
+        let result = session.describe(Some(offset));
+        let (next, end, exited) = match &result {
+            Ok(ResponseResult::Success {
+                session,
+                output: Some(page),
+            }) => (page.next, page.end, session.exited),
+            _ => return send_response(stream, instance, result).await,
+        };
+        if first || next != offset || exited {
+            send_response(stream, instance, result).await?;
+        }
+        first = false;
+        offset = next;
+        if offset < end {
+            continue;
+        }
+        if exited {
+            return Ok(());
+        }
+        let mut input = [0];
+        tokio::select! {
+            changed = session.updates.changed() => { changed.context("terminal updates closed")?; }
+            _ = stream.read(&mut input) => return Ok(()),
+        }
+    }
+}
+
+async fn request(mut stream: Stream, action: Action) -> Result<()> {
+    let following = matches!(action, Action::Follow { .. });
+    tokio::time::timeout(
+        IO_TIMEOUT,
+        write_message(
+            &mut stream,
+            &Request {
+                version: VERSION,
+                action,
+            },
+        ),
     )
-    .await?;
-    let response: serde_json::Value = serde_json::from_slice(&read_message(&mut stream).await?)?;
+    .await??;
+    let mut reader = BufReader::new(stream);
+    let first = tokio::time::timeout(IO_TIMEOUT, read_message(&mut reader))
+        .await??
+        .context("runtime closed before responding")?;
+    let completed = print_response(&first)?;
+    if following {
+        if completed {
+            return Ok(());
+        }
+        while let Some(message) = read_message(&mut reader).await? {
+            if print_response(&message)? {
+                return Ok(());
+            }
+        }
+        bail!("runtime disconnected before the terminal exited");
+    }
+    Ok(())
+}
+
+fn print_response(message: &[u8]) -> Result<bool> {
+    use std::io::Write;
+
+    let response: serde_json::Value = serde_json::from_slice(message)?;
     if response.get("version").and_then(serde_json::Value::as_u64) != Some(u64::from(VERSION)) {
         bail!("incompatible runtime response");
     }
-    Ok(response)
+    let mut output = std::io::stdout().lock();
+    output.write_all(message)?;
+    output.flush()?;
+    if let Some(error) = response.get("error") {
+        bail!("{error}");
+    }
+    let output = &response["output"];
+    let completed = response["session"]["exited"] == true
+        && output["next"]
+            .as_u64()
+            .is_some_and(|next| Some(next) == output["end"].as_u64());
+    Ok(completed)
 }
 
-async fn read_message(stream: &mut Stream) -> Result<Vec<u8>> {
+async fn read_message(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option<Vec<u8>>> {
     let mut message = Vec::new();
-    BufReader::new(stream)
+    reader
         .take(MAX_MESSAGE)
         .read_until(b'\n', &mut message)
         .await?;
+    if message.is_empty() {
+        return Ok(None);
+    }
     if message.last() != Some(&b'\n') {
         bail!("missing or oversized runtime message");
     }
-    Ok(message)
+    Ok(Some(message))
 }
 
 async fn write_message(stream: &mut Stream, value: &impl Serialize) -> Result<()> {
