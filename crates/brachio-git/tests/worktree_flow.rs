@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use brachio_git::{AddWorktree, Git};
+use brachio_git::{AddWorktree, Git, GitError};
 
 fn run(git: &Git, args: &[&str]) {
     if let Err(error) = git.run(args) {
@@ -96,8 +96,36 @@ fn inspect_finds_root_and_branch_from_a_subfolder() {
 #[test]
 fn inspect_rejects_a_plain_folder() {
     let folder = temp_dir();
-    let result = brachio_git::inspect_repo(folder.path());
-    assert!(result.is_err(), "a folder without .git is not a repository");
+    let error = brachio_git::inspect_repo(folder.path()).expect_err("a folder without .git");
+    assert!(
+        matches!(&error, GitError::NotARepository { suggestions, .. } if suggestions.is_empty()),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("Choose the folder that contains .git"),
+        "{error}"
+    );
+}
+
+#[test]
+fn inspect_points_at_the_repository_inside_the_chosen_folder() {
+    let parent = temp_dir();
+    let repo = parent.path().join("project");
+    fs::create_dir(&repo).expect("make project folder");
+    init_repo(&repo);
+    fs::create_dir(parent.path().join("notes")).expect("make a plain sibling folder");
+
+    let error = brachio_git::inspect_repo(parent.path()).expect_err("the parent is not a repo");
+    match &error {
+        GitError::NotARepository { suggestions, .. } => {
+            assert_eq!(suggestions, std::slice::from_ref(&repo))
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+    assert!(error.to_string().contains("Did you mean"), "{error}");
+    assert!(error.to_string().contains("project"), "{error}");
 }
 
 #[test]
