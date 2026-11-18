@@ -137,6 +137,14 @@ impl SessionManager {
         Ok(ids)
     }
 
+    /// Operating-system identifier for an active child, when available.
+    ///
+    /// # Errors
+    /// Fails when the session has ended or cannot be locked.
+    pub fn process_id(&self, id: SessionId) -> Result<Option<u32>> {
+        Ok(lock_session(&self.get(id)?)?.process_id())
+    }
+
     fn get(&self, id: SessionId) -> Result<SharedSession> {
         let table = self.table()?;
         let session = table
