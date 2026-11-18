@@ -2,6 +2,8 @@ import { For, Match, Show, Switch, createMemo, createSignal, onMount } from "sol
 import { locale, setLocale, t } from "../i18n";
 import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
 import type { TaskRow } from "../lib/tasks";
+import { AgentSettings } from "./settings/AgentSettings";
+import { TerminalSettings } from "./settings/TerminalSettings";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -138,7 +140,9 @@ export function WorkspaceDialog(props: {
               <span>{t("quickOpen.title")}</span><kbd>{QUICK_OPEN_KEYS}</kbd>
               <span>{t("newTask.title")}</span><kbd>{NEW_TASK_KEYS}</kbd>
             </div>
+            <TerminalSettings />
             <Show when={props.onOpenArchived}>
+              <AgentSettings />
               <button type="button" class="button button-sm" onClick={() => props.onOpenArchived?.()}>
                 {t("task.archived")}
               </button>
