@@ -312,11 +312,6 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
-      const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
-        if (payload.type === "drop") void dropFiles(payload.paths, payload.position).catch(report);
-      });
-      dropListener.catch(report);
-      onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       const listener = listenForTaskNotifications((id) => {
         if (!findTask(id)) return;
         open(id);
@@ -325,6 +320,11 @@ export function App() {
       });
       listener.catch(report);
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
+      const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
+        if (payload.type === "drop") void dropFiles(payload.paths, payload.position).catch(report);
+      });
+      dropListener.catch(report);
+      onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
       void watchApprovals(
         (question) => setQuestions((open) => [...open, question]),
