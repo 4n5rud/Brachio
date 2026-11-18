@@ -43,6 +43,8 @@ export const ko: Messages = {
   "approval.allowAlways": "이 작업에서는 항상 허용",
   "approval.deny": "거부",
   "approval.hint": "터미널에서 바로 답해도 돼요.",
+  "terminal.exited": "프로세스가 끝났어요",
+  "terminal.startFailed": "터미널을 시작하지 못했어요",
 
   "inspector.changes": "변경",
   "inspector.qa": "QA",

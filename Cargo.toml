@@ -51,12 +51,24 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 
+# Lints that enforce docs/rust-style.md (Google's Rust style guide, adapted).
 [workspace.lints.rust]
 unsafe_code = "forbid"
+missing_docs = "warn"
 
 [workspace.lints.clippy]
-unwrap_used = "deny"
 dbg_macro = "deny"
+unwrap_used = "deny"
+wildcard_imports = "warn"
+enum_glob_use = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+must_use_candidate = "warn"
+redundant_clone = "warn"
+fn_params_excessive_bools = "warn"
+struct_excessive_bools = "warn"
+manual_assert = "warn"
+uninlined_format_args = "warn"
 
 [profile.release]
 lto = "thin"

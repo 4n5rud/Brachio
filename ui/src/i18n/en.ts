@@ -41,6 +41,8 @@ export const en = {
   "approval.allowAlways": "Always allow in this task",
   "approval.deny": "Deny",
   "approval.hint": "You can also answer in the terminal.",
+  "terminal.exited": "Process exited",
+  "terminal.startFailed": "Could not start the terminal",
 
   "inspector.changes": "Changes",
   "inspector.qa": "QA",

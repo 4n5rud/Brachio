@@ -1,3 +1,5 @@
+//! Branch and folder names derived from task titles.
+
 const MAX_SLUG_LEN: usize = 40;
 const BRANCH_PREFIX: &str = "brachio/";
 
@@ -7,9 +9,9 @@ const BRANCH_PREFIX: &str = "brachio/";
 #[must_use]
 pub fn slugify(title: &str) -> String {
     let mut slug = String::with_capacity(title.len());
-    for ch in title.chars() {
-        if ch.is_ascii_alphanumeric() {
-            slug.push(ch.to_ascii_lowercase());
+    for character in title.chars() {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character.to_ascii_lowercase());
         } else if !slug.ends_with('-') && !slug.is_empty() {
             slug.push('-');
         }

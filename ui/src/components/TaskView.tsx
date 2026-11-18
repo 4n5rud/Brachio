@@ -7,10 +7,15 @@ import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
 import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
-import { TerminalPane } from "./TerminalPane";
+import { CORE_AGENT } from "../lib/terminal";
+import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
 /** Main area for one task: header, tabs, the agent terminal, approval bar. */
 export function TaskView(props: { task: TaskRow }) {
+  const session = (): TerminalSession | undefined => {
+    const cwd = props.task.worktreePath;
+    return cwd === undefined ? undefined : { agent: CORE_AGENT[props.task.agent], cwd };
+  };
   return (
     <section class="task-view">
       <div class="task-header">
@@ -62,7 +67,9 @@ export function TaskView(props: { task: TaskRow }) {
           </div>
         </div>
         <div class="pane-body">
-          <TerminalPane />
+          <Show when={props.task.id} keyed>
+            {(_id) => <TerminalPane session={session()} />}
+          </Show>
         </div>
         <Show when={props.task.pendingCommand}>
           {(command) => <ApprovalBar command={command()} />}

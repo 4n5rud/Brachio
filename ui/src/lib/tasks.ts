@@ -23,6 +23,8 @@ export interface TaskRow {
   qa?: QaSummary;
   /** Command waiting on a permission answer, when the agent is blocked on one. */
   pendingCommand?: string;
+  /** Worktree folder. Sample tasks have none, so their terminal stays empty. */
+  worktreePath?: string;
 }
 
 export type TaskGroup = "needs" | "working" | "review" | "done";

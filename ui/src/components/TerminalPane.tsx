@@ -2,12 +2,25 @@ import { onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { t } from "../i18n";
+import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
+
+/** What to run. Without it the pane stays an empty terminal. */
+export interface TerminalSession {
+  /** `null` opens the user's shell. */
+  agent: AgentKind | null;
+  cwd: string;
+}
+
+/** Lines kept above the screen. Each line costs memory per terminal, so keep it bounded. */
+const SCROLLBACK_LINES = 5_000;
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-// One visible terminal. Hidden panes are unmounted; the core keeps their
-// screen state and repaints on remount.
-export function TerminalPane() {
+// One live terminal bound to one PTY session. Unmounting closes the session;
+// keeping hidden sessions alive and repainting them comes with the core's
+// emulator state.
+export function TerminalPane(props: { session?: TerminalSession; onExit?: (code: number | null) => void }) {
   let host!: HTMLDivElement;
   onMount(() => {
     const term = new Terminal({
@@ -15,6 +28,7 @@ export function TerminalPane() {
       fontSize: Number.parseInt(cssVar("--text-term"), 10) || 13,
       lineHeight: 1.4,
       cursorBlink: true,
+      scrollback: SCROLLBACK_LINES,
       allowProposedApi: true,
       theme: {
         background: cssVar("--color-term-bg"),
@@ -26,16 +40,47 @@ export function TerminalPane() {
     term.loadAddon(fit);
     term.open(host);
     try {
-      term.loadAddon(new WebglAddon());
+      const webgl = new WebglAddon();
+      // The GPU can drop the context (sleep, driver reset). Disposing the
+      // addon hands rendering back to xterm's DOM renderer.
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
     } catch {
-      // WebGL unavailable: xterm falls back to its DOM renderer.
+      // WebGL unavailable: xterm keeps its DOM renderer.
     }
     fit.fit();
-    term.writeln("Brachio: the PTY connection lands in M1.");
+
+    let handle: TerminalHandle | null = null;
+    let disposed = false;
+    const session = props.session;
+    if (session) {
+      const options = { ...session, rows: term.rows, cols: term.cols };
+      openTerminal(options, (message) => {
+        if (message.type === "output") {
+          term.write(message.bytes);
+          return;
+        }
+        const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
+        term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
+        props.onExit?.(message.exitCode);
+      })
+        .then((opened) => {
+          if (disposed) void opened.close();
+          else handle = opened;
+        })
+        .catch((error: unknown) => term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`));
+    }
+
+    const input = term.onData((data) => void handle?.write(data));
+    const resized = term.onResize(({ rows, cols }) => void handle?.resize(rows, cols));
     const observer = new ResizeObserver(() => fit.fit());
     observer.observe(host);
     onCleanup(() => {
+      disposed = true;
       observer.disconnect();
+      input.dispose();
+      resized.dispose();
+      void handle?.close();
       term.dispose();
     });
   });

@@ -1,4 +1,6 @@
-use super::types::AgentState;
+//! Holds back state changes until they settle.
+
+use super::agent_state::AgentState;
 
 /// Publishes a state only after it has held for `stable_ms`.
 ///
@@ -8,10 +10,18 @@ use super::types::AgentState;
 pub struct Debouncer {
     stable_ms: i64,
     published: AgentState,
-    pending: Option<(AgentState, i64)>,
+    pending: Option<Pending>,
+}
+
+/// A candidate state and when it was first seen.
+#[derive(Debug, Clone, Copy)]
+struct Pending {
+    state: AgentState,
+    since_ms: i64,
 }
 
 impl Debouncer {
+    /// Creates a debouncer that starts at `Unknown`.
     #[must_use]
     pub fn new(stable_ms: i64) -> Self {
         Self {
@@ -21,6 +31,7 @@ impl Debouncer {
         }
     }
 
+    /// The state last published.
     #[must_use]
     pub fn published(&self) -> AgentState {
         self.published
@@ -38,11 +49,18 @@ impl Debouncer {
             return self.publish(candidate);
         }
         match self.pending {
-            Some((state, since)) if state == candidate => (now_ms - since >= self.stable_ms)
-                .then(|| self.publish(candidate))
-                .flatten(),
+            Some(pending) if pending.state == candidate => {
+                if now_ms - pending.since_ms >= self.stable_ms {
+                    self.publish(candidate)
+                } else {
+                    None
+                }
+            }
             _ => {
-                self.pending = Some((candidate, now_ms));
+                self.pending = Some(Pending {
+                    state: candidate,
+                    since_ms: now_ms,
+                });
                 None
             }
         }
@@ -61,31 +79,31 @@ mod tests {
 
     #[test]
     fn publishes_only_after_state_holds() {
-        let mut d = Debouncer::new(300);
-        assert_eq!(d.update(AgentState::Working, 0), None);
-        assert_eq!(d.update(AgentState::Working, 299), None);
+        let mut debouncer = Debouncer::new(300);
+        assert_eq!(debouncer.update(AgentState::Working, 0), None);
+        assert_eq!(debouncer.update(AgentState::Working, 299), None);
         assert_eq!(
-            d.update(AgentState::Working, 300),
+            debouncer.update(AgentState::Working, 300),
             Some(AgentState::Working)
         );
-        assert_eq!(d.published(), AgentState::Working);
+        assert_eq!(debouncer.published(), AgentState::Working);
     }
 
     #[test]
     fn flicker_shorter_than_window_is_ignored() {
-        let mut d = Debouncer::new(300);
-        d.update(AgentState::Working, 0);
-        d.update(AgentState::Working, 300);
-        assert_eq!(d.update(AgentState::Idle, 400), None);
-        assert_eq!(d.update(AgentState::Working, 500), None);
-        assert_eq!(d.update(AgentState::Idle, 600), None);
-        assert_eq!(d.published(), AgentState::Working);
+        let mut debouncer = Debouncer::new(300);
+        debouncer.update(AgentState::Working, 0);
+        debouncer.update(AgentState::Working, 300);
+        assert_eq!(debouncer.update(AgentState::Idle, 400), None);
+        assert_eq!(debouncer.update(AgentState::Working, 500), None);
+        assert_eq!(debouncer.update(AgentState::Idle, 600), None);
+        assert_eq!(debouncer.published(), AgentState::Working);
     }
 
     #[test]
     fn exit_is_published_immediately() {
-        let mut d = Debouncer::new(300);
+        let mut debouncer = Debouncer::new(300);
         let exited = AgentState::Exited { code: Some(0) };
-        assert_eq!(d.update(exited, 0), Some(exited));
+        assert_eq!(debouncer.update(exited, 0), Some(exited));
     }
 }

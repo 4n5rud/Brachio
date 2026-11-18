@@ -2,10 +2,10 @@
 //!
 //! Signal precedence: process > hook > OSC 7501 > output activity.
 
-mod debounce;
+mod agent_state;
+mod debouncer;
 mod resolve;
-mod types;
 
-pub use debounce::Debouncer;
+pub use agent_state::{AgentState, BlockReason, Observation, Observations, Source};
+pub use debouncer::Debouncer;
 pub use resolve::{resolve, ResolveConfig};
-pub use types::{AgentState, BlockReason, Observation, Observations, Source};
