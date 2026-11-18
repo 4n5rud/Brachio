@@ -74,6 +74,7 @@ export const ko: Messages = {
   "inspector.diffBase": "작업 브랜치와 기본 브랜치의 공통 조상 커밋 기준입니다.",
   "inspector.loadingChanges": "변경사항을 불러오는 중…",
   "inspector.noChanges": "변경사항이 없습니다.",
+  "inspector.conflicts": "해결되지 않은 Git 충돌",
   "inspector.truncated": "변경사항의 처음 256 KiB를 표시합니다.",
   "inspector.untracked": "추적되지 않은 파일",
   "diff.comment": "줄 코멘트",

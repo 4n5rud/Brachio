@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createResource, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
@@ -63,6 +63,14 @@ export function Inspector(props: {
               <Show when={currentChanges()?.data}>
                 {(data) => (
                   <>
+                    <Show when={data().conflicts.length > 0}>
+                      <div class="worktree-conflicts" role="status">
+                        <strong>{t("inspector.conflicts")}</strong>
+                        <ul>
+                          <For each={data().conflicts}>{(path) => <li><code>{path}</code></li>}</For>
+                        </ul>
+                      </div>
+                    </Show>
                     <Show when={data().patch ? currentChanges() : undefined} keyed>
                       {(snapshot) => <DiffReview patch={snapshot.data?.patch ?? ""}
                         onDraft={(text) => props.onDraft(snapshot.id, text)} />}
@@ -70,7 +78,8 @@ export function Inspector(props: {
                     <Show when={data().truncated}>
                       <p class="muted">{t("inspector.truncated")}</p>
                     </Show>
-                    <Show when={!data().patch && data().untracked.length === 0 && data().staged.length === 0}>
+                    <Show when={!data().patch && data().untracked.length === 0 &&
+                      data().staged.length === 0 && data().conflicts.length === 0}>
                       <p class="muted">{t("inspector.noChanges")}</p>
                     </Show>
                     <Show when={currentChanges()?.id} keyed>

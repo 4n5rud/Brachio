@@ -226,6 +226,7 @@ pub struct TaskChanges {
     patch: String,
     untracked: Vec<String>,
     staged: Vec<String>,
+    conflicts: Vec<String>,
     truncated: bool,
 }
 
@@ -272,6 +273,17 @@ pub async fn task_changes(
             patch.truncate(end);
         }
         let untracked = git_paths(&git, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+        let conflicts = git_paths(
+            &git,
+            &[
+                "diff",
+                "--cached",
+                "--diff-filter=U",
+                "--name-only",
+                "-z",
+                "--",
+            ],
+        )?;
         let staged = git_paths(
             &git,
             &[
@@ -287,6 +299,7 @@ pub async fn task_changes(
             patch,
             untracked,
             staged,
+            conflicts,
             truncated,
         })
     })
