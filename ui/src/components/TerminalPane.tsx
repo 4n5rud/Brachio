@@ -12,6 +12,9 @@ export interface TerminalSession {
   cwd: string;
 }
 
+/** Lines kept above the screen. Each line costs memory per terminal, so keep it bounded. */
+const SCROLLBACK_LINES = 5_000;
+
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 // One live terminal bound to one PTY session. Unmounting closes the session;
@@ -25,6 +28,7 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
       fontSize: Number.parseInt(cssVar("--text-term"), 10) || 13,
       lineHeight: 1.4,
       cursorBlink: true,
+      scrollback: SCROLLBACK_LINES,
       allowProposedApi: true,
       theme: {
         background: cssVar("--color-term-bg"),
@@ -36,9 +40,13 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
     term.loadAddon(fit);
     term.open(host);
     try {
-      term.loadAddon(new WebglAddon());
+      const webgl = new WebglAddon();
+      // The GPU can drop the context (sleep, driver reset). Disposing the
+      // addon hands rendering back to xterm's DOM renderer.
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
     } catch {
-      // WebGL unavailable: xterm falls back to its DOM renderer.
+      // WebGL unavailable: xterm keeps its DOM renderer.
     }
     fit.fit();
 
