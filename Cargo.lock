@@ -422,7 +422,12 @@ name = "brachio-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "brachio-runtime",
  "clap",
+ "interprocess",
+ "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
