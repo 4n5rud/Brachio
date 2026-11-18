@@ -8,13 +8,17 @@
 
 Brachio runs several Claude Code and Codex sessions side by side, each in its own git worktree. It uses the WebView that ships with the OS instead of bundling Chromium and Node, so the whole app is an 8 MB binary.
 
-> **Status: pre-alpha.** The core logic exists, but the app cannot run agents yet.
+> **Status: pre-alpha.** The app runs Claude Code and Codex in per-task worktrees, shows what each one is doing, and lets you review and commit their changes. Windows is the platform we test on; macOS is not verified yet.
 
 ## What it does
 
-- Gives each task its own git worktree, branch, and dev server ports, so agents do not step on each other.
+- Gives each task its own git worktree and branch, so agents do not step on each other.
 - Shows on one board whether each agent is working, waiting for approval or an answer, or done, and notifies you when it needs you.
-- Lets a lead agent split a large task, hand the pieces to workers, and collect the results.
+- Continues an agent's conversation after the app restarts.
+- Shows each task's changes, lets you comment on lines and send the comments to the agent, and stages, commits, and pushes.
+- Keeps terminals running when the window closes, if you turn on the independent runtime (see below).
+
+Not built yet: a lead agent that splits a task among workers, creating pull requests from the app, and an in-app approval bar for agents.
 
 Brachio supports macOS and Windows. It runs entirely on your machine with no server, and agents run under your own accounts.
 
@@ -33,11 +37,15 @@ Numbers we have measured, with where and how in each row. Rows marked "not measu
 Where the savings come from:
 
 - **No bundled browser.** macOS uses WKWebView and Windows uses WebView2, both already on the machine. Electron apps ship their own Chromium and Node.js.
-- **One process for the core.** PTYs, git, and storage run as Rust threads inside the app, not as Node.js processes.
+- **Core in Rust threads.** PTYs, git, and storage run as Rust threads, not as Node.js processes. By default they live inside the app process.
 - **Raw bytes to the screen.** Terminal output goes to the UI as binary frames over a Tauri channel, with no JSON encoding.
 - **Batching only under load.** Output after a quiet period is sent at once, so typing feels immediate. Streaming output is grouped into frames of up to 16 ms or 64 KB, so a busy agent does not flood the UI.
 
 Not every number favors Brachio. On Linux with WebKitGTK, the idle app used about 340 MB (PSS) against 292 MB for the same UI in Electron 43. Linux is not a target platform, and macOS and Windows still need their own measurements.
+
+## Independent terminal runtime (experimental)
+
+Set `BRACHIO_TERMINAL_RUNTIME=1` to start terminals in `brachio-runtime`, a separate process, instead of inside the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable must sit next to the app, or be named by `BRACHIO_RUNTIME_EXECUTABLE`; the installer does not include it yet. It is tested on Windows and Linux, not on macOS.
 
 ## Getting started
 
@@ -58,6 +66,7 @@ cargo tauri dev     # run the app (macOS or Windows)
 | --- | --- |
 | `crates/brachio-core` | Status model and the rules that merge status signals |
 | `crates/brachio-pty` | PTY sessions and batched output |
+| `crates/brachio-runtime` | Independent terminal runtime: protocol, client library, and the process that keeps shells alive |
 | `crates/brachio-git` | Worktree setup and cleanup, port allocation, conflict prediction |
 | `crates/brachio-agent` | Claude Code and Codex adapters |
 | `crates/brachio-store` | SQLite storage and migrations |
