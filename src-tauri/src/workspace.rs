@@ -6,7 +6,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
-use brachio_git::{AddWorktree, Git};
+use brachio_git::{AddWorktree, Git, PullRequest};
 use brachio_store::{NewRepo, NewTask, RepoRecord, TaskRecord};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -250,6 +250,13 @@ pub enum TaskGitAction {
     },
     /// Push the task branch to origin.
     Push,
+    /// Open a pull request for the pushed task branch with the GitHub CLI.
+    CreatePr {
+        /// One-line title.
+        title: String,
+        /// Description; may be empty.
+        body: String,
+    },
 }
 
 /// Runs a Git action in the task worktree.
@@ -258,7 +265,7 @@ pub async fn task_git_action(
     database: State<'_, Database>,
     id: String,
     request: TaskGitAction,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&task.worktree_path);
@@ -266,6 +273,9 @@ pub async fn task_git_action(
         let current_ref = git.run(&["symbolic-ref", "HEAD"]).map_err(to_text)?;
         if current_ref != branch_ref {
             return Err(format!("Expected {branch_ref}, found {current_ref}"));
+        }
+        if let TaskGitAction::CreatePr { title, body } = &request {
+            return create_pull_request(&task, title, body).map(Some);
         }
         match request {
             TaskGitAction::StageTracked => git.run(&["add", "--update", "--"]),
@@ -286,12 +296,31 @@ pub async fn task_git_action(
                 let refspec = format!("{branch_ref}:{branch_ref}");
                 git.run(&["push", "--", "origin", &refspec])
             }
+            TaskGitAction::CreatePr { .. } => unreachable!("handled before the match"),
         }
         .map_err(to_text)?;
-        Ok(())
+        Ok(None)
     })
     .await
     .map_err(to_text)?
+}
+
+/// Opens a pull request from the task branch into the repository's default branch.
+fn create_pull_request(task: &TaskRecord, title: &str, body: &str) -> Result<String, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Enter a pull request title.".to_owned());
+    }
+    let base = brachio_git::inspect_repo(&task.worktree_path)
+        .map_err(to_text)?
+        .default_branch;
+    let request = PullRequest {
+        base: &base,
+        head: &task.branch,
+        title,
+        body: body.trim(),
+    };
+    brachio_git::create_pull_request(&task.worktree_path, &request).map_err(to_text)
 }
 
 /// Errors cross the IPC boundary as display strings.
