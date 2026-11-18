@@ -11,9 +11,57 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 use brachio_pty::SessionManager;
-use tauri::menu::{Menu, MenuItem};
+use serde::Deserialize;
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, Emitter, Manager};
+use tauri::{App, AppHandle, Emitter, Manager};
+
+const TRAY_TASK_PREFIX: &str = "task:";
+const TRAY_TASK_LIMIT: usize = 15;
+
+struct TrayTasks(Submenu<tauri::Wry>);
+
+#[derive(Deserialize)]
+struct TrayTask {
+    id: String,
+    label: String,
+}
+
+#[tauri::command]
+fn tray_update_tasks(app: AppHandle, tasks: Vec<TrayTask>, label: String) -> Result<(), String> {
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let Some(menu) = handle.try_state::<TrayTasks>() else {
+            return;
+        };
+        if let Err(error) = update_tray_tasks(&handle, &menu.0, tasks, label) {
+            tracing::warn!(%error, "could not update tray tasks");
+        }
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn update_tray_tasks(
+    app: &AppHandle,
+    menu: &Submenu<tauri::Wry>,
+    tasks: Vec<TrayTask>,
+    label: String,
+) -> tauri::Result<()> {
+    let mut items = Vec::new();
+    for task in tasks.into_iter().take(TRAY_TASK_LIMIT) {
+        let id = format!("{TRAY_TASK_PREFIX}{}", task.id);
+        let title = task.label.replace('&', "&&");
+        items.push(MenuItem::with_id(app, id, title, true, None::<&str>)?);
+    }
+    for item in menu.items()? {
+        menu.remove(&item)?;
+    }
+    for item in &items {
+        menu.append(item)?;
+    }
+    menu.set_text(label)?;
+    menu.set_enabled(!items.is_empty())
+}
 
 /// The app version, for the about box.
 #[tauri::command]
@@ -42,6 +90,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_version,
+            tray_update_tasks,
             terminal::agents_detect,
             terminal::terminal_open,
             terminal::terminal_write,
@@ -116,30 +165,41 @@ fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
 fn install_tray(app: &App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Brachio", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Brachio", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let tasks = Submenu::with_id(app, "open-tasks", "Open tasks", false)?;
+    let menu = Menu::with_items(app, &[&show, &tasks, &quit])?;
     let mut tray = TrayIconBuilder::new()
         .tooltip("Brachio")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let result = window
-                        .show()
-                        .and_then(|()| window.unminimize())
-                        .and_then(|()| window.set_focus());
-                    if let Err(error) = result {
-                        tracing::warn!(%error, "could not show the main window");
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            id => {
+                if let Some(task_id) = id.strip_prefix(TRAY_TASK_PREFIX) {
+                    show_main_window(app);
+                    if let Err(error) = app.emit_to("main", "tray-open-task", task_id) {
+                        tracing::warn!(%error, "could not open task from the tray");
                     }
                 }
             }
-            "quit" => app.exit(0),
-            _ => {}
         });
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    app.manage(TrayTasks(tasks));
     Ok(())
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let result = window
+            .show()
+            .and_then(|()| window.unminimize())
+            .and_then(|()| window.set_focus());
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not show the main window");
+        }
+    }
 }
 
 /// Opens `brachio.db` in the app's data folder and makes it app state.

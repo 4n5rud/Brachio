@@ -1,4 +1,6 @@
 import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { confirm, open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Board } from "./components/Board";
@@ -41,6 +43,17 @@ export function App() {
   const [now, setNow] = createSignal(Date.now());
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
+  const [trayReady, setTrayReady] = createSignal(false);
+  createEffect(() => {
+    if (!trayReady()) return;
+    const names = new Map(repos().map((repo) => [repo.id, repo.name]));
+    const entries = tasks().map((task) => {
+      const repo = task.repoId && names.get(task.repoId);
+      return { id: task.id, label: repo ? `${repo} · ${task.title}` : task.title };
+    });
+    void invoke("tray_update_tasks", { tasks: entries, label: t("tray.openTasks") })
+      .catch((error) => console.warn("Could not update tray tasks", error));
+  });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
   // Live state per task, as its agent last reported it in this run.
   const [live, setLive] = createSignal<ReadonlyMap<string, LiveStatus>>(new Map());
@@ -299,6 +312,17 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
+      let disposed = false;
+      const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
+        if (findTask(id)) open(id);
+      });
+      void trayListener.then(() => {
+        if (!disposed) setTrayReady(true);
+      }).catch((error) => console.warn("Could not listen for tray tasks", error));
+      onCleanup(() => {
+        disposed = true;
+        void trayListener.then((unlisten) => unlisten(), () => {});
+      });
       const listener = listenForTaskNotifications((id) => {
         if (!findTask(id)) return;
         open(id);
