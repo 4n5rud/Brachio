@@ -143,6 +143,59 @@ pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRec
     TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
 }
 
+/// What deleting an archived task would destroy.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskLoss {
+    uncommitted_files: u32,
+    unpushed_commits: u32,
+}
+
+/// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
+/// so no terminal is still using the worktree.
+fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecord), String> {
+    let connection = database.lock()?;
+    let task = TaskRecord::get(&connection, id).map_err(to_text)?;
+    if task.archived_at_ms.is_none() {
+        return Err("Archive the task before deleting it.".to_owned());
+    }
+    let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
+    Ok((task, repo))
+}
+
+/// Counts the work that deleting an archived task would lose, so the user can confirm it.
+#[tauri::command]
+pub async fn task_delete_preview(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<TaskLoss, String> {
+    let (task, repo) = archived_task(&database, &id)?;
+    let work = tauri::async_runtime::spawn_blocking(move || {
+        brachio_git::unsaved_work(&Git::new(&repo.path), &task.worktree_path, &task.branch)
+    })
+    .await
+    .map_err(to_text)?
+    .map_err(to_text)?;
+    Ok(TaskLoss {
+        uncommitted_files: work.uncommitted_files,
+        unpushed_commits: work.unpushed_commits,
+    })
+}
+
+/// Deletes an archived task for good: its worktree folder, its branch and its record. The caller
+/// has shown `task_delete_preview` to the user.
+#[tauri::command]
+pub async fn task_delete(database: State<'_, Database>, id: String) -> Result<(), String> {
+    let (task, repo) = archived_task(&database, &id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        brachio_git::discard_worktree(&Git::new(&repo.path), &task.worktree_path, &task.branch)
+    })
+    .await
+    .map_err(to_text)?
+    .map_err(to_text)?;
+    TaskRecord::delete(&*database.lock()?, &id).map_err(to_text)
+}
+
 /// Changes in a task worktree relative to its base.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

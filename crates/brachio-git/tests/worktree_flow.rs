@@ -99,3 +99,48 @@ fn inspect_rejects_a_plain_folder() {
     let result = brachio_git::inspect_repo(folder.path());
     assert!(result.is_err(), "a folder without .git is not a repository");
 }
+
+#[test]
+fn deleting_a_task_reports_and_then_discards_unsaved_work() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    let tree = trees.path().join("d");
+    add(&git, "brachio/d-4", &tree);
+    commit_in(&tree, "committed only here\n");
+    fs::write(tree.join("scratch.txt"), "not committed\n").expect("write scratch.txt");
+
+    let work = brachio_git::unsaved_work(&git, &tree, "brachio/d-4").expect("count unsaved work");
+    assert_eq!(
+        work,
+        brachio_git::UnsavedWork {
+            uncommitted_files: 1,
+            unpushed_commits: 1
+        }
+    );
+
+    brachio_git::discard_worktree(&git, &tree, "brachio/d-4").expect("discard");
+    assert!(!tree.exists(), "the worktree folder must be gone");
+    let branches = git
+        .run(&["branch", "--list", "brachio/d-4"])
+        .expect("list branches");
+    assert!(branches.is_empty(), "the branch must be gone: {branches}");
+}
+
+#[test]
+fn a_worktree_folder_that_was_already_deleted_does_not_block_cleanup() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    let tree = trees.path().join("e");
+    add(&git, "brachio/e-5", &tree);
+    fs::remove_dir_all(&tree).expect("delete the folder by hand");
+
+    let work = brachio_git::unsaved_work(&git, &tree, "brachio/e-5").expect("count unsaved work");
+    assert_eq!(work.uncommitted_files, 0);
+    brachio_git::discard_worktree(&git, &tree, "brachio/e-5").expect("discard");
+    let branches = git
+        .run(&["branch", "--list", "brachio/e-5"])
+        .expect("list branches");
+    assert!(branches.is_empty());
+}

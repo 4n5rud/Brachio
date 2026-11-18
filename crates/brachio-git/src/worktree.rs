@@ -44,6 +44,63 @@ pub fn remove_worktree(git: &Git, path: &Path, branch: &str) -> Result<(), GitEr
     git.run(&["branch", "-d", branch]).map(|_| ())
 }
 
+/// Work that deleting a task would destroy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsavedWork {
+    /// Files with uncommitted changes, including untracked ones.
+    pub uncommitted_files: u32,
+    /// Commits only the task branch holds: no remote branch and no other local branch has them.
+    pub unpushed_commits: u32,
+}
+
+/// Counts what deleting the task would lose, without changing anything. A worktree folder that is
+/// already gone has no uncommitted files.
+///
+/// # Errors
+/// Fails when git cannot read the repository.
+pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork, GitError> {
+    let uncommitted_files = if path.is_dir() {
+        let status = Git::new(path).run_text(&["status", "--porcelain", "-z"])?;
+        count(status.split_terminator('\0').count())
+    } else {
+        0
+    };
+    let reference = format!("refs/heads/{branch}");
+    // Commits another branch or a remote also holds survive the deletion, so they are not counted.
+    let exclude = format!("--exclude={branch}");
+    let unpushed = git.run(&[
+        "rev-list",
+        "--count",
+        &reference,
+        "--not",
+        "--remotes",
+        &exclude,
+        "--branches",
+    ])?;
+    Ok(UnsavedWork {
+        uncommitted_files,
+        unpushed_commits: unpushed.parse().unwrap_or(0),
+    })
+}
+
+/// Removes the worktree and its branch whatever they hold. The caller must have shown
+/// `unsaved_work` to the user first. A worktree folder that is already gone is pruned instead.
+///
+/// # Errors
+/// Fails when git refuses, for example when the branch is checked out somewhere else.
+pub fn discard_worktree(git: &Git, path: &Path, branch: &str) -> Result<(), GitError> {
+    if path.is_dir() {
+        git.run(&["worktree", "remove", "--force", &path.to_string_lossy()])?;
+    } else {
+        git.run(&["worktree", "prune"])?;
+    }
+    git.run(&["branch", "-D", branch]).map(|_| ())
+}
+
+fn count(entries: usize) -> u32 {
+    u32::try_from(entries).unwrap_or(u32::MAX)
+}
+
 /// Where the worktree for `branch` lives: a sibling folder of the repo named
 /// `<repo>.worktrees`, so tools that scan the repo never see it.
 #[must_use]

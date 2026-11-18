@@ -42,6 +42,14 @@ export const archiveTask = (id: string) => invoke<void>("task_archive", { id });
 export const listArchivedTasks = () => invoke<TaskRecord[]>("task_list_archived");
 export const restoreTask = (id: string) => invoke<TaskRecord>("task_restore", { id });
 
+/** What deleting an archived task would destroy. */
+export interface TaskLoss {
+  uncommittedFiles: number;
+  unpushedCommits: number;
+}
+export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
+export const deleteTask = (id: string) => invoke<void>("task_delete", { id });
+
 interface TaskChanges {
   patch: string;
   untracked: string[];
