@@ -8,9 +8,8 @@ import { Icon } from "./Icon";
 import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
+import { loadLayouts, saveLayouts, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
-
-type TerminalLayout = "agent" | "shell" | "split";
 
 /**
  * Main area for one task: header, tabs, the agent terminal, approval bar.
@@ -32,7 +31,11 @@ export function TaskView(props: {
   shouldResume?: (taskId: string) => boolean;
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
 }) {
-  const [shells, setShells] = createSignal<ReadonlyMap<string, TerminalLayout>>(new Map());
+  const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
+  const setShells = (update: (current: ReadonlyMap<string, TerminalLayout>) => ReadonlyMap<string, TerminalLayout>) => {
+    setLayouts((current) => update(current));
+    saveLayouts(shells());
+  };
   const layout = () => shells().get(props.task.id) ?? "agent";
   const setLayout = (next: TerminalLayout) => {
     if (props.task.worktreePath) {
@@ -57,6 +60,7 @@ export function TaskView(props: {
       prompt: props.takePrompt?.(task.id),
       resume: props.shouldResume?.(task.id),
       sessionId: task.agentSessionId,
+      key: terminalKey(task.id, "agent"),
     };
   };
   return (
@@ -146,7 +150,7 @@ export function TaskView(props: {
                   <Show when={mode() && props.findTask(id)?.worktreePath}>
                     {(cwd) => (
                       <div class="terminal-cell" hidden={mode() === "agent"}>
-                        <TerminalPane session={{ agent: null, cwd: cwd() }} theme={props.theme}
+                        <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell") }} theme={props.theme}
                           active={selected() && mode() !== "agent"} focus={mode() === "shell"} />
                       </div>
                     )}

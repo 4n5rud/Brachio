@@ -1,5 +1,7 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
+mod runtime_client;
+mod runtime_terminals;
 mod terminal;
 mod workspace;
 
@@ -27,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
+        .manage(runtime_terminals::RuntimeTerminals::default())
         .setup(|app| {
             open_database(app)?;
             if let Err(error) = install_tray(app) {
