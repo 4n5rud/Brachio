@@ -1,5 +1,7 @@
 //! Brachio terminal runtime and its local client.
 
+#[cfg(any(windows, test))]
+mod output;
 #[cfg(windows)]
 mod windows;
 

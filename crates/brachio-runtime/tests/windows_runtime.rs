@@ -100,6 +100,23 @@ fn a_new_client_reuses_the_live_shell() {
         first["session"]["session_id"]
     );
     assert!(after["session"]["output_bytes"].as_u64() > before["session"]["output_bytes"].as_u64());
+    let before_offset = before["session"]["output_bytes"].to_string();
+    let restored = response(send(&name, &["read", "task", &before_offset]));
+    let page = &restored["output"];
+    assert_eq!(page["start"], before["session"]["output_bytes"]);
+    assert_eq!(page["truncated"], false);
+    let bytes: Vec<u8> = serde_json::from_value(page["bytes"].clone()).expect("read output bytes");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains("brachio-tick-"),
+        "{bytes:?}"
+    );
+    let next = page["next"].as_u64().expect("next byte offset");
+    assert_eq!(
+        next - page["start"].as_u64().expect("first offset"),
+        bytes.len() as u64
+    );
+    let following = response(send(&name, &["read", "task", &next.to_string()]));
+    assert_eq!(following["output"]["start"], next);
 
     response(send(&name, &["ensure", "other", cwd]));
     response(send(&name, &["stop", "task"]));
