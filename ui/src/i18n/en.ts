@@ -22,6 +22,13 @@ export const en = {
   "view.tasks": "Tasks",
   "view.board": "Board",
   "activity.title": "Activity",
+  "files.title": "Files",
+  "files.filter": "Find a file",
+  "files.empty": "No matching files.",
+  "files.more": "Showing the first 100 results. Narrow the search to see more.",
+  "files.loading": "Loading preview…",
+  "files.binary": "Preview is available for UTF-8 text files.",
+  "files.truncated": "Showing the first 64 KiB.",
   "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 

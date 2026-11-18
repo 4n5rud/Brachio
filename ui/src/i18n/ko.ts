@@ -24,6 +24,13 @@ export const ko: Messages = {
   "view.tasks": "작업",
   "view.board": "보드",
   "activity.title": "활동",
+  "files.title": "파일",
+  "files.filter": "파일 찾기",
+  "files.empty": "일치하는 파일이 없습니다.",
+  "files.more": "처음 100개 결과를 표시합니다. 검색 범위를 좁혀 주세요.",
+  "files.loading": "미리보기 불러오는 중…",
+  "files.binary": "UTF-8 텍스트 파일을 미리 볼 수 있습니다.",
+  "files.truncated": "처음 64 KiB를 표시합니다.",
   "activity.empty": "이번 세션의 활동이 아직 없습니다.",
   "titlebar.settings": "설정",
 
