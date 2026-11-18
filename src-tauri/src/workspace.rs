@@ -166,6 +166,54 @@ pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRec
     TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
 }
 
+/// Converts files from a native drop into worktree-relative paths for the agent draft.
+#[tauri::command]
+pub async fn task_drop_paths(
+    database: State<'_, Database>,
+    id: String,
+    paths: Vec<PathBuf>,
+) -> Result<Vec<String>, String> {
+    if paths.is_empty() || paths.len() > 16 {
+        return Err("Drop between 1 and 16 files.".to_owned());
+    }
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = task.worktree_path.canonicalize().map_err(to_text)?;
+        let mut files = Vec::new();
+        for path in paths {
+            if !path.is_absolute() {
+                return Err("Drop files from inside the current worktree.".to_owned());
+            }
+            let file = path.canonicalize().map_err(to_text)?;
+            let relative = file
+                .strip_prefix(&root)
+                .map_err(|_| "Drop files from inside the current worktree.".to_owned())?;
+            if !file.is_file()
+                || relative
+                    .components()
+                    .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
+            {
+                return Err("Only regular worktree files can be dropped.".to_owned());
+            }
+            let parts = relative
+                .components()
+                .map(|component| component.as_os_str().to_str())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| "The dropped path is not valid UTF-8.".to_owned())?;
+            let path = parts.join("/");
+            if path.chars().any(char::is_control) || (cfg!(windows) && path.contains(':')) {
+                return Err("The dropped path contains an unsupported character.".to_owned());
+            }
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
+        Ok(files)
+    })
+    .await
+    .map_err(to_text)?
+}
+
 /// Lists the files of a task's worktree, tracked and not ignored, for quick open.
 #[tauri::command]
 pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec<String>, String> {
@@ -176,6 +224,121 @@ pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec
     .await
     .map_err(to_text)?
     .map_err(to_text)
+}
+
+#[derive(Serialize)]
+pub struct FilePreview {
+    text: Option<String>,
+    truncated: bool,
+}
+
+#[tauri::command]
+pub async fn task_file_preview(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+) -> Result<FilePreview, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || read_file_preview(&task.worktree_path, &path))
+        .await
+        .map_err(to_text)?
+}
+
+/// Reads a supported media file without passing its contents through JSON.
+#[tauri::command]
+pub async fn task_file_media(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        const LIMIT: usize = 8 * 1024 * 1024;
+        let file = resolve_preview_path(&task.worktree_path, &path)?;
+        let bytes = read_preview_bytes(&file, LIMIT)?;
+        if bytes.len() > LIMIT {
+            return Err("Media preview is limited to 8 MiB.".to_owned());
+        }
+        let valid = match Path::new(&path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+            Some("jpg" | "jpeg") => bytes.starts_with(b"\xff\xd8\xff"),
+            Some("gif") => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+            Some("webp") => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+            Some("pdf") => bytes.starts_with(b"%PDF-"),
+            _ => false,
+        };
+        if !valid {
+            return Err("The file does not match a supported media format.".to_owned());
+        }
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(to_text)?
+}
+
+fn resolve_preview_path(worktree: &Path, path: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+
+    let relative = Path::new(path);
+    if path.is_empty()
+        || (cfg!(windows) && path.contains(':'))
+        || relative.components().any(|component| match component {
+            Component::Normal(name) => name.eq_ignore_ascii_case(".git"),
+            _ => true,
+        })
+    {
+        return Err("Choose a file inside the task's worktree.".to_owned());
+    }
+    let root = worktree.canonicalize().map_err(to_text)?;
+    let file = root.join(relative).canonicalize().map_err(to_text)?;
+    let resolved = file.strip_prefix(&root).map_err(to_text)?;
+    if !file.is_file()
+        || resolved
+            .components()
+            .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
+    {
+        return Err("Choose a regular file inside the task's worktree.".to_owned());
+    }
+    Ok(file)
+}
+
+fn read_preview_bytes(file: &Path, limit: usize) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)
+        .map_err(to_text)?
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(to_text)?;
+    Ok(bytes)
+}
+
+fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String> {
+    const LIMIT: usize = 64 * 1024;
+    let file = resolve_preview_path(worktree, path)?;
+    let mut bytes = read_preview_bytes(&file, LIMIT)?;
+    let truncated = bytes.len() > LIMIT;
+    bytes.truncate(LIMIT);
+    let text = if bytes.contains(&0) {
+        None
+    } else {
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => Some(text.to_owned()),
+            Err(error) if truncated && error.error_len().is_none() => {
+                std::str::from_utf8(&bytes[..error.valid_up_to()])
+                    .ok()
+                    .map(str::to_owned)
+            }
+            Err(_) => None,
+        }
+    };
+    Ok(FilePreview { text, truncated })
 }
 
 /// What deleting an archived task would destroy.

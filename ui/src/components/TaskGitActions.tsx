@@ -7,12 +7,28 @@ export function TaskGitActions(props: {
   staged: readonly string[];
   untracked: readonly string[];
   onChanged: () => Promise<unknown>;
+  onDraft: (text: string) => Promise<boolean>;
 }) {
   const [message, setMessage] = createSignal("");
   const [prTitle, setPrTitle] = createSignal("");
   const [prBody, setPrBody] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [feedback, setFeedback] = createSignal<{ error: boolean; text: string }>();
+  const [requesting, setRequesting] = createSignal(false);
+
+  const askAgent = async (kind: "commit" | "pr") => {
+    if (busy() || requesting()) return;
+    setRequesting(true);
+    setFeedback(undefined);
+    try {
+      const accepted = await props.onDraft(t(kind === "commit" ? "git.agentCommitPrompt" : "git.agentPrPrompt"));
+      setFeedback({ error: !accepted, text: t(accepted ? "git.agentDraftReady" : "diff.notReady") });
+    } catch (error) {
+      setFeedback({ error: true, text: String(error) });
+    } finally {
+      setRequesting(false);
+    }
+  };
 
   const run = async (request: TaskGitAction) => {
     if (busy()) return;
@@ -68,6 +84,8 @@ export function TaskGitActions(props: {
           event.preventDefault();
           if (message().trim()) void run({ action: "commit", message: message() });
         }}>
+          <button type="button" class="button button-sm" disabled={busy() || requesting()}
+            onClick={() => void askAgent("commit")}>{t("git.askCommit")}</button>
           <label>
             {t("git.message")}
             <textarea rows={2} disabled={busy()} value={message()}
@@ -84,6 +102,8 @@ export function TaskGitActions(props: {
         event.preventDefault();
         if (prTitle().trim()) void run({ action: "createPr", title: prTitle(), body: prBody() });
       }}>
+        <button type="button" class="button button-sm" disabled={busy() || requesting()}
+          onClick={() => void askAgent("pr")}>{t("git.askPr")}</button>
         <label>
           {t("git.prTitle")}
           <input type="text" disabled={busy()} value={prTitle()}

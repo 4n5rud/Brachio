@@ -102,6 +102,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
+          args: --config src-tauri/tauri.release.conf.json
           tagName: ${{ github.ref_name }}
           releaseName: Brachio ${{ needs.prepare.outputs.version }}
           releaseDraft: true

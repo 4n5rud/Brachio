@@ -1,5 +1,6 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
+mod agent_accounts;
 mod hook_setup;
 mod hook_socket;
 mod runtime_client;
@@ -70,6 +71,41 @@ fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Opens a loopback development URL in the system browser.
+#[tauri::command]
+async fn open_local_port(port: std::num::NonZeroU16, secure: bool) -> Result<(), String> {
+    let scheme = if secure { "https" } else { "http" };
+    let url = format!("{scheme}://127.0.0.1:{port}/");
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            use std::os::windows::process::CommandExt;
+
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut command = std::process::Command::new("cmd.exe");
+            command
+                .creation_flags(CREATE_NO_WINDOW)
+                .args(["/d", "/c", "start", ""]);
+            command
+        };
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("open");
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let mut command = std::process::Command::new("xdg-open");
+        let status = command
+            .arg(url)
+            .status()
+            .map_err(|error| error.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("Could not open the default browser ({status})."))
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Builds and runs the Tauri app.
 ///
 /// # Panics
@@ -98,10 +134,15 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            workspace::task_drop_paths,
             hook_socket::approval_answer,
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,
+            agent_accounts::agent_auth_status,
+            agent_accounts::codex_auth_action,
+            agent_accounts::codex_usage,
+            agent_accounts::open_claude_usage,
             workspace::task_list,
             workspace::task_create,
             workspace::task_archive,
@@ -110,10 +151,13 @@ pub fn run() {
             workspace::task_delete_preview,
             workspace::task_delete,
             workspace::task_files,
+            workspace::task_file_preview,
+            workspace::task_file_media,
             workspace::task_changes,
             workspace::task_merge_preview,
             workspace::task_pr_feedback,
             workspace::task_git_action,
+            open_local_port,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Brachio");
@@ -153,11 +197,19 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Whether `key` (`<task id>:agent`) names a task that is open in this app.
+/// Whether the primary or secondary terminal belongs to an open task.
 fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
-    let Some(id) = key.strip_suffix(":agent") else {
+    let Some((id, terminal)) = key.split_once(':') else {
         return false;
     };
+    if terminal != "agent"
+        && terminal
+            .strip_prefix("agent-")
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            .is_none()
+    {
+        return false;
+    }
     let database = app.state::<workspace::Database>();
     let Ok(connection) = database.lock() else {
         return false;

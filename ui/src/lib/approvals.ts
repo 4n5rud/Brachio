@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 /** A permission question an agent is waiting on, as the app reports it. */
 export interface ApprovalQuestion {
   id: number;
-  /** The terminal the agent runs in: `<task id>:agent`. */
+  /** The terminal the agent runs in, including a secondary tab ID when present. */
   key: string;
   toolName: string;
   toolInput: unknown;

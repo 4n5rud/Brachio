@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { TaskPorts } from "./TaskPorts";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
@@ -7,8 +8,9 @@ import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";
 import { TaskMergePreview } from "./TaskMergePreview";
+import { TaskFiles } from "./TaskFiles";
 
-type Pane = "changes" | "qa" | "activity";
+type Pane = "changes" | "files" | "qa" | "activity";
 
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: {
@@ -37,11 +39,20 @@ export function Inspector(props: {
       <div class="inspector-head">
         <div class="segmented" role="group">
           {tab("changes", t("inspector.changes"))}
+          {tab("files", t("files.title"))}
           {tab("qa", t("inspector.qa"))}
           {tab("activity", t("inspector.activity"))}
         </div>
       </div>
       <Switch>
+        <Match when={pane() === "files"}>
+          <section class="inspector-section">
+            <Show when={props.task.worktreePath && props.task.id} keyed
+              fallback={<p class="muted">{t("files.empty")}</p>}>
+              {(id) => <TaskFiles taskId={id} />}
+            </Show>
+          </section>
+        </Match>
         <Match when={pane() === "changes"}>
           <section class="inspector-section inspector-changes">
             <h3>
@@ -93,6 +104,7 @@ export function Inspector(props: {
                     <Show when={currentChanges()?.id} keyed>
                       {(id) => <TaskGitActions taskId={id} staged={data().staged}
                         untracked={data().untracked}
+                        onDraft={(text) => props.onDraft(id, text)}
                         onChanged={async () => { if (props.task.id === id) await refetch(); }} />}
                     </Show>
                   </>
@@ -125,6 +137,9 @@ export function Inspector(props: {
           </section>
         </Match>
       </Switch>
+      <Show when={props.task.worktreePath && props.task.id} keyed>
+        {(id) => <TaskPorts taskId={id} />}
+      </Show>
     </aside>
   );
 }

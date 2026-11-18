@@ -121,6 +121,7 @@ export function TerminalPane(props: {
 
     let handle: TerminalHandle | null = null;
     let exited = false;
+    let blocked = false;
     let disposed = false;
     let generation = 0;
     let promptTimer: ReturnType<typeof setTimeout> | undefined;
@@ -128,6 +129,7 @@ export function TerminalPane(props: {
     let typeInPrompt: string | null = null;
     let initialInputPending = session?.initialInput ?? null;
     const start = (resume: boolean, initialPrompt: string | null) => {
+      blocked = false;
       if (!session) return;
       const launch = ++generation;
       const earlyOutput: Uint8Array[] = [];
@@ -155,6 +157,7 @@ export function TerminalPane(props: {
           return;
         }
         if (message.type === "status") {
+          blocked = message.status.state === "blocked";
           props.onStatus?.(message.status, message.message);
           return;
         }
@@ -219,7 +222,7 @@ export function TerminalPane(props: {
     };
     start(session?.resume === true && session.agent !== null, session?.prompt ?? null);
     const unregister = props.registerDraftWriter?.(async (text) => {
-      if (!handle || !session?.agent || exited || disposed || !props.active
+      if (!handle || !session?.agent || exited || disposed || blocked || !props.active
         || !term.modes.bracketedPasteMode) {
         return false;
       }
@@ -274,7 +277,7 @@ export function TerminalPane(props: {
   });
   return (
     <div class="terminal-content">
-      <div ref={host} class="terminal-host" />
+      <div ref={host} class="terminal-host" data-agent-terminal={props.session?.agent ? "" : undefined} />
       <Show when={canReopen()}>
         <div class="terminal-recovery">
           <button type="button" class="button button-sm" onClick={() => reopen()}>

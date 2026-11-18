@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { confirm, open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
 import { answerApproval, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { EmptyRepo } from "./components/EmptyRepo";
@@ -24,7 +25,7 @@ import { CORE_AGENT } from "./lib/terminal";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
-  previewTaskDeletion, restoreTask,
+  previewTaskDeletion, resolveDroppedTaskPaths, restoreTask,
   toTaskRow, type RepoRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
@@ -204,7 +205,7 @@ export function App() {
   };
   const draftComment = (id: string, text: string) => {
     const task = selected();
-    if (task?.id !== id || task.status.state === "blocked") return Promise.resolve(false);
+    if (task?.id !== id) return Promise.resolve(false);
     return draftWriters.get(id)?.(text) ?? Promise.resolve(false);
   };
 
@@ -347,6 +348,18 @@ export function App() {
 
   const canCreate = () => inTauri && repo() !== undefined;
 
+  const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
+    const task = selected();
+    if (!task?.worktreePath || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+    const ratio = window.devicePixelRatio;
+    const target = document.elementFromPoint(position.x / ratio, position.y / ratio);
+    if (!target?.closest(".task-view [data-agent-terminal]")) return;
+    const files = await resolveDroppedTaskPaths(task.id, paths);
+    if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+    const draft = files.map((path) => `@${/[\s"\\]/u.test(path) ? JSON.stringify(path) : path}`).join(" ");
+    if (!(await draftComment(task.id, draft + " "))) report(t("diff.notReady"));
+  };
+
   onMount(() => {
     if (inTauri) {
       let disposed = false;
@@ -368,6 +381,11 @@ export function App() {
       });
       listener.catch(report);
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
+      const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
+        if (payload.type === "drop") void dropFiles(payload.paths, payload.position).catch(report);
+      });
+      dropListener.catch(report);
+      onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
       void watchApprovals(
         (question) => setQuestions((open) => [...open, question]),

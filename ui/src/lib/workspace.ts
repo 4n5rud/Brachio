@@ -51,6 +51,10 @@ export interface TaskLoss {
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
 export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });
+export const previewTaskFile = (id: string, path: string) =>
+  invoke<{ text: string | null; truncated: boolean }>("task_file_preview", { id, path });
+export const previewTaskMedia = (id: string, path: string) =>
+  invoke<ArrayBuffer | number[]>("task_file_media", { id, path });
 export const deleteTask = (id: string) => invoke<void>("task_delete", { id });
 
 interface TaskChanges {
@@ -105,3 +109,6 @@ export function titleFromPrompt(prompt: string): string {
   const line = prompt.trim().split("\n")[0]?.trim() ?? "";
   return line.length <= 60 ? line : `${line.slice(0, 57).trimEnd()}...`;
 }
+
+export const resolveDroppedTaskPaths = (id: string, paths: string[]) =>
+  invoke<string[]>("task_drop_paths", { id, paths });

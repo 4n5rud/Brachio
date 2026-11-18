@@ -9,7 +9,8 @@ import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
 import { summarize, type ApprovalQuestion } from "../lib/approvals";
-import { loadLayouts, saveLayouts, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
+import { loadLayouts, loadSecondaryAgents, saveLayouts, saveSecondaryAgents, terminalKey,
+  type TerminalLayout } from "../lib/terminal-layout";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
 /**
@@ -39,6 +40,30 @@ export function TaskView(props: {
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
+  const restoredAgents = loadSecondaryAgents();
+  const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(restoredAgents);
+  const [selectedSecondary, setSelectedSecondary] = createSignal<ReadonlySet<string>>(new Set());
+  const secondaryWriters = new Map<string, (text: string) => Promise<boolean>>();
+  const secondaryKind = (task: TaskRow) => task.agent === "claude" ? "codex" : "claude";
+  const selectAgent = (id: string, extra: boolean) => {
+    setSelectedSecondary((current) => {
+      const next = new Set(current);
+      if (extra) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    if (layout() === "shell") setLayout("agent");
+  };
+  const changeSecondary = (id: string, sessionId?: string) => {
+    setSecondary((current) => {
+      const next = new Map(current);
+      if (sessionId) next.set(id, sessionId);
+      else next.delete(id);
+      return next;
+    });
+    saveSecondaryAgents(secondary());
+    selectAgent(id, sessionId !== undefined);
+  };
   const setShells = (update: (current: ReadonlyMap<string, TerminalLayout>) => ReadonlyMap<string, TerminalLayout>) => {
     setLayouts((current) => update(current));
     saveLayouts(shells());
@@ -107,11 +132,16 @@ export function TaskView(props: {
         </div>
       </div>
       <div class="tabs" role="tablist">
-        <button class="tab" role="tab" aria-selected={layout() !== "shell"} type="button"
-          onClick={() => { if (shells().has(props.task.id)) setLayout("agent"); }}>
+        <button class="tab" role="tab" aria-selected={layout() !== "shell" && !selectedSecondary().has(props.task.id)} type="button"
+          onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={statusTone(props.task.status)} />
           {AGENT_NAME[props.task.agent]}
         </button>
+        <Show when={secondary().has(props.task.id)}>
+          <button class="tab" role="tab" type="button"
+            aria-selected={layout() !== "shell" && selectedSecondary().has(props.task.id)}
+            onClick={() => selectAgent(props.task.id, true)}>{AGENT_NAME[secondaryKind(props.task)]}</button>
+        </Show>
         <Show when={shells().has(props.task.id)} fallback={
           <Show when={props.task.worktreePath}>
             <button class="icon-button icon-button-sm" type="button" aria-label={t("task.newTab")}
@@ -125,8 +155,20 @@ export function TaskView(props: {
       <div class="pane">
         <div class="pane-head">
           <Icon name="bot" class="icon-sm" />
-          {layout() === "shell" ? t("task.shell") : AGENT_NAME[props.task.agent]}
+          {layout() === "shell" ? t("task.shell") :
+            AGENT_NAME[selectedSecondary().has(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
           <div class="pane-actions">
+            <Show when={props.task.worktreePath && !secondary().has(props.task.id)}>
+              <button class="button button-sm" type="button"
+                onClick={() => changeSecondary(props.task.id, crypto.randomUUID())}>
+                {t("task.addAgent")} {AGENT_NAME[secondaryKind(props.task)]}
+              </button>
+            </Show>
+            <Show when={layout() !== "shell" && selectedSecondary().has(props.task.id)}>
+              <button class="button button-sm" type="button" onClick={() => changeSecondary(props.task.id)}>
+                {t("task.closeAgent")}
+              </button>
+            </Show>
             <Show when={props.task.worktreePath}>
               <button class="icon-button icon-button-sm" type="button" aria-label={t("task.split")}
                 aria-pressed={layout() === "split"}
@@ -146,17 +188,43 @@ export function TaskView(props: {
             {(id) => {
               const selected = () => props.visible && id === props.task.id;
               const mode = () => shells().get(id);
+              const extraSelected = () => selectedSecondary().has(id);
               return (
                 <div class="terminal-slot" classList={{ "terminal-split": mode() === "split" }}
                   hidden={id !== props.task.id}>
                   <div class="terminal-cell" hidden={mode() === "shell"}>
-                    <TerminalPane
-                      session={sessionFor(id)}
-                      active={selected() && mode() !== "shell"}
-                      theme={props.theme}
-                      onStatus={(status, message) => props.onStatus?.(id, status, message)}
-                      registerDraftWriter={(writer) => props.registerDraftWriter(id, writer)}
-                    />
+                    <div class="terminal-cell" hidden={extraSelected()}>
+                      <TerminalPane
+                        session={sessionFor(id)}
+                        active={selected() && mode() !== "shell" && !extraSelected()}
+                        theme={props.theme}
+                        onStatus={(status, message) => props.onStatus?.(id, status, message)}
+                        registerDraftWriter={(writer) => props.registerDraftWriter(id, (text) =>
+                          extraSelected() ? secondaryWriters.get(id)?.(text) ?? Promise.resolve(false) : writer(text))}
+                      />
+                    </div>
+                    <Show when={secondary().get(id)} keyed>
+                      {(sessionId) => {
+                        const task = props.findTask(id);
+                        if (!task?.worktreePath) return null;
+                        return (
+                          <div class="terminal-cell" hidden={!extraSelected()}>
+                            <TerminalPane
+                              session={{ agent: CORE_AGENT[secondaryKind(task)], cwd: task.worktreePath,
+                                key: `${id}:agent-${sessionId}`, sessionId, resume: restoredAgents.get(id) === sessionId }}
+                              active={selected() && mode() !== "shell" && extraSelected()}
+                              theme={props.theme}
+                              registerDraftWriter={(writer) => {
+                                secondaryWriters.set(id, writer);
+                                return () => {
+                                  if (secondaryWriters.get(id) === writer) secondaryWriters.delete(id);
+                                };
+                              }}
+                            />
+                          </div>
+                        );
+                      }}
+                    </Show>
                   </div>
                   <Show when={mode() && props.findTask(id)?.worktreePath}>
                     {(cwd) => (
