@@ -19,6 +19,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 use widestring::U16CString;
 
+use crate::output::{OutputHistory, Page};
+
 const VERSION: u8 = 1;
 const MAX_MESSAGE: u64 = 64 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -51,6 +53,8 @@ enum Action {
     Ensure { key: String, cwd: PathBuf },
     /// Read the shell identity and number of PTY bytes received.
     Inspect { key: String },
+    /// Read a page of output starting at the requested absolute byte offset.
+    Read { key: String, after: u64 },
     /// Write text to the shell.
     Write { key: String, text: String },
     /// Stop one shell explicitly.
@@ -74,8 +78,35 @@ struct Response<'a> {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum ResponseResult {
-    Success { session: SessionInfo },
-    Error { error: String },
+    Success {
+        session: SessionInfo,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<OutputPage>,
+    },
+    Error {
+        error: String,
+    },
+}
+
+#[derive(Serialize)]
+struct OutputPage {
+    start: u64,
+    next: u64,
+    end: u64,
+    truncated: bool,
+    bytes: Vec<u8>,
+}
+
+impl From<Page> for OutputPage {
+    fn from(page: Page) -> Self {
+        Self {
+            start: page.start,
+            next: page.next,
+            end: page.end,
+            truncated: page.truncated,
+            bytes: page.bytes,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -107,7 +138,7 @@ impl Runtime {
         }
     }
 
-    fn execute(&self, request: Request) -> Result<SessionInfo> {
+    fn execute(&self, request: Request) -> Result<ResponseResult> {
         if request.version != VERSION {
             bail!("unsupported protocol version {}", request.version);
         }
@@ -126,23 +157,24 @@ impl Runtime {
                     if existing.cwd != cwd {
                         bail!("session key already belongs to a different working directory");
                     }
-                    return existing.info();
+                    return existing.describe(None);
                 }
                 let session = self.start_shell(cwd)?;
-                let info = session.info()?;
+                let info = session.describe(None)?;
                 sessions.insert(key, session);
                 Ok(info)
             }
-            Action::Inspect { key } => get(&sessions, &key)?.info(),
+            Action::Inspect { key } => get(&sessions, &key)?.describe(None),
+            Action::Read { key, after } => get(&sessions, &key)?.describe(Some(after)),
             Action::Write { key, text } => {
                 let session = get(&sessions, &key)?;
                 self.manager.write(session.id, text.as_bytes())?;
-                session.info()
+                session.describe(None)
             }
             Action::Stop { key } => {
                 let session = get(&sessions, &key)?;
                 self.manager.kill(session.id)?;
-                session.info()
+                session.describe(None)
             }
         }
     }
@@ -191,11 +223,24 @@ impl Runtime {
 }
 
 impl Session {
-    fn info(&self) -> Result<SessionInfo> {
-        Ok(SessionInfo {
-            session_id: self.id,
-            pid: self.pid,
-            output_bytes: lock(&self.output)?.bytes,
+    fn describe(&self, after: Option<u64>) -> Result<ResponseResult> {
+        let state = lock(&self.output)?;
+        let output = after
+            .map(|offset| {
+                state
+                    .history
+                    .read(offset)
+                    .map(OutputPage::from)
+                    .context("output offset is past the end")
+            })
+            .transpose()?;
+        Ok(ResponseResult::Success {
+            session: SessionInfo {
+                session_id: self.id,
+                pid: self.pid,
+                output_bytes: state.history.end(),
+            },
+            output,
         })
     }
 }
@@ -203,14 +248,14 @@ impl Session {
 #[derive(Default)]
 struct StartupOutput {
     id: Option<SessionId>,
-    bytes: u64,
+    history: OutputHistory,
     matched: usize,
     answered: bool,
 }
 
 impl StartupOutput {
     fn record(&mut self, bytes: &[u8]) -> Option<SessionId> {
-        self.bytes = self.bytes.saturating_add(bytes.len() as u64);
+        self.history.push(bytes);
         if !self.answered && self.matched < CURSOR_QUERY.len() {
             for &byte in bytes {
                 if byte == CURSOR_QUERY[self.matched] {
@@ -300,7 +345,7 @@ async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
         Err(error) => Err(error.into()),
     };
     let result = match result {
-        Ok(session) => ResponseResult::Success { session },
+        Ok(result) => result,
         Err(error) => ResponseResult::Error {
             error: format!("{error:#}"),
         },
