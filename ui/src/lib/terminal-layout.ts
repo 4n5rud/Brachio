@@ -28,3 +28,24 @@ export function saveLayouts(layouts: ReadonlyMap<string, TerminalLayout>): void 
 
 /** Stable name of a task's terminal, so the runtime can find it again after a restart. */
 export const terminalKey = (taskId: string, kind: "agent" | "shell"): string => `${taskId}:${kind}`;
+
+const SECONDARY_KEY = "brachio.secondaryAgents";
+
+export function loadSecondaryAgents(): Map<string, string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(SECONDARY_KEY) ?? "{}");
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return new Map();
+    return new Map(Object.entries(stored).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string" && /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(entry[1])));
+  } catch {
+    return new Map();
+  }
+}
+
+export function saveSecondaryAgents(agents: ReadonlyMap<string, string>) {
+  try {
+    localStorage.setItem(SECONDARY_KEY, JSON.stringify(Object.fromEntries(agents)));
+  } catch {
+    // The open tabs remain available for this run.
+  }
+}

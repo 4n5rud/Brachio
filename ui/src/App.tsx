@@ -167,7 +167,7 @@ export function App() {
   };
   const draftComment = (id: string, text: string) => {
     const task = selected();
-    if (task?.id !== id || task.status.state === "blocked") return Promise.resolve(false);
+    if (task?.id !== id) return Promise.resolve(false);
     return draftWriters.get(id)?.(text) ?? Promise.resolve(false);
   };
 

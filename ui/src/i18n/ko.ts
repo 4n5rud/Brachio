@@ -38,6 +38,8 @@ export const ko: Messages = {
   "task.openInEditor": "편집기로 열기",
   "task.newTab": "셸 탭 열기",
   "task.shell": "셸",
+  "task.addAgent": "추가",
+  "task.closeAgent": "에이전트 탭 닫기",
   "task.closeShell": "셸 닫기",
   "task.archive": "작업 보관",
   "task.archived": "보관한 작업",
