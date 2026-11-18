@@ -45,6 +45,7 @@ export const ko: Messages = {
   "approval.deny": "거부",
   "approval.hint": "터미널에서 바로 답해도 돼요.",
   "terminal.exited": "프로세스가 끝났어요",
+  "terminal.resumeFailed": "이어갈 대화가 없어서 새로 시작해요",
   "terminal.startFailed": "터미널을 시작하지 못했어요",
 
   "inspector.changes": "변경",

@@ -24,6 +24,9 @@ pub struct OpenRequest {
     pub agent: Option<AgentKind>,
     /// First prompt for the agent. Ignored for a shell.
     pub prompt: Option<String>,
+    /// Continue the agent's latest conversation instead of starting fresh.
+    #[serde(default)]
+    pub resume: bool,
     /// Working directory.
     pub cwd: PathBuf,
     /// Initial height in rows.
@@ -76,7 +79,11 @@ pub fn terminal_open(
     on_event: Channel<InvokeResponseBody>,
 ) -> CommandResult<Opened> {
     let (command, prompt_delivery) = match request.agent {
-        Some(kind) => agent_command(kind, request.prompt.as_deref())?,
+        Some(kind) if request.resume => (
+            installed(kind)?.resolve(&kind.resume()),
+            PromptDelivery::None,
+        ),
+        Some(kind) => installed(kind)?.resolve_interactive(request.prompt.as_deref()),
         None => (shell_command(), PromptDelivery::None),
     };
     let spec = SpawnSpec {
@@ -126,17 +133,9 @@ pub fn terminal_close(terminals: State<'_, Terminals>, id: SessionId) -> Command
     terminals.0.kill(id).map_err(|error| to_message(&error))
 }
 
-fn agent_command(
-    kind: AgentKind,
-    prompt: Option<&str>,
-) -> CommandResult<(ResolvedCommand, PromptDelivery)> {
-    let Some(installed) = brachio_agent::detect(kind) else {
-        return Err(format!(
-            "{} is not installed or not on PATH",
-            kind.program()
-        ));
-    };
-    Ok(installed.resolve_interactive(prompt))
+fn installed(kind: AgentKind) -> CommandResult<Installed> {
+    brachio_agent::detect(kind)
+        .ok_or_else(|| format!("{} is not installed or not on PATH", kind.program()))
 }
 
 fn shell_command() -> ResolvedCommand {

@@ -22,6 +22,8 @@ export interface OpenOptions {
   cols: number;
   /** First prompt for an agent. */
   prompt: string | null;
+  /** Continue the agent's latest conversation in `cwd`. */
+  resume: boolean;
 }
 
 /** How the first prompt reaches the agent, as the core reports it. */

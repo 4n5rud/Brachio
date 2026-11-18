@@ -52,6 +52,20 @@ impl AgentKind {
         }
     }
 
+    /// Interactive TUI that picks up the latest conversation in its working
+    /// directory. Each task has its own worktree, so that is the task's own.
+    #[must_use]
+    pub fn resume(self) -> Launch {
+        let args: &[&str] = match self {
+            Self::ClaudeCode => &["--continue"],
+            Self::Codex => &["resume", "--last"],
+        };
+        Launch {
+            program: self.program(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+        }
+    }
+
     /// Headless worker that emits one JSON event per line.
     #[must_use]
     pub fn structured(self, prompt: &str) -> Launch {
@@ -95,5 +109,11 @@ mod tests {
             "stream-json output is required: {:?}",
             launch.args
         );
+    }
+
+    #[test]
+    fn resume_continues_the_latest_conversation() {
+        assert_eq!(AgentKind::ClaudeCode.resume().args, vec!["--continue"]);
+        assert_eq!(AgentKind::Codex.resume().args, vec!["resume", "--last"]);
     }
 }

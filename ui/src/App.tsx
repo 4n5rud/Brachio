@@ -61,6 +61,10 @@ export function App() {
   // First prompts of tasks created in this run. Each is handed to the
   // task's terminal once, then dropped.
   const firstPrompts = new Map<string, string>();
+  // Tasks created in this run start fresh. Older ones had a session before
+  // the app restarted, so their agent picks up its last conversation.
+  const createdThisRun = new Set<string>();
+  const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
   const takePrompt = (taskId: string) => {
     const prompt = firstPrompts.get(taskId);
     firstPrompts.delete(taskId);
@@ -100,6 +104,7 @@ export function App() {
       agent: CORE_AGENT[input.agent],
       base: input.base === "" ? null : input.base,
     });
+    createdThisRun.add(record.id);
     if (input.prompt !== "") firstPrompts.set(record.id, input.prompt);
     setTasks((list) => [toTaskRow(record), ...list]);
     setSelectedId(record.id);
@@ -179,6 +184,7 @@ export function App() {
                 <>
                   <TaskView task={task()} openIds={openIds()} findTask={findTask}
                     takePrompt={takePrompt}
+                    shouldResume={shouldResume}
                     onStatus={onStatus}
                   />
                   <Inspector task={task()} />
