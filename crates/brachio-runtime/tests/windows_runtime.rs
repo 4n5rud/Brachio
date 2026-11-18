@@ -235,7 +235,29 @@ fn a_slow_follower_does_not_block_other_clients() {
         let ansi = frame["screen"]["ansi"]
             .as_str()
             .expect("visible screen ANSI");
-        ansi.contains("brachio-frame-marker") && !ansi.contains("xxxxxxxxxx")
+        ansi.contains("brachio-frame-marker")
+            && !ansi.contains("xxxxxxxxxx")
+            && frame["screen"]["resume_offset"].is_u64()
     });
+    let mut follower = Server(
+        Command::new(RUNTIME)
+            .args(["--pipe", &name, "send", "follow-frame", "burst"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start frame follower"),
+    );
+    let stdout = follower.0.stdout.take().expect("frame follower output");
+    let mut frames = BufReader::new(stdout).lines();
+    let frame: Value =
+        serde_json::from_str(&frames.next().expect("snapshot").expect("read snapshot"))
+            .expect("decode snapshot");
+    let offset = frame["screen"]["resume_offset"]
+        .as_u64()
+        .expect("snapshot offset");
+    let live: Value =
+        serde_json::from_str(&frames.next().expect("live page").expect("read live page"))
+            .expect("decode live page");
+    assert_eq!(live["output"]["start"], offset);
+    assert_eq!(live["session"]["pid"], frame["session"]["pid"]);
     response(send(&name, &["stop", "burst"]));
 }
