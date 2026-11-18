@@ -34,7 +34,9 @@ export const ko: Messages = {
   "task.reviewChanges": "변경 검토",
   "task.createPr": "PR 만들기",
   "task.openInEditor": "편집기로 열기",
-  "task.newTab": "새 탭",
+  "task.newTab": "셸 탭 열기",
+  "task.shell": "셸",
+  "task.closeShell": "셸 닫기",
   "task.split": "나누기",
   "task.more": "더 보기",
 

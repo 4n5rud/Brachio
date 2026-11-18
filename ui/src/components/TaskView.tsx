@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
@@ -9,6 +9,8 @@ import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
+
+type TerminalLayout = "agent" | "shell" | "split";
 
 /**
  * Main area for one task: header, tabs, the agent terminal, approval bar.
@@ -29,6 +31,20 @@ export function TaskView(props: {
   shouldResume?: (taskId: string) => boolean;
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
 }) {
+  const [shells, setShells] = createSignal<ReadonlyMap<string, TerminalLayout>>(new Map());
+  const layout = () => shells().get(props.task.id) ?? "agent";
+  const setLayout = (next: TerminalLayout) => {
+    if (props.task.worktreePath) {
+      setShells((current) => new Map(current).set(props.task.id, next));
+    }
+  };
+  const closeShell = () => {
+    setShells((current) => {
+      const next = new Map(current);
+      next.delete(props.task.id);
+      return next;
+    });
+  };
   // Called once per terminal: the first prompt goes only to the first session.
   const sessionFor = (id: string): TerminalSession | undefined => {
     const task = props.findTask(id);
@@ -71,40 +87,68 @@ export function TaskView(props: {
         </div>
       </div>
       <div class="tabs" role="tablist">
-        <button class="tab" role="tab" aria-selected="true" type="button">
+        <button class="tab" role="tab" aria-selected={layout() !== "shell"} type="button"
+          onClick={() => { if (shells().has(props.task.id)) setLayout("agent"); }}>
           <StatusGlyph tone={statusTone(props.task.status)} />
           {AGENT_NAME[props.task.agent]}
         </button>
-        <button class="tab" role="tab" aria-selected="false" type="button" aria-label={t("task.newTab")}>
-          <Icon name="plus" />
-        </button>
+        <Show when={shells().has(props.task.id)} fallback={
+          <Show when={props.task.worktreePath}>
+            <button class="icon-button icon-button-sm" type="button" aria-label={t("task.newTab")}
+              onClick={() => setLayout("shell")}><Icon name="plus" /></button>
+          </Show>
+        }>
+          <button class="tab" role="tab" aria-selected={layout() === "shell"} type="button"
+            onClick={() => setLayout("shell")}>{t("task.shell")}</button>
+        </Show>
       </div>
       <div class="pane">
         <div class="pane-head">
           <Icon name="bot" class="icon-sm" />
-          {AGENT_NAME[props.task.agent]}
+          {layout() === "shell" ? t("task.shell") : AGENT_NAME[props.task.agent]}
           <div class="pane-actions">
-            <button class="icon-button icon-button-sm" type="button" aria-label={t("task.split")}>
-              <Icon name="split" />
-            </button>
-            <button class="icon-button icon-button-sm" type="button" aria-label={t("task.more")}>
-              <Icon name="more" />
-            </button>
+            <Show when={props.task.worktreePath}>
+              <button class="icon-button icon-button-sm" type="button" aria-label={t("task.split")}
+                aria-pressed={layout() === "split"}
+                onClick={() => setLayout(layout() === "split" ? "agent" : "split")}>
+                <Icon name="split" />
+              </button>
+            </Show>
+            <Show when={shells().has(props.task.id)}>
+              <button class="button button-sm" type="button" onClick={closeShell}>
+                {t("task.closeShell")}
+              </button>
+            </Show>
           </div>
         </div>
         <div class="pane-body">
           <For each={props.openIds}>
-            {(id) => (
-              <div class="terminal-slot" hidden={id !== props.task.id}>
-                <TerminalPane
-                  session={sessionFor(id)}
-                  active={props.visible && id === props.task.id}
-                  theme={props.theme}
-                  onStatus={(status, message) => props.onStatus?.(id, status, message)}
-                  registerDraftWriter={(writer) => props.registerDraftWriter(id, writer)}
-                />
-              </div>
-            )}
+            {(id) => {
+              const selected = () => props.visible && id === props.task.id;
+              const mode = () => shells().get(id);
+              return (
+                <div class="terminal-slot" classList={{ "terminal-split": mode() === "split" }}
+                  hidden={id !== props.task.id}>
+                  <div class="terminal-cell" hidden={mode() === "shell"}>
+                    <TerminalPane
+                      session={sessionFor(id)}
+                      active={selected() && mode() !== "shell"}
+                      theme={props.theme}
+                      onStatus={(status, message) => props.onStatus?.(id, status, message)}
+                      registerDraftWriter={(writer) => props.registerDraftWriter(id, writer)}
+                    />
+                  </div>
+                  <Show when={mode() && props.findTask(id)?.worktreePath}>
+                    {(cwd) => (
+                      <div class="terminal-cell" hidden={mode() === "agent"}>
+                        <TerminalPane session={{ agent: null, cwd: cwd() }} theme={props.theme}
+                          active={selected() && mode() !== "agent"} focus={mode() === "shell"} />
+                      </div>
+                    )}
+                  </Show>
+                </div>
+              );
+            }}
           </For>
         </div>
         <Show when={props.task.pendingCommand}>

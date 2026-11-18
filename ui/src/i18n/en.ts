@@ -32,7 +32,9 @@ export const en = {
   "task.reviewChanges": "Review changes",
   "task.createPr": "Create PR",
   "task.openInEditor": "Open in editor",
-  "task.newTab": "New tab",
+  "task.newTab": "Open shell tab",
+  "task.shell": "Shell",
+  "task.closeShell": "Close shell",
   "task.split": "Split",
   "task.more": "More",
 
