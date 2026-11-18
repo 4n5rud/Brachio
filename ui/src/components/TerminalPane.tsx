@@ -20,6 +20,8 @@ export interface TerminalSession {
   sessionId?: string;
   /** Stable name of this terminal, so it can be attached again after a restart. */
   key?: string;
+  /** Typed into a shell the first time it starts, such as a repository's setup commands. */
+  initialInput?: string;
 }
 
 /**
@@ -124,6 +126,7 @@ export function TerminalPane(props: {
     let promptTimer: ReturnType<typeof setTimeout> | undefined;
     const session = props.session;
     let typeInPrompt: string | null = null;
+    let initialInputPending = session?.initialInput ?? null;
     const start = (resume: boolean, initialPrompt: string | null) => {
       if (!session) return;
       const launch = ++generation;
@@ -193,6 +196,9 @@ export function TerminalPane(props: {
           // The size may have changed while the session was starting.
           void opened.resize(term.rows, term.cols).catch(() => {});
           if (opened.promptDelivery === "type_in") typeInPrompt = initialPrompt;
+          // A shell that was already running has had its setup typed in before.
+          else if (initialInputPending !== null && !opened.resumed) typeInPrompt = initialInputPending;
+          initialInputPending = null;
           // ConPTY can ask for cursor position before the open request resolves.
           // Render only after the terminal can send its response to this PTY.
           for (const bytes of earlyOutput.splice(0)) writeOutput(bytes);

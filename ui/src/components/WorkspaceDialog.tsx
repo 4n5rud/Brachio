@@ -1,15 +1,27 @@
 import { For, Match, Show, Switch, createMemo, createSignal, onMount } from "solid-js";
-import { locale, setLocale, t } from "../i18n";
+import { locale, setLocale, t, type MessageKey } from "../i18n";
 import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
 import type { TaskRow } from "../lib/tasks";
+import { formatAge } from "../lib/time";
 import { AgentSettings } from "./settings/AgentSettings";
 import { TerminalSettings } from "./settings/TerminalSettings";
 
 export type Theme = "system" | "light" | "dark";
 
+export interface TaskActivity {
+  taskId: string;
+  title: string;
+  key: MessageKey;
+  detail: string | null;
+  at: number;
+}
+
 export function WorkspaceDialog(props: {
-  panel: "quickOpen" | "settings" | "archived";
+  panel: "quickOpen" | "settings" | "archived" | "activity";
   tasks: readonly TaskRow[];
+  activity: readonly TaskActivity[];
+  activeTaskIds: ReadonlySet<string>;
+  now: number;
   archived: readonly TaskRow[];
   onRestore: (id: string) => Promise<void>;
   onDelete: (task: TaskRow) => Promise<void>;
@@ -20,15 +32,18 @@ export function WorkspaceDialog(props: {
   onNotifications: (enabled: boolean) => void;
   onOpen: (id: string) => void;
   onClose: () => void;
+  repos: readonly { id: string; name: string }[];
 }) {
   const [query, setQuery] = createSignal("");
   const [highlight, setHighlight] = createSignal(0);
   const [restoring, setRestoring] = createSignal<string>();
   const [restoreError, setRestoreError] = createSignal("");
+  const repoNames = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
+  const repoName = (task: TaskRow) => task.repoId ? repoNames().get(task.repoId) : undefined;
   const matches = createMemo(() => {
     const terms = query().trim().toLowerCase().split(/\s+/);
     return props.tasks.filter((task) => {
-      const searchable = `${task.title} ${task.branch}`.toLowerCase();
+      const searchable = [task.title, task.branch, repoName(task), task.worktreePath].join(" ").toLowerCase();
       return terms.every((term) => searchable.includes(term));
     });
   });
@@ -66,6 +81,7 @@ export function WorkspaceDialog(props: {
   const title = () => {
     if (props.panel === "quickOpen") return t("quickOpen.title");
     if (props.panel === "archived") return t("task.archived");
+    if (props.panel === "activity") return t("activity.title");
     return t("titlebar.settings");
   };
   return (
@@ -79,6 +95,23 @@ export function WorkspaceDialog(props: {
       </div>
       <div class="modal-body">
         <Switch>
+          <Match when={props.panel === "activity"}>
+            <Show when={props.activity.length > 0} fallback={<p class="muted">{t("activity.empty")}</p>}>
+              <ul class="quick-open-results activity-list">
+                <For each={props.activity}>{(item) => (
+                  <li>
+                    <button class="quick-open-result activity-result" type="button"
+                      disabled={!props.activeTaskIds.has(item.taskId)} onClick={() => choose(item.taskId)}>
+                      <strong>{item.title}</strong>
+                      <time dateTime={new Date(item.at).toISOString()}>{formatAge(item.at, props.now)}</time>
+                      <span>{t(item.key)}</span>
+                      <Show when={item.detail}>{(detail) => <span class="activity-detail">{detail()}</span>}</Show>
+                    </button>
+                  </li>
+                )}</For>
+              </ul>
+            </Show>
+          </Match>
           <Match when={props.panel === "quickOpen"}>
             <input autofocus class="input" aria-label={t("titlebar.search")}
               placeholder={t("quickOpen.placeholder")} value={query()}
@@ -105,7 +138,7 @@ export function WorkspaceDialog(props: {
                   <button class="quick-open-result" classList={{ selected: highlight() === index() }}
                     type="button" onClick={() => choose(task.id)}>
                     <strong>{task.title}</strong>
-                    <span>{task.branch}</span>
+                    <span>{[repoName(task), task.branch].filter(Boolean).join(" · ")}</span>
                   </button>
                 )}</For>
               </div>

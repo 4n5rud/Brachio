@@ -4,7 +4,41 @@ export interface DiffLocation {
   side: "old" | "new";
 }
 
-export function diffRows(patch: string): { text: string; location?: DiffLocation }[] {
+export interface DiffRow {
+  text: string;
+  location?: DiffLocation;
+}
+
+export type SplitDiffRow = { shared: DiffRow } | { old?: DiffRow; next?: DiffRow };
+
+export function splitDiffRows(rows: readonly DiffRow[]): SplitDiffRow[] {
+  const result: SplitDiffRow[] = [];
+  let removed: DiffRow[] = [];
+  let added: DiffRow[] = [];
+  const flush = () => {
+    for (let index = 0; index < Math.max(removed.length, added.length); index++) {
+      result.push({ old: removed[index], next: added[index] });
+    }
+    removed = [];
+    added = [];
+  };
+
+  for (const row of rows) {
+    if (row.location?.side === "old") {
+      if (added.length) flush();
+      removed.push(row);
+    } else if (row.location && row.text.startsWith("+")) {
+      added.push(row);
+    } else {
+      flush();
+      result.push({ shared: row });
+    }
+  }
+  flush();
+  return result;
+}
+
+export function diffRows(patch: string): DiffRow[] {
   let oldPath = "";
   let newPath = "";
   let oldLine = 0;
