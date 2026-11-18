@@ -6,7 +6,7 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use brachio_agent::{AgentKind, Installed, ResolvedCommand};
+use brachio_agent::{AgentKind, Installed, PromptDelivery, ResolvedCommand};
 use brachio_pty::{EventSink, PtyEvent, SessionId, SessionManager, SpawnSpec};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -21,12 +21,24 @@ pub struct Terminals(pub Arc<SessionManager>);
 pub struct OpenRequest {
     /// `None` opens the user's shell.
     pub agent: Option<AgentKind>,
+    /// First prompt for the agent. Ignored for a shell.
+    pub prompt: Option<String>,
     /// Working directory.
     pub cwd: PathBuf,
     /// Initial height in rows.
     pub rows: u16,
     /// Initial width in columns.
     pub cols: u16,
+}
+
+/// A terminal that started.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Opened {
+    /// Session handle for later calls.
+    pub id: SessionId,
+    /// Whether the UI still has to type the first prompt in.
+    pub prompt_delivery: PromptDelivery,
 }
 
 /// Sent as JSON on the channel when the child exits. Output frames are raw.
@@ -55,13 +67,10 @@ pub fn terminal_open(
     terminals: State<'_, Terminals>,
     request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
-) -> CommandResult<SessionId> {
-    let command = match request.agent {
-        Some(kind) => agent_command(kind)?,
-        None => ResolvedCommand {
-            program: default_shell(),
-            args: Vec::new(),
-        },
+) -> CommandResult<Opened> {
+    let (command, prompt_delivery) = match request.agent {
+        Some(kind) => agent_command(kind, request.prompt.as_deref())?,
+        None => (shell_command(), PromptDelivery::None),
     };
     let spec = SpawnSpec {
         program: command.program.to_string_lossy().into_owned(),
@@ -71,10 +80,12 @@ pub fn terminal_open(
         rows: request.rows.max(1),
         cols: request.cols.max(1),
     };
-    terminals
-        .0
-        .spawn(&spec, sink_for(on_event))
-        .map_err(|error| to_message(&error))
+    let spawned = terminals.0.spawn(&spec, sink_for(on_event));
+    let id = spawned.map_err(|error| to_message(&error))?;
+    Ok(Opened {
+        id,
+        prompt_delivery,
+    })
 }
 
 /// Sends keyboard input to a terminal.
@@ -108,14 +119,24 @@ pub fn terminal_close(terminals: State<'_, Terminals>, id: SessionId) -> Command
     terminals.0.kill(id).map_err(|error| to_message(&error))
 }
 
-fn agent_command(kind: AgentKind) -> CommandResult<ResolvedCommand> {
+fn agent_command(
+    kind: AgentKind,
+    prompt: Option<&str>,
+) -> CommandResult<(ResolvedCommand, PromptDelivery)> {
     let Some(installed) = brachio_agent::detect(kind) else {
         return Err(format!(
             "{} is not installed or not on PATH",
             kind.program()
         ));
     };
-    Ok(installed.resolve(&kind.interactive()))
+    Ok(installed.resolve_interactive(prompt))
+}
+
+fn shell_command() -> ResolvedCommand {
+    ResolvedCommand {
+        program: default_shell(),
+        args: Vec::new(),
+    }
 }
 
 fn sink_for(channel: Channel<InvokeResponseBody>) -> EventSink {

@@ -78,3 +78,24 @@ fn disjoint_changes_are_clean() {
         "changes to different files must not conflict: {report:?}"
     );
 }
+
+#[test]
+fn inspect_finds_root_and_branch_from_a_subfolder() {
+    let repo = temp_dir();
+    init_repo(repo.path());
+    let subfolder = repo.path().join("src");
+    fs::create_dir(&subfolder).expect("create subfolder");
+
+    let info = brachio_git::inspect_repo(&subfolder).expect("inspect");
+
+    let root = repo.path().canonicalize().expect("canonical root");
+    assert_eq!(info.root.canonicalize().expect("canonical info root"), root);
+    assert_eq!(info.default_branch, "main");
+}
+
+#[test]
+fn inspect_rejects_a_plain_folder() {
+    let folder = temp_dir();
+    let result = brachio_git::inspect_repo(folder.path());
+    assert!(result.is_err(), "a folder without .git is not a repository");
+}

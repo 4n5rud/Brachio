@@ -66,6 +66,19 @@ export const en = {
   "empty.repo.body": "Choose a git repository folder, or drop one on this window.",
   "empty.repo.add": "Add repository",
 
+  "newTask.title": "New task",
+  "newTask.prompt": "What should the agent do?",
+  "newTask.name": "Task name",
+  "newTask.base": "Base",
+  "newTask.agent": "Agent",
+  "newTask.cancel": "Cancel",
+  "newTask.create": "Create task",
+  "newTask.creating": "Creating...",
+  "empty.task.title": "No task selected",
+  "empty.task.body": "Create a task to start an agent in its own worktree.",
+  "error.dismiss": "Dismiss",
+  "error.title": "Something went wrong",
+
   "time.now": "now",
 } as const;
 

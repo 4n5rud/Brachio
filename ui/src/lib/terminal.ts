@@ -19,7 +19,12 @@ export interface OpenOptions {
   cwd: string;
   rows: number;
   cols: number;
+  /** First prompt for an agent. */
+  prompt: string | null;
 }
+
+/** How the first prompt reaches the agent, as the core reports it. */
+export type PromptDelivery = "none" | "argument" | "type_in";
 
 export type TerminalMessage =
   | { type: "output"; bytes: Uint8Array }
@@ -39,6 +44,8 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
 
 export interface TerminalHandle {
   id: number;
+  /** `type_in` means the caller still has to type the prompt. */
+  promptDelivery: PromptDelivery;
   write(data: string): Promise<void>;
   resize(rows: number, cols: number): Promise<void>;
   close(): Promise<void>;
@@ -53,9 +60,14 @@ export async function openTerminal(
     const m = decodeMessage(raw);
     if (m) onMessage(m);
   };
-  const id = await invoke<number>("terminal_open", { request: options, onEvent: channel });
+  const opened = await invoke<{ id: number; promptDelivery: PromptDelivery }>("terminal_open", {
+    request: options,
+    onEvent: channel,
+  });
+  const id = opened.id;
   return {
     id,
+    promptDelivery: opened.promptDelivery,
     write: (data) => invoke("terminal_write", { id, data }),
     resize: (rows, cols) => invoke("terminal_resize", { id, rows, cols }),
     close: () => invoke("terminal_close", { id }),

@@ -1,0 +1,236 @@
+//! Tasks: one worktree and branch each, with the agent that works in it.
+
+use std::path::{Path, PathBuf};
+
+use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::Serialize;
+
+use crate::database::StoreError;
+
+/// A task as stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRecord {
+    /// Stable id.
+    pub id: String,
+    /// Repository the task belongs to.
+    pub repo_id: String,
+    /// Title the user gave.
+    pub title: String,
+    /// Branch created for the task.
+    pub branch: String,
+    /// Worktree folder.
+    pub worktree_path: PathBuf,
+    /// Agent the task was created for, as its snake_case name.
+    pub agent_kind: Option<String>,
+    /// When the task was created.
+    pub created_at_ms: i64,
+    /// Set once the task is archived.
+    pub archived_at_ms: Option<i64>,
+}
+
+/// Fields for a new task row.
+#[derive(Debug, Clone)]
+pub struct NewTask<'a> {
+    /// Stable id.
+    pub id: &'a str,
+    /// Repository the task belongs to.
+    pub repo_id: &'a str,
+    /// Title the user gave.
+    pub title: &'a str,
+    /// Branch created for the task.
+    pub branch: &'a str,
+    /// Worktree folder.
+    pub worktree_path: &'a Path,
+    /// Agent the task is for, if any.
+    pub agent_kind: Option<&'a str>,
+    /// Creation time.
+    pub created_at_ms: i64,
+}
+
+const COLUMNS: &str =
+    "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms";
+
+impl TaskRecord {
+    /// Adds a task.
+    ///
+    /// # Errors
+    /// Fails when the repository does not exist or the id is taken.
+    pub fn insert(connection: &Connection, task: &NewTask<'_>) -> Result<Self, StoreError> {
+        connection.execute(
+            "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path,
+                                agent_kind, state, created_at_ms)
+             VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, 'active', ?7)",
+            params![
+                task.id,
+                task.repo_id,
+                task.title,
+                task.branch,
+                task.worktree_path.to_string_lossy(),
+                task.agent_kind,
+                task.created_at_ms
+            ],
+        )?;
+        Self::get(connection, task.id)
+    }
+
+    /// Tasks that are not archived, newest first.
+    ///
+    /// # Errors
+    /// Fails when the query fails.
+    pub fn list_open(connection: &Connection) -> Result<Vec<Self>, StoreError> {
+        let sql = format!(
+            "SELECT {COLUMNS} FROM tasks WHERE archived_at_ms IS NULL ORDER BY created_at_ms DESC"
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map([], Self::from_row)?;
+        let tasks: Vec<Self> = rows.collect::<Result<_, _>>()?;
+        Ok(tasks)
+    }
+
+    /// Number of tasks, archived or not, in a repository.
+    ///
+    /// # Errors
+    /// Fails when the query fails.
+    pub fn count_for_repo(connection: &Connection, repo_id: &str) -> Result<u64, StoreError> {
+        let count: u64 = connection.query_row(
+            "SELECT count(*) FROM tasks WHERE repo_id = ?1",
+            [repo_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// One task by id.
+    ///
+    /// # Errors
+    /// Fails with `NotFound` when no task has this id.
+    pub fn get(connection: &Connection, id: &str) -> Result<Self, StoreError> {
+        let sql = format!("SELECT {COLUMNS} FROM tasks WHERE id = ?1");
+        let task = connection
+            .query_row(&sql, [id], Self::from_row)
+            .optional()?;
+        task.ok_or_else(|| StoreError::NotFound {
+            table: "tasks",
+            id: id.to_owned(),
+        })
+    }
+
+    /// Hides a task from the open list but keeps its history.
+    ///
+    /// # Errors
+    /// Fails with `NotFound` when no task has this id.
+    pub fn archive(connection: &Connection, id: &str, now_ms: i64) -> Result<(), StoreError> {
+        let changed = connection.execute(
+            "UPDATE tasks SET archived_at_ms = ?2 WHERE id = ?1",
+            params![id, now_ms],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound {
+                table: "tasks",
+                id: id.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Deletes a task row for good.
+    ///
+    /// # Errors
+    /// Fails when sessions still point at the task.
+    pub fn delete(connection: &Connection, id: &str) -> Result<(), StoreError> {
+        connection.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+        let worktree_path: String = row.get(4)?;
+        Ok(Self {
+            id: row.get(0)?,
+            repo_id: row.get(1)?,
+            title: row.get(2)?,
+            branch: row.get(3)?,
+            worktree_path: PathBuf::from(worktree_path),
+            agent_kind: row.get(5)?,
+            created_at_ms: row.get(6)?,
+            archived_at_ms: row.get(7)?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database;
+    use crate::repo_record::{NewRepo, RepoRecord};
+
+    fn connection_with_repo() -> Connection {
+        let connection = database::open_in_memory().expect("open database");
+        let repo = NewRepo {
+            id: "r1",
+            name: "brachio",
+            path: Path::new("/src/brachio"),
+            default_branch: "main",
+            added_at_ms: 0,
+        };
+        RepoRecord::insert(&connection, &repo).expect("insert repo");
+        connection
+    }
+
+    fn sample<'a>(id: &'a str, created_at_ms: i64) -> NewTask<'a> {
+        NewTask {
+            id,
+            repo_id: "r1",
+            title: "Fix login",
+            branch: "brachio/fix-login-a1b2c3",
+            worktree_path: Path::new("/src/brachio.worktrees/fix-login-a1b2c3"),
+            agent_kind: Some("claude_code"),
+            created_at_ms,
+        }
+    }
+
+    #[test]
+    fn open_tasks_are_listed_newest_first() {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert t1");
+        TaskRecord::insert(&connection, &sample("t2", 2)).expect("insert t2");
+
+        let ids: Vec<String> = TaskRecord::list_open(&connection)
+            .expect("list")
+            .into_iter()
+            .map(|task| task.id)
+            .collect();
+
+        assert_eq!(ids, vec!["t2", "t1"]);
+    }
+
+    #[test]
+    fn archived_tasks_leave_the_open_list() {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert");
+
+        TaskRecord::archive(&connection, "t1", 5).expect("archive");
+
+        assert!(
+            TaskRecord::list_open(&connection).expect("list").is_empty(),
+            "t1 is archived"
+        );
+        assert_eq!(
+            TaskRecord::get(&connection, "t1")
+                .expect("get")
+                .archived_at_ms,
+            Some(5)
+        );
+        assert_eq!(
+            TaskRecord::count_for_repo(&connection, "r1").expect("count"),
+            1
+        );
+    }
+
+    #[test]
+    fn a_task_needs_an_existing_repo() {
+        let connection = database::open_in_memory().expect("open database");
+        let orphan = TaskRecord::insert(&connection, &sample("t1", 1));
+        assert!(orphan.is_err(), "foreign keys are on");
+    }
+}

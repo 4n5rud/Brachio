@@ -1,4 +1,4 @@
-import { Show } from "solid-js";
+import { For, Show } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
@@ -10,11 +10,25 @@ import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
-/** Main area for one task: header, tabs, the agent terminal, approval bar. */
-export function TaskView(props: { task: TaskRow }) {
-  const session = (): TerminalSession | undefined => {
-    const cwd = props.task.worktreePath;
-    return cwd === undefined ? undefined : { agent: CORE_AGENT[props.task.agent], cwd };
+/**
+ * Main area for one task: header, tabs, the agent terminal, approval bar.
+ *
+ * Every task opened in this run keeps its terminal mounted, so its session
+ * and screen survive switching tasks. Only the selected one is shown.
+ */
+export function TaskView(props: {
+  task: TaskRow;
+  /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
+  openIds: readonly string[];
+  findTask: (id: string) => TaskRow | undefined;
+  takePrompt?: (taskId: string) => string | undefined;
+}) {
+  // Called once per terminal: the first prompt goes only to the first session.
+  const sessionFor = (id: string): TerminalSession | undefined => {
+    const task = props.findTask(id);
+    const cwd = task?.worktreePath;
+    if (task === undefined || cwd === undefined) return undefined;
+    return { agent: CORE_AGENT[task.agent], cwd, prompt: props.takePrompt?.(task.id) };
   };
   return (
     <section class="task-view">
@@ -67,9 +81,13 @@ export function TaskView(props: { task: TaskRow }) {
           </div>
         </div>
         <div class="pane-body">
-          <Show when={props.task.id} keyed>
-            {(_id) => <TerminalPane session={session()} />}
-          </Show>
+          <For each={props.openIds}>
+            {(id) => (
+              <div class="terminal-slot" hidden={id !== props.task.id}>
+                <TerminalPane session={sessionFor(id)} active={id === props.task.id} />
+              </div>
+            )}
+          </For>
         </div>
         <Show when={props.task.pendingCommand}>
           {(command) => <ApprovalBar command={command()} />}

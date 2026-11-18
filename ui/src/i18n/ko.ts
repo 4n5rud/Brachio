@@ -68,5 +68,18 @@ export const ko: Messages = {
   "empty.repo.body": "git 저장소 폴더를 고르거나 이 창에 끌어다 놓으세요.",
   "empty.repo.add": "저장소 추가",
 
+  "newTask.title": "새 작업",
+  "newTask.prompt": "에이전트에게 무엇을 맡길까요?",
+  "newTask.name": "작업 이름",
+  "newTask.base": "기준 브랜치",
+  "newTask.agent": "에이전트",
+  "newTask.cancel": "취소",
+  "newTask.create": "작업 만들기",
+  "newTask.creating": "만드는 중...",
+  "empty.task.title": "고른 작업이 없어요",
+  "empty.task.body": "작업을 만들면 전용 worktree에서 에이전트가 시작돼요.",
+  "error.dismiss": "닫기",
+  "error.title": "문제가 생겼어요",
+
   "time.now": "방금",
 };
