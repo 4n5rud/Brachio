@@ -207,7 +207,12 @@ mod tests {
         let repo = tempfile::tempdir().expect("temp repo");
         let worktree = tempfile::tempdir().expect("temp worktree");
         let outside = repo.path().join("..").join("secret.txt");
-        for entry in ["../secret.txt", "/etc/passwd", "C:\\Windows\\win.ini", ""] {
+        // `C:\x` is only a drive-qualified path on Windows; elsewhere it is an odd file name.
+        let mut unsafe_entries = vec!["../secret.txt", "/etc/passwd", ""];
+        if cfg!(windows) {
+            unsafe_entries.push("C:\\Windows\\win.ini");
+        }
+        for entry in unsafe_entries {
             let config = SetupConfig {
                 copy: vec![entry.to_owned()],
                 run: Vec::new(),
