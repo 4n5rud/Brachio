@@ -23,6 +23,7 @@ import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
+import { checkForRelease, openRelease } from "./lib/updates";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask,
   toTaskRow, type RepoRecord } from "./lib/workspace";
@@ -30,6 +31,7 @@ import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRe
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
 // show example tasks so the layout can be reviewed.
 const inTauri = "__TAURI_INTERNALS__" in window;
+const UPDATE_INTERVAL = 6 * 60 * 60 * 1000;
 
 interface LiveStatus {
   status: AgentState;
@@ -110,6 +112,41 @@ export function App() {
     document.documentElement.lang = locale();
   });
   const [error, setError] = createSignal<string | null>(null);
+  const [automaticUpdates, setAutomaticUpdates] = createSignal(localStorage.getItem("brachio.updateChecks") !== "off");
+  const [updateVersion, setUpdateVersion] = createSignal<string | null>(null);
+  const [dismissedVersion, setDismissedVersion] = createSignal<string>();
+  const [updateStatus, setUpdateStatus] = createSignal<"idle" | "checking" | "current" | "unavailable">("idle");
+  const checkUpdates = async (manual: boolean) => {
+    if (updateStatus() === "checking") return;
+    setUpdateStatus("checking");
+    try {
+      const version = await checkForRelease();
+      if (manual || automaticUpdates()) setUpdateVersion(version);
+      if (manual) setDismissedVersion(undefined);
+      setUpdateStatus(version ? "idle" : "current");
+    } catch {
+      setUpdateStatus(manual ? "unavailable" : "idle");
+    }
+  };
+  createEffect(() => {
+    const enabled = automaticUpdates();
+    try {
+      localStorage.setItem("brachio.updateChecks", enabled ? "on" : "off");
+    } catch {
+      // Keep the current setting in memory when storage is blocked.
+    }
+    if (!inTauri || !enabled) {
+      setUpdateVersion(null);
+      return;
+    }
+    const run = () => void checkUpdates(false);
+    const first = window.setTimeout(run, 0);
+    const interval = window.setInterval(run, UPDATE_INTERVAL);
+    onCleanup(() => {
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+    });
+  });
   const draftWriters = new Map<string, (text: string) => Promise<boolean>>();
   const registerDraftWriter = (id: string, writer: (text: string) => Promise<boolean>) => {
     draftWriters.set(id, writer);
@@ -421,6 +458,19 @@ export function App() {
           </div>
         )}
       </Show>
+      <Show when={!error() && updateVersion() !== dismissedVersion() && updateVersion()}>
+        {(version) => (
+          <div class="update-banner">
+            <strong role="status">{t("updates.available").replace("{version}", version())}</strong>
+            <button class="button button-sm" type="button" onClick={() => void openRelease().catch(report)}>
+              {t("updates.download")}
+            </button>
+            <button class="button button-ghost button-sm" type="button" onClick={() => setDismissedVersion(version())}>
+              {t("updates.later")}
+            </button>
+          </div>
+        )}
+      </Show>
       <Show when={view() === "board"}>
         <main class="layout layout-full">
           <Board tasks={repoRows()} now={now()} onOpen={open} />
@@ -466,6 +516,11 @@ export function App() {
           repos={repos()}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
+          updates={inTauri ? {
+            enabled: automaticUpdates(), status: updateStatus(), version: updateVersion(),
+            onEnabled: setAutomaticUpdates, onCheck: () => void checkUpdates(true),
+            onDownload: () => void openRelease().catch(report),
+          } : undefined}
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
           onCommand={runCommand}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
