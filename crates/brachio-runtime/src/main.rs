@@ -1,6 +1,7 @@
 //! Brachio terminal runtime and its local client.
 
 mod endpoint;
+mod journal;
 mod output;
 mod protocol;
 mod screen;

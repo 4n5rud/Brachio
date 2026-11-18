@@ -1,12 +1,13 @@
 //! Local control of an independent PTY runtime: the server, its sessions and the client.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use brachio_pty::{PtyEvent, SessionId, SessionManager, SpawnSpec};
@@ -19,6 +20,7 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::endpoint::{self, Liveness};
+use crate::journal::{self, Journal, SessionRecord};
 use crate::output::{OutputHistory, Page};
 use crate::protocol;
 use crate::screen::{TerminalScreen, COLS, ROWS};
@@ -35,6 +37,9 @@ struct Args {
     /// Local pipe name for this runtime instance.
     #[arg(long)]
     pipe: String,
+    /// Where the last screen of each shell is kept. Defaults to the user's state directory.
+    #[arg(long)]
+    state_dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -70,6 +75,12 @@ enum Action {
     FollowFrame { key: String },
     /// Read the protocol range and drain state of this runtime.
     Hello,
+    /// List shells that ended or were left by an earlier runtime.
+    Lost,
+    /// Read the last screen of a shell listed by `lost`.
+    Recover { key: String },
+    /// Drop the saved screen of a shell listed by `lost`.
+    Forget { key: String },
     /// Take no new terminals and exit once the last one ends.
     Drain,
     /// Resize the shell and the frame that snapshots describe.
@@ -87,6 +98,7 @@ impl Action {
             Action::Hello => (2, "hello"),
             Action::Drain => (2, "drain"),
             Action::Resize { .. } => (2, "resize"),
+            Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
             _ => (1, "this action"),
         }
     }
@@ -121,9 +133,43 @@ enum ResponseResult {
     Hello {
         runtime: RuntimeInfo,
     },
+    Lost {
+        lost: Vec<LostInfo>,
+    },
+    Recovered {
+        lost: LostInfo,
+        screen: ScreenSnapshot,
+    },
     Error {
         error: String,
     },
+}
+
+#[derive(Serialize)]
+struct LostInfo {
+    key: String,
+    cwd: PathBuf,
+    former_instance: String,
+    former_pid: u32,
+    exited: bool,
+    exit_code: Option<u32>,
+    output_bytes: u64,
+    saved_at_ms: u64,
+}
+
+impl From<&SessionRecord> for LostInfo {
+    fn from(record: &SessionRecord) -> Self {
+        Self {
+            key: record.key.clone(),
+            cwd: record.cwd.clone(),
+            former_instance: record.instance.clone(),
+            former_pid: record.pid,
+            exited: record.exited,
+            exit_code: record.exit_code,
+            output_bytes: record.output_bytes,
+            saved_at_ms: record.saved_at_ms,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -188,16 +234,89 @@ struct Runtime {
     manager: Arc<SessionManager>,
     sessions: Mutex<HashMap<String, Session>>,
     draining: AtomicBool,
+    journal: Option<Journal>,
+    /// Shells that are gone but whose last screen can still be read.
+    lost: Mutex<HashMap<String, SessionRecord>>,
+    /// Keys the user stopped on purpose; their records are deleted, not kept.
+    stopped: Mutex<HashSet<String>>,
+    /// What the journal already holds for each key: output length and exit state.
+    saved: Mutex<HashMap<String, (u64, bool)>>,
 }
 
 impl Runtime {
-    fn new() -> Self {
+    fn new(journal: Option<Journal>) -> Self {
+        let mut lost = HashMap::new();
+        if let Some(journal) = &journal {
+            match journal.load() {
+                Ok(loaded) => {
+                    for path in &loaded.unreadable {
+                        eprintln!("set aside unreadable journal file {}", path.display());
+                    }
+                    lost.extend(
+                        loaded
+                            .records
+                            .into_iter()
+                            .map(|record| (record.key.clone(), record)),
+                    );
+                }
+                Err(error) => eprintln!("cannot read the journal: {error}"),
+            }
+        }
         Self {
             instance: Uuid::new_v4().to_string(),
             manager: Arc::new(SessionManager::default()),
             sessions: Mutex::default(),
             draining: AtomicBool::new(false),
+            journal,
+            lost: Mutex::new(lost),
+            stopped: Mutex::default(),
+            saved: Mutex::default(),
         }
+    }
+
+    /// Write the screen of every shell that changed since the last write.
+    fn persist(&self) {
+        let Some(journal) = &self.journal else { return };
+        let records: Vec<SessionRecord> = match lock(&self.sessions) {
+            Ok(sessions) => sessions
+                .iter()
+                .filter_map(|(key, session)| session.record(key, &self.instance).ok())
+                .collect(),
+            Err(_) => return,
+        };
+        let Ok(mut saved) = lock(&self.saved) else {
+            return;
+        };
+        for record in records {
+            let mark = (record.output_bytes, record.exited);
+            if saved.get(&record.key) != Some(&mark) && journal.save(&record).is_ok() {
+                saved.insert(record.key, mark);
+            }
+        }
+    }
+
+    /// A shell that ended by itself keeps its last screen, unless the user stopped it.
+    fn keep_ended(&self, key: &str, session: &Session) -> Result<()> {
+        if lock(&self.stopped)?.remove(key) {
+            return Ok(());
+        }
+        let mut record = session.record(key, &self.instance)?;
+        record.exited = true;
+        if let Some(journal) = &self.journal {
+            journal.save(&record)?;
+        }
+        lock(&self.saved)?.remove(key);
+        lock(&self.lost)?.insert(key.to_owned(), record);
+        Ok(())
+    }
+
+    fn forget(&self, key: &str) -> Result<()> {
+        lock(&self.lost)?.remove(key);
+        lock(&self.saved)?.remove(key);
+        if let Some(journal) = &self.journal {
+            journal.remove(key)?;
+        }
+        Ok(())
     }
 
     /// A draining runtime with no shells left has nothing more to serve.
@@ -219,9 +338,47 @@ impl Runtime {
     fn execute(&self, request: Request) -> Result<ResponseResult> {
         let mut sessions = lock(&self.sessions)?;
         let active = self.manager.ids()?;
-        sessions.retain(|_, session| active.contains(&session.id));
+        let ended: Vec<String> = sessions
+            .iter()
+            .filter(|(_, session)| !active.contains(&session.id))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in ended {
+            if let Some(session) = sessions.remove(&key) {
+                if let Err(error) = self.keep_ended(&key, &session) {
+                    eprintln!("cannot keep the last screen of {key}: {error:#}");
+                }
+            }
+        }
         match request.action {
             Action::Hello => Ok(self.hello()),
+            Action::Lost => {
+                let lost = lock(&self.lost)?;
+                let mut listed: Vec<LostInfo> = lost.values().map(LostInfo::from).collect();
+                listed.sort_by(|a, b| a.key.cmp(&b.key));
+                Ok(ResponseResult::Lost { lost: listed })
+            }
+            Action::Recover { key } => {
+                let lost = lock(&self.lost)?;
+                let record = lost
+                    .get(&key)
+                    .with_context(|| format!("no saved screen for {key}"))?;
+                Ok(ResponseResult::Recovered {
+                    lost: LostInfo::from(record),
+                    screen: ScreenSnapshot {
+                        ansi: record.ansi.clone(),
+                        cursor: record.cursor,
+                        rows: record.rows,
+                        cols: record.cols,
+                        alternate_screen: record.alternate_screen,
+                        resume_offset: None,
+                    },
+                })
+            }
+            Action::Forget { key } => {
+                self.forget(&key)?;
+                Ok(self.hello())
+            }
             Action::Drain => {
                 self.draining.store(true, Ordering::SeqCst);
                 Ok(self.hello())
@@ -243,6 +400,7 @@ impl Runtime {
                     bail!("runtime is draining and takes no new terminals");
                 }
                 let session = self.start_shell(cwd)?;
+                self.forget(&key)?;
                 let info = session.describe(None)?;
                 sessions.insert(key, session);
                 Ok(info)
@@ -268,6 +426,8 @@ impl Runtime {
             }
             Action::Stop { key } => {
                 let session = get(&sessions, &key)?;
+                lock(&self.stopped)?.insert(key.clone());
+                self.forget(&key)?;
                 self.manager.kill(session.id)?;
                 session.describe(None)
             }
@@ -344,6 +504,31 @@ impl Session {
         Ok(ResponseResult::Success {
             session: self.info(&state),
             output,
+        })
+    }
+
+    fn record(&self, key: &str, instance: &str) -> Result<SessionRecord> {
+        let state = lock(&self.output)?;
+        let frame = state.screen.frame();
+        let saved_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
+        Ok(SessionRecord {
+            key: key.to_owned(),
+            cwd: self.cwd.clone(),
+            instance: instance.to_owned(),
+            pid: self.pid,
+            rows: frame.rows,
+            cols: frame.cols,
+            ansi: frame.ansi,
+            cursor: frame.cursor,
+            alternate_screen: frame.alternate_screen,
+            output_bytes: state.history.end(),
+            exited: state.exited,
+            exit_code: state.exit_code,
+            saved_at_ms,
         })
     }
 
@@ -444,7 +629,7 @@ fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
 pub(super) async fn run() -> Result<()> {
     let args = Args::parse();
     match args.command {
-        Command::Serve => serve(&args.pipe).await,
+        Command::Serve => serve(&args.pipe, args.state_dir).await,
         Command::Send { protocol, action } => {
             let connected = transport::connect(&args.pipe).await;
             let reason = match endpoint::classify(&connected) {
@@ -456,7 +641,7 @@ pub(super) async fn run() -> Result<()> {
     }
 }
 
-async fn serve(pipe: &str) -> Result<()> {
+async fn serve(pipe: &str, state_dir: Option<PathBuf>) -> Result<()> {
     let listener = match own(pipe).await {
         Ok(listener) => listener,
         Err((code, error)) => {
@@ -464,12 +649,25 @@ async fn serve(pipe: &str) -> Result<()> {
             std::process::exit(code);
         }
     };
-    let runtime = Arc::new(Runtime::new());
+    // The journal is read only after this process owns the endpoint, so every record in it
+    // belongs to a runtime that is gone.
+    let journal = state_dir
+        .map_or_else(journal::default_directory, Ok)
+        .and_then(|directory| Journal::open(&directory));
+    let journal = match journal {
+        Ok(journal) => Some(journal),
+        Err(error) => {
+            eprintln!("running without a journal: {error}");
+            None
+        }
+    };
+    let runtime = Arc::new(Runtime::new(journal));
     let mut check = tokio::time::interval(Duration::from_secs(1));
     loop {
         let stream = tokio::select! {
             stream = listener.accept() => stream?,
             _ = check.tick() => {
+                runtime.persist();
                 if runtime.finished() {
                     return Ok(());
                 }
