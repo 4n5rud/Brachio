@@ -131,6 +131,18 @@ pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), Str
     TaskRecord::archive(&*database.lock()?, &id, now_ms()).map_err(to_text)
 }
 
+/// Lists archived task records.
+#[tauri::command]
+pub fn task_list_archived(database: State<'_, Database>) -> Result<Vec<TaskRecord>, String> {
+    TaskRecord::list_archived(&*database.lock()?).map_err(to_text)
+}
+
+/// Restores an archived task to the open list.
+#[tauri::command]
+pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRecord, String> {
+    TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
+}
+
 /// Changes in a task worktree relative to its base.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -184,7 +196,17 @@ pub async fn task_changes(
             patch.truncate(end);
         }
         let untracked = git_paths(&git, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-        let staged = git_paths(&git, &["diff", "--cached", "--name-only", "-z", "--"])?;
+        let staged = git_paths(
+            &git,
+            &[
+                "diff",
+                "--cached",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                "--",
+            ],
+        )?;
         Ok(TaskChanges {
             patch,
             untracked,
@@ -216,6 +238,11 @@ pub enum TaskGitAction {
         /// A literal path relative to the worktree.
         path: String,
     },
+    /// Remove a file from the index while keeping its working copy.
+    UnstageFile {
+        /// A literal path relative to the worktree.
+        path: String,
+    },
     /// Commit the current index with the given message.
     Commit {
         /// User-entered commit message.
@@ -244,6 +271,9 @@ pub async fn task_git_action(
             TaskGitAction::StageTracked => git.run(&["add", "--update", "--"]),
             TaskGitAction::StageFile { path } => {
                 git.run(&["--literal-pathspecs", "add", "--", &path])
+            }
+            TaskGitAction::UnstageFile { path } => {
+                git.run(&["--literal-pathspecs", "restore", "--staged", "--", &path])
             }
             TaskGitAction::Commit { message } => {
                 let message = message.trim();

@@ -46,6 +46,7 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
 export function TerminalPane(props: {
   session?: TerminalSession;
   active?: boolean;
+  focus?: boolean;
   theme?: string;
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
@@ -223,7 +224,9 @@ export function TerminalPane(props: {
       }
       startWebgl();
       fitVisible();
-      term.focus();
+    });
+    createEffect(() => {
+      if (props.active !== false && props.focus !== false) term.focus();
     });
 
     const observer = new ResizeObserver(fitVisible);
