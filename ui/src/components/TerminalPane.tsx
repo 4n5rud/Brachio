@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { t } from "../i18n";
+import type { AgentState } from "../lib/status";
 import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -35,7 +36,8 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
 export function TerminalPane(props: {
   session?: TerminalSession;
   active?: boolean;
-  onExit?: (code: number | null) => void;
+  /** Called with the agent's reported state, and with `exited` when the process ends. */
+  onStatus?: (status: AgentState, message: string | null) => void;
 }) {
   let host!: HTMLDivElement;
   onMount(() => {
@@ -97,9 +99,13 @@ export function TerminalPane(props: {
           sendTypeInPrompt();
           return;
         }
+        if (message.type === "status") {
+          props.onStatus?.(message.status, message.message);
+          return;
+        }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
         term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
-        props.onExit?.(message.exitCode);
+        props.onStatus?.({ state: "exited", code: message.exitCode }, null);
       })
         .then((opened) => {
           if (disposed) {

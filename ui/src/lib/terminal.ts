@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
+import type { AgentState } from "./status";
 import type { AgentKind as TaskAgent } from "./tasks";
 
 /** Agent names as the core spells them. */
@@ -28,13 +29,18 @@ export type PromptDelivery = "none" | "argument" | "type_in";
 
 export type TerminalMessage =
   | { type: "output"; bytes: Uint8Array }
-  | { type: "exit"; exitCode: number | null };
+  | { type: "exit"; exitCode: number | null }
+  | { type: "status"; status: AgentState; message: string | null };
 
 /** Output frames arrive as raw bytes, the exit notice as JSON. */
 export function decodeMessage(raw: unknown): TerminalMessage | null {
   if (raw instanceof ArrayBuffer) return { type: "output", bytes: new Uint8Array(raw) };
   if (raw instanceof Uint8Array) return { type: "output", bytes: raw };
   if (Array.isArray(raw)) return { type: "output", bytes: Uint8Array.from(raw as number[]) };
+  if (raw !== null && typeof raw === "object" && "status" in raw) {
+    const { status, message } = raw as { status: AgentState; message?: unknown };
+    return { type: "status", status, message: typeof message === "string" ? message : null };
+  }
   if (raw !== null && typeof raw === "object" && "exitCode" in raw) {
     const code = (raw as { exitCode: unknown }).exitCode;
     return { type: "exit", exitCode: typeof code === "number" ? code : null };

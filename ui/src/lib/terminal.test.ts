@@ -9,6 +9,15 @@ describe("decodeMessage", () => {
 
   it("reads the exit notice", () => {
     expect(decodeMessage({ exitCode: 3 })).toEqual({ type: "exit", exitCode: 3 });
+  });
+
+  it("reads status reports", () => {
+    const m = decodeMessage({ status: { state: "blocked", reason: "permission" }, message: "npm test" });
+    expect(m).toEqual({
+      type: "status",
+      status: { state: "blocked", reason: "permission" },
+      message: "npm test",
+    });
     expect(decodeMessage({ exitCode: null })).toEqual({ type: "exit", exitCode: null });
   });
 

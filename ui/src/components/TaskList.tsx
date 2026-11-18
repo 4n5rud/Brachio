@@ -40,12 +40,12 @@ export function TaskList(props: {
         <button
           class="button button-primary button-sm"
           type="button"
+          title={`${t("sidebar.newTask")} (${NEW_TASK_KEYS})`}
           disabled={!props.onNewTask}
           onClick={() => props.onNewTask?.()}
         >
           <Icon name="plus" />
           {t("sidebar.newTask")}
-          <kbd>{NEW_TASK_KEYS}</kbd>
         </button>
       </div>
       <Show

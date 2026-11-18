@@ -12,6 +12,8 @@ pub enum BlockReason {
     Question,
     /// The CLI needs the person to sign in again.
     Auth,
+    /// The agent is blocked but did not say why.
+    Other,
 }
 
 /// What an agent session is doing, as shown on the board.

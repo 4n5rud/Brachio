@@ -7,6 +7,7 @@ export const ko: Messages = {
   "status.blocked.permission": "승인 대기",
   "status.blocked.question": "답변 대기",
   "status.blocked.auth": "로그인 필요",
+  "status.blocked.other": "입력 기다림",
   "status.idle": "입력 대기",
   "status.error": "오류",
   "status.exited": "종료",
@@ -80,6 +81,14 @@ export const ko: Messages = {
   "empty.task.body": "작업을 만들면 전용 worktree에서 에이전트가 시작돼요.",
   "error.dismiss": "닫기",
   "error.title": "문제가 생겼어요",
+
+  "notify.permission": "승인이 필요해요",
+  "notify.question": "질문이 있어요",
+  "notify.auth": "로그인이 필요해요",
+  "notify.other": "입력을 기다려요",
+  "notify.error": "문제가 생겼어요",
+  "notify.finished": "끝났어요",
+  "notify.crashed": "비정상 종료됐어요",
 
   "time.now": "방금",
 };

@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 
 // Mirrors brachio_core::status::AgentState (serde tag = "state").
-export type BlockReason = "permission" | "question" | "auth";
+export type BlockReason = "permission" | "question" | "auth" | "other";
 
 export type AgentState =
   | { state: "working" }

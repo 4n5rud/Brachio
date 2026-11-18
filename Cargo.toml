@@ -40,6 +40,7 @@ brachio-qa = { path = "crates/brachio-qa" }
 brachio-store = { path = "crates/brachio-store" }
 brachio-mcp = { path = "crates/brachio-mcp" }
 anyhow = "1"
+base64 = "0.22"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
