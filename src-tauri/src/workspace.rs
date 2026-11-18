@@ -456,6 +456,90 @@ fn create_pull_request(task: &TaskRecord, title: &str, body: &str) -> Result<Str
     brachio_git::create_pull_request(&task.worktree_path, &request).map_err(to_text)
 }
 
+/// Reads the PR associated with the task branch using the user's GitHub CLI login.
+#[tauri::command]
+pub async fn task_pr_feedback(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = std::process::Command::new("gh")
+            .current_dir(&task.worktree_path)
+            .args([
+                "pr",
+                "view",
+                "--json",
+                "url,statusCheckRollup,reviews,comments",
+                "--",
+            ])
+            .arg(&task.branch)
+            .output()
+            .map_err(to_text)?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+        let mut feedback: serde_json::Value =
+            serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        let (inline_comments, inline_error) =
+            match read_inline_reviews(&task.worktree_path, &feedback) {
+                Ok(comments) => (comments, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
+        feedback["inlineComments"] = serde_json::json!(inline_comments);
+        feedback["inlineError"] = serde_json::json!(inline_error);
+        Ok(feedback)
+    })
+    .await
+    .map_err(to_text)?
+}
+
+fn read_inline_reviews(
+    worktree: &Path,
+    feedback: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>, String> {
+    let url = feedback["url"].as_str().unwrap_or_default();
+    let parts: Vec<_> = url
+        .strip_prefix("https://")
+        .unwrap_or_default()
+        .split('/')
+        .collect();
+    let [host, owner, repo, "pull", number] = parts.as_slice() else {
+        return Err("Could not identify the repository for inline reviews.".to_owned());
+    };
+    let endpoint = format!("repos/{owner}/{repo}/pulls/{number}/comments");
+    let output = std::process::Command::new("gh")
+        .current_dir(worktree)
+        .args([
+            "api",
+            "--hostname",
+            host,
+            "--paginate",
+            "--slurp",
+            &endpoint,
+        ])
+        .output()
+        .map_err(to_text)?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    let pages: Vec<Vec<serde_json::Value>> =
+        serde_json::from_slice(&output.stdout).map_err(to_text)?;
+    Ok(pages
+        .into_iter()
+        .flatten()
+        .map(|comment| {
+            serde_json::json!({
+                "body": comment["body"],
+                "url": comment["html_url"],
+                "author": comment["user"],
+                "path": comment["path"],
+                "line": comment["line"].as_u64().or_else(|| comment["original_line"].as_u64()),
+            })
+        })
+        .collect())
+}
+
 /// Errors cross the IPC boundary as display strings.
 fn to_text(error: impl std::fmt::Display) -> String {
     error.to_string()

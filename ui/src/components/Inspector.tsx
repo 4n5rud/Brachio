@@ -5,6 +5,7 @@ import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
 import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
+import { PullRequestFeedback } from "./PullRequestFeedback";
 import { TaskMergePreview } from "./TaskMergePreview";
 
 type Pane = "changes" | "qa" | "activity";
@@ -67,6 +68,9 @@ export function Inspector(props: {
               <Show when={currentChanges()?.data}>
                 {(data) => (
                   <>
+                    <Show when={currentChanges()?.id} keyed>
+                      {(id) => <PullRequestFeedback taskId={id} onDraft={(text) => props.onDraft(id, text)} />}
+                    </Show>
                     <Show when={data().conflicts.length > 0}>
                       <div class="worktree-conflicts" role="status">
                         <strong>{t("inspector.conflicts")}</strong>
