@@ -101,11 +101,19 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Whether `key` (`<task id>:agent`) names a task that is open in this app.
+/// Whether the primary or secondary terminal belongs to an open task.
 fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
-    let Some(id) = key.strip_suffix(":agent") else {
+    let Some((id, terminal)) = key.split_once(':') else {
         return false;
     };
+    if terminal != "agent"
+        && terminal
+            .strip_prefix("agent-")
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            .is_none()
+    {
+        return false;
+    }
     let database = app.state::<workspace::Database>();
     let Ok(connection) = database.lock() else {
         return false;

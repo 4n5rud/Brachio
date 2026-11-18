@@ -24,6 +24,8 @@ export const ko: Messages = {
   "view.tasks": "작업",
   "view.board": "보드",
   "activity.title": "활동",
+  "task.addAgent": "추가",
+  "task.closeAgent": "에이전트 탭 닫기",
   "activity.empty": "이번 세션의 활동이 아직 없습니다.",
   "titlebar.settings": "설정",
 

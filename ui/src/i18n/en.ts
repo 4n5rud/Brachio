@@ -22,6 +22,8 @@ export const en = {
   "view.tasks": "Tasks",
   "view.board": "Board",
   "activity.title": "Activity",
+  "task.addAgent": "Add",
+  "task.closeAgent": "Close agent tab",
   "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 
