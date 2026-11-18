@@ -36,8 +36,8 @@ jobs:
   # The app is built for Windows and macOS only. Linux checks the crates that do not need a
   # web view, and the runtime's Unix socket transport.
   rust-linux:
-    name: Rust (ubuntu-latest, without the app shell)
-    runs-on: ubuntu-latest
+    name: Rust (ubuntu-24.04, without the app shell)
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
 
   ui:
     name: UI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
   # One version, kept in two files. Only a release changes it.
   versions:
     name: Version files agree
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
