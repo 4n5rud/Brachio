@@ -5,6 +5,7 @@ mod hook_socket;
 mod runtime_client;
 mod runtime_terminals;
 mod terminal;
+mod update_release;
 mod workspace;
 
 use std::fs;
@@ -92,6 +93,7 @@ pub fn run() {
             app_version,
             tray_update_tasks,
             terminal::agents_detect,
+            update_release::open_update_release,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,

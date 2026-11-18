@@ -1071,7 +1071,7 @@ kbd {
   box-shadow: 0 0 0 1px var(--color-focus) inset;
 }
 
-.error-banner {
+:is(.error-banner, .update-banner) {
   position: fixed;
   left: 50%;
   bottom: calc(var(--size-statusbar) + var(--space-3));
@@ -1085,8 +1085,11 @@ kbd {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
-  background: color-mix(in srgb, var(--color-danger) 12%, var(--color-panel));
+  background: var(--color-panel);
   font-size: var(--text-sm);
+}
+.error-banner {
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--color-panel));
 }
 .error-banner span {
   flex: 1;

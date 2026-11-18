@@ -38,6 +38,14 @@ export function WorkspaceDialog(props: {
   notifications: boolean;
   onTheme: (theme: Theme) => void;
   onNotifications: (enabled: boolean) => void;
+  updates?: {
+    enabled: boolean;
+    status: "idle" | "checking" | "current" | "unavailable";
+    version: string | null;
+    onEnabled: (enabled: boolean) => void;
+    onCheck: () => void;
+    onDownload: () => void;
+  };
   onOpen: (id: string) => void;
   /** Files of the selected task, offered when the query is two characters or more. */
   files?: readonly string[];
@@ -205,6 +213,29 @@ export function WorkspaceDialog(props: {
               <span>{t("newTask.title")}</span><kbd>{NEW_TASK_KEYS}</kbd>
             </div>
             <TerminalSettings />
+            <Show when={props.updates}>{(updates) => (
+              <section class="settings-group" aria-labelledby="settings-updates">
+                <h3 id="settings-updates">{t("updates.title")}</h3>
+                <label>
+                  <input type="checkbox" checked={updates().enabled}
+                    onChange={(event) => updates().onEnabled(event.currentTarget.checked)} />
+                  {" "}{t("updates.auto")}
+                </label>
+                <button class="button button-sm" type="button" disabled={updates().status === "checking"}
+                  onClick={() => updates().onCheck()}>{t("updates.check")}</button>
+                <Show when={updates().status !== "idle"}>
+                  <p role="status">{t(`updates.${updates().status}` as "updates.checking" | "updates.current" | "updates.unavailable")}</p>
+                </Show>
+                <Show when={updates().version}>{(version) => (
+                  <div>
+                    <p role="status">{t("updates.available").replace("{version}", version())}</p>
+                    <button class="button button-sm" type="button" onClick={() => updates().onDownload()}>
+                      {t("updates.download")}
+                    </button>
+                  </div>
+                )}</Show>
+              </section>
+            )}</Show>
             <Show when={props.onOpenArchived}>
               <AgentSettings />
               <button type="button" class="button button-sm" onClick={() => props.onOpenArchived?.()}>
