@@ -1,0 +1,27 @@
+# How GitHub groups the pull requests it lists in generated release notes.
+# Labels come from the pull request title, see workflows/labels.yml.
+changelog:
+  exclude:
+    labels:
+      - skip-release-notes
+    authors:
+      - dependabot
+  categories:
+    - title: New
+      labels:
+        - feature
+    - title: Fixes
+      labels:
+        - bug
+    - title: Performance
+      labels:
+        - performance
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Maintenance
+      labels:
+        - maintenance
+    - title: Other changes
+      labels:
+        - '*'

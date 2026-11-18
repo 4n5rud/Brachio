@@ -1,0 +1,68 @@
+name: Labels
+
+# Labels feed the release notes (pull requests) and triage (issues). This workflow only reads
+# titles and form answers and never checks out or runs code from a pull request.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  pull-request:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Label by Conventional Commit prefix
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const BY_PREFIX = {
+              feat: 'feature',
+              fix: 'bug',
+              perf: 'performance',
+              docs: 'documentation',
+              ci: 'maintenance',
+              chore: 'maintenance',
+              refactor: 'maintenance',
+              build: 'maintenance',
+              test: 'maintenance',
+            };
+            const MANAGED = new Set(Object.values(BY_PREFIX));
+            const pr = context.payload.pull_request;
+            const match = /^([a-z]+)(\([^)]*\))?!?:/.exec(pr.title);
+            const wanted = match ? BY_PREFIX[match[1]] : undefined;
+            const current = pr.labels.map((label) => label.name);
+            for (const name of current.filter((name) => MANAGED.has(name) && name !== wanted)) {
+              await github.rest.issues.removeLabel({ ...context.repo, issue_number: pr.number, name });
+            }
+            if (wanted && !current.includes(wanted)) {
+              await github.rest.issues.addLabels({ ...context.repo, issue_number: pr.number, labels: [wanted] });
+            }
+
+  issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Label by the operating system chosen in the form
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const BY_ANSWER = { Windows: 'os:windows', macOS: 'os:macos' };
+            const MANAGED = new Set(Object.values(BY_ANSWER));
+            const issue = context.payload.issue;
+            const match = /### Operating system\s+(.+)/.exec(issue.body ?? '');
+            const wanted = match ? BY_ANSWER[match[1].trim()] : undefined;
+            const current = issue.labels.map((label) => label.name);
+            for (const name of current.filter((name) => MANAGED.has(name) && name !== wanted)) {
+              await github.rest.issues.removeLabel({ ...context.repo, issue_number: issue.number, name });
+            }
+            if (wanted && !current.includes(wanted)) {
+              await github.rest.issues.addLabels({ ...context.repo, issue_number: issue.number, labels: [wanted] });
+            }

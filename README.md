@@ -53,6 +53,7 @@ You need Rust stable, Node 22 or later, pnpm 10 or later, and git 2.38 or later.
 
 ```sh
 pnpm --dir ui install
+cargo install tauri-cli --version "^2" --locked   # once, for `cargo tauri`
 cargo test          # platform-independent crates
 pnpm --dir ui test
 cargo tauri dev     # run the app (macOS or Windows)
@@ -74,6 +75,10 @@ cargo tauri dev     # run the app (macOS or Windows)
 | `crates/brachio-cli` | The `brachio` helper that hooks and agents run |
 | `src-tauri` | App shell: window, tray, IPC |
 | `ui` | SolidJS UI, xterm.js, design tokens |
+
+## Contributing
+
+See [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) for setup, branch names, checks and pull request rules, and [`.github/RELEASING.md`](.github/RELEASING.md) for how releases are cut.
 
 ## License
 

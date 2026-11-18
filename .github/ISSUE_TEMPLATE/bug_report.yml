@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a problem with Brachio
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include enough detail for someone else to reproduce the problem. Please write in English.
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Brachio version
+      description: From the About box, or the release you installed.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      description: The agent the task was running, if the bug involves one.
+      options:
+        - Claude Code
+        - Codex
+        - Not related to an agent
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Where do terminals run?
+      description: Brachio can keep terminals in a separate runtime process (the default when the runtime executable is found), or inside the app (`BRACHIO_TERMINAL_RUNTIME=0`).
+      options:
+        - Separate runtime process
+        - Inside the app
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected and what happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or logs
+      description: Remove tokens and private paths first.
+    validations:
+      required: false
