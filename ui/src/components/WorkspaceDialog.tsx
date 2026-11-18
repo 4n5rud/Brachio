@@ -8,7 +8,6 @@ export type Theme = "system" | "light" | "dark";
 export function WorkspaceDialog(props: {
   panel: "quickOpen" | "settings" | "archived";
   tasks: readonly TaskRow[];
-  repos: readonly { id: string; name: string }[];
   archived: readonly TaskRow[];
   onRestore: (id: string) => Promise<void>;
   onDelete: (task: TaskRow) => Promise<void>;
@@ -19,6 +18,7 @@ export function WorkspaceDialog(props: {
   onNotifications: (enabled: boolean) => void;
   onOpen: (id: string) => void;
   onClose: () => void;
+  repos: readonly { id: string; name: string }[];
 }) {
   const [query, setQuery] = createSignal("");
   const [highlight, setHighlight] = createSignal(0);
