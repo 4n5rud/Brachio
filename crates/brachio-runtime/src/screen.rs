@@ -1,12 +1,16 @@
 //! Reconstructs the visible terminal frame independently of retained raw bytes.
 
+mod boundary;
+
 use std::num::NonZeroU16;
+
+use boundary::OutputBoundary;
 
 pub(crate) const ROWS: NonZeroU16 = vt100::Parser::DEFAULT_ROWS;
 pub(crate) const COLS: NonZeroU16 = vt100::Parser::DEFAULT_COLS;
 
 /// Escape sequences that switch to the alternate screen.
-const ALTERNATE_ENTRIES: [&[u8]; 3] = [b"[?1049h", b"[?1047h", b"[?47h"];
+const ALTERNATE_ENTRIES: [&[u8]; 2] = [b"[?1049h", b"[?47h"];
 const LONGEST_ENTRY: usize = 8;
 
 pub(crate) struct TerminalScreen {
@@ -17,6 +21,7 @@ pub(crate) struct TerminalScreen {
     normal_frame: Option<String>,
     /// Trailing bytes of the previous chunk, in case an entry sequence is split.
     tail: Vec<u8>,
+    alternate_1047: bool,
 }
 
 pub(crate) struct Frame {
@@ -38,13 +43,48 @@ impl Default for TerminalScreen {
             size: (ROWS, COLS),
             normal_frame: None,
             tail: Vec::new(),
+            alternate_1047: false,
         }
     }
 }
 
 impl TerminalScreen {
     pub(crate) fn process(&mut self, bytes: &[u8]) {
-        self.boundary.process(bytes);
+        let changes = self.boundary.process(bytes);
+        let mut start = 0;
+        for (end, enter) in changes {
+            self.process_model(&bytes[start..end]);
+            self.change_1047(enter);
+            start = end;
+        }
+        self.process_model(&bytes[start..]);
+    }
+
+    fn change_1047(&mut self, enter: bool) {
+        let screen = self.parser.screen();
+        if enter == screen.alternate_screen() {
+            return;
+        }
+
+        // xterm carries the active cursor into the newly activated buffer.
+        // The vt100 parser ignores mode 1047, so model it using mode 47 and
+        // explicitly clear the alternate grid on entry.
+        let (row, col) = screen.cursor_position();
+        let switch = if enter {
+            "\x1b[?47h\x1b[2J"
+        } else {
+            "\x1b[?47l"
+        };
+        let cursor = format!("\x1b[{};{}H", row + 1, col + 1);
+        self.process_model(switch.as_bytes());
+        self.parser.process(cursor.as_bytes());
+        self.alternate_1047 = enter;
+    }
+
+    fn process_model(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
         let mut rest = bytes;
         let mut tail = self.tail.clone();
         while let Some(entry) = self.next_entry(&tail, rest) {
@@ -58,6 +98,7 @@ impl TerminalScreen {
         self.parser.process(rest);
         if !self.parser.screen().alternate_screen() {
             self.normal_frame = None;
+            self.alternate_1047 = false;
         }
         self.remember_tail(bytes);
     }
@@ -103,7 +144,11 @@ impl TerminalScreen {
         let mut ansi = String::new();
         if let Some(normal) = &self.normal_frame {
             ansi.push_str(normal);
-            ansi.push_str("[?1049h");
+            ansi.push_str(if self.alternate_1047 {
+                "\x1b[?1047h"
+            } else {
+                "\x1b[?1049h"
+            });
         }
         ansi.push_str(&screen.state_formatted());
         Frame {
@@ -120,66 +165,6 @@ impl TerminalScreen {
 struct AlternateEntry {
     start: usize,
     length: usize,
-}
-
-struct OutputBoundary {
-    parser: vte::Parser,
-    settled: bool,
-}
-
-impl Default for OutputBoundary {
-    fn default() -> Self {
-        Self {
-            parser: vte::Parser::new(),
-            settled: true,
-        }
-    }
-}
-
-impl OutputBoundary {
-    fn process(&mut self, bytes: &[u8]) {
-        let mut witness = BoundaryWitness {
-            settled: false,
-            allow_print: false,
-        };
-        let end = bytes
-            .iter()
-            .rposition(|byte| !matches!(byte, b'\r' | b'\n' | b'\t' | 8));
-        if let Some(end) = end {
-            self.parser.advance(&mut witness, &bytes[..end]);
-            let final_byte = bytes[end];
-            witness.settled = false;
-            witness.allow_print = matches!(final_byte, 0x20..=0x7e | 0x80..=0xbf);
-            self.parser.advance(&mut witness, &bytes[end..=end]);
-            self.settled = witness.settled;
-            self.parser.advance(&mut witness, &bytes[end + 1..]);
-        } else {
-            self.parser.advance(&mut witness, bytes);
-        }
-    }
-}
-
-struct BoundaryWitness {
-    settled: bool,
-    allow_print: bool,
-}
-
-impl vte::Perform for BoundaryWitness {
-    fn print(&mut self, _: char) {
-        self.settled = self.allow_print;
-    }
-
-    fn esc_dispatch(&mut self, _: &[u8], _: bool, _: u8) {
-        self.settled = true;
-    }
-
-    fn csi_dispatch(&mut self, _: &vte::Params, _: &[u8], _: bool, _: char) {
-        self.settled = true;
-    }
-
-    fn osc_dispatch(&mut self, _: &[&[u8]], bell_terminated: bool) {
-        self.settled = bell_terminated;
-    }
 }
 
 #[cfg(test)]
@@ -264,6 +249,28 @@ file.txt
 
         screen.process(b"[?1049lback");
         assert!(!screen.frame().ansi.contains("[?1049h"));
+    }
+
+    #[test]
+    fn mode_1047_preserves_the_normal_buffer_and_carries_the_active_cursor() {
+        let mut screen = TerminalScreen::default();
+        screen.process(b"main\x1b[3;6H\x1b[?10");
+        screen.process(b"47h");
+        let entered = screen.frame();
+        assert!(entered.alternate_screen);
+        assert_eq!(entered.cursor, (2, 5));
+        assert!(entered.ansi.contains("\x1b[?1047h"));
+        assert!(!entered.ansi.contains("\x1b[?1049h"));
+
+        screen.process(b"\x1b[8;5Halt\x1b[?1047l");
+        let normal = screen.frame();
+        assert!(!normal.alternate_screen);
+        assert_eq!(normal.cursor, (7, 7));
+        assert!(normal.ansi.contains("main"));
+        assert!(!normal.ansi.contains("alt"));
+
+        screen.process(b"\x1b[?1047h");
+        assert!(!screen.frame().ansi.contains("alt"));
     }
 
     #[test]

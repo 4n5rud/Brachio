@@ -1,4 +1,4 @@
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 import { t, type MessageKey } from "../i18n";
 import type { AgentState } from "./status";
@@ -34,7 +34,18 @@ function allowed(): Promise<boolean> {
 }
 
 /** Shows an OS notification, but only while the window is not in front. */
-export async function notifyIfAway(key: MessageKey, taskTitle: string, detail: string | null) {
+export async function notifyIfAway(key: MessageKey, task: { id: string; title: string }, detail: string | null) {
   if (document.hasFocus() || !(await allowed())) return;
-  sendNotification({ title: t(key), body: detail ? `${taskTitle}: ${detail}` : taskTitle });
+  sendNotification({
+    title: t(key),
+    body: detail ? `${task.title}: ${detail}` : task.title,
+    extra: { brachioTaskId: task.id },
+  });
+}
+
+export function listenForTaskNotifications(openTask: (taskId: string) => void) {
+  return onAction(({ actionId, notification }) => {
+    const taskId = notification?.extra?.brachioTaskId;
+    if (actionId === "tap" && typeof taskId === "string" && taskId) openTask(taskId);
+  });
 }

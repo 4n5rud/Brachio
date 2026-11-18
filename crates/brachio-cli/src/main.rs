@@ -1,8 +1,14 @@
-//! `brachio` helper binary. Agents' hooks run `brachio notify`; agents start
-//! `brachio mcp` as an MCP server. Both talk to the running app over a local
-//! socket identified by `BRACHIO_SOCKET` and authenticated by `BRACHIO_TOKEN`.
+//! `brachio` helper binary that agents run. `brachio hook permission-request` forwards an
+//! agent's permission question to the running app; `brachio notify` and `brachio mcp` are
+//! placeholders for later.
+
+use std::io::Read;
+use std::time::Duration;
 
 use anyhow::{bail, Result};
+use brachio_runtime::approval::{
+    self, ApprovalRequest, DEFAULT_WAIT, ENDPOINT_VARIABLE, KEY_VARIABLE, WAIT_VARIABLE,
+};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -22,15 +28,66 @@ enum Command {
     },
     /// Run the Brachio MCP server on stdio.
     Mcp,
+    /// Commands that an agent's hooks run.
+    Hook {
+        #[command(subcommand)]
+        hook: Hook,
+    },
+}
+
+#[derive(Subcommand)]
+enum Hook {
+    /// Let the user answer a permission question in the app. Prints the agent's answer, or
+    /// nothing when the app does not answer, so the agent asks in the terminal as usual.
+    PermissionRequest,
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
-    if std::env::var_os("BRACHIO_SOCKET").is_none() {
-        bail!("BRACHIO_SOCKET is not set; run this from a session started by Brachio");
-    }
-    match cli.command {
+    match Cli::parse().command {
+        Command::Hook {
+            hook: Hook::PermissionRequest,
+        } => {
+            // Exit status 2 would block the agent's tool. Whatever happens, finish normally.
+            permission_request();
+            Ok(())
+        }
         Command::Notify { event } => bail!("notify is not implemented yet (event {event}); M1"),
         Command::Mcp => bail!("mcp is not implemented yet; M3"),
     }
+}
+
+fn permission_request() {
+    let (Some(endpoint), Some(key)) = (
+        std::env::var_os(ENDPOINT_VARIABLE),
+        std::env::var_os(KEY_VARIABLE),
+    ) else {
+        return;
+    };
+    let (Some(endpoint), Some(key)) = (endpoint.to_str(), key.to_str()) else {
+        return;
+    };
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+    let Some(request) = approval::request_from_hook_input(&input, key) else {
+        return;
+    };
+    if let Some(output) =
+        answer(endpoint, &request).and_then(|decision| approval::hook_output(&decision))
+    {
+        println!("{output}");
+    }
+}
+
+fn answer(endpoint: &str, request: &ApprovalRequest) -> Option<approval::Decision> {
+    let wait = std::env::var(WAIT_VARIABLE)
+        .ok()
+        .and_then(|seconds| seconds.parse::<u64>().ok())
+        .map_or(DEFAULT_WAIT, Duration::from_secs);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    runtime.block_on(approval::ask(endpoint, request, wait))
 }

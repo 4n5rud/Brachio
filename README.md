@@ -47,6 +47,18 @@ Not every number favors Brachio. On Linux with WebKitGTK, the idle app used abou
 
 Set `BRACHIO_TERMINAL_RUNTIME=1` to start terminals in `brachio-runtime`, a separate process, instead of inside the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable must sit next to the app, or be named by `BRACHIO_RUNTIME_EXECUTABLE`; the installer does not include it yet. It is tested on Windows and Linux, not on macOS.
 
+## Preparing new worktrees (`brachio.toml`)
+
+A new worktree starts without the files git does not track, such as `.env`, and without installed dependencies. A repository can say what to do about that in a `brachio.toml` at its root:
+
+```toml
+[setup]
+copy = [".env"]            # copied from the repository into every new worktree; missing files are skipped
+run = ["pnpm install"]     # typed into the shell next to the agent
+```
+
+`copy` entries must be plain paths inside the repository. The `run` commands are never started silently: Brachio shows them and asks once per exact list before typing them into the task's shell.
+
 ## Getting started
 
 You need Rust stable, Node 22 or later, pnpm 10 or later, and git 2.38 or later.

@@ -9,6 +9,7 @@ mod port_pool;
 mod pull_request;
 mod repo_info;
 mod worktree;
+mod worktree_setup;
 
 pub use conflict_report::{predict_conflict, ConflictReport};
 pub use file_list::{list_files, MAX_FILES};
@@ -21,3 +22,4 @@ pub use worktree::{
     add_worktree, discard_worktree, remove_worktree, unsaved_work, worktree_path, AddWorktree,
     UnsavedWork,
 };
+pub use worktree_setup::{copy_setup_files, read_setup, SetupConfig, SetupError, CONFIG_FILE};
