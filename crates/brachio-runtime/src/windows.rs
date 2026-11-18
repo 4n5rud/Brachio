@@ -21,9 +21,11 @@ use uuid::Uuid;
 use widestring::U16CString;
 
 use crate::output::{OutputHistory, Page};
+use crate::screen::{TerminalScreen, COLS, ROWS};
 
 const VERSION: u8 = 1;
 const MAX_MESSAGE: u64 = 64 * 1024;
+const MAX_RESPONSE: u64 = 256 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 
@@ -58,6 +60,8 @@ enum Action {
     Read { key: String, after: u64 },
     /// Replay and then follow output on the same connection.
     Follow { key: String, after: u64 },
+    /// Capture the current visible frame of a running shell.
+    Snapshot { key: String },
     /// Write text to the shell.
     Write { key: String, text: String },
     /// Stop one shell explicitly.
@@ -85,6 +89,10 @@ enum ResponseResult {
         session: SessionInfo,
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<OutputPage>,
+    },
+    Snapshot {
+        session: SessionInfo,
+        screen: ScreenSnapshot,
     },
     Error {
         error: String,
@@ -119,6 +127,15 @@ struct SessionInfo {
     output_bytes: u64,
     exited: bool,
     exit_code: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct ScreenSnapshot {
+    ansi: String,
+    cursor: (u16, u16),
+    rows: u16,
+    cols: u16,
+    alternate_screen: bool,
 }
 
 #[derive(Clone)]
@@ -173,6 +190,7 @@ impl Runtime {
             }
             Action::Inspect { key } => get(&sessions, &key)?.describe(None),
             Action::Read { key, after } => get(&sessions, &key)?.describe(Some(after)),
+            Action::Snapshot { key } => get(&sessions, &key)?.snapshot(),
             Action::Follow { .. } => bail!("follow requires a streaming response"),
             Action::Write { key, text } => {
                 let session = get(&sessions, &key)?;
@@ -193,8 +211,8 @@ impl Runtime {
             args: vec!["/d".to_owned()],
             cwd: cwd.clone(),
             env: Vec::new(),
-            rows: 24,
-            cols: 80,
+            rows: ROWS.get(),
+            cols: COLS.get(),
         };
         let output = Arc::new(Mutex::new(StartupOutput::default()));
         let received = Arc::clone(&output);
@@ -254,15 +272,34 @@ impl Session {
             })
             .transpose()?;
         Ok(ResponseResult::Success {
-            session: SessionInfo {
-                session_id: self.id,
-                pid: self.pid,
-                output_bytes: state.history.end(),
-                exited: state.exited,
-                exit_code: state.exit_code,
-            },
+            session: self.info(&state),
             output,
         })
+    }
+
+    fn snapshot(&self) -> Result<ResponseResult> {
+        let state = lock(&self.output)?;
+        let frame = state.screen.frame();
+        Ok(ResponseResult::Snapshot {
+            session: self.info(&state),
+            screen: ScreenSnapshot {
+                ansi: frame.ansi,
+                cursor: frame.cursor,
+                rows: ROWS.get(),
+                cols: COLS.get(),
+                alternate_screen: frame.alternate_screen,
+            },
+        })
+    }
+
+    fn info(&self, state: &StartupOutput) -> SessionInfo {
+        SessionInfo {
+            session_id: self.id,
+            pid: self.pid,
+            output_bytes: state.history.end(),
+            exited: state.exited,
+            exit_code: state.exit_code,
+        }
     }
 }
 
@@ -270,6 +307,7 @@ impl Session {
 struct StartupOutput {
     id: Option<SessionId>,
     history: OutputHistory,
+    screen: TerminalScreen,
     matched: usize,
     answered: bool,
     exited: bool,
@@ -279,6 +317,7 @@ struct StartupOutput {
 impl StartupOutput {
     fn record(&mut self, bytes: &[u8]) -> Option<SessionId> {
         self.history.push(bytes);
+        self.screen.process(bytes);
         if !self.answered && self.matched < CURSOR_QUERY.len() {
             for &byte in bytes {
                 if byte == CURSOR_QUERY[self.matched] {
@@ -354,9 +393,12 @@ pub(super) async fn run() -> Result<()> {
 }
 
 async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
-    let message = tokio::time::timeout(IO_TIMEOUT, read_message(&mut BufReader::new(&mut stream)))
-        .await??
-        .context("connection closed before request")?;
+    let message = tokio::time::timeout(
+        IO_TIMEOUT,
+        read_message(&mut BufReader::new(&mut stream), MAX_MESSAGE),
+    )
+    .await??
+    .context("connection closed before request")?;
     let result = match serde_json::from_slice::<Request>(&message) {
         Ok(Request {
             version: VERSION,
@@ -404,6 +446,7 @@ async fn send_response(
                 instance,
                 result,
             },
+            MAX_RESPONSE,
         ),
     )
     .await?
@@ -457,11 +500,12 @@ async fn request(mut stream: Stream, action: Action) -> Result<()> {
                 version: VERSION,
                 action,
             },
+            MAX_MESSAGE,
         ),
     )
     .await??;
     let mut reader = BufReader::new(stream);
-    let first = tokio::time::timeout(IO_TIMEOUT, read_message(&mut reader))
+    let first = tokio::time::timeout(IO_TIMEOUT, read_message(&mut reader, MAX_RESPONSE))
         .await??
         .context("runtime closed before responding")?;
     let completed = print_response(&first)?;
@@ -469,7 +513,7 @@ async fn request(mut stream: Stream, action: Action) -> Result<()> {
         if completed {
             return Ok(());
         }
-        while let Some(message) = read_message(&mut reader).await? {
+        while let Some(message) = read_message(&mut reader, MAX_RESPONSE).await? {
             if print_response(&message)? {
                 return Ok(());
             }
@@ -500,12 +544,12 @@ fn print_response(message: &[u8]) -> Result<bool> {
     Ok(completed)
 }
 
-async fn read_message(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option<Vec<u8>>> {
+async fn read_message(
+    reader: &mut (impl AsyncBufRead + Unpin),
+    limit: u64,
+) -> Result<Option<Vec<u8>>> {
     let mut message = Vec::new();
-    reader
-        .take(MAX_MESSAGE)
-        .read_until(b'\n', &mut message)
-        .await?;
+    reader.take(limit).read_until(b'\n', &mut message).await?;
     if message.is_empty() {
         return Ok(None);
     }
@@ -515,9 +559,12 @@ async fn read_message(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option
     Ok(Some(message))
 }
 
-async fn write_message(stream: &mut Stream, value: &impl Serialize) -> Result<()> {
+async fn write_message(stream: &mut Stream, value: &impl Serialize, limit: u64) -> Result<()> {
     let mut message = serde_json::to_vec(value)?;
     message.push(b'\n');
+    if message.len() as u64 > limit {
+        bail!("runtime message exceeds the frame limit");
+    }
     stream.write_all(&message).await?;
     stream.flush().await?;
     Ok(())

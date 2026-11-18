@@ -2,6 +2,8 @@
 
 #[cfg(any(windows, test))]
 mod output;
+#[cfg(any(windows, test))]
+mod screen;
 #[cfg(windows)]
 mod windows;
 

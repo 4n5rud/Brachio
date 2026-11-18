@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[dependencies]
+vt100 = "0.18.1"
+
 [target.'cfg(windows)'.dependencies]
 anyhow.workspace = true
 brachio-pty.workspace = true
