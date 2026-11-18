@@ -93,6 +93,7 @@ export function Inspector(props: {
                     <Show when={currentChanges()?.id} keyed>
                       {(id) => <TaskGitActions taskId={id} staged={data().staged}
                         untracked={data().untracked}
+                        onDraft={(text) => props.onDraft(id, text)}
                         onChanged={async () => { if (props.task.id === id) await refetch(); }} />}
                     </Show>
                   </>
