@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { TaskPorts } from "./TaskPorts";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
@@ -7,7 +8,6 @@ import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";
 import { TaskMergePreview } from "./TaskMergePreview";
-import { TaskPorts } from "./TaskPorts";
 
 type Pane = "changes" | "qa" | "activity";
 
