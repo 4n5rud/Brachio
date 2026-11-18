@@ -1,10 +1,15 @@
 //! Brachio terminal runtime and its local client.
 
+mod cli;
 mod journal;
+mod launcher;
 mod output;
+mod recovery;
+mod runtime;
 mod screen;
-mod service;
+mod server;
+mod session;
 
 fn main() -> anyhow::Result<()> {
-    service::run()
+    cli::run()
 }
