@@ -22,8 +22,6 @@ export const en = {
   "view.tasks": "Tasks",
   "view.board": "Board",
   "activity.title": "Activity",
-  "task.addAgent": "Add",
-  "task.closeAgent": "Close agent tab",
   "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 
@@ -37,6 +35,8 @@ export const en = {
   "task.openInEditor": "Open in editor",
   "task.newTab": "Open shell tab",
   "task.shell": "Shell",
+  "task.addAgent": "Add",
+  "task.closeAgent": "Close agent tab",
   "task.closeShell": "Close shell",
   "task.archive": "Archive task",
   "task.archived": "Archived tasks",
