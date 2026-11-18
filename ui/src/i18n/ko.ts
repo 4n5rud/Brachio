@@ -73,6 +73,7 @@ export const ko: Messages = {
   "diff.insert": "에이전트 입력란에 넣기",
   "diff.notReady": "에이전트 입력란을 사용할 수 없습니다. 터미널 상태를 확인하세요.",
   "git.stageFile": "스테이징",
+  "git.unstageFile": "스테이징 해제",
   "git.stageTracked": "추적 중인 변경 스테이징",
   "git.staged": "스테이징된 파일",
   "git.message": "커밋 메시지",

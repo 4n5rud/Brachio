@@ -71,6 +71,7 @@ export const en = {
   "diff.insert": "Insert in agent prompt",
   "diff.notReady": "The agent prompt is unavailable. Check the terminal.",
   "git.stageFile": "Stage",
+  "git.unstageFile": "Unstage",
   "git.stageTracked": "Stage tracked changes",
   "git.staged": "Staged files",
   "git.message": "Commit message",
