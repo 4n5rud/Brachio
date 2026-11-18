@@ -18,6 +18,8 @@ import { TerminalPane, type TerminalSession } from "./TerminalPane";
  */
 export function TaskView(props: {
   task: TaskRow;
+  visible: boolean;
+  theme?: string;
   /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
   openIds: readonly string[];
   findTask: (id: string) => TaskRow | undefined;
@@ -41,7 +43,7 @@ export function TaskView(props: {
     };
   };
   return (
-    <section class="task-view">
+    <section class="task-view" classList={{ "view-hidden": !props.visible }}>
       <div class="task-header">
         <div class="task-header-text">
           <h1>{props.task.title}</h1>
@@ -96,7 +98,8 @@ export function TaskView(props: {
               <div class="terminal-slot" hidden={id !== props.task.id}>
                 <TerminalPane
                   session={sessionFor(id)}
-                  active={id === props.task.id}
+                  active={props.visible && id === props.task.id}
+                  theme={props.theme}
                   onStatus={(status, message) => props.onStatus?.(id, status, message)}
                   registerDraftWriter={(writer) => props.registerDraftWriter(id, writer)}
                 />

@@ -9,6 +9,7 @@ export interface QaSummary {
 
 /** One task as the task list and board show it. Filled from the core in M2. */
 export interface TaskRow {
+  repoId?: string;
   id: string;
   title: string;
   agent: AgentKind;

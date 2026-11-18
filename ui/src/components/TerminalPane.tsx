@@ -46,6 +46,7 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
 export function TerminalPane(props: {
   session?: TerminalSession;
   active?: boolean;
+  theme?: string;
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
   registerDraftWriter?: (writer: (text: string) => Promise<boolean>) => () => void;
@@ -68,6 +69,20 @@ export function TerminalPane(props: {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    const applyTheme = () => {
+      term.options.theme = {
+        background: cssVar("--color-term-bg"),
+        foreground: cssVar("--color-term-text"),
+        cursor: cssVar("--color-text-2"),
+      };
+    };
+    const systemTheme = window.matchMedia("(prefers-color-scheme: light)");
+    systemTheme.addEventListener("change", applyTheme);
+    createEffect((theme) => {
+      if (theme !== props.theme) applyTheme();
+      return props.theme;
+    });
+    onCleanup(() => systemTheme.removeEventListener("change", applyTheme));
     let webgl: WebglAddon | null = null;
     const startWebgl = () => {
       if (webgl) return;
