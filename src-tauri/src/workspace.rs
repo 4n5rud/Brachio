@@ -166,6 +166,54 @@ pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRec
     TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
 }
 
+/// Converts files from a native drop into worktree-relative paths for the agent draft.
+#[tauri::command]
+pub async fn task_drop_paths(
+    database: State<'_, Database>,
+    id: String,
+    paths: Vec<PathBuf>,
+) -> Result<Vec<String>, String> {
+    if paths.is_empty() || paths.len() > 16 {
+        return Err("Drop between 1 and 16 files.".to_owned());
+    }
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = task.worktree_path.canonicalize().map_err(to_text)?;
+        let mut files = Vec::new();
+        for path in paths {
+            if !path.is_absolute() {
+                return Err("Drop files from inside the current worktree.".to_owned());
+            }
+            let file = path.canonicalize().map_err(to_text)?;
+            let relative = file
+                .strip_prefix(&root)
+                .map_err(|_| "Drop files from inside the current worktree.".to_owned())?;
+            if !file.is_file()
+                || relative
+                    .components()
+                    .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
+            {
+                return Err("Only regular worktree files can be dropped.".to_owned());
+            }
+            let parts = relative
+                .components()
+                .map(|component| component.as_os_str().to_str())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| "The dropped path is not valid UTF-8.".to_owned())?;
+            let path = parts.join("/");
+            if path.chars().any(char::is_control) || (cfg!(windows) && path.contains(':')) {
+                return Err("The dropped path contains an unsupported character.".to_owned());
+            }
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
+        Ok(files)
+    })
+    .await
+    .map_err(to_text)?
+}
+
 /// Lists the files of a task's worktree, tracked and not ignored, for quick open.
 #[tauri::command]
 pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec<String>, String> {

@@ -96,6 +96,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            workspace::task_drop_paths,
             hook_socket::approval_answer,
             workspace::repo_list,
             workspace::repo_add,
