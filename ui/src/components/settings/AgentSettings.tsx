@@ -1,10 +1,11 @@
 import { For, Show, createResource } from "solid-js";
 import { t } from "../../i18n";
 import { detectAgents } from "../../lib/terminal";
+import { AgentAccountControls } from "./AgentAccountControls";
 
 const AGENT_NAMES = { claude_code: "Claude Code", codex: "Codex" } as const;
 
-/** The agent programs Brachio found on this machine. Read only: they come from the PATH. */
+/** The local agent programs and their account controls. */
 export function AgentSettings() {
   const [agents] = createResource(detectAgents);
   return (
@@ -15,9 +16,10 @@ export function AgentSettings() {
           fallback={<p class="muted">{t("settings.agentsNone")}</p>}>
           <ul class="quick-open-results">
             <For each={agents()}>{(agent) => (
-              <li class="archive-row">
+              <li class="archive-row form-field">
                 <span>{AGENT_NAMES[agent.kind]}{agent.version ? ` ${agent.version}` : ""}</span>
                 <span class="muted">{agent.path}</span>
+                <AgentAccountControls kind={agent.kind} />
               </li>
             )}</For>
           </ul>

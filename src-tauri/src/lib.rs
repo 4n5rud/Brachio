@@ -1,5 +1,6 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
+mod agent_accounts;
 mod hook_setup;
 mod hook_socket;
 mod runtime_client;
@@ -136,6 +137,10 @@ pub fn run() {
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,
+            agent_accounts::agent_auth_status,
+            agent_accounts::codex_auth_action,
+            agent_accounts::codex_usage,
+            agent_accounts::open_claude_usage,
             workspace::task_list,
             workspace::task_create,
             workspace::task_archive,
