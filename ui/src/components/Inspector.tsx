@@ -1,9 +1,10 @@
-import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
+import { Match, Show, Switch, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
 import { DiffReview } from "./DiffReview";
+import { TaskGitActions } from "./TaskGitActions";
 
 type Pane = "changes" | "qa" | "activity";
 
@@ -69,12 +70,13 @@ export function Inspector(props: {
                     <Show when={data().truncated}>
                       <p class="muted">{t("inspector.truncated")}</p>
                     </Show>
-                    <Show when={data().untracked.length > 0}>
-                      <h4>{t("inspector.untracked")}</h4>
-                      <ul><For each={data().untracked}>{(path) => <li>{path}</li>}</For></ul>
-                    </Show>
-                    <Show when={!data().patch && data().untracked.length === 0}>
+                    <Show when={!data().patch && data().untracked.length === 0 && data().staged.length === 0}>
                       <p class="muted">{t("inspector.noChanges")}</p>
+                    </Show>
+                    <Show when={currentChanges()?.id} keyed>
+                      {(id) => <TaskGitActions taskId={id} staged={data().staged}
+                        untracked={data().untracked}
+                        onChanged={async () => { if (props.task.id === id) await refetch(); }} />}
                     </Show>
                   </>
                 )}

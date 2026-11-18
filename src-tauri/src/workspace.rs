@@ -137,6 +137,7 @@ pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), Str
 pub struct TaskChanges {
     patch: String,
     untracked: Vec<String>,
+    staged: Vec<String>,
     truncated: bool,
 }
 
@@ -182,17 +183,82 @@ pub async fn task_changes(
             }
             patch.truncate(end);
         }
-        let untracked = git
-            .run_text(&["ls-files", "--others", "--exclude-standard", "-z"])
-            .map_err(to_text)?
-            .split_terminator('\0')
-            .map(str::to_owned)
-            .collect();
+        let untracked = git_paths(&git, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+        let staged = git_paths(&git, &["diff", "--cached", "--name-only", "-z", "--"])?;
         Ok(TaskChanges {
             patch,
             untracked,
+            staged,
             truncated,
         })
+    })
+    .await
+    .map_err(to_text)?
+}
+
+fn git_paths(git: &Git, args: &[&str]) -> Result<Vec<String>, String> {
+    Ok(git
+        .run_text(args)
+        .map_err(to_text)?
+        .split_terminator('\0')
+        .map(str::to_owned)
+        .collect())
+}
+
+/// A Git operation explicitly requested from the task's Changes panel.
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum TaskGitAction {
+    /// Stage modifications and deletions to tracked files.
+    StageTracked,
+    /// Stage a single new file.
+    StageFile {
+        /// A literal path relative to the worktree.
+        path: String,
+    },
+    /// Commit the current index with the given message.
+    Commit {
+        /// User-entered commit message.
+        message: String,
+    },
+    /// Push the task branch to origin.
+    Push,
+}
+
+/// Runs a Git action in the task worktree.
+#[tauri::command]
+pub async fn task_git_action(
+    database: State<'_, Database>,
+    id: String,
+    request: TaskGitAction,
+) -> Result<(), String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let git = Git::new(&task.worktree_path);
+        let branch_ref = format!("refs/heads/{}", task.branch);
+        let current_ref = git.run(&["symbolic-ref", "HEAD"]).map_err(to_text)?;
+        if current_ref != branch_ref {
+            return Err(format!("Expected {branch_ref}, found {current_ref}"));
+        }
+        match request {
+            TaskGitAction::StageTracked => git.run(&["add", "--update", "--"]),
+            TaskGitAction::StageFile { path } => {
+                git.run(&["--literal-pathspecs", "add", "--", &path])
+            }
+            TaskGitAction::Commit { message } => {
+                let message = message.trim();
+                if message.is_empty() {
+                    return Err("Enter a commit message.".to_owned());
+                }
+                git.run(&["commit", "-m", message])
+            }
+            TaskGitAction::Push => {
+                let refspec = format!("{branch_ref}:{branch_ref}");
+                git.run(&["push", "--", "origin", &refspec])
+            }
+        }
+        .map_err(to_text)?;
+        Ok(())
     })
     .await
     .map_err(to_text)?
