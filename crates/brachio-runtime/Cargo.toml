@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 vt100 = "0.18.1"
+vte = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 anyhow.workspace = true
