@@ -226,5 +226,16 @@ fn a_slow_follower_does_not_block_other_clients() {
             .expect("retained start")
             > 0
     );
+    response(send(
+        &name,
+        &["write", "burst", "cls & echo brachio-frame-marker\r"],
+    ));
+    wait_until(|| {
+        let frame = response(send(&name, &["snapshot", "burst"]));
+        let ansi = frame["screen"]["ansi"]
+            .as_str()
+            .expect("visible screen ANSI");
+        ansi.contains("brachio-frame-marker") && !ansi.contains("xxxxxxxxxx")
+    });
     response(send(&name, &["stop", "burst"]));
 }
