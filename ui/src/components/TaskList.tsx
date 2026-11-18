@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { statusTone } from "../lib/status";
 import { AGENT_NAME, GROUP_ORDER, groupTasks, shortBranch, type TaskGroup, type TaskRow } from "../lib/tasks";
+import { NEW_TASK_KEYS } from "../lib/shortcut";
 import { formatAge } from "../lib/time";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
@@ -44,7 +45,7 @@ export function TaskList(props: {
         >
           <Icon name="plus" />
           {t("sidebar.newTask")}
-          <kbd>⌘N</kbd>
+          <kbd>{NEW_TASK_KEYS}</kbd>
         </button>
       </div>
       <Show
