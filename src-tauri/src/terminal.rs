@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
+use crate::hook_setup::HookSetup;
 use crate::runtime_terminals::{Launch, RuntimeTerminals};
 
 /// App state that owns every terminal.
@@ -90,20 +91,30 @@ pub fn agents_detect() -> Vec<Installed> {
 pub async fn terminal_open(
     terminals: State<'_, Terminals>,
     hosted: State<'_, RuntimeTerminals>,
+    hook: State<'_, HookSetup>,
     request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
 ) -> CommandResult<Opened> {
-    let (command, prompt_delivery, resumed) = match request.agent {
+    let (mut command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => agent_command(kind, &request)?,
         None => (shell_command(), PromptDelivery::None, false),
     };
+    // Claude Code can ask the app instead of the terminal when a hook is available.
+    let mut environment = terminal_env();
+    if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
+        let extra = hook.environment(key);
+        if !extra.is_empty() {
+            command.args.splice(0..0, hook.claude_arguments());
+            environment.extend(extra);
+        }
+    }
     if let Some(key) = request.key.clone() {
         let launch = Launch {
             cwd: request.cwd.clone(),
             program: command.program.to_string_lossy().into_owned(),
             args: command.args.clone(),
-            env: terminal_env()
-                .into_iter()
+            env: environment
+                .iter()
                 .map(|(name, value)| format!("{name}={value}"))
                 .collect(),
             rows: request.rows.max(1),
@@ -126,7 +137,7 @@ pub async fn terminal_open(
         program: command.program.to_string_lossy().into_owned(),
         args: command.args,
         cwd: request.cwd,
-        env: terminal_env(),
+        env: environment,
         rows: request.rows.max(1),
         cols: request.cols.max(1),
     };

@@ -2,6 +2,7 @@ import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount
 import { confirm, open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Board } from "./components/Board";
+import { answerApproval, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { Inspector } from "./components/Inspector";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
@@ -105,6 +106,16 @@ export function App() {
   // the app restarted, so their agent picks up its last conversation.
   const createdThisRun = new Set<string>();
   const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
+  // Questions that agents' hooks have asked and the user has not answered.
+  const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
+  const answer = async (id: number, allow: boolean) => {
+    setQuestions((open) => open.filter((question) => question.id !== id));
+    try {
+      await answerApproval(id, allow);
+    } catch (failure) {
+      report(failure);
+    }
+  };
   // Setup commands of tasks created in this run, typed into the task's shell once.
   const setupInputs = new Map<string, string>();
   const hasSetupInput = (taskId: string) => setupInputs.has(taskId);
@@ -274,6 +285,12 @@ export function App() {
       listener.catch(report);
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
       load().catch(report);
+      void watchApprovals(
+        (question) => setQuestions((open) => [...open, question]),
+        (id) => setQuestions((open) => open.filter((question) => question.id !== id)),
+      )
+        .then((stop) => onCleanup(stop))
+        .catch(report);
     }
     // Keeps "2m ago" labels current.
     const clock = setInterval(() => setNow(Date.now()), 30_000);
@@ -361,6 +378,8 @@ export function App() {
               openIds={openIds()}
               findTask={findTask}
               takePrompt={takePrompt}
+              question={questions().find((question) => taskIdOf(question.key) === task().id)}
+              onAnswer={(id, allow) => void answer(id, allow)}
               hasSetupInput={hasSetupInput}
               takeSetupInput={takeSetupInput}
               shouldResume={shouldResume}

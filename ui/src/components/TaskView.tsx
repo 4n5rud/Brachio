@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
+import { summarize, type ApprovalQuestion } from "../lib/approvals";
 import { loadLayouts, saveLayouts, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
@@ -26,6 +27,9 @@ export function TaskView(props: {
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
+  /** A permission question this task's agent is waiting on, and how to answer it. */
+  question?: ApprovalQuestion;
+  onAnswer?: (id: number, allow: boolean) => void;
   /** Setup commands waiting to be typed into the task's shell, which opens beside the agent. */
   hasSetupInput?: (taskId: string) => boolean;
   takeSetupInput?: (taskId: string) => string | undefined;
@@ -167,8 +171,14 @@ export function TaskView(props: {
             }}
           </For>
         </div>
-        <Show when={props.task.pendingCommand}>
-          {(command) => <ApprovalBar command={command()} />}
+        <Show when={props.question} fallback={
+          <Show when={props.task.pendingCommand}>{(command) => <ApprovalBar command={command()} />}</Show>
+        }>
+          {(question) => (
+            <ApprovalBar command={summarize(question())}
+              onAllow={() => props.onAnswer?.(question().id, true)}
+              onDeny={() => props.onAnswer?.(question().id, false)} />
+          )}
         </Show>
       </div>
     </section>
@@ -176,7 +186,7 @@ export function TaskView(props: {
 }
 
 /** Answers a permission hook from inside the app without covering the terminal. */
-function ApprovalBar(props: { command: string }) {
+function ApprovalBar(props: { command: string; onAllow?: () => void; onDeny?: () => void }) {
   return (
     <div class="approval" role="region" aria-label={t("approval.title")}>
       <StatusGlyph tone="blocked" />
@@ -186,14 +196,13 @@ function ApprovalBar(props: { command: string }) {
         <span>{t("approval.inWorktree")}</span>
       </div>
       <div class="approval-actions">
-        <button class="button button-primary button-sm" type="button">
-          {t("approval.allowOnce")} <kbd>⏎</kbd>
+        <button class="button button-primary button-sm" type="button" disabled={!props.onAllow}
+          onClick={() => props.onAllow?.()}>
+          {t("approval.allowOnce")}
         </button>
-        <button class="button button-sm" type="button">
-          {t("approval.allowAlways")}
-        </button>
-        <button class="button button-ghost button-sm" type="button">
-          {t("approval.deny")} <kbd>Esc</kbd>
+        <button class="button button-ghost button-sm" type="button" disabled={!props.onDeny}
+          onClick={() => props.onDeny?.()}>
+          {t("approval.deny")}
         </button>
       </div>
       <p class="approval-hint">{t("approval.hint")}</p>

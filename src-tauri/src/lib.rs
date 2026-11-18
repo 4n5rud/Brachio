@@ -1,5 +1,7 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
+mod hook_setup;
+mod hook_socket;
 mod runtime_client;
 mod runtime_terminals;
 mod terminal;
@@ -11,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use brachio_pty::SessionManager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, Manager};
+use tauri::{App, Emitter, Manager};
 
 /// The app version, for the about box.
 #[tauri::command]
@@ -32,6 +34,7 @@ pub fn run() {
         .manage(runtime_terminals::RuntimeTerminals::default())
         .setup(|app| {
             open_database(app)?;
+            start_approvals(app)?;
             if let Err(error) = install_tray(app) {
                 tracing::warn!(%error, "could not install tray");
             }
@@ -44,6 +47,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            hook_socket::approval_answer,
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,
@@ -59,6 +63,52 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Brachio");
+}
+
+/// Starts listening for permission questions from agents' hooks and prepares the hook that
+/// Claude Code sessions get. If the socket cannot be taken, agents keep asking in the terminal.
+fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
+    let endpoint = format!("{}-hooks", runtime_client::endpoint());
+    let hooks_folder = app.path().app_data_dir()?.join("hooks");
+    app.manage(hook_setup::HookSetup::prepare(
+        &hooks_folder,
+        endpoint.clone(),
+    ));
+
+    let knows = app.handle().clone();
+    let notify = app.handle().clone();
+    let approvals = hook_socket::Approvals::new(
+        move |key| task_is_open(&knows, key),
+        move |notice| {
+            let sent = match notice {
+                hook_socket::Notice::Asked(question) => notify.emit("approval-asked", question),
+                hook_socket::Notice::Closed(id) => notify.emit("approval-closed", id),
+            };
+            if let Err(error) = sent {
+                tracing::debug!(%error, "could not tell the window about a permission question");
+            }
+        },
+    );
+    app.manage(Arc::clone(&approvals));
+    tauri::async_runtime::spawn(async move {
+        match brachio_runtime::transport::listen(&endpoint) {
+            Ok(listener) => approvals.serve(listener).await,
+            Err(error) => tracing::warn!(%error, "in-app approval is off"),
+        }
+    });
+    Ok(())
+}
+
+/// Whether `key` (`<task id>:agent`) names a task that is open in this app.
+fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
+    let Some(id) = key.strip_suffix(":agent") else {
+        return false;
+    };
+    let database = app.state::<workspace::Database>();
+    let Ok(connection) = database.lock() else {
+        return false;
+    };
+    brachio_store::TaskRecord::get(&connection, id).is_ok_and(|task| task.archived_at_ms.is_none())
 }
 
 fn install_tray(app: &App) -> tauri::Result<()> {
