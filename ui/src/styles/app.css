@@ -680,6 +680,34 @@ kbd {
 .diff-row button[aria-pressed="true"] {
   text-decoration: underline;
 }
+.diff-layout {
+  margin-block-end: var(--space-2);
+}
+.diff-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.diff-column-head {
+  color: var(--color-text-2);
+  border-bottom: 1px solid var(--color-line);
+}
+.diff-column-head span {
+  padding-inline: var(--space-2);
+}
+.diff-pair > :nth-child(2) {
+  border-inline-start: 1px solid var(--color-line);
+}
+.inspector-patch-split .diff-row {
+  grid-template-columns: 3em minmax(0, 1fr);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-removed:has(.diff-row) {
+  background: var(--color-del-bg);
+}
+.diff-added:has(.diff-row) {
+  background: var(--color-add-bg);
+}
 .diff-comment {
   margin-top: var(--space-2);
 }
