@@ -68,6 +68,8 @@ pub(crate) enum ChannelMessage {
     },
     /// The connection to the runtime ended while the program may still run.
     Detached { detached: bool },
+    /// The screen just sent is the last one of a shell that is gone, shown before its restart.
+    Restored { restored: bool },
 }
 
 /// Errors cross the IPC boundary as display strings.

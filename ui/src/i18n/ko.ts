@@ -51,9 +51,11 @@ export const ko: Messages = {
   "approval.allowAlways": "이 작업에서는 항상 허용",
   "approval.deny": "거부",
   "approval.hint": "터미널에서 바로 답해도 돼요.",
+  "terminal.detached": "터미널 런타임과 연결이 끊어졌어요",
   "terminal.exited": "프로세스가 끝났어요",
   "terminal.reopen": "세션 다시 열기",
   "terminal.reopening": "세션을 다시 여는 중",
+  "terminal.restored": "마지막 화면을 복원하고 다시 시작해요",
   "terminal.resumeFailed": "이어갈 대화가 없어서 새로 시작해요",
   "terminal.startFailed": "터미널을 시작하지 못했어요",
 

@@ -49,9 +49,11 @@ export const en = {
   "approval.allowAlways": "Always allow in this task",
   "approval.deny": "Deny",
   "approval.hint": "You can also answer in the terminal.",
+  "terminal.detached": "Lost the connection to the terminal runtime",
   "terminal.exited": "Process exited",
   "terminal.reopen": "Reopen session",
   "terminal.reopening": "Reopening session",
+  "terminal.restored": "Last screen restored, restarting",
   "terminal.resumeFailed": "Nothing to resume, starting a new conversation",
   "terminal.startFailed": "Could not start the terminal",
 
