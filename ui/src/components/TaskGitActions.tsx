@@ -46,7 +46,15 @@ export function TaskGitActions(props: {
         onClick={() => void run({ action: "stageTracked" })}>{t("git.stageTracked")}</button>
       <Show when={props.staged.length > 0}>
         <h4>{t("git.staged")}</h4>
-        <ul><For each={props.staged}>{(path) => <li>{path}</li>}</For></ul>
+        <ul>
+          <For each={props.staged}>{(path) => (
+            <li>
+              {path}{" "}
+              <button type="button" class="button button-sm" disabled={busy()}
+                onClick={() => void run({ action: "unstageFile", path })}>{t("git.unstageFile")}</button>
+            </li>
+          )}</For>
+        </ul>
         <form onSubmit={(event) => {
           event.preventDefault();
           if (message().trim()) void run({ action: "commit", message: message() });

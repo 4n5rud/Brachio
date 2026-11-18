@@ -127,9 +127,39 @@ impl TaskRecord {
     /// # Errors
     /// Fails with `NotFound` when no task has this id.
     pub fn archive(connection: &Connection, id: &str, now_ms: i64) -> Result<(), StoreError> {
+        Self::set_archived_at(connection, id, Some(now_ms))
+    }
+
+    /// Lists archived tasks, most recently archived first.
+    ///
+    /// # Errors
+    /// Fails if the database cannot read the records.
+    pub fn list_archived(connection: &Connection) -> Result<Vec<Self>, StoreError> {
+        let sql = format!(
+            "SELECT {COLUMNS} FROM tasks WHERE archived_at_ms IS NOT NULL ORDER BY archived_at_ms DESC"
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map([], Self::from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<Self>>>()?)
+    }
+
+    /// Returns an archived task to the open list.
+    ///
+    /// # Errors
+    /// Fails when the record cannot be updated or does not exist.
+    pub fn restore(connection: &Connection, id: &str) -> Result<Self, StoreError> {
+        Self::set_archived_at(connection, id, None)?;
+        Self::get(connection, id)
+    }
+
+    fn set_archived_at(
+        connection: &Connection,
+        id: &str,
+        archived_at_ms: Option<i64>,
+    ) -> Result<(), StoreError> {
         let changed = connection.execute(
             "UPDATE tasks SET archived_at_ms = ?2 WHERE id = ?1",
-            params![id, now_ms],
+            params![id, archived_at_ms],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound {
@@ -231,6 +261,21 @@ mod tests {
         );
         assert_eq!(
             TaskRecord::count_for_repo(&connection, "r1").expect("count"),
+            1
+        );
+        assert_eq!(
+            TaskRecord::list_archived(&connection)
+                .expect("list archived")
+                .len(),
+            1
+        );
+        let restored = TaskRecord::restore(&connection, "t1").expect("restore");
+        assert_eq!(restored.archived_at_ms, None);
+        assert!(TaskRecord::list_archived(&connection)
+            .expect("list archived")
+            .is_empty());
+        assert_eq!(
+            TaskRecord::list_open(&connection).expect("list open").len(),
             1
         );
     }

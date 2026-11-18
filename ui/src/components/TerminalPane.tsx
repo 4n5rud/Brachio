@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -46,12 +46,15 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
 export function TerminalPane(props: {
   session?: TerminalSession;
   active?: boolean;
+  focus?: boolean;
   theme?: string;
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
   registerDraftWriter?: (writer: (text: string) => Promise<boolean>) => () => void;
 }) {
   let host!: HTMLDivElement;
+  const [canReopen, setCanReopen] = createSignal(false);
+  let reopen: () => void;
   onMount(() => {
     const term = new Terminal({
       fontFamily: cssVar("--font-mono"),
@@ -114,16 +117,20 @@ export function TerminalPane(props: {
     let promptTimer: ReturnType<typeof setTimeout> | undefined;
     const session = props.session;
     let typeInPrompt: string | null = null;
-    const start = (resume: boolean) => {
+    const start = (resume: boolean, initialPrompt: string | null) => {
       if (!session) return;
       const launch = ++generation;
       const earlyOutput: Uint8Array[] = [];
+      clearTimeout(promptTimer);
+      typeInPrompt = null;
       handle = null;
+      exited = false;
+      setCanReopen(false);
       const startedAt = Date.now();
       const options = {
         agent: session.agent,
         cwd: session.cwd,
-        prompt: session.prompt ?? null,
+        prompt: initialPrompt,
         resume,
         sessionId: session.sessionId ?? null,
         rows: term.rows,
@@ -143,11 +150,13 @@ export function TerminalPane(props: {
         for (const bytes of earlyOutput.splice(0)) term.write(bytes);
         if (resume && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
           term.writeln(`\r\n[${t("terminal.resumeFailed")}]\r\n`);
-          start(false);
+          start(false, initialPrompt);
           return;
         }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
         exited = true;
+        handle = null;
+        setCanReopen(true);
         term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
         props.onStatus?.({ state: "exited", code: message.exitCode }, null);
       })
@@ -159,8 +168,8 @@ export function TerminalPane(props: {
           handle = opened;
           if (resume && !opened.resumed) term.writeln(`[${t("terminal.resumeFailed")}]\r\n`);
           // The size may have changed while the session was starting.
-          void opened.resize(term.rows, term.cols);
-          if (opened.promptDelivery === "type_in") typeInPrompt = session.prompt ?? null;
+          void opened.resize(term.rows, term.cols).catch(() => {});
+          if (opened.promptDelivery === "type_in") typeInPrompt = initialPrompt;
           // ConPTY can ask for cursor position before the open request resolves.
           // Render only after the terminal can send its response to this PTY.
           for (const bytes of earlyOutput.splice(0)) writeOutput(bytes);
@@ -168,10 +177,18 @@ export function TerminalPane(props: {
         .catch((error: unknown) => {
           if (disposed || launch !== generation) return;
           term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`);
+          setCanReopen(true);
           props.onStatus?.({ state: "error" }, null);
         });
     };
-    start(session?.resume === true && session.agent !== null);
+    reopen = () => {
+      if (!canReopen() || !session) return;
+      props.onStatus?.({ state: "unknown" }, null);
+      term.writeln(`\r\n[${t("terminal.reopening")}]\r\n`);
+      start(session.agent !== null, null);
+      term.focus();
+    };
+    start(session?.resume === true && session.agent !== null, session?.prompt ?? null);
     const unregister = props.registerDraftWriter?.(async (text) => {
       if (!handle || !session?.agent || exited || disposed || !props.active
         || !term.modes.bracketedPasteMode) {
@@ -207,7 +224,9 @@ export function TerminalPane(props: {
       }
       startWebgl();
       fitVisible();
-      term.focus();
+    });
+    createEffect(() => {
+      if (props.active !== false && props.focus !== false) term.focus();
     });
 
     const observer = new ResizeObserver(fitVisible);
@@ -224,5 +243,16 @@ export function TerminalPane(props: {
       term.dispose();
     });
   });
-  return <div ref={host} class="terminal-host" />;
+  return (
+    <div class="terminal-content">
+      <div ref={host} class="terminal-host" />
+      <Show when={canReopen()}>
+        <div class="terminal-recovery">
+          <button type="button" class="button button-sm" onClick={() => reopen()}>
+            {t("terminal.reopen")}
+          </button>
+        </div>
+      </Show>
+    </div>
+  );
 }

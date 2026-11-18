@@ -555,6 +555,32 @@ kbd {
 .terminal-slot[hidden] {
   display: none;
 }
+.terminal-slot.terminal-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.terminal-slot.terminal-split[hidden] {
+  display: none;
+}
+.terminal-cell {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.terminal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.terminal-content .terminal-host {
+  flex: 1;
+  min-height: 0;
+}
+.terminal-recovery {
+  flex: none;
+  padding-top: var(--space-2);
+}
 .approval {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -862,6 +888,14 @@ kbd {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: var(--space-2);
+}
+.archive-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  overflow-wrap: anywhere;
 }
 .scrim {
   position: fixed;
