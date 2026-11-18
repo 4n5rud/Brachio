@@ -8,6 +8,7 @@ export type Theme = "system" | "light" | "dark";
 export function WorkspaceDialog(props: {
   panel: "quickOpen" | "settings" | "archived";
   tasks: readonly TaskRow[];
+  repos: readonly { id: string; name: string }[];
   archived: readonly TaskRow[];
   onRestore: (id: string) => Promise<void>;
   onDelete: (task: TaskRow) => Promise<void>;
@@ -23,10 +24,12 @@ export function WorkspaceDialog(props: {
   const [highlight, setHighlight] = createSignal(0);
   const [restoring, setRestoring] = createSignal<string>();
   const [restoreError, setRestoreError] = createSignal("");
+  const repoNames = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
+  const repoName = (task: TaskRow) => task.repoId ? repoNames().get(task.repoId) : undefined;
   const matches = createMemo(() => {
     const terms = query().trim().toLowerCase().split(/\s+/);
     return props.tasks.filter((task) => {
-      const searchable = `${task.title} ${task.branch}`.toLowerCase();
+      const searchable = [task.title, task.branch, repoName(task), task.worktreePath].join(" ").toLowerCase();
       return terms.every((term) => searchable.includes(term));
     });
   });
@@ -103,7 +106,7 @@ export function WorkspaceDialog(props: {
                   <button class="quick-open-result" classList={{ selected: highlight() === index() }}
                     type="button" onClick={() => choose(task.id)}>
                     <strong>{task.title}</strong>
-                    <span>{task.branch}</span>
+                    <span>{[repoName(task), task.branch].filter(Boolean).join(" · ")}</span>
                   </button>
                 )}</For>
               </div>
