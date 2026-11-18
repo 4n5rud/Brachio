@@ -6,17 +6,26 @@ use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::tokio::{Listener, Stream};
 
 /// Connect to the runtime that owns this endpoint.
-pub(crate) async fn connect(endpoint: &str) -> io::Result<Stream> {
+///
+/// # Errors
+/// Fails when no runtime accepts the connection.
+pub async fn connect(endpoint: &str) -> io::Result<Stream> {
     Stream::connect(name(endpoint)?).await
 }
 
 /// Start listening, failing when another runtime already holds the endpoint.
-pub(crate) fn listen(endpoint: &str) -> io::Result<Listener> {
+///
+/// # Errors
+/// Fails when the endpoint is taken or cannot be created.
+pub fn listen(endpoint: &str) -> io::Result<Listener> {
     platform::listen(endpoint, name(endpoint)?)
 }
 
 /// Remove the leftover of a runtime that has been shown to be dead.
-pub(crate) fn reclaim(endpoint: &str) -> io::Result<()> {
+///
+/// # Errors
+/// Fails when the leftover cannot be removed.
+pub fn reclaim(endpoint: &str) -> io::Result<()> {
     platform::reclaim(endpoint)
 }
 

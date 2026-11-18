@@ -11,25 +11,26 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use brachio_pty::{PtyEvent, SessionId, SessionManager, SpawnSpec};
+use brachio_runtime::endpoint::{self, Liveness};
+use brachio_runtime::protocol;
+use brachio_runtime::transport;
+use brachio_runtime::wire::{
+    accepted, read_message, write_message, Action, LostInfo, OutputPage, Request, Response,
+    ResponseResult, RuntimeInfo, ScreenSnapshot, SessionInfo, IO_TIMEOUT, MAX_MESSAGE,
+    MAX_RESPONSE,
+};
 use clap::{Parser, Subcommand};
 use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::tokio::Stream;
-use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::sync::watch;
 use uuid::Uuid;
 
-use crate::endpoint::{self, Liveness};
 use crate::journal::{self, Journal, SessionRecord};
 use crate::output::{OutputHistory, Page};
-use crate::protocol;
 use crate::screen::{TerminalScreen, COLS, ROWS};
-use crate::transport;
 use std::num::NonZeroU16;
 
-const MAX_MESSAGE: u64 = 64 * 1024;
-const MAX_RESPONSE: u64 = 256 * 1024;
-const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 
 #[derive(Parser)]
@@ -56,168 +57,6 @@ enum Command {
         #[command(subcommand)]
         action: Action,
     },
-}
-
-#[derive(Subcommand, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-enum Action {
-    /// Start one shell for this key, or return the existing one.
-    Ensure { key: String, cwd: PathBuf },
-    /// Read the shell identity and number of PTY bytes received.
-    Inspect { key: String },
-    /// Read a page of output starting at the requested absolute byte offset.
-    Read { key: String, after: u64 },
-    /// Replay and then follow output on the same connection.
-    Follow { key: String, after: u64 },
-    /// Capture the current visible frame of a running shell.
-    Snapshot { key: String },
-    /// Send a settled normal-screen frame, then follow future output.
-    FollowFrame { key: String },
-    /// Read the protocol range and drain state of this runtime.
-    Hello,
-    /// List shells that ended or were left by an earlier runtime.
-    Lost,
-    /// Read the last screen of a shell listed by `lost`.
-    Recover { key: String },
-    /// Drop the saved screen of a shell listed by `lost`.
-    Forget { key: String },
-    /// Take no new terminals and exit once the last one ends.
-    Drain,
-    /// Resize the shell and the frame that snapshots describe.
-    Resize { key: String, rows: u16, cols: u16 },
-    /// Write text to the shell.
-    Write { key: String, text: String },
-    /// Stop one shell explicitly.
-    Stop { key: String },
-}
-
-impl Action {
-    /// The first protocol version that defines this action.
-    fn since(&self) -> (u8, &'static str) {
-        match self {
-            Action::Hello => (2, "hello"),
-            Action::Drain => (2, "drain"),
-            Action::Resize { .. } => (2, "resize"),
-            Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
-            _ => (1, "this action"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct Request {
-    version: u8,
-    action: Action,
-}
-
-#[derive(Serialize)]
-struct Response<'a> {
-    version: u8,
-    instance: &'a str,
-    #[serde(flatten)]
-    result: ResponseResult,
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum ResponseResult {
-    Success {
-        session: SessionInfo,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        output: Option<OutputPage>,
-    },
-    Snapshot {
-        session: SessionInfo,
-        screen: ScreenSnapshot,
-    },
-    Hello {
-        runtime: RuntimeInfo,
-    },
-    Lost {
-        lost: Vec<LostInfo>,
-    },
-    Recovered {
-        lost: LostInfo,
-        screen: ScreenSnapshot,
-    },
-    Error {
-        error: String,
-    },
-}
-
-#[derive(Serialize)]
-struct LostInfo {
-    key: String,
-    cwd: PathBuf,
-    former_instance: String,
-    former_pid: u32,
-    exited: bool,
-    exit_code: Option<u32>,
-    output_bytes: u64,
-    saved_at_ms: u64,
-}
-
-impl From<&SessionRecord> for LostInfo {
-    fn from(record: &SessionRecord) -> Self {
-        Self {
-            key: record.key.clone(),
-            cwd: record.cwd.clone(),
-            former_instance: record.instance.clone(),
-            former_pid: record.pid,
-            exited: record.exited,
-            exit_code: record.exit_code,
-            output_bytes: record.output_bytes,
-            saved_at_ms: record.saved_at_ms,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct RuntimeInfo {
-    pid: u32,
-    oldest_version: u8,
-    current_version: u8,
-    draining: bool,
-}
-
-#[derive(Serialize)]
-struct OutputPage {
-    start: u64,
-    next: u64,
-    end: u64,
-    truncated: bool,
-    bytes: Vec<u8>,
-}
-
-impl From<Page> for OutputPage {
-    fn from(page: Page) -> Self {
-        Self {
-            start: page.start,
-            next: page.next,
-            end: page.end,
-            truncated: page.truncated,
-            bytes: page.bytes,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct SessionInfo {
-    session_id: SessionId,
-    pid: u32,
-    output_bytes: u64,
-    exited: bool,
-    exit_code: Option<u32>,
-}
-
-#[derive(Serialize)]
-struct ScreenSnapshot {
-    ansi: String,
-    cursor: (u16, u16),
-    rows: u16,
-    cols: u16,
-    alternate_screen: bool,
-    resume_offset: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -354,7 +193,7 @@ impl Runtime {
             Action::Hello => Ok(self.hello()),
             Action::Lost => {
                 let lost = lock(&self.lost)?;
-                let mut listed: Vec<LostInfo> = lost.values().map(LostInfo::from).collect();
+                let mut listed: Vec<LostInfo> = lost.values().map(lost_info).collect();
                 listed.sort_by(|a, b| a.key.cmp(&b.key));
                 Ok(ResponseResult::Lost { lost: listed })
             }
@@ -364,7 +203,7 @@ impl Runtime {
                     .get(&key)
                     .with_context(|| format!("no saved screen for {key}"))?;
                 Ok(ResponseResult::Recovered {
-                    lost: LostInfo::from(record),
+                    lost: lost_info(record),
                     screen: ScreenSnapshot {
                         ansi: record.ansi.clone(),
                         cursor: record.cursor,
@@ -497,7 +336,7 @@ impl Session {
                 state
                     .history
                     .read(offset)
-                    .map(OutputPage::from)
+                    .map(output_page)
                     .context("output offset is past the end")
             })
             .transpose()?;
@@ -777,16 +616,6 @@ async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
     send_response(&mut stream, &runtime.instance, version, result).await
 }
 
-/// Check the requested version against what this build speaks and what the action needs.
-fn accepted(request: Request) -> Result<Request> {
-    if !protocol::accepts(request.version) {
-        bail!(protocol::rejection(request.version));
-    }
-    let (since, name) = request.action.since();
-    protocol::requires(request.version, since, name).map_err(|message| anyhow!(message))?;
-    Ok(request)
-}
-
 async fn send_response(
     stream: &mut Stream,
     instance: &str,
@@ -907,28 +736,25 @@ fn print_response(message: &[u8], protocol: u8) -> Result<bool> {
     Ok(completed)
 }
 
-async fn read_message(
-    reader: &mut (impl AsyncBufRead + Unpin),
-    limit: u64,
-) -> Result<Option<Vec<u8>>> {
-    let mut message = Vec::new();
-    reader.take(limit).read_until(b'\n', &mut message).await?;
-    if message.is_empty() {
-        return Ok(None);
+fn lost_info(record: &SessionRecord) -> LostInfo {
+    LostInfo {
+        key: record.key.clone(),
+        cwd: record.cwd.clone(),
+        former_instance: record.instance.clone(),
+        former_pid: record.pid,
+        exited: record.exited,
+        exit_code: record.exit_code,
+        output_bytes: record.output_bytes,
+        saved_at_ms: record.saved_at_ms,
     }
-    if message.last() != Some(&b'\n') {
-        bail!("missing or oversized runtime message");
-    }
-    Ok(Some(message))
 }
 
-async fn write_message(stream: &mut Stream, value: &impl Serialize, limit: u64) -> Result<()> {
-    let mut message = serde_json::to_vec(value)?;
-    message.push(b'\n');
-    if message.len() as u64 > limit {
-        bail!("runtime message exceeds the frame limit");
+fn output_page(page: Page) -> OutputPage {
+    OutputPage {
+        start: page.start,
+        next: page.next,
+        end: page.end,
+        truncated: page.truncated,
+        bytes: page.bytes,
     }
-    stream.write_all(&message).await?;
-    stream.flush().await?;
-    Ok(())
 }

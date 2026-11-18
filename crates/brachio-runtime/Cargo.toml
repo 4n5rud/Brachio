@@ -13,6 +13,7 @@ clap.workspace = true
 interprocess = { version = "2.4.8", features = ["tokio"] }
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 vt100 = "0.18.1"
@@ -20,6 +21,9 @@ vte = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
