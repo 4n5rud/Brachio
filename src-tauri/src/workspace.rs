@@ -178,6 +178,73 @@ pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec
     .map_err(to_text)
 }
 
+#[derive(Serialize)]
+pub struct FilePreview {
+    text: Option<String>,
+    truncated: bool,
+}
+
+#[tauri::command]
+pub async fn task_file_preview(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+) -> Result<FilePreview, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || read_file_preview(&task.worktree_path, &path))
+        .await
+        .map_err(to_text)?
+}
+
+fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String> {
+    use std::io::Read;
+    use std::path::Component;
+
+    const LIMIT: usize = 64 * 1024;
+    let relative = Path::new(path);
+    if path.is_empty()
+        || (cfg!(windows) && path.contains(':'))
+        || relative.components().any(|component| match component {
+            Component::Normal(name) => name.eq_ignore_ascii_case(".git"),
+            _ => true,
+        })
+    {
+        return Err("Choose a file inside the task's worktree.".to_owned());
+    }
+    let root = worktree.canonicalize().map_err(to_text)?;
+    let file = root.join(relative).canonicalize().map_err(to_text)?;
+    let resolved = file.strip_prefix(&root).map_err(to_text)?;
+    if !file.is_file()
+        || resolved
+            .components()
+            .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
+    {
+        return Err("Choose a regular file inside the task's worktree.".to_owned());
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)
+        .map_err(to_text)?
+        .take((LIMIT + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(to_text)?;
+    let truncated = bytes.len() > LIMIT;
+    bytes.truncate(LIMIT);
+    let text = if bytes.contains(&0) {
+        None
+    } else {
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => Some(text.to_owned()),
+            Err(error) if truncated && error.error_len().is_none() => {
+                std::str::from_utf8(&bytes[..error.valid_up_to()])
+                    .ok()
+                    .map(str::to_owned)
+            }
+            Err(_) => None,
+        }
+    };
+    Ok(FilePreview { text, truncated })
+}
+
 /// What deleting an archived task would destroy.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

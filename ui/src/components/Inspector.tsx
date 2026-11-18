@@ -7,8 +7,9 @@ import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";
 import { TaskMergePreview } from "./TaskMergePreview";
+import { TaskFiles } from "./TaskFiles";
 
-type Pane = "changes" | "qa" | "activity";
+type Pane = "changes" | "files" | "qa" | "activity";
 
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: {
@@ -37,11 +38,20 @@ export function Inspector(props: {
       <div class="inspector-head">
         <div class="segmented" role="group">
           {tab("changes", t("inspector.changes"))}
+          {tab("files", t("files.title"))}
           {tab("qa", t("inspector.qa"))}
           {tab("activity", t("inspector.activity"))}
         </div>
       </div>
       <Switch>
+        <Match when={pane() === "files"}>
+          <section class="inspector-section">
+            <Show when={props.task.worktreePath && props.task.id} keyed
+              fallback={<p class="muted">{t("files.empty")}</p>}>
+              {(id) => <TaskFiles taskId={id} />}
+            </Show>
+          </section>
+        </Match>
         <Match when={pane() === "changes"}>
           <section class="inspector-section inspector-changes">
             <h3>
