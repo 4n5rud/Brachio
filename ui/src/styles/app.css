@@ -884,6 +884,26 @@ kbd {
 .quick-open-result span {
   color: var(--color-text-2);
 }
+.activity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-list li + li {
+  border-top: 1px solid var(--color-line);
+}
+.activity-result {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.activity-result time {
+  color: var(--color-text-2);
+}
+.activity-result span {
+  grid-column: 1 / -1;
+}
+.activity-detail {
+  white-space: pre-wrap;
+}
 .workspace-shortcuts {
   display: grid;
   grid-template-columns: 1fr auto;
