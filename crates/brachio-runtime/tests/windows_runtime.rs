@@ -261,3 +261,18 @@ fn a_slow_follower_does_not_block_other_clients() {
     assert_eq!(live["session"]["pid"], frame["session"]["pid"]);
     response(send(&name, &["stop", "burst"]));
 }
+
+#[test]
+fn a_resize_is_reflected_in_later_snapshots() {
+    let name = format!("brachio-runtime-test-{}", Uuid::new_v4());
+    let _host = server(&name);
+    let cwd = std::env::temp_dir();
+    let cwd = cwd.to_str().expect("test directory");
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+    response(send(&name, &["ensure", "sized", cwd]));
+
+    response(send(&name, &["resize", "sized", "40", "120"]));
+    let frame = response(send(&name, &["snapshot", "sized"]));
+    assert_eq!(frame["screen"]["rows"], 40);
+    assert_eq!(frame["screen"]["cols"], 120);
+}
