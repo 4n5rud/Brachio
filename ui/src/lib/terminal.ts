@@ -36,7 +36,9 @@ export type PromptDelivery = "none" | "argument" | "type_in";
 export type TerminalMessage =
   | { type: "output"; bytes: Uint8Array }
   | { type: "exit"; exitCode: number | null }
-  | { type: "status"; status: AgentState; message: string | null };
+  | { type: "status"; status: AgentState; message: string | null }
+  | { type: "detached" }
+  | { type: "restored" };
 
 /** Output frames arrive as raw bytes, the exit notice as JSON. */
 export function decodeMessage(raw: unknown): TerminalMessage | null {
@@ -47,6 +49,8 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
     const { status, message } = raw as { status: AgentState; message?: unknown };
     return { type: "status", status, message: typeof message === "string" ? message : null };
   }
+  if (raw !== null && typeof raw === "object" && "detached" in raw) return { type: "detached" };
+  if (raw !== null && typeof raw === "object" && "restored" in raw) return { type: "restored" };
   if (raw !== null && typeof raw === "object" && "exitCode" in raw) {
     const code = (raw as { exitCode: unknown }).exitCode;
     return { type: "exit", exitCode: typeof code === "number" ? code : null };

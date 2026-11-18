@@ -150,6 +150,21 @@ export function TerminalPane(props: {
           props.onStatus?.(message.status, message.message);
           return;
         }
+        if (message.type === "restored") {
+          const notice = new TextEncoder().encode(`\r\n[${t("terminal.restored")}]\r\n`);
+          if (handle) term.write(notice);
+          else earlyOutput.push(notice);
+          return;
+        }
+        if (message.type === "detached") {
+          for (const bytes of earlyOutput.splice(0)) term.write(bytes);
+          exited = true;
+          handle = null;
+          setCanReopen(true);
+          term.writeln(`\r\n[${t("terminal.detached")}]`);
+          props.onStatus?.({ state: "unknown" }, null);
+          return;
+        }
         for (const bytes of earlyOutput.splice(0)) term.write(bytes);
         if (resume && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
           term.writeln(`\r\n[${t("terminal.resumeFailed")}]\r\n`);

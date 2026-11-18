@@ -47,23 +47,24 @@ struct Attached {
 /// terminals of the two kinds never share the session id space.
 #[derive(Default)]
 pub struct RuntimeTerminals {
-    client: OnceCell<Option<Client>>,
+    client: OnceCell<Client>,
     attached: Mutex<HashMap<SessionId, Attached>>,
 }
 
 impl RuntimeTerminals {
-    /// Attach to the terminal for `key`, starting it when it does not exist.
-    /// Returns `None` when the runtime is not available, so the caller can host it in the app.
+    /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
+    /// is gone but its last screen was kept, that screen is shown first.
+    /// Returns `None` when the runtime is not used, so the caller can host it in the app.
     ///
     /// # Errors
-    /// Fails when the runtime refuses to start the program.
+    /// Fails when the runtime is used but cannot be reached or refuses to start the program.
     pub async fn open(
         &self,
         key: String,
         launch: Launch,
         channel: Channel<InvokeResponseBody>,
     ) -> Result<Option<(SessionId, bool)>> {
-        let Some(client) = self.client().await else {
+        let Some(client) = self.client().await? else {
             return Ok(None);
         };
         let existing = match client.call(Action::Inspect { key: key.clone() }).await {
@@ -72,6 +73,9 @@ impl RuntimeTerminals {
             Err(error) => bail!("{error}"),
         };
         let attached = existing.is_some();
+        if !attached {
+            show_last_screen(&client, &key, &channel).await;
+        }
         let reply = match existing {
             Some(reply) => reply,
             None => client.call(launch_action(&key, launch)).await?,
@@ -134,27 +138,19 @@ impl RuntimeTerminals {
         Some(stopped.map(|_| ()).map_err(Into::into))
     }
 
-    async fn client(&self) -> Option<Client> {
+    /// The runtime client, connecting on first use. `None` when the runtime is not used. A failed
+    /// connection is not remembered, so the next open tries again.
+    async fn client(&self) -> Result<Option<Client>> {
         if !runtime_client::enabled() {
-            return None;
+            return Ok(None);
         }
-        self.client
-            .get_or_init(|| async {
-                match runtime_client::connect().await {
-                    Ok(client) => Some(client),
-                    Err(error) => {
-                        tracing::warn!(%error, "terminal runtime unavailable, hosting terminals in the app");
-                        None
-                    }
-                }
-            })
-            .await
-            .clone()
+        let client = self.client.get_or_try_init(runtime_client::connect).await?;
+        Ok(Some(client.clone()))
     }
 
     async fn target(&self, id: SessionId) -> Option<(Client, String)> {
         let key = self.attached.lock().ok()?.get(&id)?.key.clone();
-        Some((self.client().await?, key))
+        Some((self.client().await.ok()??, key))
     }
 
     fn drop_attachment(&self, id: SessionId) {
@@ -178,6 +174,23 @@ fn launch_action(key: &str, launch: Launch) -> Action {
         env: launch.env,
         rows: launch.rows,
         cols: launch.cols,
+    }
+}
+
+/// Show what a shell that is gone last displayed, so a restart does not look like a blank slate.
+async fn show_last_screen(client: &Client, key: &str, channel: &Channel<InvokeResponseBody>) {
+    let recovered = client
+        .call(Action::Recover {
+            key: key.to_owned(),
+        })
+        .await;
+    if let Ok(Reply {
+        result: ResponseResult::Recovered { screen, .. },
+        ..
+    }) = recovered
+    {
+        send(channel, InvokeResponseBody::Raw(screen.ansi.into_bytes()));
+        send_message(channel, &ChannelMessage::Restored { restored: true });
     }
 }
 
