@@ -51,6 +51,8 @@ export interface TaskLoss {
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
 export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });
+export const resolveDroppedTaskPaths = (id: string, paths: string[]) =>
+  invoke<string[]>("task_drop_paths", { id, paths });
 export const deleteTask = (id: string) => invoke<void>("task_delete", { id });
 
 interface TaskChanges {

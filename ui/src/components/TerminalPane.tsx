@@ -274,7 +274,7 @@ export function TerminalPane(props: {
   });
   return (
     <div class="terminal-content">
-      <div ref={host} class="terminal-host" />
+      <div ref={host} class="terminal-host" data-agent-terminal={props.session?.agent ? "" : undefined} />
       <Show when={canReopen()}>
         <div class="terminal-recovery">
           <button type="button" class="button button-sm" onClick={() => reopen()}>
