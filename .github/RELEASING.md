@@ -1,0 +1,39 @@
+# Releasing Brachio
+
+Maintainers only. Contributors never change the version in a feature pull request.
+
+## Versions
+
+One version, in two files that must match: `[workspace.package] version` in `Cargo.toml` and `version` in `ui/package.json`. CI fails when they differ.
+
+- Stable: `0.2.0`. Release candidate: `0.2.0-rc.1`, `0.2.0-rc.2`, and so on. A release candidate is published as a pre-release.
+- Before 1.0, a new feature raises the minor number and a fix raises the patch number. The version must be higher than the last stable release.
+
+## Steps
+
+1. Open a pull request titled `chore: release 0.2.0-rc.1` that changes only the two version files (and the `brachio-*` entries of `Cargo.lock`, which `cargo update --workspace` rewrites). Merge it.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag v0.2.0-rc.1
+   git push origin v0.2.0-rc.1
+   ```
+
+3. The **Release** workflow checks that the tag matches both version files and is on `main`, drafts a GitHub release with generated notes, builds the Windows and macOS installers and attaches them.
+4. Open the draft. Read the notes, install the build on a real machine, and publish. A draft that should not ship is deleted together with its tag.
+
+## Release notes
+
+GitHub writes them from the pull requests merged since the previous release (for a stable release, since the previous stable one). Each entry is the pull request title with its author, and first-time contributors are listed separately. That is why pull request titles are written for users, and why the title prefix matters: `labels.yml` turns `feat:`, `fix:`, `perf:`, `docs:` and `ci:`/`chore:`/`refactor:` into the labels that [`release.yml`](./release.yml) groups into New, Fixes, Performance, Documentation and Maintenance. Add the label `skip-release-notes` to leave a pull request out.
+
+## What a release does not do yet
+
+- The installers are not signed. Windows shows SmartScreen and macOS asks the user to allow the app. Say so in the draft until signing is set up.
+- The installers do not include `brachio-runtime`. Without it the app keeps terminals inside itself and they end when the window closes. Bundling it needs its own change and a check on both platforms.
+- The macOS build is for Apple silicon only.
+- There is no automatic update.
+
+## One-time repository settings
+
+Turn on private vulnerability reporting (Settings, Code security) so [`SECURITY.md`](./SECURITY.md) works, and make sure Actions can create releases (Settings, Actions, Workflow permissions).
