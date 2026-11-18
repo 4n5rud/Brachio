@@ -24,6 +24,10 @@ export const ko: Messages = {
   "view.tasks": "작업",
   "view.board": "보드",
   "activity.title": "활동",
+  "prFeedback.load": "PR 피드백 불러오기",
+  "prFeedback.empty": "실패한 검사나 리뷰 피드백이 없습니다.",
+  "prFeedback.check": "검사",
+  "prFeedback.comment": "리뷰어",
   "activity.empty": "이번 세션의 활동이 아직 없습니다.",
   "titlebar.settings": "설정",
 
