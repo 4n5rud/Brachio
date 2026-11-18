@@ -1,6 +1,7 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind } from "../lib/tasks";
+import { SUBMIT_KEYS } from "../lib/shortcut";
 import { titleFromPrompt } from "../lib/workspace";
 import { Icon } from "./Icon";
 
@@ -116,7 +117,7 @@ export function NewTaskDialog(props: {
           <button class="button button-primary" type="button" disabled={!canCreate()} onClick={() => void submit()}>
             <Icon name="plus" />
             {busy() ? t("newTask.creating") : t("newTask.create")}
-            <kbd>⌘⏎</kbd>
+            <kbd>{SUBMIT_KEYS}</kbd>
           </button>
         </div>
       </div>

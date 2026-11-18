@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from "solid-js";
+import { createEffect, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -25,10 +25,18 @@ const SCROLLBACK_LINES = 5_000;
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-// One live terminal bound to one PTY session. Unmounting closes the session;
-// keeping hidden sessions alive and repainting them comes with the core's
-// emulator state.
-export function TerminalPane(props: { session?: TerminalSession; onExit?: (code: number | null) => void }) {
+/**
+ * One live terminal bound to one PTY session. Unmounting closes the session.
+ *
+ * A hidden pane (`active` false) keeps its session and screen, so switching
+ * tasks is instant. It gives up its WebGL context, since browsers allow only
+ * a handful at once.
+ */
+export function TerminalPane(props: {
+  session?: TerminalSession;
+  active?: boolean;
+  onExit?: (code: number | null) => void;
+}) {
   let host!: HTMLDivElement;
   onMount(() => {
     const term = new Terminal({
@@ -47,16 +55,29 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    try {
-      const webgl = new WebglAddon();
-      // The GPU can drop the context (sleep, driver reset). Disposing the
-      // addon hands rendering back to xterm's DOM renderer.
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      // WebGL unavailable: xterm keeps its DOM renderer.
-    }
-    fit.fit();
+    let webgl: WebglAddon | null = null;
+    const startWebgl = () => {
+      if (webgl) return;
+      try {
+        const addon = new WebglAddon();
+        // The GPU can drop the context (sleep, driver reset). Disposing the
+        // addon hands rendering back to xterm's DOM renderer.
+        addon.onContextLoss(() => stopWebgl());
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        // WebGL unavailable: xterm keeps its DOM renderer.
+      }
+    };
+    const stopWebgl = () => {
+      webgl?.dispose();
+      webgl = null;
+    };
+    // A hidden host has no size; fitting it would shrink the PTY to nothing.
+    const fitVisible = () => {
+      if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
+    };
+    fitVisible();
 
     let handle: TerminalHandle | null = null;
     let disposed = false;
@@ -86,6 +107,8 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
             return;
           }
           handle = opened;
+          // The size may have changed while the session was starting.
+          void opened.resize(term.rows, term.cols);
           if (opened.promptDelivery === "type_in") typeInPrompt = session.prompt ?? null;
         })
         .catch((error: unknown) => term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`));
@@ -100,13 +123,24 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
 
     const input = term.onData((data) => void handle?.write(data));
     const resized = term.onResize(({ rows, cols }) => void handle?.resize(rows, cols));
-    const observer = new ResizeObserver(() => fit.fit());
+    createEffect(() => {
+      if (props.active === false) {
+        stopWebgl();
+        return;
+      }
+      startWebgl();
+      fitVisible();
+      term.focus();
+    });
+
+    const observer = new ResizeObserver(fitVisible);
     observer.observe(host);
     onCleanup(() => {
       disposed = true;
       observer.disconnect();
       input.dispose();
       resized.dispose();
+      stopWebgl();
       void handle?.close();
       term.dispose();
     });

@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { Board } from "./components/Board";
 import { EmptyRepo } from "./components/EmptyRepo";
@@ -11,6 +11,7 @@ import { TitleBar, type View } from "./components/TitleBar";
 import { t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
+import { isNewTaskShortcut } from "./lib/shortcut";
 import { CORE_AGENT } from "./lib/terminal";
 import { addRepo, createTask, listRepos, listTasks, toTaskRow, type RepoRecord } from "./lib/workspace";
 
@@ -30,6 +31,13 @@ export function App() {
   // One repository at a time for now. The title bar switcher picks among them later.
   const repo = createMemo(() => repos()[0]);
   const selected = createMemo(() => tasks().find((task) => task.id === selectedId()));
+  // Tasks whose terminal has been opened in this run, in the order they were opened.
+  const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
+  createEffect(() => {
+    const id = selectedId();
+    if (id !== undefined && !openIds().includes(id)) setOpenIds((ids) => [...ids, id]);
+  });
+  const findTask = (id: string) => tasks().find((task) => task.id === id);
   const needsYou = createMemo(() => tasks().filter((task) => taskGroup(task.status) === "needs").length);
 
   // First prompts of tasks created in this run. Each is handed to the
@@ -78,13 +86,15 @@ export function App() {
   onMount(() => {
     if (inTauri) load().catch(report);
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "n" && (event.metaKey || event.ctrlKey) && canCreate()) {
+      if (isNewTaskShortcut(event) && canCreate()) {
         event.preventDefault();
+        event.stopPropagation();
         setDialogOpen(true);
       }
     };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
+    // Capture phase: the terminal swallows key events it handles.
+    window.addEventListener("keydown", onKey, true);
+    onCleanup(() => window.removeEventListener("keydown", onKey, true));
   });
 
   const open = (id: string) => {
@@ -138,7 +148,7 @@ export function App() {
             <Show when={selected()} fallback={noTask()}>
               {(task) => (
                 <>
-                  <TaskView task={task()} takePrompt={takePrompt} />
+                  <TaskView task={task()} openIds={openIds()} findTask={findTask} takePrompt={takePrompt} />
                   <Inspector task={task()} />
                 </>
               )}
@@ -146,7 +156,7 @@ export function App() {
           </main>
         </Match>
       </Switch>
-      <StatusBar sessions={tasks().length} />
+      <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={dialogOpen() && repo()}>
         {(current) => (
           <NewTaskDialog
