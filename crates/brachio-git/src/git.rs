@@ -21,6 +21,25 @@ pub enum GitError {
         /// Trimmed standard error.
         stderr: String,
     },
+    /// The folder is not inside a git repository.
+    #[error("{} is not a git repository.{}", .path.display(), did_you_mean(.suggestions))]
+    NotARepository {
+        /// The folder that was asked about.
+        path: PathBuf,
+        /// Repositories directly inside that folder, which the user may have meant.
+        suggestions: Vec<PathBuf>,
+    },
+}
+
+fn did_you_mean(suggestions: &[PathBuf]) -> String {
+    if suggestions.is_empty() {
+        return " Choose the folder that contains .git.".to_owned();
+    }
+    let names: Vec<String> = suggestions
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    format!(" Did you mean: {}?", names.join(", "))
 }
 
 /// A git CLI bound to one repository directory.
