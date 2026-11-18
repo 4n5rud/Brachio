@@ -1,5 +1,6 @@
 import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { confirm, open as openFolder } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Board } from "./components/Board";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { Inspector } from "./components/Inspector";
@@ -12,7 +13,7 @@ import { WorkspaceDialog, type TaskActivity, type Theme } from "./components/Wor
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
-import { notificationKey, notifyIfAway } from "./lib/notify";
+import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
@@ -136,7 +137,7 @@ export function App() {
       { taskId, title: task.title, key, detail: message, at },
       ...items.slice(0, ACTIVITY_LIMIT - 1),
     ]);
-    if (notifications()) notifyIfAway(key, task.title, message).catch(report);
+    if (notifications()) notifyIfAway(key, task, message).catch(report);
   };
 
   const load = async () => {
@@ -263,7 +264,17 @@ export function App() {
   const canCreate = () => inTauri && repo() !== undefined;
 
   onMount(() => {
-    if (inTauri) load().catch(report);
+    if (inTauri) {
+      const listener = listenForTaskNotifications((id) => {
+        if (!findTask(id)) return;
+        open(id);
+        const appWindow = getCurrentWindow();
+        appWindow.unminimize().then(() => appWindow.setFocus()).catch(report);
+      });
+      listener.catch(report);
+      onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
+      load().catch(report);
+    }
     // Keeps "2m ago" labels current.
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
