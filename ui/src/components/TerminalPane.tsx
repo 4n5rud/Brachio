@@ -17,6 +17,8 @@ export interface TerminalSession {
   resume?: boolean;
   /** The task's conversation id, for agents that take one. */
   sessionId?: string;
+  /** Stable name of this terminal, so it can be attached again after a restart. */
+  key?: string;
 }
 
 /**
@@ -133,6 +135,7 @@ export function TerminalPane(props: {
         prompt: initialPrompt,
         resume,
         sessionId: session.sessionId ?? null,
+        key: session.key ?? null,
         rows: term.rows,
         cols: term.cols,
       };

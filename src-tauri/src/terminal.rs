@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
+use crate::runtime_terminals::{Launch, RuntimeTerminals};
+
 /// App state that owns every terminal.
 pub struct Terminals(pub Arc<SessionManager>);
 
@@ -35,6 +37,10 @@ pub struct OpenRequest {
     pub rows: u16,
     /// Initial width in columns.
     pub cols: u16,
+    /// Stable name of this terminal, such as the task and tab. With it the terminal can live in
+    /// the runtime and be found again after the window closes.
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 /// A terminal that started.
@@ -52,7 +58,7 @@ pub struct Opened {
 /// Sent as JSON on the channel. Output frames are raw bytes instead.
 #[derive(Debug, Serialize)]
 #[serde(untagged, rename_all_fields = "camelCase")]
-enum ChannelMessage {
+pub(crate) enum ChannelMessage {
     /// The child exited.
     Exit { exit_code: Option<u32> },
     /// The agent reported its state.
@@ -60,6 +66,8 @@ enum ChannelMessage {
         status: AgentState,
         message: Option<String>,
     },
+    /// The connection to the runtime ended while the program may still run.
+    Detached { detached: bool },
 }
 
 /// Errors cross the IPC boundary as display strings.
@@ -77,8 +85,9 @@ pub fn agents_detect() -> Vec<Installed> {
 
 /// Opens a terminal and streams its events to `on_event`.
 #[tauri::command]
-pub fn terminal_open(
+pub async fn terminal_open(
     terminals: State<'_, Terminals>,
+    hosted: State<'_, RuntimeTerminals>,
     request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
 ) -> CommandResult<Opened> {
@@ -86,6 +95,31 @@ pub fn terminal_open(
         Some(kind) => agent_command(kind, &request)?,
         None => (shell_command(), PromptDelivery::None, false),
     };
+    if let Some(key) = request.key.clone() {
+        let launch = Launch {
+            cwd: request.cwd.clone(),
+            program: command.program.to_string_lossy().into_owned(),
+            args: command.args.clone(),
+            env: terminal_env()
+                .into_iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect(),
+            rows: request.rows.max(1),
+            cols: request.cols.max(1),
+        };
+        let opened = hosted.open(key, launch, on_event.clone()).await;
+        if let Some((id, attached)) = opened.map_err(|error| to_message(&error))? {
+            return Ok(Opened {
+                id,
+                prompt_delivery: if attached {
+                    PromptDelivery::None
+                } else {
+                    prompt_delivery
+                },
+                resumed: resumed || attached,
+            });
+        }
+    }
     let spec = SpawnSpec {
         program: command.program.to_string_lossy().into_owned(),
         args: command.args,
@@ -105,11 +139,15 @@ pub fn terminal_open(
 
 /// Sends keyboard input to a terminal.
 #[tauri::command]
-pub fn terminal_write(
+pub async fn terminal_write(
     terminals: State<'_, Terminals>,
+    hosted: State<'_, RuntimeTerminals>,
     id: SessionId,
     data: String,
 ) -> CommandResult<()> {
+    if let Some(result) = hosted.write(id, data.clone()).await {
+        return result.map_err(|error| to_message(&error));
+    }
     terminals
         .0
         .write(id, data.as_bytes())
@@ -118,19 +156,31 @@ pub fn terminal_write(
 
 /// Changes a terminal's size.
 #[tauri::command]
-pub fn terminal_resize(
+pub async fn terminal_resize(
     terminals: State<'_, Terminals>,
+    hosted: State<'_, RuntimeTerminals>,
     id: SessionId,
     rows: u16,
     cols: u16,
 ) -> CommandResult<()> {
-    let resized = terminals.0.resize(id, rows.max(1), cols.max(1));
+    let (rows, cols) = (rows.max(1), cols.max(1));
+    if let Some(result) = hosted.resize(id, rows, cols).await {
+        return result.map_err(|error| to_message(&error));
+    }
+    let resized = terminals.0.resize(id, rows, cols);
     resized.map_err(|error| to_message(&error))
 }
 
 /// Stops a terminal's process. The exit event still arrives on its channel.
 #[tauri::command]
-pub fn terminal_close(terminals: State<'_, Terminals>, id: SessionId) -> CommandResult<()> {
+pub async fn terminal_close(
+    terminals: State<'_, Terminals>,
+    hosted: State<'_, RuntimeTerminals>,
+    id: SessionId,
+) -> CommandResult<()> {
+    if let Some(result) = hosted.stop(id).await {
+        return result.map_err(|error| to_message(&error));
+    }
     terminals.0.kill(id).map_err(|error| to_message(&error))
 }
 
@@ -198,7 +248,13 @@ fn sink_for(channel: Channel<InvokeResponseBody>) -> EventSink {
     })
 }
 
-fn send(channel: &Channel<InvokeResponseBody>, body: InvokeResponseBody) {
+pub(crate) fn send_message(channel: &Channel<InvokeResponseBody>, message: &ChannelMessage) {
+    if let Ok(json) = serde_json::to_string(message) {
+        send(channel, InvokeResponseBody::Json(json));
+    }
+}
+
+pub(crate) fn send(channel: &Channel<InvokeResponseBody>, body: InvokeResponseBody) {
     if let Err(error) = channel.send(body) {
         tracing::debug!("terminal channel closed: {error}");
     }

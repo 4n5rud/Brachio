@@ -26,6 +26,8 @@ export interface OpenOptions {
   resume: boolean;
   /** The task's conversation id, for agents that take one. */
   sessionId: string | null;
+  /** Stable name of this terminal. With it the terminal can survive a restart and be attached again. */
+  key?: string | null;
 }
 
 /** How the first prompt reaches the agent, as the core reports it. */

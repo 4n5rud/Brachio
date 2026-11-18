@@ -1,0 +1,265 @@
+//! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use anyhow::{anyhow, bail, Result};
+use brachio_core::status::AgentState;
+use brachio_pty::SessionId;
+use brachio_runtime::client::{Client, ClientError, Following};
+use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
+use tauri::async_runtime::{spawn, JoinHandle};
+use tauri::ipc::{Channel, InvokeResponseBody};
+use tokio::sync::OnceCell;
+
+use crate::runtime_client;
+use crate::terminal::{send, send_message, ChannelMessage};
+
+/// How often a frame that is not yet at a replay boundary is retried.
+const FRAME_ATTEMPTS: u32 = 5;
+const FRAME_RETRY: Duration = Duration::from_millis(100);
+
+/// What to run for a terminal key.
+pub struct Launch {
+    /// Directory the program starts in.
+    pub cwd: PathBuf,
+    /// Program to run.
+    pub program: String,
+    /// Arguments, one per element.
+    pub args: Vec<String>,
+    /// `NAME=value` entries.
+    pub env: Vec<String>,
+    /// Initial height in rows.
+    pub rows: u16,
+    /// Initial width in columns.
+    pub cols: u16,
+}
+
+/// A terminal this app is attached to.
+struct Attached {
+    key: String,
+    pump: JoinHandle<()>,
+}
+
+/// App state for runtime-hosted terminals. Whether the runtime is used is decided once, so
+/// terminals of the two kinds never share the session id space.
+#[derive(Default)]
+pub struct RuntimeTerminals {
+    client: OnceCell<Option<Client>>,
+    attached: Mutex<HashMap<SessionId, Attached>>,
+}
+
+impl RuntimeTerminals {
+    /// Attach to the terminal for `key`, starting it when it does not exist.
+    /// Returns `None` when the runtime is not available, so the caller can host it in the app.
+    ///
+    /// # Errors
+    /// Fails when the runtime refuses to start the program.
+    pub async fn open(
+        &self,
+        key: String,
+        launch: Launch,
+        channel: Channel<InvokeResponseBody>,
+    ) -> Result<Option<(SessionId, bool)>> {
+        let Some(client) = self.client().await else {
+            return Ok(None);
+        };
+        let existing = match client.call(Action::Inspect { key: key.clone() }).await {
+            Ok(reply) => Some(reply),
+            Err(ClientError::Refused(_)) => None,
+            Err(error) => bail!("{error}"),
+        };
+        let attached = existing.is_some();
+        let reply = match existing {
+            Some(reply) => reply,
+            None => client.call(launch_action(&key, launch)).await?,
+        };
+        let ResponseResult::Success { session, .. } = reply.result else {
+            bail!("the terminal runtime sent an unexpected reply");
+        };
+        let (first, following) = if attached {
+            open_frame(&client, &key).await?
+        } else {
+            client
+                .follow(Action::Follow {
+                    key: key.clone(),
+                    after: 0,
+                })
+                .await?
+        };
+        let pump = spawn(pump(first, following, channel));
+        let id = session.session_id;
+        let previous = self
+            .attached
+            .lock()
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?
+            .insert(id, Attached { key, pump });
+        if let Some(previous) = previous {
+            previous.pump.abort();
+        }
+        Ok(Some((id, attached)))
+    }
+
+    /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
+    pub async fn write(&self, id: SessionId, data: String) -> Option<Result<()>> {
+        let (client, key) = self.target(id).await?;
+        Some(
+            client
+                .call(Action::Write { key, text: data })
+                .await
+                .map(|_| ())
+                .map_err(Into::into),
+        )
+    }
+
+    /// Resizes an attached terminal. `None` when `id` is not runtime-hosted.
+    pub async fn resize(&self, id: SessionId, rows: u16, cols: u16) -> Option<Result<()>> {
+        let (client, key) = self.target(id).await?;
+        Some(
+            client
+                .call(Action::Resize { key, rows, cols })
+                .await
+                .map(|_| ())
+                .map_err(Into::into),
+        )
+    }
+
+    /// Ends the program on purpose. `None` when `id` is not runtime-hosted.
+    pub async fn stop(&self, id: SessionId) -> Option<Result<()>> {
+        let (client, key) = self.target(id).await?;
+        let stopped = client.call(Action::Stop { key }).await;
+        self.drop_attachment(id);
+        Some(stopped.map(|_| ()).map_err(Into::into))
+    }
+
+    async fn client(&self) -> Option<Client> {
+        if !runtime_client::enabled() {
+            return None;
+        }
+        self.client
+            .get_or_init(|| async {
+                match runtime_client::connect().await {
+                    Ok(client) => Some(client),
+                    Err(error) => {
+                        tracing::warn!(%error, "terminal runtime unavailable, hosting terminals in the app");
+                        None
+                    }
+                }
+            })
+            .await
+            .clone()
+    }
+
+    async fn target(&self, id: SessionId) -> Option<(Client, String)> {
+        let key = self.attached.lock().ok()?.get(&id)?.key.clone();
+        Some((self.client().await?, key))
+    }
+
+    fn drop_attachment(&self, id: SessionId) {
+        let removed = self
+            .attached
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(&id));
+        if let Some(attached) = removed {
+            attached.pump.abort();
+        }
+    }
+}
+
+fn launch_action(key: &str, launch: Launch) -> Action {
+    Action::Launch {
+        key: key.to_owned(),
+        cwd: launch.cwd,
+        program: launch.program,
+        args: launch.args,
+        env: launch.env,
+        rows: launch.rows,
+        cols: launch.cols,
+    }
+}
+
+/// Follow from the settled frame, or from the retained history when no frame settles.
+async fn open_frame(client: &Client, key: &str) -> Result<(Reply, Following), ClientError> {
+    for _ in 0..FRAME_ATTEMPTS {
+        match client
+            .follow(Action::FollowFrame {
+                key: key.to_owned(),
+            })
+            .await
+        {
+            Err(ClientError::Refused(_)) => tokio::time::sleep(FRAME_RETRY).await,
+            other => return other,
+        }
+    }
+    client
+        .follow(Action::Follow {
+            key: key.to_owned(),
+            after: 0,
+        })
+        .await
+}
+
+/// Forward everything the runtime reports to the web view until the program ends.
+async fn pump(first: Reply, mut following: Following, channel: Channel<InvokeResponseBody>) {
+    let mut last_status = None;
+    let mut next = Some(first);
+    loop {
+        if let Some(reply) = next.take() {
+            if deliver(reply, &mut last_status, &channel) {
+                return;
+            }
+        }
+        match following.next().await {
+            Ok(Some(reply)) => next = Some(reply),
+            Ok(None) | Err(_) => {
+                send_message(&channel, &ChannelMessage::Detached { detached: true });
+                return;
+            }
+        }
+    }
+}
+
+/// Send one reply on; `true` once the program has ended and its output is fully sent.
+fn deliver(
+    reply: Reply,
+    last_status: &mut Option<StatusInfo>,
+    channel: &Channel<InvokeResponseBody>,
+) -> bool {
+    let (session, bytes, drained) = match reply.result {
+        ResponseResult::Snapshot { session, screen } => (session, screen.ansi.into_bytes(), true),
+        ResponseResult::Success { session, output } => match output {
+            Some(page) => {
+                let drained = page.next == page.end;
+                (session, page.bytes, drained)
+            }
+            None => (session, Vec::new(), true),
+        },
+        _ => return false,
+    };
+    if !bytes.is_empty() {
+        send(channel, InvokeResponseBody::Raw(bytes));
+    }
+    if session.status != *last_status {
+        let (status, message) = session
+            .status
+            .clone()
+            .map_or((AgentState::Unknown, None), |status| {
+                (status.state, status.message)
+            });
+        send_message(channel, &ChannelMessage::Status { status, message });
+        *last_status = session.status.clone();
+    }
+    if session.exited && drained {
+        send_message(
+            channel,
+            &ChannelMessage::Exit {
+                exit_code: session.exit_code,
+            },
+        );
+        return true;
+    }
+    false
+}
