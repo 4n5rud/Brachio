@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -20,11 +21,12 @@ use tokio::sync::watch;
 use uuid::Uuid;
 use widestring::U16CString;
 
+use crate::endpoint::{self, Liveness};
 use crate::output::{OutputHistory, Page};
+use crate::protocol;
 use crate::screen::{TerminalScreen, COLS, ROWS};
 use std::num::NonZeroU16;
 
-const VERSION: u8 = 1;
 const MAX_MESSAGE: u64 = 64 * 1024;
 const MAX_RESPONSE: u64 = 256 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -45,6 +47,9 @@ enum Command {
     Serve,
     /// Send one request to a running instance.
     Send {
+        /// Protocol version to speak, for testing older clients.
+        #[arg(long, default_value_t = protocol::CURRENT)]
+        protocol: u8,
         #[command(subcommand)]
         action: Action,
     },
@@ -65,12 +70,28 @@ enum Action {
     Snapshot { key: String },
     /// Send a settled normal-screen frame, then follow future output.
     FollowFrame { key: String },
+    /// Read the protocol range and drain state of this runtime.
+    Hello,
+    /// Take no new terminals and exit once the last one ends.
+    Drain,
     /// Resize the shell and the frame that snapshots describe.
     Resize { key: String, rows: u16, cols: u16 },
     /// Write text to the shell.
     Write { key: String, text: String },
     /// Stop one shell explicitly.
     Stop { key: String },
+}
+
+impl Action {
+    /// The first protocol version that defines this action.
+    fn since(&self) -> (u8, &'static str) {
+        match self {
+            Action::Hello => (2, "hello"),
+            Action::Drain => (2, "drain"),
+            Action::Resize { .. } => (2, "resize"),
+            _ => (1, "this action"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -99,9 +120,20 @@ enum ResponseResult {
         session: SessionInfo,
         screen: ScreenSnapshot,
     },
+    Hello {
+        runtime: RuntimeInfo,
+    },
     Error {
         error: String,
     },
+}
+
+#[derive(Serialize)]
+struct RuntimeInfo {
+    pid: u32,
+    oldest_version: u8,
+    current_version: u8,
+    draining: bool,
 }
 
 #[derive(Serialize)]
@@ -157,6 +189,7 @@ struct Runtime {
     instance: String,
     manager: Arc<SessionManager>,
     sessions: Mutex<HashMap<String, Session>>,
+    draining: AtomicBool,
 }
 
 impl Runtime {
@@ -165,17 +198,36 @@ impl Runtime {
             instance: Uuid::new_v4().to_string(),
             manager: Arc::new(SessionManager::default()),
             sessions: Mutex::default(),
+            draining: AtomicBool::new(false),
+        }
+    }
+
+    /// A draining runtime with no shells left has nothing more to serve.
+    fn finished(&self) -> bool {
+        self.draining.load(Ordering::SeqCst) && self.manager.ids().is_ok_and(|ids| ids.is_empty())
+    }
+
+    fn hello(&self) -> ResponseResult {
+        ResponseResult::Hello {
+            runtime: RuntimeInfo {
+                pid: std::process::id(),
+                oldest_version: protocol::OLDEST,
+                current_version: protocol::CURRENT,
+                draining: self.draining.load(Ordering::SeqCst),
+            },
         }
     }
 
     fn execute(&self, request: Request) -> Result<ResponseResult> {
-        if request.version != VERSION {
-            bail!("unsupported protocol version {}", request.version);
-        }
         let mut sessions = lock(&self.sessions)?;
         let active = self.manager.ids()?;
         sessions.retain(|_, session| active.contains(&session.id));
         match request.action {
+            Action::Hello => Ok(self.hello()),
+            Action::Drain => {
+                self.draining.store(true, Ordering::SeqCst);
+                Ok(self.hello())
+            }
             Action::Ensure { key, cwd } => {
                 let cwd = cwd
                     .canonicalize()
@@ -188,6 +240,9 @@ impl Runtime {
                         bail!("session key already belongs to a different working directory");
                     }
                     return existing.describe(None);
+                }
+                if self.draining.load(Ordering::SeqCst) {
+                    bail!("runtime is draining and takes no new terminals");
                 }
                 let session = self.start_shell(cwd)?;
                 let info = session.describe(None)?;
@@ -377,38 +432,67 @@ fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
 #[tokio::main]
 pub(super) async fn run() -> Result<()> {
     let args = Args::parse();
-    let name = args.pipe.to_ns_name::<GenericNamespaced>()?;
     match args.command {
-        Command::Serve => {
-            let descriptor =
-                SecurityDescriptor::deserialize(&U16CString::from_str("D:P(A;;GA;;;OW)")?)?;
-            let listener = ListenerOptions::new()
-                .name(name)
-                .security_descriptor(descriptor)
-                .create_tokio()?;
-            let runtime = Arc::new(Runtime::new());
-            loop {
-                let stream = listener.accept().await?;
-                let runtime = Arc::clone(&runtime);
-                tokio::spawn(async move {
-                    if let Err(error) = respond(stream, runtime).await {
-                        let disconnected = error
-                            .downcast_ref::<std::io::Error>()
-                            .is_some_and(|error| error.kind() == std::io::ErrorKind::BrokenPipe);
-                        if !disconnected {
-                            eprintln!("runtime connection ended: {error}");
-                        }
-                    }
-                });
-            }
-        }
-        Command::Send { action } => {
-            let stream = Stream::connect(name)
-                .await
-                .context("connect to terminal runtime")?;
-            request(stream, action).await
+        Command::Serve => serve(&args.pipe).await,
+        Command::Send { protocol, action } => {
+            let name = args.pipe.to_ns_name::<GenericNamespaced>()?;
+            let connected = Stream::connect(name).await;
+            let reason = match endpoint::classify(&connected) {
+                Liveness::Dead => "terminal runtime is not running",
+                _ => "cannot tell whether the terminal runtime is running",
+            };
+            request(connected.context(reason)?, protocol, action).await
         }
     }
+}
+
+async fn serve(pipe: &str) -> Result<()> {
+    let listener = match listen(pipe) {
+        Ok(listener) => listener,
+        Err(error) => {
+            // Only a live reply proves another runtime owns the pipe. Anything else
+            // proves nothing, so this process neither takes over nor claims it is free.
+            let probe = Stream::connect(pipe.to_ns_name::<GenericNamespaced>()?).await;
+            let code = match endpoint::classify(&probe) {
+                Liveness::Serving => endpoint::EXIT_OCCUPIED,
+                Liveness::Dead | Liveness::Unknown => endpoint::EXIT_UNCERTAIN,
+            };
+            eprintln!("cannot own pipe {pipe}: {error}");
+            std::process::exit(code);
+        }
+    };
+    let runtime = Arc::new(Runtime::new());
+    let mut check = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        let stream = tokio::select! {
+            stream = listener.accept() => stream?,
+            _ = check.tick() => {
+                if runtime.finished() {
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+        let runtime = Arc::clone(&runtime);
+        tokio::spawn(async move {
+            if let Err(error) = respond(stream, runtime).await {
+                let disconnected = error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::BrokenPipe);
+                if !disconnected {
+                    eprintln!("runtime connection ended: {error}");
+                }
+            }
+        });
+    }
+}
+
+fn listen(pipe: &str) -> Result<interprocess::local_socket::tokio::Listener> {
+    let descriptor = SecurityDescriptor::deserialize(&U16CString::from_str("D:P(A;;GA;;;OW)")?)?;
+    Ok(ListenerOptions::new()
+        .name(pipe.to_ns_name::<GenericNamespaced>()?)
+        .security_descriptor(descriptor)
+        .create_tokio()?)
 }
 
 async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
@@ -418,21 +502,29 @@ async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
     )
     .await??
     .context("connection closed before request")?;
-    let result = match serde_json::from_slice::<Request>(&message) {
+    let request = serde_json::from_slice::<Request>(&message)
+        .map_err(anyhow::Error::from)
+        .and_then(accepted);
+    let version = request
+        .as_ref()
+        .map_or(protocol::CURRENT, |request| request.version);
+    let result = match request {
         Ok(Request {
-            version: VERSION,
             action: Action::Follow { key, after },
+            ..
         }) => {
             let session =
                 lock(&runtime.sessions).and_then(|sessions| get(&sessions, &key).cloned());
             match session {
-                Ok(session) => return follow(&mut stream, &runtime.instance, session, after).await,
+                Ok(session) => {
+                    return follow(&mut stream, &runtime.instance, version, session, after).await
+                }
                 Err(error) => Err(error),
             }
         }
         Ok(Request {
-            version: VERSION,
             action: Action::FollowFrame { key },
+            ..
         }) => {
             let session =
                 lock(&runtime.sessions).and_then(|sessions| get(&sessions, &key).cloned());
@@ -441,8 +533,16 @@ async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
                     let snapshot = session.snapshot()?;
                     if let ResponseResult::Snapshot { screen, .. } = &snapshot {
                         if let Some(offset) = screen.resume_offset {
-                            send_response(&mut stream, &runtime.instance, Ok(snapshot)).await?;
-                            return follow(&mut stream, &runtime.instance, session, offset).await;
+                            send_response(&mut stream, &runtime.instance, version, Ok(snapshot))
+                                .await?;
+                            return follow(
+                                &mut stream,
+                                &runtime.instance,
+                                version,
+                                session,
+                                offset,
+                            )
+                            .await;
                         }
                     }
                     Err(anyhow!(
@@ -462,14 +562,25 @@ async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
             )
             .await??
         }
-        Err(error) => Err(error.into()),
+        Err(error) => Err(error),
     };
-    send_response(&mut stream, &runtime.instance, result).await
+    send_response(&mut stream, &runtime.instance, version, result).await
+}
+
+/// Check the requested version against what this build speaks and what the action needs.
+fn accepted(request: Request) -> Result<Request> {
+    if !protocol::accepts(request.version) {
+        bail!(protocol::rejection(request.version));
+    }
+    let (since, name) = request.action.since();
+    protocol::requires(request.version, since, name).map_err(|message| anyhow!(message))?;
+    Ok(request)
 }
 
 async fn send_response(
     stream: &mut Stream,
     instance: &str,
+    version: u8,
     result: Result<ResponseResult>,
 ) -> Result<()> {
     let result = match result {
@@ -483,7 +594,7 @@ async fn send_response(
         write_message(
             stream,
             &Response {
-                version: VERSION,
+                version,
                 instance,
                 result,
             },
@@ -496,6 +607,7 @@ async fn send_response(
 async fn follow(
     stream: &mut Stream,
     instance: &str,
+    version: u8,
     mut session: Session,
     mut offset: u64,
 ) -> Result<()> {
@@ -510,10 +622,10 @@ async fn follow(
                 session,
                 output: Some(page),
             }) => (page.next, page.end, session.exited),
-            _ => return send_response(stream, instance, result).await,
+            _ => return send_response(stream, instance, version, result).await,
         };
         if first || next != offset || exited {
-            send_response(stream, instance, result).await?;
+            send_response(stream, instance, version, result).await?;
         }
         first = false;
         offset = next;
@@ -531,14 +643,14 @@ async fn follow(
     }
 }
 
-async fn request(mut stream: Stream, action: Action) -> Result<()> {
+async fn request(mut stream: Stream, protocol: u8, action: Action) -> Result<()> {
     let following = matches!(action, Action::Follow { .. } | Action::FollowFrame { .. });
     tokio::time::timeout(
         IO_TIMEOUT,
         write_message(
             &mut stream,
             &Request {
-                version: VERSION,
+                version: protocol,
                 action,
             },
             MAX_MESSAGE,
@@ -549,13 +661,13 @@ async fn request(mut stream: Stream, action: Action) -> Result<()> {
     let first = tokio::time::timeout(IO_TIMEOUT, read_message(&mut reader, MAX_RESPONSE))
         .await??
         .context("runtime closed before responding")?;
-    let completed = print_response(&first)?;
+    let completed = print_response(&first, protocol)?;
     if following {
         if completed {
             return Ok(());
         }
         while let Some(message) = read_message(&mut reader, MAX_RESPONSE).await? {
-            if print_response(&message)? {
+            if print_response(&message, protocol)? {
                 return Ok(());
             }
         }
@@ -564,18 +676,18 @@ async fn request(mut stream: Stream, action: Action) -> Result<()> {
     Ok(())
 }
 
-fn print_response(message: &[u8]) -> Result<bool> {
+fn print_response(message: &[u8], protocol: u8) -> Result<bool> {
     use std::io::Write;
 
     let response: serde_json::Value = serde_json::from_slice(message)?;
-    if response.get("version").and_then(serde_json::Value::as_u64) != Some(u64::from(VERSION)) {
-        bail!("incompatible runtime response");
-    }
     let mut output = std::io::stdout().lock();
     output.write_all(message)?;
     output.flush()?;
     if let Some(error) = response.get("error") {
         bail!("{error}");
+    }
+    if response.get("version").and_then(serde_json::Value::as_u64) != Some(u64::from(protocol)) {
+        bail!("incompatible runtime response");
     }
     let output = &response["output"];
     let completed = response["session"]["exited"] == true
