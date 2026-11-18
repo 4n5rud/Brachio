@@ -40,6 +40,7 @@ pub fn run() {
             workspace::task_create,
             workspace::task_archive,
             workspace::task_changes,
+            workspace::task_git_action,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Brachio");
