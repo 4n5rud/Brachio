@@ -53,9 +53,11 @@ export const readTaskChanges = (id: string) => invoke<TaskChanges>("task_changes
 export type TaskGitAction =
   | { action: "stageTracked" | "push" }
   | { action: "stageFile" | "unstageFile"; path: string }
-  | { action: "commit"; message: string };
+  | { action: "commit"; message: string }
+  | { action: "createPr"; title: string; body: string };
+/** Resolves to the pull request's address for `createPr`, and to nothing for the other actions. */
 export const runTaskGitAction = (id: string, request: TaskGitAction) =>
-  invoke<void>("task_git_action", { id, request });
+  invoke<string | null>("task_git_action", { id, request });
 
 const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "codex" };
 

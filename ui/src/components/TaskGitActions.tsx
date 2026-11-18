@@ -9,6 +9,8 @@ export function TaskGitActions(props: {
   onChanged: () => Promise<unknown>;
 }) {
   const [message, setMessage] = createSignal("");
+  const [prTitle, setPrTitle] = createSignal("");
+  const [prBody, setPrBody] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [feedback, setFeedback] = createSignal<{ error: boolean; text: string }>();
 
@@ -17,9 +19,16 @@ export function TaskGitActions(props: {
     setBusy(true);
     setFeedback(undefined);
     try {
-      await runTaskGitAction(props.taskId, request);
+      const address = await runTaskGitAction(props.taskId, request);
       if (request.action === "commit") setMessage("");
-      setFeedback({ error: false, text: t("git.completed") });
+      if (request.action === "createPr") {
+        setPrTitle("");
+        setPrBody("");
+      }
+      setFeedback({
+        error: false,
+        text: address ? `${t("git.prCreated")}: ${address}` : t("git.completed"),
+      });
       await props.onChanged();
     } catch (error) {
       setFeedback({ error: true, text: String(error) });
@@ -71,6 +80,24 @@ export function TaskGitActions(props: {
       </Show>
       <button type="button" class="button button-sm" disabled={busy()}
         onClick={() => void run({ action: "push" })}>{t("git.push")}</button>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        if (prTitle().trim()) void run({ action: "createPr", title: prTitle(), body: prBody() });
+      }}>
+        <label>
+          {t("git.prTitle")}
+          <input type="text" disabled={busy()} value={prTitle()}
+            onInput={(event) => setPrTitle(event.currentTarget.value)} />
+        </label>
+        <label>
+          {t("git.prBody")}
+          <textarea rows={3} disabled={busy()} value={prBody()}
+            onInput={(event) => setPrBody(event.currentTarget.value)} />
+        </label>
+        <button type="submit" class="button button-sm" disabled={busy() || !prTitle().trim()}>
+          {t("git.createPr")}
+        </button>
+      </form>
       <Show when={feedback()}>
         {(result) => <p role={result().error ? "alert" : "status"}>{result().text}</p>}
       </Show>
