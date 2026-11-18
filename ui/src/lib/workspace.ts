@@ -62,6 +62,13 @@ interface TaskChanges {
 }
 
 export const readTaskChanges = (id: string) => invoke<TaskChanges>("task_changes", { id });
+
+export interface TaskMergePreview {
+  baseBranch: string;
+  conflicts: string[];
+}
+
+export const previewTaskMerge = (id: string) => invoke<TaskMergePreview>("task_merge_preview", { id });
 export type TaskGitAction =
   | { action: "stageTracked" | "push" }
   | { action: "stageFile" | "unstageFile"; path: string }

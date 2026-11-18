@@ -6,7 +6,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
-use brachio_git::{AddWorktree, Git, PullRequest};
+use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
 use brachio_store::{NewRepo, NewTask, RepoRecord, TaskRecord};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -326,6 +326,38 @@ fn git_paths(git: &Git, args: &[&str]) -> Result<Vec<String>, String> {
         .split_terminator('\0')
         .map(str::to_owned)
         .collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMergePreview {
+    base_branch: String,
+    conflicts: Vec<String>,
+}
+
+/// Checks how the task's committed HEAD would merge into the local default branch.
+#[tauri::command]
+pub async fn task_merge_preview(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<TaskMergePreview, String> {
+    let (worktree_path, base_branch) = {
+        let connection = database.lock()?;
+        let task = TaskRecord::get(&connection, &id).map_err(to_text)?;
+        let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
+        (task.worktree_path, repo.default_branch)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let base_ref = format!("refs/heads/{base_branch}");
+        let report =
+            predict_conflict(&Git::new(&worktree_path), &base_ref, "HEAD").map_err(to_text)?;
+        Ok(TaskMergePreview {
+            base_branch,
+            conflicts: report.conflicted_files,
+        })
+    })
+    .await
+    .map_err(to_text)?
 }
 
 /// A Git operation explicitly requested from the task's Changes panel.
