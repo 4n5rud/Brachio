@@ -22,8 +22,10 @@ export interface OpenOptions {
   cols: number;
   /** First prompt for an agent. */
   prompt: string | null;
-  /** Continue the agent's latest conversation in `cwd`. */
+  /** Continue the task's conversation instead of starting a new one. */
   resume: boolean;
+  /** The task's conversation id, for agents that take one. */
+  sessionId: string | null;
 }
 
 /** How the first prompt reaches the agent, as the core reports it. */
@@ -50,10 +52,18 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
   return null;
 }
 
+interface OpenedTerminal {
+  id: number;
+  promptDelivery: PromptDelivery;
+  resumed: boolean;
+}
+
 export interface TerminalHandle {
   id: number;
   /** `type_in` means the caller still has to type the prompt. */
   promptDelivery: PromptDelivery;
+  /** Whether the agent continued an earlier conversation. */
+  resumed: boolean;
   write(data: string): Promise<void>;
   resize(rows: number, cols: number): Promise<void>;
   close(): Promise<void>;
@@ -68,14 +78,12 @@ export async function openTerminal(
     const m = decodeMessage(raw);
     if (m) onMessage(m);
   };
-  const opened = await invoke<{ id: number; promptDelivery: PromptDelivery }>("terminal_open", {
-    request: options,
-    onEvent: channel,
-  });
+  const opened = await invoke<OpenedTerminal>("terminal_open", { request: options, onEvent: channel });
   const id = opened.id;
   return {
     id,
     promptDelivery: opened.promptDelivery,
+    resumed: opened.resumed,
     write: (data) => invoke("terminal_write", { id, data }),
     resize: (rows, cols) => invoke("terminal_resize", { id, rows, cols }),
     close: () => invoke("terminal_close", { id }),

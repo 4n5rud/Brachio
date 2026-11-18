@@ -52,17 +52,33 @@ impl AgentKind {
         }
     }
 
-    /// Interactive TUI that picks up the latest conversation in its working
-    /// directory. Each task has its own worktree, so that is the task's own.
+    /// Whether Brachio can choose the conversation id up front. Claude Code
+    /// takes one; Codex picks its own, found later in its session files.
     #[must_use]
-    pub fn resume(self) -> Launch {
-        let args: &[&str] = match self {
-            Self::ClaudeCode => &["--continue"],
-            Self::Codex => &["resume", "--last"],
+    pub fn accepts_session_id(self) -> bool {
+        matches!(self, Self::ClaudeCode)
+    }
+
+    /// Arguments that start a new conversation under `session_id`.
+    /// Empty for agents that do not accept one.
+    #[must_use]
+    pub fn session_id_args(self, session_id: &str) -> Vec<String> {
+        match self {
+            Self::ClaudeCode => vec!["--session-id".to_owned(), session_id.to_owned()],
+            Self::Codex => Vec::new(),
+        }
+    }
+
+    /// Interactive TUI that continues the conversation `session_id`.
+    #[must_use]
+    pub fn resume(self, session_id: &str) -> Launch {
+        let flag = match self {
+            Self::ClaudeCode => "--resume",
+            Self::Codex => "resume",
         };
         Launch {
             program: self.program(),
-            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            args: vec![flag.to_owned(), session_id.to_owned()],
         }
     }
 
@@ -112,8 +128,11 @@ mod tests {
     }
 
     #[test]
-    fn resume_continues_the_latest_conversation() {
-        assert_eq!(AgentKind::ClaudeCode.resume().args, vec!["--continue"]);
-        assert_eq!(AgentKind::Codex.resume().args, vec!["resume", "--last"]);
+    fn resume_names_the_conversation() {
+        assert_eq!(
+            AgentKind::ClaudeCode.resume("abc").args,
+            vec!["--resume", "abc"]
+        );
+        assert_eq!(AgentKind::Codex.resume("abc").args, vec!["resume", "abc"]);
     }
 }

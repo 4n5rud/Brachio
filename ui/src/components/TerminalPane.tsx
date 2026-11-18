@@ -13,8 +13,10 @@ export interface TerminalSession {
   cwd: string;
   /** First prompt for the agent, sent once when the session starts. */
   prompt?: string;
-  /** Continue the agent's latest conversation, for tasks from an earlier run. */
+  /** Continue the task's conversation, for tasks from an earlier run. */
   resume?: boolean;
+  /** The task's conversation id, for agents that take one. */
+  sessionId?: string;
 }
 
 /**
@@ -101,6 +103,7 @@ export function TerminalPane(props: {
         cwd: session.cwd,
         prompt: session.prompt ?? null,
         resume,
+        sessionId: session.sessionId ?? null,
         rows: term.rows,
         cols: term.cols,
       };
@@ -129,6 +132,7 @@ export function TerminalPane(props: {
             return;
           }
           handle = opened;
+          if (resume && !opened.resumed) term.writeln(`[${t("terminal.resumeFailed")}]\r\n`);
           // The size may have changed while the session was starting.
           void opened.resize(term.rows, term.cols);
           if (opened.promptDelivery === "type_in") typeInPrompt = session.prompt ?? null;

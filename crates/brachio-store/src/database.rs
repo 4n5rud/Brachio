@@ -7,6 +7,7 @@ use rusqlite::Connection;
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_repo_name_task_agent.sql"),
+    include_str!("../migrations/0003_task_agent_session.sql"),
 ];
 
 /// Why a storage call failed.

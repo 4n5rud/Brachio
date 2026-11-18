@@ -40,19 +40,32 @@ impl Installed {
     /// The interactive agent, with a first prompt when it can be passed
     /// safely. Through `cmd.exe`, text with shell characters cannot, so the
     /// agent then starts without it and the caller should type it in.
+    ///
+    /// `session_id` names the new conversation, for agents that accept one.
     #[must_use]
-    pub fn resolve_interactive(&self, prompt: Option<&str>) -> (ResolvedCommand, PromptDelivery) {
-        let Some(prompt) = prompt.filter(|text| !text.trim().is_empty()) else {
-            return (self.resolve(&self.kind.interactive()), PromptDelivery::None);
+    pub fn resolve_interactive(
+        &self,
+        prompt: Option<&str>,
+        session_id: Option<&str>,
+    ) -> (ResolvedCommand, PromptDelivery) {
+        let prompt = prompt.filter(|text| !text.trim().is_empty());
+        let (mut launch, delivery) = match prompt {
+            None => (self.kind.interactive(), PromptDelivery::None),
+            Some(text) if is_batch_file(&self.path) && !is_safe_for_cmd(text) => {
+                (self.kind.interactive(), PromptDelivery::TypeIn)
+            }
+            Some(text) => (
+                self.kind.interactive_with_prompt(text),
+                PromptDelivery::Argument,
+            ),
         };
-        if is_batch_file(&self.path) && !is_safe_for_cmd(prompt) {
-            return (
-                self.resolve(&self.kind.interactive()),
-                PromptDelivery::TypeIn,
-            );
+        if let Some(id) = session_id {
+            // Options go before the prompt, which is positional.
+            let mut args = self.kind.session_id_args(id);
+            args.append(&mut launch.args);
+            launch.args = args;
         }
-        let launch = self.kind.interactive_with_prompt(prompt);
-        (self.resolve(&launch), PromptDelivery::Argument)
+        (self.resolve(&launch), delivery)
     }
 }
 
@@ -230,12 +243,25 @@ mod tests {
             version: None,
         };
 
-        let (_, plain) = installed.resolve_interactive(Some("add a test"));
-        let (command, risky) = installed.resolve_interactive(Some("fix it & push"));
+        let (_, plain) = installed.resolve_interactive(Some("add a test"), None);
+        let (command, risky) = installed.resolve_interactive(Some("fix it & push"), None);
 
         assert_eq!(plain, PromptDelivery::Argument);
         assert_eq!(risky, PromptDelivery::TypeIn);
         assert_eq!(command.args, vec!["/d", "/c", "C:/npm/claude.cmd"]);
+    }
+
+    #[test]
+    fn session_id_comes_before_the_prompt() {
+        let installed = Installed {
+            kind: AgentKind::ClaudeCode,
+            path: PathBuf::from("/usr/bin/claude"),
+            version: None,
+        };
+
+        let (command, _) = installed.resolve_interactive(Some("add a test"), Some("abc"));
+
+        assert_eq!(command.args, vec!["--session-id", "abc", "add a test"]);
     }
 
     #[test]

@@ -22,6 +22,8 @@ export interface TaskRecord {
   agentKind: CoreAgent | null;
   createdAtMs: number;
   archivedAtMs: number | null;
+  /** Conversation id the agent resumes, when Brachio picked one. */
+  agentSessionId: string | null;
 }
 
 export interface CreateTaskRequest {
@@ -55,6 +57,7 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     deletions: 0,
     updatedAt: record.createdAtMs,
     worktreePath: record.worktreePath,
+    agentSessionId: record.agentSessionId ?? undefined,
   };
 }
 

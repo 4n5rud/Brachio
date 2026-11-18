@@ -36,6 +36,7 @@ export function TaskView(props: {
       cwd,
       prompt: props.takePrompt?.(task.id),
       resume: props.shouldResume?.(task.id),
+      sessionId: task.agentSessionId,
     };
   };
   return (

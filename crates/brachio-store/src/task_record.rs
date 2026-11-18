@@ -23,6 +23,8 @@ pub struct TaskRecord {
     pub worktree_path: PathBuf,
     /// Agent the task was created for, as its snake_case name.
     pub agent_kind: Option<String>,
+    /// Conversation id the agent resumes, when Brachio picked one.
+    pub agent_session_id: Option<String>,
     /// When the task was created.
     pub created_at_ms: i64,
     /// Set once the task is archived.
@@ -44,12 +46,15 @@ pub struct NewTask<'a> {
     pub worktree_path: &'a Path,
     /// Agent the task is for, if any.
     pub agent_kind: Option<&'a str>,
+    /// Conversation id to start the agent with, when the agent accepts one.
+    pub agent_session_id: Option<&'a str>,
     /// Creation time.
     pub created_at_ms: i64,
 }
 
 const COLUMNS: &str =
-    "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms";
+    "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms, \
+     agent_session_id";
 
 impl TaskRecord {
     /// Adds a task.
@@ -59,8 +64,8 @@ impl TaskRecord {
     pub fn insert(connection: &Connection, task: &NewTask<'_>) -> Result<Self, StoreError> {
         connection.execute(
             "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path,
-                                agent_kind, state, created_at_ms)
-             VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, 'active', ?7)",
+                                agent_kind, state, created_at_ms, agent_session_id)
+             VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, 'active', ?7, ?8)",
             params![
                 task.id,
                 task.repo_id,
@@ -68,7 +73,8 @@ impl TaskRecord {
                 task.branch,
                 task.worktree_path.to_string_lossy(),
                 task.agent_kind,
-                task.created_at_ms
+                task.created_at_ms,
+                task.agent_session_id
             ],
         )?;
         Self::get(connection, task.id)
@@ -154,6 +160,7 @@ impl TaskRecord {
             agent_kind: row.get(5)?,
             created_at_ms: row.get(6)?,
             archived_at_ms: row.get(7)?,
+            agent_session_id: row.get(8)?,
         })
     }
 }
@@ -185,6 +192,7 @@ mod tests {
             branch: "brachio/fix-login-a1b2c3",
             worktree_path: Path::new("/src/brachio.worktrees/fix-login-a1b2c3"),
             agent_kind: Some("claude_code"),
+            agent_session_id: None,
             created_at_ms,
         }
     }

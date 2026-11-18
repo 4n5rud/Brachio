@@ -25,6 +25,7 @@ describe("toTaskRow", () => {
       agentKind: "codex",
       createdAtMs: 5,
       archivedAtMs: null,
+      agentSessionId: null,
     });
     expect(row.agent).toBe("codex");
     expect(row.worktreePath).toBe("/repo.worktrees/fix-login-abc123");
