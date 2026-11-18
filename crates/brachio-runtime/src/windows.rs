@@ -22,6 +22,7 @@ use widestring::U16CString;
 
 use crate::output::{OutputHistory, Page};
 use crate::screen::{TerminalScreen, COLS, ROWS};
+use std::num::NonZeroU16;
 
 const VERSION: u8 = 1;
 const MAX_MESSAGE: u64 = 64 * 1024;
@@ -64,6 +65,8 @@ enum Action {
     Snapshot { key: String },
     /// Send a settled normal-screen frame, then follow future output.
     FollowFrame { key: String },
+    /// Resize the shell and the frame that snapshots describe.
+    Resize { key: String, rows: u16, cols: u16 },
     /// Write text to the shell.
     Write { key: String, text: String },
     /// Stop one shell explicitly.
@@ -197,6 +200,14 @@ impl Runtime {
             Action::Follow { .. } | Action::FollowFrame { .. } => {
                 bail!("follow requires a streaming response");
             }
+            Action::Resize { key, rows, cols } => {
+                let session = get(&sessions, &key)?;
+                let rows = NonZeroU16::new(rows).context("rows must be at least 1")?;
+                let cols = NonZeroU16::new(cols).context("columns must be at least 1")?;
+                self.manager.resize(session.id, rows.get(), cols.get())?;
+                lock(&session.output)?.screen.resize(rows, cols);
+                session.describe(None)
+            }
             Action::Write { key, text } => {
                 let session = get(&sessions, &key)?;
                 self.manager.write(session.id, text.as_bytes())?;
@@ -292,8 +303,8 @@ impl Session {
             screen: ScreenSnapshot {
                 ansi: frame.ansi,
                 cursor: frame.cursor,
-                rows: ROWS.get(),
-                cols: COLS.get(),
+                rows: frame.rows,
+                cols: frame.cols,
                 alternate_screen: frame.alternate_screen,
                 resume_offset,
             },
