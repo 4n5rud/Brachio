@@ -473,6 +473,7 @@ dependencies = [
  "tokio",
  "uuid",
  "vt100",
+ "vte",
  "widestring",
 ]
 
