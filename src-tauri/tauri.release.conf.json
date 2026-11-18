@@ -1,0 +1,8 @@
+{
+  "build": {
+    "beforeBuildCommand": "node scripts/stage-sidecars.mjs && pnpm --dir ui build"
+  },
+  "bundle": {
+    "externalBin": ["sidecars/brachio-runtime", "sidecars/brachio"]
+  }
+}
