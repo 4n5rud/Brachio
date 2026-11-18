@@ -15,6 +15,8 @@ interface Comment {
   body: string;
   url?: string;
   author?: { login: string } | null;
+  path?: string;
+  line?: number | null;
 }
 
 interface Feedback {
@@ -22,6 +24,8 @@ interface Feedback {
   statusCheckRollup: Check[] | null;
   reviews: Comment[];
   comments: Comment[];
+  inlineComments: Comment[];
+  inlineError: string | null;
 }
 
 const failed = new Set(["FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
@@ -31,10 +35,12 @@ export function PullRequestFeedback(props: { taskId: string; onDraft: (text: str
   const [busy, setBusy] = createSignal(false);
   const [loaded, setLoaded] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [inlineError, setInlineError] = createSignal<string | null>(null);
 
   const load = async () => {
     setBusy(true);
     setError("");
+    setInlineError(null);
     setItems([]);
     setLoaded(false);
     try {
@@ -46,13 +52,16 @@ export function PullRequestFeedback(props: { taskId: string; onDraft: (text: str
           const url = check.detailsUrl || check.targetUrl || feedback.url;
           return { label: name, text: `PR check failed: ${name} (${check.conclusion ?? check.state}) ${url}` };
         });
-      const comments = [...feedback.reviews, ...feedback.comments]
+      const comments = [...feedback.reviews, ...feedback.comments, ...feedback.inlineComments]
         .filter((comment) => comment.body.trim())
         .map((comment) => {
           const author = comment.author?.login ?? t("prFeedback.comment");
-          return { label: author, text: `PR feedback from ${author} (${comment.url || feedback.url}): ${comment.body}` };
+          const location = comment.path ? [comment.path, comment.line].filter(Boolean).join(":") : "";
+          const label = location ? `${author} · ${location}` : author;
+          return { label, text: `PR feedback from ${label} (${comment.url || feedback.url}): ${comment.body}` };
         });
       setItems([...checks, ...comments]);
+      setInlineError(feedback.inlineError);
       setLoaded(true);
     } catch (failure) {
       setError(String(failure));
@@ -91,6 +100,7 @@ export function PullRequestFeedback(props: { taskId: string; onDraft: (text: str
         </Show>
       </Show>
       <Show when={error()}><p role="alert">{error()}</p></Show>
+      <Show when={inlineError()}><p role="status">{t("prFeedback.inlineUnavailable")} {inlineError()}</p></Show>
     </div>
   );
 }

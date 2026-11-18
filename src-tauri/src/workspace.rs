@@ -479,10 +479,65 @@ pub async fn task_pr_feedback(
         if !output.status.success() {
             return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
         }
-        serde_json::from_slice(&output.stdout).map_err(to_text)
+        let mut feedback: serde_json::Value =
+            serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        let (inline_comments, inline_error) =
+            match read_inline_reviews(&task.worktree_path, &feedback) {
+                Ok(comments) => (comments, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
+        feedback["inlineComments"] = serde_json::json!(inline_comments);
+        feedback["inlineError"] = serde_json::json!(inline_error);
+        Ok(feedback)
     })
     .await
     .map_err(to_text)?
+}
+
+fn read_inline_reviews(
+    worktree: &Path,
+    feedback: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>, String> {
+    let url = feedback["url"].as_str().unwrap_or_default();
+    let parts: Vec<_> = url
+        .strip_prefix("https://")
+        .unwrap_or_default()
+        .split('/')
+        .collect();
+    let [host, owner, repo, "pull", number] = parts.as_slice() else {
+        return Err("Could not identify the repository for inline reviews.".to_owned());
+    };
+    let endpoint = format!("repos/{owner}/{repo}/pulls/{number}/comments");
+    let output = std::process::Command::new("gh")
+        .current_dir(worktree)
+        .args([
+            "api",
+            "--hostname",
+            host,
+            "--paginate",
+            "--slurp",
+            &endpoint,
+        ])
+        .output()
+        .map_err(to_text)?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    let pages: Vec<Vec<serde_json::Value>> =
+        serde_json::from_slice(&output.stdout).map_err(to_text)?;
+    Ok(pages
+        .into_iter()
+        .flatten()
+        .map(|comment| {
+            serde_json::json!({
+                "body": comment["body"],
+                "url": comment["html_url"],
+                "author": comment["user"],
+                "path": comment["path"],
+                "line": comment["line"].as_u64().or_else(|| comment["original_line"].as_u64()),
+            })
+        })
+        .collect())
 }
 
 /// Errors cross the IPC boundary as display strings.

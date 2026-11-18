@@ -28,6 +28,7 @@ export const ko: Messages = {
   "prFeedback.empty": "실패한 검사나 리뷰 피드백이 없습니다.",
   "prFeedback.check": "검사",
   "prFeedback.comment": "리뷰어",
+  "prFeedback.inlineUnavailable": "인라인 리뷰를 불러오지 못했습니다.",
   "activity.empty": "이번 세션의 활동이 아직 없습니다.",
   "titlebar.settings": "설정",
 

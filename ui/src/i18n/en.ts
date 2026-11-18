@@ -26,6 +26,7 @@ export const en = {
   "prFeedback.empty": "No failed checks or review feedback.",
   "prFeedback.check": "Check",
   "prFeedback.comment": "Reviewer",
+  "prFeedback.inlineUnavailable": "Could not load inline reviews.",
   "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 
