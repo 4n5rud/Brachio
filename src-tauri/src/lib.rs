@@ -69,6 +69,41 @@ fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Opens a loopback development URL in the system browser.
+#[tauri::command]
+async fn open_local_port(port: std::num::NonZeroU16, secure: bool) -> Result<(), String> {
+    let scheme = if secure { "https" } else { "http" };
+    let url = format!("{scheme}://127.0.0.1:{port}/");
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            use std::os::windows::process::CommandExt;
+
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut command = std::process::Command::new("cmd.exe");
+            command
+                .creation_flags(CREATE_NO_WINDOW)
+                .args(["/d", "/c", "start", ""]);
+            command
+        };
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("open");
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let mut command = std::process::Command::new("xdg-open");
+        let status = command
+            .arg(url)
+            .status()
+            .map_err(|error| error.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("Could not open the default browser ({status})."))
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Builds and runs the Tauri app.
 ///
 /// # Panics
@@ -114,6 +149,7 @@ pub fn run() {
             workspace::task_merge_preview,
             workspace::task_pr_feedback,
             workspace::task_git_action,
+            open_local_port,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Brachio");
