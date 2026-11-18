@@ -1,60 +1,152 @@
 /*
- * Design tokens. Screens use only these variables, never raw colors or sizes.
- * Values are a first pass; the design system work in M2 replaces them.
+ * Design tokens. Screens and components use only these variables, never raw
+ * colors or sizes. Source of truth: the UI mockup (docs link in README).
+ *
+ * Dark is the base theme. Light applies when the OS asks for it and the user
+ * has not forced dark, or when the user forces light.
  */
 :root {
-  --color-bg: #f7f8fa;
-  --color-surface: #ffffff;
-  --color-surface-raised: #eef1f5;
-  --color-border: #dde2ea;
-  --color-text: #111827;
-  --color-text-muted: #5b6474;
-  --color-accent: #0e9f8e;
-  --color-accent-contrast: #ffffff;
-  --color-status-working: #2563eb;
-  --color-status-blocked: #d97706;
-  --color-status-idle: #059669;
-  --color-status-error: #dc2626;
-  --color-status-unknown: #6b7280;
+  /* Surfaces, from the brand charcoal #1F1F24 */
+  --color-canvas: #141418;
+  --color-panel: #1b1b20;
+  --color-raised: #232329;
+  --color-hover: #2a2a31;
+  --color-press: #31313a;
+  --color-line: #2e2e36;
+  --color-line-strong: #3d3d47;
 
-  --font-sans: "Pretendard", "Inter", system-ui, sans-serif;
+  /* Text */
+  --color-text: #ececf1;
+  --color-text-2: #b4b4bf;
+  --color-text-3: #9d9daa;
+
+  /* Brand */
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-accent-text: #98e0bf;
+  --color-focus: #98e0bf;
+
+  /* Status. Always paired with a glyph shape and a text label. */
+  --color-status-working: #8db2ff;
+  --color-status-blocked: #f2b65a;
+  --color-status-ready: #98e0bf;
+  --color-status-error: #ff8080;
+  --color-status-neutral: #9d9daa;
+
+  /* Diff */
+  --color-add: #7fd8a6;
+  --color-del: #ff8f8f;
+  --color-add-bg: rgb(127 216 166 / 9%);
+  --color-del-bg: rgb(255 128 128 / 9%);
+
+  --color-danger: #ff8080;
+  --color-danger-ink: #2a0b0b;
+  --color-badge-ink: #1b1404;
+  --color-term-bg: #141418;
+  --color-term-text: #d9d9e0;
+  --color-scrim: rgb(8 8 10 / 62%);
+  --shadow-overlay: 0 16px 48px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 4%);
+
+  --font-sans: "Pretendard Variable", "Pretendard", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, monospace;
-  --text-xs: 11px;
+
+  /* Type. Readability first: nothing in the UI goes below 12px. */
+  --text-xs: 12px;
   --text-sm: 13px;
   --text-md: 14px;
-  --text-lg: 16px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-term: 13px;
+  --leading: 1.5;
 
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
+  --space-8: 32px;
 
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 10px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+
+  /* Fixed chrome sizes */
+  --size-titlebar: 40px;
+  --size-statusbar: 24px;
+  --size-row: 28px;
+  --size-tabs: 34px;
+  --size-task-header: 60px;
+  --size-sidebar: 288px;
+  --size-inspector: 360px;
+
   --duration-fast: 120ms;
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --color-bg: #0b0f14;
-    --color-surface: #11161d;
-    --color-surface-raised: #18202a;
-    --color-border: #242e3a;
-    --color-text: #e6e9ef;
-    --color-text-muted: #8b95a5;
-    --color-accent: #2dd4bf;
-    --color-accent-contrast: #062925;
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --color-canvas: #f1f1f4;
+    --color-panel: #ffffff;
+    --color-raised: #f5f5f8;
+    --color-hover: #ebebf0;
+    --color-press: #e2e2e9;
+    --color-line: #e2e2e8;
+    --color-line-strong: #cdcdd6;
+    --color-text: #1f1f24;
+    --color-text-2: #4a4a55;
+    --color-text-3: #5c5c69;
+    --color-accent-text: #1c7a52;
+    --color-focus: #1c7a52;
+    --color-status-working: #2d5fd3;
+    --color-status-blocked: #9a5b00;
+    --color-status-ready: #1c7a52;
+    --color-status-error: #c42f2f;
+    --color-status-neutral: #5c5c69;
+    --color-add: #1c7a52;
+    --color-del: #c42f2f;
+    --color-add-bg: rgb(28 122 82 / 8%);
+    --color-del-bg: rgb(196 47 47 / 7%);
+    --color-danger: #c42f2f;
+    --color-danger-ink: #ffffff;
+    --color-badge-ink: #ffffff;
+    --color-term-bg: #fafafc;
+    --color-term-text: #2a2a31;
+    --color-scrim: rgb(31 31 36 / 36%);
+    --shadow-overlay: 0 16px 48px rgb(31 31 36 / 18%), 0 0 0 1px rgb(31 31 36 / 6%);
+    color-scheme: light;
   }
 }
 
-:root[data-theme="dark"] {
-  --color-bg: #0b0f14;
-  --color-surface: #11161d;
-  --color-surface-raised: #18202a;
-  --color-border: #242e3a;
-  --color-text: #e6e9ef;
-  --color-text-muted: #8b95a5;
-  --color-accent: #2dd4bf;
-  --color-accent-contrast: #062925;
+:root[data-theme="light"] {
+  --color-canvas: #f1f1f4;
+  --color-panel: #ffffff;
+  --color-raised: #f5f5f8;
+  --color-hover: #ebebf0;
+  --color-press: #e2e2e9;
+  --color-line: #e2e2e8;
+  --color-line-strong: #cdcdd6;
+  --color-text: #1f1f24;
+  --color-text-2: #4a4a55;
+  --color-text-3: #5c5c69;
+  --color-accent-text: #1c7a52;
+  --color-focus: #1c7a52;
+  --color-status-working: #2d5fd3;
+  --color-status-blocked: #9a5b00;
+  --color-status-ready: #1c7a52;
+  --color-status-error: #c42f2f;
+  --color-status-neutral: #5c5c69;
+  --color-add: #1c7a52;
+  --color-del: #c42f2f;
+  --color-add-bg: rgb(28 122 82 / 8%);
+  --color-del-bg: rgb(196 47 47 / 7%);
+  --color-danger: #c42f2f;
+  --color-danger-ink: #ffffff;
+  --color-badge-ink: #ffffff;
+  --color-term-bg: #fafafc;
+  --color-term-text: #2a2a31;
+  --color-scrim: rgb(31 31 36 / 36%);
+  --shadow-overlay: 0 16px 48px rgb(31 31 36 / 18%), 0 0 0 1px rgb(31 31 36 / 6%);
+  color-scheme: light;
 }
