@@ -62,6 +62,8 @@ enum Action {
     Follow { key: String, after: u64 },
     /// Capture the current visible frame of a running shell.
     Snapshot { key: String },
+    /// Send a settled normal-screen frame, then follow future output.
+    FollowFrame { key: String },
     /// Write text to the shell.
     Write { key: String, text: String },
     /// Stop one shell explicitly.
@@ -136,6 +138,7 @@ struct ScreenSnapshot {
     rows: u16,
     cols: u16,
     alternate_screen: bool,
+    resume_offset: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -191,7 +194,9 @@ impl Runtime {
             Action::Inspect { key } => get(&sessions, &key)?.describe(None),
             Action::Read { key, after } => get(&sessions, &key)?.describe(Some(after)),
             Action::Snapshot { key } => get(&sessions, &key)?.snapshot(),
-            Action::Follow { .. } => bail!("follow requires a streaming response"),
+            Action::Follow { .. } | Action::FollowFrame { .. } => {
+                bail!("follow requires a streaming response");
+            }
             Action::Write { key, text } => {
                 let session = get(&sessions, &key)?;
                 self.manager.write(session.id, text.as_bytes())?;
@@ -280,6 +285,8 @@ impl Session {
     fn snapshot(&self) -> Result<ResponseResult> {
         let state = lock(&self.output)?;
         let frame = state.screen.frame();
+        let resume_offset =
+            (frame.at_boundary && !frame.alternate_screen).then(|| state.history.end());
         Ok(ResponseResult::Snapshot {
             session: self.info(&state),
             screen: ScreenSnapshot {
@@ -288,6 +295,7 @@ impl Session {
                 rows: ROWS.get(),
                 cols: COLS.get(),
                 alternate_screen: frame.alternate_screen,
+                resume_offset,
             },
         })
     }
@@ -411,6 +419,28 @@ async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
                 Err(error) => Err(error),
             }
         }
+        Ok(Request {
+            version: VERSION,
+            action: Action::FollowFrame { key },
+        }) => {
+            let session =
+                lock(&runtime.sessions).and_then(|sessions| get(&sessions, &key).cloned());
+            match session {
+                Ok(session) => {
+                    let snapshot = session.snapshot()?;
+                    if let ResponseResult::Snapshot { screen, .. } = &snapshot {
+                        if let Some(offset) = screen.resume_offset {
+                            send_response(&mut stream, &runtime.instance, Ok(snapshot)).await?;
+                            return follow(&mut stream, &runtime.instance, session, offset).await;
+                        }
+                    }
+                    Err(anyhow!(
+                        "terminal frame is not at a supported replay boundary"
+                    ))
+                }
+                Err(error) => Err(error),
+            }
+        }
         Ok(request) => {
             tokio::time::timeout(
                 IO_TIMEOUT,
@@ -491,7 +521,7 @@ async fn follow(
 }
 
 async fn request(mut stream: Stream, action: Action) -> Result<()> {
-    let following = matches!(action, Action::Follow { .. });
+    let following = matches!(action, Action::Follow { .. } | Action::FollowFrame { .. });
     tokio::time::timeout(
         IO_TIMEOUT,
         write_message(
