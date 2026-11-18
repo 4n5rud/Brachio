@@ -9,7 +9,7 @@ import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
 import { TaskView } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
-import { WorkspaceDialog, type Theme } from "./components/WorkspaceDialog";
+import { WorkspaceDialog, type TaskActivity, type Theme } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
@@ -32,6 +32,8 @@ interface LiveStatus {
   at: number;
 }
 
+const ACTIVITY_LIMIT = 100;
+
 export function App() {
   const [now, setNow] = createSignal(Date.now());
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
@@ -50,7 +52,9 @@ export function App() {
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [archiving, setArchiving] = createSignal(false);
-  const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived">();
+  const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived" | "activity">();
+  const [activity, setActivity] = createSignal<readonly TaskActivity[]>([]);
+  const activeTaskIds = createMemo(() => new Set(tasks().map((task) => task.id)));
   const savedTheme = localStorage.getItem("brachio.theme");
   const [theme, setTheme] = createSignal<Theme>(
     savedTheme === "light" || savedTheme === "dark" ? savedTheme : "system",
@@ -115,10 +119,16 @@ export function App() {
 
   const onStatus = (taskId: string, status: AgentState, message: string | null) => {
     const previous = live().get(taskId)?.status ?? { state: "unknown" };
-    setLive((map) => new Map(map).set(taskId, { status, message, at: Date.now() }));
+    const at = Date.now();
+    setLive((map) => new Map(map).set(taskId, { status, message, at }));
     const key = notificationKey(previous, status);
-    const task = tasks().find((row) => row.id === taskId);
-    if (key && task && notifications()) notifyIfAway(key, task, message).catch(report);
+    const task = findTask(taskId);
+    if (!key || !task) return;
+    setActivity((items) => [
+      { taskId, title: task.title, key, detail: message, at },
+      ...items.slice(0, ACTIVITY_LIMIT - 1),
+    ]);
+    if (notifications()) notifyIfAway(key, task, message).catch(report);
   };
 
   const load = async () => {
@@ -288,6 +298,7 @@ export function App() {
         view={view()}
         onView={setView}
         needsYou={needsYou()}
+        onActivity={() => setWorkspacePanel("activity")}
         onQuickOpen={() => setWorkspacePanel("quickOpen")}
         onSettings={() => setWorkspacePanel("settings")}
       />
@@ -338,6 +349,7 @@ export function App() {
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} theme={theme()}
+          activity={activity()} now={now()} activeTaskIds={activeTaskIds()}
           archived={archived()} onRestore={restore} onDelete={deleteArchived}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
