@@ -54,6 +54,7 @@ pub fn run() {
             workspace::task_restore,
             workspace::task_delete_preview,
             workspace::task_delete,
+            workspace::task_files,
             workspace::task_changes,
             workspace::task_git_action,
         ])

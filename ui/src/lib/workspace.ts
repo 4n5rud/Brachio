@@ -48,6 +48,7 @@ export interface TaskLoss {
   unpushedCommits: number;
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
+export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });
 export const deleteTask = (id: string) => invoke<void>("task_delete", { id });
 
 interface TaskChanges {

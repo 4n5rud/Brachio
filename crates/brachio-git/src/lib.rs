@@ -2,6 +2,7 @@
 //! argument vector.
 
 mod conflict_report;
+mod file_list;
 mod git;
 mod naming;
 mod port_pool;
@@ -10,6 +11,7 @@ mod repo_info;
 mod worktree;
 
 pub use conflict_report::{predict_conflict, ConflictReport};
+pub use file_list::{list_files, MAX_FILES};
 pub use git::{Git, GitError};
 pub use naming::{branch_name, slugify};
 pub use port_pool::{PortBlock, PortPool};

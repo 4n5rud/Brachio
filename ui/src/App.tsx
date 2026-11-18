@@ -13,10 +13,11 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { notificationKey, notifyIfAway } from "./lib/notify";
+import type { CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
-import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTasks,
+import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, restoreTask,
   toTaskRow, type RepoRecord } from "./lib/workspace";
 
@@ -50,6 +51,28 @@ export function App() {
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [archiving, setArchiving] = createSignal(false);
   const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived">();
+  // Files of the selected task, read each time quick open opens so new files are found.
+  const [quickFiles, setQuickFiles] = createSignal<readonly string[]>([]);
+  createEffect(() => {
+    const task = selected();
+    if (workspacePanel() !== "quickOpen" || !task || !inTauri || !task.worktreePath) {
+      setQuickFiles([]);
+      return;
+    }
+    listTaskFiles(task.id).then(setQuickFiles).catch(() => setQuickFiles([]));
+  });
+  const runCommand = (id: CommandId) => {
+    if (id === "newTask") {
+      setWorkspacePanel(undefined);
+      if (canCreate()) setDialogOpen(true);
+    } else {
+      setWorkspacePanel(id);
+    }
+  };
+  const insertFile = (path: string) => {
+    const task = selected();
+    if (task) void draftComment(task.id, `@${path} `);
+  };
   const savedTheme = localStorage.getItem("brachio.theme");
   const [theme, setTheme] = createSignal<Theme>(
     savedTheme === "light" || savedTheme === "dark" ? savedTheme : "system",
@@ -330,6 +353,8 @@ export function App() {
           archived={archived()} onRestore={restore} onDelete={deleteArchived}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
+          files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
+          onCommand={runCommand}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
       </Show>
       <Show when={dialogOpen() && repo()}>

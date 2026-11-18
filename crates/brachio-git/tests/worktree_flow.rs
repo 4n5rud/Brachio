@@ -144,3 +144,34 @@ fn a_worktree_folder_that_was_already_deleted_does_not_block_cleanup() {
         .expect("list branches");
     assert!(branches.is_empty());
 }
+
+#[test]
+fn listing_files_includes_untracked_ones_and_skips_ignored_ones() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    fs::write(
+        repo.path().join(".gitignore"),
+        "target/
+",
+    )
+    .expect("write .gitignore");
+    run(&git, &["add", ".gitignore"]);
+    run(&git, &["commit", "-q", "-m", "ignore target"]);
+    fs::create_dir_all(repo.path().join("src/deep")).expect("make folders");
+    fs::write(
+        repo.path().join("src/deep/new file.rs"),
+        "x
+",
+    )
+    .expect("write untracked file");
+    fs::create_dir_all(repo.path().join("target")).expect("make target");
+    fs::write(
+        repo.path().join("target/out.bin"),
+        "x
+",
+    )
+    .expect("write ignored file");
+
+    let files = brachio_git::list_files(&git).expect("list files");
+    assert_eq!(files, [".gitignore", "a.txt", "src/deep/new file.rs"]);
+}
