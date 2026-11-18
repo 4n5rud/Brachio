@@ -36,6 +36,42 @@ impl Installed {
     pub fn resolve(&self, launch: &Launch) -> ResolvedCommand {
         ResolvedCommand::new(&self.path, &launch.args)
     }
+
+    /// The interactive agent, with a first prompt when it can be passed
+    /// safely. Through `cmd.exe`, text with shell characters cannot, so the
+    /// agent then starts without it and the caller should type it in.
+    #[must_use]
+    pub fn resolve_interactive(&self, prompt: Option<&str>) -> (ResolvedCommand, PromptDelivery) {
+        let Some(prompt) = prompt.filter(|text| !text.trim().is_empty()) else {
+            return (self.resolve(&self.kind.interactive()), PromptDelivery::None);
+        };
+        if is_batch_file(&self.path) && !is_safe_for_cmd(prompt) {
+            return (
+                self.resolve(&self.kind.interactive()),
+                PromptDelivery::TypeIn,
+            );
+        }
+        let launch = self.kind.interactive_with_prompt(prompt);
+        (self.resolve(&launch), PromptDelivery::Argument)
+    }
+}
+
+/// How the first prompt reaches the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptDelivery {
+    /// There was no prompt.
+    None,
+    /// The prompt is a command-line argument.
+    Argument,
+    /// The caller must type the prompt into the terminal.
+    TypeIn,
+}
+
+/// True when `cmd.exe` passes `text` through unchanged inside double quotes.
+fn is_safe_for_cmd(text: &str) -> bool {
+    const SPECIAL: &[char] = &['"', '%', '^', '&', '|', '<', '>', '!', '\n', '\r'];
+    !text.contains(SPECIAL)
 }
 
 impl ResolvedCommand {
@@ -184,6 +220,22 @@ mod tests {
         let path_var = env::join_paths([empty.path()]).expect("join PATH");
         assert_eq!(find_on_path("codex", Some(&path_var), None), None);
         assert_eq!(find_on_path("codex", None, None), None);
+    }
+
+    #[test]
+    fn prompts_with_shell_characters_are_typed_in_through_cmd() {
+        let installed = Installed {
+            kind: AgentKind::ClaudeCode,
+            path: PathBuf::from("C:/npm/claude.cmd"),
+            version: None,
+        };
+
+        let (_, plain) = installed.resolve_interactive(Some("add a test"));
+        let (command, risky) = installed.resolve_interactive(Some("fix it & push"));
+
+        assert_eq!(plain, PromptDelivery::Argument);
+        assert_eq!(risky, PromptDelivery::TypeIn);
+        assert_eq!(command.args, vec!["/d", "/c", "C:/npm/claude.cmd"]);
     }
 
     #[test]

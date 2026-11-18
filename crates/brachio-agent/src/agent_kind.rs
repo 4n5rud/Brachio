@@ -43,6 +43,15 @@ impl AgentKind {
         }
     }
 
+    /// Interactive TUI that starts working on `prompt` right away.
+    #[must_use]
+    pub fn interactive_with_prompt(self, prompt: &str) -> Launch {
+        Launch {
+            program: self.program(),
+            args: vec![prompt.to_owned()],
+        }
+    }
+
     /// Headless worker that emits one JSON event per line.
     #[must_use]
     pub fn structured(self, prompt: &str) -> Launch {
@@ -65,6 +74,12 @@ mod tests {
     fn prompt_is_one_argument_not_shell_text() {
         let launch = AgentKind::Codex.structured("fix it; rm -rf /");
         assert_eq!(launch.args, vec!["exec", "--json", "fix it; rm -rf /"]);
+    }
+
+    #[test]
+    fn interactive_prompt_is_the_only_argument() {
+        let launch = AgentKind::ClaudeCode.interactive_with_prompt("add a test");
+        assert_eq!(launch.args, vec!["add a test"]);
     }
 
     #[test]

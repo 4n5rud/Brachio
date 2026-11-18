@@ -3,7 +3,7 @@ import { NECK } from "./BrandMark";
 import { Icon } from "./Icon";
 
 /** First-run screen. The only place the mascot appears at full size. */
-export function EmptyRepo() {
+export function EmptyRepo(props: { onAdd?: () => void }) {
   return (
     <section class="empty-state">
       <div class="peek">
@@ -15,7 +15,7 @@ export function EmptyRepo() {
       </div>
       <h1>{t("empty.repo.title")}</h1>
       <p>{t("empty.repo.body")}</p>
-      <button class="button button-primary" type="button">
+      <button class="button button-primary" type="button" onClick={() => props.onAdd?.()}>
         <Icon name="folder" />
         {t("empty.repo.add")}
       </button>

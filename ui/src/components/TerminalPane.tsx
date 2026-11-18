@@ -10,7 +10,15 @@ export interface TerminalSession {
   /** `null` opens the user's shell. */
   agent: AgentKind | null;
   cwd: string;
+  /** First prompt for the agent, sent once when the session starts. */
+  prompt?: string;
 }
+
+/**
+ * When the prompt has to be typed in, wait this long after the agent's first
+ * output so its input box is ready.
+ */
+const TYPE_IN_DELAY_MS = 1_000;
 
 /** Lines kept above the screen. Each line costs memory per terminal, so keep it bounded. */
 const SCROLLBACK_LINES = 5_000;
@@ -53,11 +61,19 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
     let handle: TerminalHandle | null = null;
     let disposed = false;
     const session = props.session;
+    let typeInPrompt: string | null = null;
     if (session) {
-      const options = { ...session, rows: term.rows, cols: term.cols };
+      const options = {
+        agent: session.agent,
+        cwd: session.cwd,
+        prompt: session.prompt ?? null,
+        rows: term.rows,
+        cols: term.cols,
+      };
       openTerminal(options, (message) => {
         if (message.type === "output") {
           term.write(message.bytes);
+          sendTypeInPrompt();
           return;
         }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
@@ -65,10 +81,21 @@ export function TerminalPane(props: { session?: TerminalSession; onExit?: (code:
         props.onExit?.(message.exitCode);
       })
         .then((opened) => {
-          if (disposed) void opened.close();
-          else handle = opened;
+          if (disposed) {
+            void opened.close();
+            return;
+          }
+          handle = opened;
+          if (opened.promptDelivery === "type_in") typeInPrompt = session.prompt ?? null;
         })
         .catch((error: unknown) => term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`));
+    }
+
+    function sendTypeInPrompt() {
+      const prompt = typeInPrompt;
+      if (prompt === null) return;
+      typeInPrompt = null;
+      setTimeout(() => void handle?.write(`${prompt}\r`), TYPE_IN_DELAY_MS);
     }
 
     const input = term.onData((data) => void handle?.write(data));

@@ -11,10 +11,12 @@ import { CORE_AGENT } from "../lib/terminal";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
 /** Main area for one task: header, tabs, the agent terminal, approval bar. */
-export function TaskView(props: { task: TaskRow }) {
+export function TaskView(props: { task: TaskRow; takePrompt?: (taskId: string) => string | undefined }) {
+  // Read once per mount: the first prompt goes only to the first session.
   const session = (): TerminalSession | undefined => {
     const cwd = props.task.worktreePath;
-    return cwd === undefined ? undefined : { agent: CORE_AGENT[props.task.agent], cwd };
+    if (cwd === undefined) return undefined;
+    return { agent: CORE_AGENT[props.task.agent], cwd, prompt: props.takePrompt?.(props.task.id) };
   };
   return (
     <section class="task-view">
