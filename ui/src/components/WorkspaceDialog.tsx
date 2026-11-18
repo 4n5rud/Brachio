@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch, createMemo, createSignal, onMount } from "solid-js";
 import { locale, setLocale, t, type MessageKey } from "../i18n";
+import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
 import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
 import type { TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
@@ -7,6 +8,13 @@ import { AgentSettings } from "./settings/AgentSettings";
 import { TerminalSettings } from "./settings/TerminalSettings";
 
 export type Theme = "system" | "light" | "dark";
+
+const COMMANDS: readonly CommandId[] = ["newTask", "settings", "archived"];
+const COMMAND_LABEL: Record<CommandId, () => string> = {
+  newTask: () => t("quickOpen.cmd.newTask"),
+  settings: () => t("quickOpen.cmd.settings"),
+  archived: () => t("quickOpen.cmd.archived"),
+};
 
 export interface TaskActivity {
   taskId: string;
@@ -31,6 +39,10 @@ export function WorkspaceDialog(props: {
   onTheme: (theme: Theme) => void;
   onNotifications: (enabled: boolean) => void;
   onOpen: (id: string) => void;
+  /** Files of the selected task, offered when the query is two characters or more. */
+  files?: readonly string[];
+  onInsertFile?: (path: string) => void;
+  onCommand?: (id: CommandId) => void;
   onClose: () => void;
   repos: readonly { id: string; name: string }[];
 }) {
@@ -40,12 +52,19 @@ export function WorkspaceDialog(props: {
   const [restoreError, setRestoreError] = createSignal("");
   const repoNames = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const repoName = (task: TaskRow) => task.repoId ? repoNames().get(task.repoId) : undefined;
-  const matches = createMemo(() => {
-    const terms = query().trim().toLowerCase().split(/\s+/);
-    return props.tasks.filter((task) => {
-      const searchable = [task.title, task.branch, repoName(task), task.worktreePath].join(" ").toLowerCase();
-      return terms.every((term) => searchable.includes(term));
-    });
+  const entries = createMemo<QuickEntry[]>(() => {
+    const text = query();
+    const tasks = props.tasks
+      .filter((task) => matchesAll([task.title, task.branch, repoName(task), task.worktreePath].filter(Boolean).join(" "), text))
+      .map((task): QuickEntry => ({ kind: "task", task }));
+    const commands = props.onCommand && text.trim() !== ""
+      ? COMMANDS.filter((id) => matchesAll(COMMAND_LABEL[id](), text))
+          .map((id): QuickEntry => ({ kind: "command", id }))
+      : [];
+    const files = props.onInsertFile
+      ? rankFiles(props.files ?? [], text).map((path): QuickEntry => ({ kind: "file", path }))
+      : [];
+    return [...tasks, ...commands, ...files];
   });
   let dialog!: HTMLDialogElement;
   onMount(() => dialog.showModal());
@@ -53,6 +72,17 @@ export function WorkspaceDialog(props: {
   const choose = (id: string) => {
     props.onOpen(id);
     dialog.close();
+  };
+  const activate = (entry: QuickEntry) => {
+    if (entry.kind === "task") {
+      choose(entry.task.id);
+    } else if (entry.kind === "command") {
+      // Commands that open another panel reuse this dialog, so it stays open.
+      props.onCommand?.(entry.id);
+    } else {
+      props.onInsertFile?.(entry.path);
+      dialog.close();
+    }
   };
   const restore = async (id: string) => {
     if (restoring()) return;
@@ -118,12 +148,12 @@ export function WorkspaceDialog(props: {
               onInput={(event) => { setQuery(event.currentTarget.value); setHighlight(0); }}
               onKeyDown={(event) => {
                 if (event.isComposing) return;
-                const count = matches().length;
+                const count = entries().length;
                 if (!count) return;
                 if (event.key === "Enter") {
                   event.preventDefault();
-                  const task = matches()[highlight()] ?? matches()[0];
-                  if (task) choose(task.id);
+                  const entry = entries()[highlight()] ?? entries()[0];
+                  if (entry) activate(entry);
                 } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
                   event.preventDefault();
                   const step = event.key === "ArrowDown" ? 1 : -1;
@@ -132,13 +162,14 @@ export function WorkspaceDialog(props: {
                   dialog.querySelectorAll(".quick-open-result")[next]?.scrollIntoView({ block: "nearest" });
                 }
               }} />
-            <Show when={matches().length > 0} fallback={<p class="muted">{t("quickOpen.empty")}</p>}>
+            <Show when={entries().length > 0} fallback={<p class="muted">{t("quickOpen.empty")}</p>}>
               <div class="quick-open-results">
-                <For each={matches()}>{(task, index) => (
+                <For each={entries()}>{(entry, index) => (
                   <button class="quick-open-result" classList={{ selected: highlight() === index() }}
-                    type="button" onClick={() => choose(task.id)}>
-                    <strong>{task.title}</strong>
-                    <span>{[repoName(task), task.branch].filter(Boolean).join(" · ")}</span>
+                    type="button" onClick={() => activate(entry)}>
+                    {entry.kind === "task" && (<><strong>{entry.task.title}</strong><span>{[repoName(entry.task), entry.task.branch].filter(Boolean).join(" · ")}</span></>)}
+                    {entry.kind === "command" && (<><strong>{COMMAND_LABEL[entry.id]()}</strong><span>{t("quickOpen.command")}</span></>)}
+                    {entry.kind === "file" && (<><strong>{entry.path}</strong><span>{t("quickOpen.file")}</span></>)}
                   </button>
                 )}</For>
               </div>

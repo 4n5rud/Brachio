@@ -166,6 +166,18 @@ pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRec
     TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
 }
 
+/// Lists the files of a task's worktree, tracked and not ignored, for quick open.
+#[tauri::command]
+pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec<String>, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        brachio_git::list_files(&Git::new(&task.worktree_path))
+    })
+    .await
+    .map_err(to_text)?
+    .map_err(to_text)
+}
+
 /// What deleting an archived task would destroy.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
