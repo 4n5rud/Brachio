@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
@@ -26,6 +26,9 @@ export function TaskView(props: {
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
+  /** Setup commands waiting to be typed into the task's shell, which opens beside the agent. */
+  hasSetupInput?: (taskId: string) => boolean;
+  takeSetupInput?: (taskId: string) => string | undefined;
   onArchive?: () => void;
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
@@ -42,6 +45,10 @@ export function TaskView(props: {
       setShells((current) => new Map(current).set(props.task.id, next));
     }
   };
+  createEffect(() => {
+    const id = props.task.id;
+    if (props.hasSetupInput?.(id) && !shells().has(id)) setLayout("split");
+  });
   const closeShell = () => {
     setShells((current) => {
       const next = new Map(current);
@@ -150,7 +157,7 @@ export function TaskView(props: {
                   <Show when={mode() && props.findTask(id)?.worktreePath}>
                     {(cwd) => (
                       <div class="terminal-cell" hidden={mode() === "agent"}>
-                        <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell") }} theme={props.theme}
+                        <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell"), initialInput: props.takeSetupInput?.(id) }} theme={props.theme}
                           active={selected() && mode() !== "agent"} focus={mode() === "shell"} />
                       </div>
                     )}
