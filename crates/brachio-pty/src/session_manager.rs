@@ -5,7 +5,7 @@ use std::fmt;
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -79,7 +79,7 @@ impl SessionManager {
 
         let (chunk_sender, chunk_receiver) = mpsc::channel();
         let status = StatusWatch {
-            session: Arc::clone(&shared),
+            session: Arc::downgrade(&shared),
             sink: Arc::clone(&sink),
             scanner: OscScanner::new(),
         };
@@ -169,7 +169,8 @@ pub(crate) fn lock_session(session: &SharedSession) -> Result<MutexGuard<'_, Pty
 /// follow it. Programs send a device attributes request right after the
 /// query and expect this answer to arrive first.
 struct StatusWatch {
-    session: SharedSession,
+    // The reader must not keep the ConPTY master alive after child exit.
+    session: Weak<Mutex<PtySession>>,
     sink: EventSink,
     scanner: OscScanner,
 }
@@ -183,9 +184,11 @@ impl StatusWatch {
         } = self;
         scanner.feed(bytes, |body| match ProgramStatusMessage::parse(body) {
             Some(ProgramStatusMessage::Query) => {
-                if let Ok(mut session) = lock_session(session) {
-                    // A failed write means the PTY is closing; the exit event follows.
-                    let _ = session.write_input(QUERY_REPLY);
+                if let Some(session) = session.upgrade() {
+                    if let Ok(mut session) = lock_session(&session) {
+                        // A failed write means the PTY is closing; the exit event follows.
+                        let _ = session.write_input(QUERY_REPLY);
+                    }
                 }
             }
             Some(ProgramStatusMessage::Report(status)) => sink(PtyEvent::Status(status)),
@@ -242,6 +245,66 @@ fn flush_until_done(
     }
     if let Some(frame) = batcher.tick(u64::MAX) {
         sink(PtyEvent::Output(frame));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use crate::{PtyEvent, SessionManager, SpawnSpec};
+
+    #[test]
+    fn conpty_reports_output_and_exit_after_cursor_response() {
+        let manager = Arc::new(SessionManager::default());
+        let (sender, receiver) = mpsc::channel();
+        let spec = SpawnSpec {
+            program: "cmd.exe".to_owned(),
+            args: ["/d", "/c", "echo brachio-win-pty"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        };
+        let id = manager
+            .spawn(
+                &spec,
+                Arc::new(move |event| {
+                    let _ = sender.send(event);
+                }),
+            )
+            .expect("start ConPTY child");
+        let end = Instant::now() + Duration::from_secs(10);
+        let mut output = Vec::new();
+        let mut cursor_report_sent = false;
+        while let Some(remaining) = end.checked_duration_since(Instant::now()) {
+            match receiver.recv_timeout(remaining) {
+                Ok(PtyEvent::Output(bytes)) => {
+                    output.extend(bytes);
+                    if !cursor_report_sent && output.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                        manager
+                            .write(id, b"\x1b[1;1R")
+                            .expect("answer cursor request");
+                        cursor_report_sent = true;
+                    }
+                }
+                Ok(PtyEvent::Exit(code)) => {
+                    assert_eq!(code, Some(0));
+                    assert!(String::from_utf8_lossy(&output).contains("brachio-win-pty"));
+                    assert!(manager.ids().expect("list active sessions").is_empty());
+                    return;
+                }
+                Ok(PtyEvent::Status(_)) => {}
+                Err(_) => break,
+            }
+        }
+        let _ = manager.kill(id);
+        panic!("ConPTY child did not report exit");
     }
 }
 

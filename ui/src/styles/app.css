@@ -828,6 +828,41 @@ kbd {
 }
 
 /* New task dialog */
+.view-hidden {
+  display: none;
+}
+.workspace-dialog {
+  margin: auto;
+  color: var(--color-text);
+}
+.workspace-dialog::backdrop {
+  background: rgb(0 0 0 / 54%);
+}
+.quick-open-results {
+  max-height: 19rem;
+  overflow: auto;
+}
+.quick-open-result {
+  display: grid;
+  width: 100%;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.quick-open-result.selected {
+  outline: 1px solid var(--color-line);
+  outline-offset: -1px;
+  background: var(--color-panel);
+}
+.quick-open-result span {
+  color: var(--color-text-2);
+}
+.workspace-shortcuts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2);
+}
 .scrim {
   position: fixed;
   inset: 0;

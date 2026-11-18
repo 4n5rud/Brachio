@@ -7,6 +7,8 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 use brachio_pty::SessionManager;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{App, Manager};
 
 /// The app version, for the about box.
@@ -25,7 +27,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
-        .setup(open_database)
+        .setup(|app| {
+            open_database(app)?;
+            if let Err(error) = install_tray(app) {
+                tracing::warn!(%error, "could not install tray");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             app_version,
             terminal::agents_detect,
@@ -44,6 +52,35 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Brachio");
+}
+
+fn install_tray(app: &App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Brachio", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Brachio", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::new()
+        .tooltip("Brachio")
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let result = window
+                        .show()
+                        .and_then(|()| window.unminimize())
+                        .and_then(|()| window.set_focus());
+                    if let Err(error) = result {
+                        tracing::warn!(%error, "could not show the main window");
+                    }
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
 }
 
 /// Opens `brachio.db` in the app's data folder and makes it app state.

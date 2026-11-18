@@ -64,6 +64,7 @@ const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "
 export function toTaskRow(record: TaskRecord): TaskRow {
   return {
     id: record.id,
+    repoId: record.repoId,
     title: record.title,
     agent: UI_AGENT[record.agentKind ?? "claude_code"],
     branch: record.branch,

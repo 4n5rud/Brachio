@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { Board } from "./components/Board";
 import { EmptyRepo } from "./components/EmptyRepo";
@@ -8,11 +8,12 @@ import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
 import { TaskView } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
-import { t } from "./i18n";
+import { WorkspaceDialog, type Theme } from "./components/WorkspaceDialog";
+import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { notificationKey, notifyIfAway } from "./lib/notify";
-import { isNewTaskShortcut } from "./lib/shortcut";
+import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
 import { addRepo, createTask, listRepos, listTasks, toTaskRow, type RepoRecord } from "./lib/workspace";
@@ -44,6 +45,22 @@ export function App() {
   const [view, setView] = createSignal<View>("tasks");
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings">();
+  const savedTheme = localStorage.getItem("brachio.theme");
+  const [theme, setTheme] = createSignal<Theme>(
+    savedTheme === "light" || savedTheme === "dark" ? savedTheme : "system",
+  );
+  const [notifications, setNotifications] = createSignal(localStorage.getItem("brachio.notifications") !== "off");
+  setLocale(localStorage.getItem("brachio.locale") === "ko" ? "ko" : "en");
+  createEffect(() => {
+    const preference = theme();
+    if (preference === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = preference;
+    localStorage.setItem("brachio.theme", preference);
+    localStorage.setItem("brachio.locale", locale());
+    localStorage.setItem("brachio.notifications", notifications() ? "on" : "off");
+    document.documentElement.lang = locale();
+  });
   const [error, setError] = createSignal<string | null>(null);
   const draftWriters = new Map<string, (text: string) => Promise<boolean>>();
   const registerDraftWriter = (id: string, writer: (text: string) => Promise<boolean>) => {
@@ -53,17 +70,23 @@ export function App() {
     };
   };
 
-  // One repository at a time for now. The title bar switcher picks among them later.
-  const repo = createMemo(() => repos()[0]);
-  const selected = createMemo(() => rows().find((task) => task.id === selectedId()));
+  const [repoId, setRepoId] = createSignal(localStorage.getItem("brachio.repo") ?? "");
+  const repo = createMemo(() => repos().find((item) => item.id === repoId()) ?? repos()[0]);
+  const repoRows = createMemo(() => inTauri ? rows().filter((task) => task.repoId === repo()?.id) : rows());
+  const selected = createMemo(() => repoRows().find((task) => task.id === selectedId()));
+  createEffect(() => {
+    const task = selected();
+    if (task?.repoId) localStorage.setItem(`brachio.task.${task.repoId}`, task.id);
+  });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
+  const displayedTask = createMemo(() => selected() ?? rows().find((task) => openIds().includes(task.id)));
   createEffect(() => {
     const id = selectedId();
     if (id !== undefined && !openIds().includes(id)) setOpenIds((ids) => [...ids, id]);
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
-  const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
+  const needsYou = createMemo(() => repoRows().filter((task) => taskGroup(task.status) === "needs").length);
 
   // First prompts of tasks created in this run. Each is handed to the
   // task's terminal once, then dropped.
@@ -77,6 +100,11 @@ export function App() {
     firstPrompts.delete(taskId);
     return prompt;
   };
+  const draftComment = (id: string, text: string) => {
+    const task = selected();
+    if (task?.id !== id || task.status.state === "blocked") return Promise.resolve(false);
+    return draftWriters.get(id)?.(text) ?? Promise.resolve(false);
+  };
 
   const report = (failure: unknown) => setError(String(failure));
 
@@ -85,14 +113,26 @@ export function App() {
     setLive((map) => new Map(map).set(taskId, { status, message, at: Date.now() }));
     const key = notificationKey(previous, status);
     const task = tasks().find((row) => row.id === taskId);
-    if (key && task) notifyIfAway(key, task.title, message).catch(report);
+    if (key && task && notifications()) notifyIfAway(key, task.title, message).catch(report);
   };
 
   const load = async () => {
     const [storedRepos, storedTasks] = await Promise.all([listRepos(), listTasks()]);
     setRepos(storedRepos);
     setTasks(storedTasks.map(toTaskRow));
-    setSelectedId((current) => current ?? storedTasks[0]?.id);
+    restoreSelection();
+  };
+
+  const restoreSelection = () => {
+    const id = repo()?.id;
+    const saved = id && localStorage.getItem(`brachio.task.${id}`);
+    setSelectedId(repoRows().find((task) => task.id === saved)?.id ?? repoRows()[0]?.id);
+  };
+
+  const switchRepo = (id: string) => {
+    setRepoId(id);
+    localStorage.setItem("brachio.repo", id);
+    restoreSelection();
   };
 
   const chooseRepo = async () => {
@@ -100,6 +140,7 @@ export function App() {
     if (typeof path !== "string") return;
     const added = await addRepo(path);
     setRepos((list) => (list.some((item) => item.id === added.id) ? list : [added, ...list]));
+    switchRepo(added.id);
   };
 
   const create = async (input: NewTaskInput) => {
@@ -127,6 +168,13 @@ export function App() {
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
     const onKey = (event: KeyboardEvent) => {
+      if (event.isComposing || dialogOpen() || workspacePanel()) return;
+      if (isQuickOpenShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setWorkspacePanel("quickOpen");
+        return;
+      }
       if (isNewTaskShortcut(event) && canCreate()) {
         event.preventDefault();
         event.stopPropagation();
@@ -139,6 +187,8 @@ export function App() {
   });
 
   const open = (id: string) => {
+    const taskRepoId = findTask(id)?.repoId;
+    if (taskRepoId && repo()?.id !== taskRepoId) switchRepo(taskRepoId);
     setSelectedId(id);
     setView("tasks");
   };
@@ -156,9 +206,15 @@ export function App() {
     <div class="app-shell">
       <TitleBar
         repo={inTauri ? (repo()?.name ?? "Brachio") : "lumen-web"}
+        repoId={repo()?.id}
+        repos={inTauri && repos().length ? repos() : undefined}
+        onRepo={switchRepo}
+        onAddRepo={() => void chooseRepo().catch(report)}
         view={view()}
         onView={setView}
         needsYou={needsYou()}
+        onQuickOpen={() => setWorkspacePanel("quickOpen")}
+        onSettings={() => setWorkspacePanel("settings")}
       />
       <Show when={error()}>
         {(message) => (
@@ -171,44 +227,44 @@ export function App() {
           </div>
         )}
       </Show>
-      <Switch>
-        <Match when={view() === "board"}>
-          <main class="layout layout-full">
-            <Board tasks={rows()} now={now()} onOpen={open} />
-          </main>
-        </Match>
-        <Match when={view() === "tasks"}>
-          <main class="layout" classList={{ "layout-no-inspector": !selected() }}>
-            <TaskList
-              tasks={rows()}
-              selectedId={selectedId()}
-              onSelect={setSelectedId}
-              onNewTask={canCreate() ? () => setDialogOpen(true) : undefined}
-              now={now()}
+      <Show when={view() === "board"}>
+        <main class="layout layout-full">
+          <Board tasks={repoRows()} now={now()} onOpen={open} />
+        </main>
+      </Show>
+      <main class="layout" classList={{ "layout-no-inspector": !selected(), "view-hidden": view() !== "tasks" }}>
+        <TaskList
+          tasks={repoRows()}
+          selectedId={selectedId()}
+          onSelect={setSelectedId}
+          onNewTask={canCreate() ? () => setDialogOpen(true) : undefined}
+          now={now()}
+        />
+        <Show when={displayedTask()}>
+          {(task) => (
+            <TaskView
+              task={task()}
+              visible={view() === "tasks" && !!selected()}
+              theme={theme()}
+              openIds={openIds()}
+              findTask={findTask}
+              takePrompt={takePrompt}
+              shouldResume={shouldResume}
+              onStatus={onStatus}
+              registerDraftWriter={registerDraftWriter}
             />
-            <Show when={selected()} fallback={noTask()}>
-              {(task) => (
-                <>
-                  <TaskView task={task()} openIds={openIds()} findTask={findTask}
-                    takePrompt={takePrompt}
-                    shouldResume={shouldResume}
-                    onStatus={onStatus}
-                    registerDraftWriter={registerDraftWriter}
-                  />
-                  <Inspector task={task()} onDraft={(id, text) => {
-                    const current = selected();
-                    if (current?.id !== id || current.status.state === "blocked") {
-                      return Promise.resolve(false);
-                    }
-                    return draftWriters.get(id)?.(text) ?? Promise.resolve(false);
-                  }} />
-                </>
-              )}
-            </Show>
-          </main>
-        </Match>
-      </Switch>
+          )}
+        </Show>
+        <Show when={selected()} fallback={noTask()}>
+          {(task) => <Inspector task={task()} onDraft={draftComment} />}
+        </Show>
+      </main>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <Show when={workspacePanel()} keyed>
+        {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} theme={theme()}
+          notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
+          onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
+      </Show>
       <Show when={dialogOpen() && repo()}>
         {(current) => (
           <NewTaskDialog
