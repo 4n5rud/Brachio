@@ -43,6 +43,8 @@ export const en = {
   "approval.deny": "Deny",
   "approval.hint": "You can also answer in the terminal.",
   "terminal.exited": "Process exited",
+  "terminal.reopen": "Reopen session",
+  "terminal.reopening": "Reopening session",
   "terminal.resumeFailed": "Nothing to resume, starting a new conversation",
   "terminal.startFailed": "Could not start the terminal",
 

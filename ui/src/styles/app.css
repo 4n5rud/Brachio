@@ -555,6 +555,19 @@ kbd {
 .terminal-slot[hidden] {
   display: none;
 }
+.terminal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.terminal-content .terminal-host {
+  flex: 1;
+  min-height: 0;
+}
+.terminal-recovery {
+  flex: none;
+  padding-top: var(--space-2);
+}
 .approval {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
