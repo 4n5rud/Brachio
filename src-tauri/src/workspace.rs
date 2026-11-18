@@ -244,11 +244,46 @@ pub async fn task_file_preview(
         .map_err(to_text)?
 }
 
-fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String> {
-    use std::io::Read;
+/// Reads a supported media file without passing its contents through JSON.
+#[tauri::command]
+pub async fn task_file_media(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        const LIMIT: usize = 8 * 1024 * 1024;
+        let file = resolve_preview_path(&task.worktree_path, &path)?;
+        let bytes = read_preview_bytes(&file, LIMIT)?;
+        if bytes.len() > LIMIT {
+            return Err("Media preview is limited to 8 MiB.".to_owned());
+        }
+        let valid = match Path::new(&path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+            Some("jpg" | "jpeg") => bytes.starts_with(b"\xff\xd8\xff"),
+            Some("gif") => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+            Some("webp") => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+            Some("pdf") => bytes.starts_with(b"%PDF-"),
+            _ => false,
+        };
+        if !valid {
+            return Err("The file does not match a supported media format.".to_owned());
+        }
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(to_text)?
+}
+
+fn resolve_preview_path(worktree: &Path, path: &str) -> Result<PathBuf, String> {
     use std::path::Component;
 
-    const LIMIT: usize = 64 * 1024;
     let relative = Path::new(path);
     if path.is_empty()
         || (cfg!(windows) && path.contains(':'))
@@ -269,12 +304,25 @@ fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String>
     {
         return Err("Choose a regular file inside the task's worktree.".to_owned());
     }
+    Ok(file)
+}
+
+fn read_preview_bytes(file: &Path, limit: usize) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
     let mut bytes = Vec::new();
     std::fs::File::open(file)
         .map_err(to_text)?
-        .take((LIMIT + 1) as u64)
+        .take((limit + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(to_text)?;
+    Ok(bytes)
+}
+
+fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String> {
+    const LIMIT: usize = 64 * 1024;
+    let file = resolve_preview_path(worktree, path)?;
+    let mut bytes = read_preview_bytes(&file, LIMIT)?;
     let truncated = bytes.len() > LIMIT;
     bytes.truncate(LIMIT);
     let text = if bytes.contains(&0) {

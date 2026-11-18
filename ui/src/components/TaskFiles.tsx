@@ -1,12 +1,17 @@
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
-import { listTaskFiles, previewTaskFile } from "../lib/workspace";
+import { listTaskFiles, previewTaskFile, previewTaskMedia } from "../lib/workspace";
 
 const RESULT_LIMIT = 100;
+const mediaTypes = new Map([
+  ["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"], ["webp", "image/webp"], ["pdf", "application/pdf"],
+]);
 
 export function TaskFiles(props: { taskId: string }) {
   const [filter, setFilter] = createSignal("");
   const [path, setPath] = createSignal("");
+  const [media, setMedia] = createSignal<{ url: string; type: string }>();
   const [files, { refetch }] = createResource(async () => {
     try {
       return { paths: await listTaskFiles(props.taskId) };
@@ -17,10 +22,26 @@ export function TaskFiles(props: { taskId: string }) {
   const [preview] = createResource(path, async (selected) => {
     if (!selected) return undefined;
     try {
+      const type = mediaTypes.get(selected.split(".").pop()?.toLowerCase() ?? "");
+      if (type) {
+        const response = await previewTaskMedia(props.taskId, selected);
+        const bytes = Array.isArray(response) ? Uint8Array.from(response) : new Uint8Array(response);
+        return { path: selected, blob: new Blob([bytes], { type }) };
+      }
       return { path: selected, file: await previewTaskFile(props.taskId, selected) };
     } catch (failure) {
       return { path: selected, error: String(failure) };
     }
+  });
+  createEffect(() => {
+    const result = preview();
+    if (preview.loading || result?.path !== path() || !result.blob) {
+      setMedia(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(result.blob);
+    setMedia({ url, type: result.blob.type });
+    onCleanup(() => URL.revokeObjectURL(url));
   });
   const matches = createMemo(() => {
     const query = filter().trim().toLowerCase();
@@ -48,6 +69,11 @@ export function TaskFiles(props: { taskId: string }) {
       </div>
       <Show when={matches().length > RESULT_LIMIT}><p class="muted">{t("files.more")}</p></Show>
       <Show when={preview.loading}><p role="status">{t("files.loading")}</p></Show>
+      <Show when={media()} keyed>
+        {(item) => item.type === "application/pdf"
+          ? <iframe class="file-preview-pdf" src={item.url} title={path()} />
+          : <img class="file-preview-image" src={item.url} alt={path()} />}
+      </Show>
       <Show when={!preview.loading && preview()?.path === path() && preview()}>
         {(result) => (
           <>

@@ -145,6 +145,7 @@ pub fn run() {
             workspace::task_delete,
             workspace::task_files,
             workspace::task_file_preview,
+            workspace::task_file_media,
             workspace::task_changes,
             workspace::task_merge_preview,
             workspace::task_pr_feedback,
