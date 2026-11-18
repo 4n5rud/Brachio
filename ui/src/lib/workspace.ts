@@ -54,6 +54,7 @@ interface TaskChanges {
   patch: string;
   untracked: string[];
   staged: string[];
+  conflicts: string[];
   truncated: boolean;
 }
 

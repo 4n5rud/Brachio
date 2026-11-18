@@ -68,6 +68,7 @@ export const en = {
   "inspector.diffBase": "Compared with the common ancestor of the task and default branch.",
   "inspector.loadingChanges": "Loading changes…",
   "inspector.noChanges": "No changes.",
+  "inspector.conflicts": "Unresolved Git conflicts",
   "inspector.truncated": "Showing the first 256 KiB of the diff.",
   "inspector.untracked": "Untracked files",
   "diff.comment": "Line comment",
