@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { t } from "../i18n";
 import type { AgentState } from "../lib/status";
+import { terminalSettings } from "../lib/terminal-settings";
 import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -35,9 +36,6 @@ const RESUME_GRACE_MS = 5_000;
  */
 const TYPE_IN_DELAY_MS = 1_000;
 
-/** Lines kept above the screen. Each line costs memory per terminal, so keep it bounded. */
-const SCROLLBACK_LINES = 5_000;
-
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /**
@@ -62,10 +60,10 @@ export function TerminalPane(props: {
   onMount(() => {
     const term = new Terminal({
       fontFamily: cssVar("--font-mono"),
-      fontSize: Number.parseInt(cssVar("--text-term"), 10) || 13,
+      fontSize: terminalSettings().fontSize,
       lineHeight: 1.4,
       cursorBlink: true,
-      scrollback: SCROLLBACK_LINES,
+      scrollback: terminalSettings().scrollback,
       allowProposedApi: true,
       theme: {
         background: cssVar("--color-term-bg"),
@@ -113,6 +111,13 @@ export function TerminalPane(props: {
       if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
     };
     fitVisible();
+    // Settings changed in the settings panel apply to terminals that are already open.
+    createEffect(() => {
+      const { fontSize, scrollback } = terminalSettings();
+      term.options.fontSize = fontSize;
+      term.options.scrollback = scrollback;
+      fitVisible();
+    });
 
     let handle: TerminalHandle | null = null;
     let exited = false;
