@@ -23,13 +23,21 @@ export function TaskView(props: {
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
+  /** Whether the task's agent should continue its last conversation. */
+  shouldResume?: (taskId: string) => boolean;
 }) {
   // Called once per terminal: the first prompt goes only to the first session.
   const sessionFor = (id: string): TerminalSession | undefined => {
     const task = props.findTask(id);
     const cwd = task?.worktreePath;
     if (task === undefined || cwd === undefined) return undefined;
-    return { agent: CORE_AGENT[task.agent], cwd, prompt: props.takePrompt?.(task.id) };
+    return {
+      agent: CORE_AGENT[task.agent],
+      cwd,
+      prompt: props.takePrompt?.(task.id),
+      resume: props.shouldResume?.(task.id),
+      sessionId: task.agentSessionId,
+    };
   };
   return (
     <section class="task-view">

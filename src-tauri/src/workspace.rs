@@ -106,6 +106,12 @@ pub async fn task_create(
     });
     added.await.map_err(to_text)?.map_err(to_text)?;
 
+    // Pinning the conversation id lets the task resume exactly its own
+    // conversation after a restart.
+    let session_id = request
+        .agent
+        .accepts_session_id()
+        .then(|| uuid::Uuid::new_v4().hyphenated().to_string());
     let task = NewTask {
         id: &id,
         repo_id: &repo.id,
@@ -113,6 +119,7 @@ pub async fn task_create(
         branch: &branch,
         worktree_path: &path,
         agent_kind: Some(agent_name(request.agent)),
+        agent_session_id: session_id.as_deref(),
         created_at_ms: now_ms(),
     };
     TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)

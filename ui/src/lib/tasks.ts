@@ -25,6 +25,8 @@ export interface TaskRow {
   pendingCommand?: string;
   /** Worktree folder. Sample tasks have none, so their terminal stays empty. */
   worktreePath?: string;
+  /** Conversation id the agent resumes after a restart. */
+  agentSessionId?: string;
 }
 
 export type TaskGroup = "needs" | "working" | "review" | "done";

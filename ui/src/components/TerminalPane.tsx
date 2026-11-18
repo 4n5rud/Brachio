@@ -13,7 +13,17 @@ export interface TerminalSession {
   cwd: string;
   /** First prompt for the agent, sent once when the session starts. */
   prompt?: string;
+  /** Continue the task's conversation, for tasks from an earlier run. */
+  resume?: boolean;
+  /** The task's conversation id, for agents that take one. */
+  sessionId?: string;
 }
+
+/**
+ * A resumed agent that exits this soon with an error found nothing to resume,
+ * so the pane starts a fresh one instead.
+ */
+const RESUME_GRACE_MS = 5_000;
 
 /**
  * When the prompt has to be typed in, wait this long after the agent's first
@@ -85,11 +95,15 @@ export function TerminalPane(props: {
     let disposed = false;
     const session = props.session;
     let typeInPrompt: string | null = null;
-    if (session) {
+    const start = (resume: boolean) => {
+      if (!session) return;
+      const startedAt = Date.now();
       const options = {
         agent: session.agent,
         cwd: session.cwd,
         prompt: session.prompt ?? null,
+        resume,
+        sessionId: session.sessionId ?? null,
         rows: term.rows,
         cols: term.cols,
       };
@@ -103,6 +117,11 @@ export function TerminalPane(props: {
           props.onStatus?.(message.status, message.message);
           return;
         }
+        if (resume && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
+          term.writeln(`\r\n[${t("terminal.resumeFailed")}]\r\n`);
+          start(false);
+          return;
+        }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
         term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
         props.onStatus?.({ state: "exited", code: message.exitCode }, null);
@@ -113,12 +132,14 @@ export function TerminalPane(props: {
             return;
           }
           handle = opened;
+          if (resume && !opened.resumed) term.writeln(`[${t("terminal.resumeFailed")}]\r\n`);
           // The size may have changed while the session was starting.
           void opened.resize(term.rows, term.cols);
           if (opened.promptDelivery === "type_in") typeInPrompt = session.prompt ?? null;
         })
         .catch((error: unknown) => term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`));
-    }
+    };
+    start(session?.resume === true && session.agent !== null);
 
     function sendTypeInPrompt() {
       const prompt = typeInPrompt;

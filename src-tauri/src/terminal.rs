@@ -3,7 +3,7 @@
 //! raw bytes, so the web view gets an `ArrayBuffer` with no JSON encoding.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use brachio_agent::{AgentKind, Installed, PromptDelivery, ResolvedCommand};
@@ -24,6 +24,11 @@ pub struct OpenRequest {
     pub agent: Option<AgentKind>,
     /// First prompt for the agent. Ignored for a shell.
     pub prompt: Option<String>,
+    /// Continue the task's conversation instead of starting a new one.
+    #[serde(default)]
+    pub resume: bool,
+    /// The task's conversation id, for agents that take one.
+    pub session_id: Option<String>,
     /// Working directory.
     pub cwd: PathBuf,
     /// Initial height in rows.
@@ -40,6 +45,8 @@ pub struct Opened {
     pub id: SessionId,
     /// Whether the UI still has to type the first prompt in.
     pub prompt_delivery: PromptDelivery,
+    /// Whether the agent continued an earlier conversation.
+    pub resumed: bool,
 }
 
 /// Sent as JSON on the channel. Output frames are raw bytes instead.
@@ -75,9 +82,9 @@ pub fn terminal_open(
     request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
 ) -> CommandResult<Opened> {
-    let (command, prompt_delivery) = match request.agent {
-        Some(kind) => agent_command(kind, request.prompt.as_deref())?,
-        None => (shell_command(), PromptDelivery::None),
+    let (command, prompt_delivery, resumed) = match request.agent {
+        Some(kind) => agent_command(kind, &request)?,
+        None => (shell_command(), PromptDelivery::None, false),
     };
     let spec = SpawnSpec {
         program: command.program.to_string_lossy().into_owned(),
@@ -92,6 +99,7 @@ pub fn terminal_open(
     Ok(Opened {
         id,
         prompt_delivery,
+        resumed,
     })
 }
 
@@ -126,17 +134,42 @@ pub fn terminal_close(terminals: State<'_, Terminals>, id: SessionId) -> Command
     terminals.0.kill(id).map_err(|error| to_message(&error))
 }
 
+/// The command for an agent: its earlier conversation when asked to resume
+/// and one exists, otherwise a new one.
 fn agent_command(
     kind: AgentKind,
-    prompt: Option<&str>,
-) -> CommandResult<(ResolvedCommand, PromptDelivery)> {
-    let Some(installed) = brachio_agent::detect(kind) else {
-        return Err(format!(
-            "{} is not installed or not on PATH",
-            kind.program()
-        ));
+    request: &OpenRequest,
+) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
+    let installed = installed(kind)?;
+    let earlier = if request.resume {
+        earlier_conversation(kind, request.session_id.as_deref(), &request.cwd)
+    } else {
+        None
     };
-    Ok(installed.resolve_interactive(prompt))
+    if let Some(conversation) = earlier {
+        let command = installed.resolve(&kind.resume(&conversation));
+        return Ok((command, PromptDelivery::None, true));
+    }
+    let session_id = request
+        .session_id
+        .as_deref()
+        .filter(|_| kind.accepts_session_id());
+    let (command, delivery) = installed.resolve_interactive(request.prompt.as_deref(), session_id);
+    Ok((command, delivery, false))
+}
+
+/// The conversation a task left behind. Claude Code's id was pinned when the
+/// task was created; Codex's is found from its own records for the worktree.
+fn earlier_conversation(kind: AgentKind, session_id: Option<&str>, cwd: &Path) -> Option<String> {
+    match kind {
+        AgentKind::ClaudeCode => session_id.map(str::to_owned),
+        AgentKind::Codex => brachio_agent::latest_codex_session(cwd),
+    }
+}
+
+fn installed(kind: AgentKind) -> CommandResult<Installed> {
+    brachio_agent::detect(kind)
+        .ok_or_else(|| format!("{} is not installed or not on PATH", kind.program()))
 }
 
 fn shell_command() -> ResolvedCommand {
