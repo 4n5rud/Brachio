@@ -1,7 +1,8 @@
-//! Local named-pipe control of an independent Windows PTY runtime.
+//! Local control of an independent PTY runtime: the server, its sessions and the client.
 
 use std::collections::HashMap;
 use std::env;
+use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -12,19 +13,16 @@ use brachio_pty::{PtyEvent, SessionId, SessionManager, SpawnSpec};
 use clap::{Parser, Subcommand};
 use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::tokio::Stream;
-use interprocess::local_socket::{GenericNamespaced, ListenerOptions};
-use interprocess::os::windows::local_socket::ListenerOptionsExt;
-use interprocess::os::windows::security_descriptor::SecurityDescriptor;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 use uuid::Uuid;
-use widestring::U16CString;
 
 use crate::endpoint::{self, Liveness};
 use crate::output::{OutputHistory, Page};
 use crate::protocol;
 use crate::screen::{TerminalScreen, COLS, ROWS};
+use crate::transport;
 use std::num::NonZeroU16;
 
 const MAX_MESSAGE: u64 = 64 * 1024;
@@ -277,9 +275,10 @@ impl Runtime {
     }
 
     fn start_shell(&self, cwd: PathBuf) -> Result<Session> {
+        let shell = shell_command();
         let spec = SpawnSpec {
-            program: env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned()),
-            args: vec!["/d".to_owned()],
+            program: shell.0,
+            args: shell.1,
             cwd: cwd.clone(),
             env: Vec::new(),
             rows: ROWS.get(),
@@ -417,6 +416,18 @@ impl StartupOutput {
     }
 }
 
+#[cfg(windows)]
+fn shell_command() -> (String, Vec<String>) {
+    let program = env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned());
+    (program, vec!["/d".to_owned()])
+}
+
+#[cfg(unix)]
+fn shell_command() -> (String, Vec<String>) {
+    let program = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
+    (program, Vec::new())
+}
+
 fn get<'a>(sessions: &'a HashMap<String, Session>, key: &str) -> Result<&'a Session> {
     sessions
         .get(key)
@@ -435,8 +446,7 @@ pub(super) async fn run() -> Result<()> {
     match args.command {
         Command::Serve => serve(&args.pipe).await,
         Command::Send { protocol, action } => {
-            let name = args.pipe.to_ns_name::<GenericNamespaced>()?;
-            let connected = Stream::connect(name).await;
+            let connected = transport::connect(&args.pipe).await;
             let reason = match endpoint::classify(&connected) {
                 Liveness::Dead => "terminal runtime is not running",
                 _ => "cannot tell whether the terminal runtime is running",
@@ -447,17 +457,10 @@ pub(super) async fn run() -> Result<()> {
 }
 
 async fn serve(pipe: &str) -> Result<()> {
-    let listener = match listen(pipe) {
+    let listener = match own(pipe).await {
         Ok(listener) => listener,
-        Err(error) => {
-            // Only a live reply proves another runtime owns the pipe. Anything else
-            // proves nothing, so this process neither takes over nor claims it is free.
-            let probe = Stream::connect(pipe.to_ns_name::<GenericNamespaced>()?).await;
-            let code = match endpoint::classify(&probe) {
-                Liveness::Serving => endpoint::EXIT_OCCUPIED,
-                Liveness::Dead | Liveness::Unknown => endpoint::EXIT_UNCERTAIN,
-            };
-            eprintln!("cannot own pipe {pipe}: {error}");
+        Err((code, error)) => {
+            eprintln!("cannot own endpoint {pipe}: {error}");
             std::process::exit(code);
         }
     };
@@ -487,12 +490,21 @@ async fn serve(pipe: &str) -> Result<()> {
     }
 }
 
-fn listen(pipe: &str) -> Result<interprocess::local_socket::tokio::Listener> {
-    let descriptor = SecurityDescriptor::deserialize(&U16CString::from_str("D:P(A;;GA;;;OW)")?)?;
-    Ok(ListenerOptions::new()
-        .name(pipe.to_ns_name::<GenericNamespaced>()?)
-        .security_descriptor(descriptor)
-        .create_tokio()?)
+/// Take the endpoint. Another runtime answering proves the endpoint is in use. Only a refused
+/// or missing endpoint proves its owner is gone, and only then is the leftover replaced.
+async fn own(pipe: &str) -> Result<interprocess::local_socket::tokio::Listener, (i32, io::Error)> {
+    let first = match transport::listen(pipe) {
+        Ok(listener) => return Ok(listener),
+        Err(error) => error,
+    };
+    let probe = transport::connect(pipe).await;
+    match endpoint::classify(&probe) {
+        Liveness::Serving => Err((endpoint::EXIT_OCCUPIED, first)),
+        Liveness::Unknown => Err((endpoint::EXIT_UNCERTAIN, first)),
+        Liveness::Dead => transport::reclaim(pipe)
+            .and_then(|()| transport::listen(pipe))
+            .map_err(|error| (endpoint::EXIT_UNCERTAIN, error)),
+    }
 }
 
 async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result<()> {
