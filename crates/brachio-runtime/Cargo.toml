@@ -1,0 +1,21 @@
+[package]
+name = "brachio-runtime"
+description = "Independent owner of Brachio terminal sessions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+anyhow.workspace = true
+brachio-pty.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+interprocess = { version = "2.4.8", features = ["tokio"] }
+tokio.workspace = true
+widestring = "1"
+
+[lints]
+workspace = true

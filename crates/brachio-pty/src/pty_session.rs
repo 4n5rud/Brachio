@@ -32,6 +32,12 @@ pub struct PtySession {
 }
 
 impl PtySession {
+    /// Operating-system identifier for the child, when available.
+    #[must_use]
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
+    }
+
     /// Spawns `spec.program` with an argument vector. No shell string is built.
     ///
     /// # Errors

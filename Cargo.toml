@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/brachio-core",
     "crates/brachio-pty",
+    "crates/brachio-runtime",
     "crates/brachio-git",
     "crates/brachio-agent",
     "crates/brachio-qa",
@@ -16,6 +17,7 @@ members = [
 default-members = [
     "crates/brachio-core",
     "crates/brachio-pty",
+    "crates/brachio-runtime",
     "crates/brachio-git",
     "crates/brachio-agent",
     "crates/brachio-qa",
