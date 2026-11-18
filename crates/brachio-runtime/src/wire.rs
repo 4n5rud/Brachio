@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
+use brachio_core::status::AgentState;
 use brachio_pty::SessionId;
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,29 @@ pub enum Action {
         key: String,
         /// Directory the shell starts in.
         cwd: PathBuf,
+    },
+    /// Start one program for this key, or return the existing one.
+    Launch {
+        /// Name the caller chose for the program.
+        key: String,
+        /// Directory the program starts in.
+        cwd: PathBuf,
+        /// Program to run: a path, or a name looked up on `PATH`.
+        program: String,
+        /// One argument for the program; repeat for several.
+        #[arg(long = "arg")]
+        #[serde(default)]
+        args: Vec<String>,
+        /// One `NAME=value` environment entry; repeat for several.
+        #[arg(long)]
+        #[serde(default)]
+        env: Vec<String>,
+        /// Initial height in rows.
+        #[arg(long, default_value_t = 24)]
+        rows: u16,
+        /// Initial width in columns.
+        #[arg(long, default_value_t = 80)]
+        cols: u16,
     },
     /// Read the shell identity and number of PTY bytes received.
     Inspect {
@@ -106,6 +130,7 @@ impl Action {
             Action::Drain => (2, "drain"),
             Action::Resize { .. } => (2, "resize"),
             Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
+            Action::Launch { .. } => (4, "launch"),
             _ => (1, "this action"),
         }
     }
@@ -250,6 +275,19 @@ pub struct SessionInfo {
     pub exited: bool,
     /// Its exit code, when it exited.
     pub exit_code: Option<u32>,
+    /// What the program last reported about itself, when it reports.
+    #[serde(default)]
+    pub status: Option<StatusInfo>,
+}
+
+/// What a program reported about itself through the status escape sequence.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct StatusInfo {
+    /// The state, mapped onto Brachio's states.
+    #[serde(flatten)]
+    pub state: AgentState,
+    /// Optional one-line detail, such as the command waiting for approval.
+    pub message: Option<String>,
 }
 
 /// The visible frame of a terminal, as escape sequences that redraw it.

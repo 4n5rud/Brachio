@@ -465,6 +465,7 @@ name = "brachio-runtime"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "brachio-core",
  "brachio-pty",
  "clap",
  "interprocess",

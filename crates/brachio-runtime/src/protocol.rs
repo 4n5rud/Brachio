@@ -1,7 +1,7 @@
 //! Protocol versions the runtime answers, so a runtime can outlive the app that started it.
 
 /// The newest version this build speaks.
-pub const CURRENT: u8 = 3;
+pub const CURRENT: u8 = 4;
 /// The oldest version this build still answers, so an older client keeps working.
 pub const OLDEST: u8 = 1;
 
@@ -47,7 +47,7 @@ mod tests {
     fn rejection_names_the_supported_range() {
         assert_eq!(
             rejection(9),
-            "unsupported protocol version 9; this runtime speaks 1 through 3"
+            "unsupported protocol version 9; this runtime speaks 1 through 4"
         );
     }
 
