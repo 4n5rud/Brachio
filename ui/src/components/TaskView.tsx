@@ -27,6 +27,7 @@ export function TaskView(props: {
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
+  onArchive?: () => void;
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
@@ -84,6 +85,10 @@ export function TaskView(props: {
             <Icon name="pr" />
             {t("task.createPr")}
           </button>
+          <Show when={props.task.worktreePath}>
+            <button class="button button-sm" type="button" disabled={!props.onArchive}
+              onClick={() => props.onArchive?.()}>{t("task.archive")}</button>
+          </Show>
         </div>
       </div>
       <div class="tabs" role="tablist">

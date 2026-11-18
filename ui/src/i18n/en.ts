@@ -35,6 +35,11 @@ export const en = {
   "task.newTab": "Open shell tab",
   "task.shell": "Shell",
   "task.closeShell": "Close shell",
+  "task.archive": "Archive task",
+  "task.archived": "Archived tasks",
+  "task.noArchived": "No archived tasks.",
+  "task.restore": "Restore",
+  "task.archiveBody": "This hides the task and closes its terminals. The Git branch and worktree stay on disk.",
   "task.split": "Split",
   "task.more": "More",
 

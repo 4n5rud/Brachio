@@ -6,8 +6,11 @@ import type { TaskRow } from "../lib/tasks";
 export type Theme = "system" | "light" | "dark";
 
 export function WorkspaceDialog(props: {
-  panel: "quickOpen" | "settings";
+  panel: "quickOpen" | "settings" | "archived";
   tasks: readonly TaskRow[];
+  archived: readonly TaskRow[];
+  onRestore: (id: string) => Promise<void>;
+  onOpenArchived?: () => void;
   theme: Theme;
   notifications: boolean;
   onTheme: (theme: Theme) => void;
@@ -17,6 +20,8 @@ export function WorkspaceDialog(props: {
 }) {
   const [query, setQuery] = createSignal("");
   const [highlight, setHighlight] = createSignal(0);
+  const [restoring, setRestoring] = createSignal<string>();
+  const [restoreError, setRestoreError] = createSignal("");
   const matches = createMemo(() => {
     const terms = query().trim().toLowerCase().split(/\s+/);
     return props.tasks.filter((task) => {
@@ -31,12 +36,29 @@ export function WorkspaceDialog(props: {
     props.onOpen(id);
     dialog.close();
   };
+  const restore = async (id: string) => {
+    if (restoring()) return;
+    setRestoring(id);
+    setRestoreError("");
+    try {
+      await props.onRestore(id);
+    } catch (failure) {
+      setRestoreError(String(failure));
+    } finally {
+      setRestoring(undefined);
+    }
+  };
+  const title = () => {
+    if (props.panel === "quickOpen") return t("quickOpen.title");
+    if (props.panel === "archived") return t("task.archived");
+    return t("titlebar.settings");
+  };
   return (
     <dialog ref={dialog} class="modal workspace-dialog" aria-labelledby="workspace-dialog-title"
       onClose={props.onClose}>
       <div class="modal-head">
         <h2 id="workspace-dialog-title">
-          {t(props.panel === "quickOpen" ? "quickOpen.title" : "titlebar.settings")}
+          {title()}
         </h2>
         <button class="button button-sm" type="button" onClick={() => dialog.close()}>{t("workspace.close")}</button>
       </div>
@@ -103,6 +125,26 @@ export function WorkspaceDialog(props: {
               <span>{t("quickOpen.title")}</span><kbd>{QUICK_OPEN_KEYS}</kbd>
               <span>{t("newTask.title")}</span><kbd>{NEW_TASK_KEYS}</kbd>
             </div>
+            <Show when={props.onOpenArchived}>
+              <button type="button" class="button button-sm" onClick={() => props.onOpenArchived?.()}>
+                {t("task.archived")}
+              </button>
+            </Show>
+          </Match>
+          <Match when={props.panel === "archived"}>
+            <Show when={props.archived.length > 0}
+              fallback={<p class="muted">{t("task.noArchived")}</p>}>
+              <ul class="quick-open-results">
+                <For each={props.archived}>{(task) => (
+                  <li class="archive-row">
+                    <span>{task.title} · {task.branch}</span>
+                    <button type="button" class="button button-sm" disabled={!!restoring()}
+                      onClick={() => void restore(task.id)}>{t("task.restore")}</button>
+                  </li>
+                )}</For>
+              </ul>
+            </Show>
+            <Show when={restoreError()}><p role="alert">{restoreError()}</p></Show>
           </Match>
         </Switch>
       </div>

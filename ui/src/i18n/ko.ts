@@ -37,6 +37,11 @@ export const ko: Messages = {
   "task.newTab": "셸 탭 열기",
   "task.shell": "셸",
   "task.closeShell": "셸 닫기",
+  "task.archive": "작업 보관",
+  "task.archived": "보관한 작업",
+  "task.noArchived": "보관한 작업이 없습니다.",
+  "task.restore": "복원",
+  "task.archiveBody": "작업을 목록에서 숨기고 터미널을 닫습니다. Git 브랜치와 작업 폴더는 디스크에 남습니다.",
   "task.split": "나누기",
   "task.more": "더 보기",
 

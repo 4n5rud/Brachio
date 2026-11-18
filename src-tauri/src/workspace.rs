@@ -131,6 +131,18 @@ pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), Str
     TaskRecord::archive(&*database.lock()?, &id, now_ms()).map_err(to_text)
 }
 
+/// Lists archived task records.
+#[tauri::command]
+pub fn task_list_archived(database: State<'_, Database>) -> Result<Vec<TaskRecord>, String> {
+    TaskRecord::list_archived(&*database.lock()?).map_err(to_text)
+}
+
+/// Restores an archived task to the open list.
+#[tauri::command]
+pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRecord, String> {
+    TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
+}
+
 /// Changes in a task worktree relative to its base.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
