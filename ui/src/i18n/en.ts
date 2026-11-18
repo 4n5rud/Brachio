@@ -96,7 +96,7 @@ export const en = {
   "git.createPr": "Create pull request",
   "git.prCreated": "Pull request created",
   "quickOpen.title": "Quick open",
-  "quickOpen.placeholder": "Search task names and branches",
+  "quickOpen.placeholder": "Search tasks, repositories, branches or paths",
   "quickOpen.empty": "No matching tasks.",
   "workspace.close": "Close",
   "settings.theme": "Theme",

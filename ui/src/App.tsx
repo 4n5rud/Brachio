@@ -379,6 +379,7 @@ export function App() {
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} theme={theme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}
           archived={archived()} onRestore={restore} onDelete={deleteArchived}
+          repos={repos()}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}

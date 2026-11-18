@@ -98,7 +98,7 @@ export const ko: Messages = {
   "git.prCreated": "풀 리퀘스트를 만들었어요",
   "git.completed": "Git 작업을 완료했습니다.",
   "quickOpen.title": "빠른 열기",
-  "quickOpen.placeholder": "작업 이름이나 브랜치로 검색",
+  "quickOpen.placeholder": "작업, 저장소, 브랜치 또는 경로 검색",
   "quickOpen.empty": "일치하는 작업이 없습니다.",
   "workspace.close": "닫기",
   "settings.theme": "테마",
