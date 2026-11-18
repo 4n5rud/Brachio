@@ -13,6 +13,11 @@ use uuid::Uuid;
 
 const RUNTIME: &str = env!("CARGO_BIN_EXE_brachio-runtime");
 
+/// Each runtime name gets its own journal directory, so tests never touch the user's.
+fn state_dir(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("brachio-state-{name}"))
+}
+
 struct Server(Child);
 
 impl Drop for Server {
@@ -25,7 +30,9 @@ impl Drop for Server {
 fn server(pipe: &str) -> Server {
     Server(
         Command::new(RUNTIME)
-            .args(["--pipe", pipe, "serve"])
+            .args(["--pipe", pipe, "--state-dir"])
+            .arg(state_dir(pipe))
+            .arg("serve")
             .stdout(Stdio::null())
             .spawn()
             .expect("start runtime"),
@@ -291,7 +298,7 @@ fn versions_are_negotiated_per_request() {
 
     let hello = response(send(&name, &["hello"]));
     assert_eq!(hello["runtime"]["oldest_version"], 1);
-    assert_eq!(hello["runtime"]["current_version"], 2);
+    assert_eq!(hello["runtime"]["current_version"], 3);
 
     let old = send(&name, &["--protocol", "1", "inspect", "missing"]);
     let old: Value = serde_json::from_slice(&old.stdout).expect("decode old reply");
@@ -299,7 +306,7 @@ fn versions_are_negotiated_per_request() {
     assert_eq!(old["error"], "no active terminal for missing");
 
     let future = refusal(send(&name, &["--protocol", "9", "hello"]));
-    assert!(future.contains("speaks 1 through 2"), "{future}");
+    assert!(future.contains("speaks 1 through 3"), "{future}");
     let early = refusal(send(&name, &["--protocol", "1", "hello"]));
     assert!(early.contains("needs protocol version 2"), "{early}");
 }
@@ -324,4 +331,69 @@ fn a_draining_runtime_keeps_its_shells_and_exits_after_the_last_one() {
 
     response(send(&name, &["stop", "kept"]));
     wait_until(|| host.0.try_wait().expect("poll runtime").is_some());
+}
+
+fn wait_for_saved_screen(name: &str, key: &str, text: &str) {
+    wait_until(|| {
+        std::fs::read_to_string(state_dir(name).join(format!("{key}.json")))
+            .is_ok_and(|saved| saved.contains(text))
+    });
+}
+
+#[test]
+fn a_new_runtime_recovers_the_last_screen_of_a_dead_one() {
+    let name = format!("brachio-runtime-test-{}", Uuid::new_v4());
+    let mut first = server(&name);
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+    let cwd = std::env::temp_dir();
+    let cwd = cwd.to_str().expect("test directory");
+    let before = response(send(&name, &["ensure", "task", cwd]));
+    response(send(&name, &["write", "task", "echo brachio-journal-ok\r"]));
+    wait_for_saved_screen(&name, "task", "brachio-journal-ok");
+
+    first.0.kill().expect("kill runtime");
+    first.0.wait().expect("reap runtime");
+    let _second = server(&name);
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+
+    let listed = response(send(&name, &["lost"]));
+    assert_eq!(listed["lost"][0]["key"], "task");
+    assert_eq!(listed["lost"][0]["former_instance"], before["instance"]);
+    assert_eq!(listed["lost"][0]["former_pid"], before["session"]["pid"]);
+    let recovered = response(send(&name, &["recover", "task"]));
+    let screen = recovered["screen"]["ansi"].as_str().expect("saved screen");
+    assert!(screen.contains("brachio-journal-ok"), "{screen}");
+    assert_ne!(
+        response(send(&name, &["hello"]))["instance"],
+        before["instance"]
+    );
+
+    let again = response(send(&name, &["ensure", "task", cwd]));
+    assert_ne!(again["session"]["pid"], before["session"]["pid"]);
+    assert!(response(send(&name, &["lost"]))["lost"]
+        .as_array()
+        .expect("list")
+        .is_empty());
+}
+
+#[test]
+fn a_shell_stopped_on_purpose_leaves_nothing_to_recover() {
+    let name = format!("brachio-runtime-test-{}", Uuid::new_v4());
+    let mut first = server(&name);
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+    let cwd = std::env::temp_dir();
+    let cwd = cwd.to_str().expect("test directory");
+    response(send(&name, &["ensure", "task", cwd]));
+    wait_for_saved_screen(&name, "task", "\"key\":\"task\"");
+    response(send(&name, &["stop", "task"]));
+    wait_until(|| !send(&name, &["inspect", "task"]).status.success());
+
+    first.0.kill().expect("kill runtime");
+    first.0.wait().expect("reap runtime");
+    let _second = server(&name);
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+    assert!(response(send(&name, &["lost"]))["lost"]
+        .as_array()
+        .expect("list")
+        .is_empty());
 }

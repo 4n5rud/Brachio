@@ -1,23 +1,29 @@
 //! Protocol versions the runtime answers, so a runtime can outlive the app that started it.
 
 /// The newest version this build speaks.
-pub(crate) const CURRENT: u8 = 2;
+pub const CURRENT: u8 = 3;
 /// The oldest version this build still answers, so an older client keeps working.
-pub(crate) const OLDEST: u8 = 1;
+pub const OLDEST: u8 = 1;
 
-pub(crate) fn accepts(version: u8) -> bool {
+/// Whether this build answers requests written in `version`.
+#[must_use]
+pub fn accepts(version: u8) -> bool {
     (OLDEST..=CURRENT).contains(&version)
 }
 
 /// Tell the client which versions to retry with.
-pub(crate) fn rejection(version: u8) -> String {
+#[must_use]
+pub fn rejection(version: u8) -> String {
     format!(
         "unsupported protocol version {version}; this runtime speaks {OLDEST} through {CURRENT}"
     )
 }
 
 /// Refuse an action that the client's chosen version did not define yet.
-pub(crate) fn requires(version: u8, since: u8, name: &str) -> Result<(), String> {
+///
+/// # Errors
+/// Returns the message to send when `version` is older than `since`.
+pub fn requires(version: u8, since: u8, name: &str) -> Result<(), String> {
     if version < since {
         return Err(format!(
             "{name} needs protocol version {since}, got {version}"
@@ -41,7 +47,7 @@ mod tests {
     fn rejection_names_the_supported_range() {
         assert_eq!(
             rejection(9),
-            "unsupported protocol version 9; this runtime speaks 1 through 2"
+            "unsupported protocol version 9; this runtime speaks 1 through 3"
         );
     }
 

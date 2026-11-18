@@ -3,20 +3,24 @@
 use std::io;
 
 /// Exit status when another runtime is already serving the endpoint.
-pub(crate) const EXIT_OCCUPIED: i32 = 75;
+pub const EXIT_OCCUPIED: i32 = 75;
 /// Exit status when the endpoint could not be shown to be free or in use.
-pub(crate) const EXIT_UNCERTAIN: i32 = 76;
+pub const EXIT_UNCERTAIN: i32 = 76;
 
+/// What a connection attempt shows about the owner of an endpoint.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Liveness {
+pub enum Liveness {
+    /// A runtime accepted the connection.
     Serving,
+    /// Nothing serves the endpoint.
     Dead,
+    /// The attempt proves nothing either way.
     Unknown,
 }
 
 /// Only a refused or missing endpoint proves nothing serves it. A timeout, a busy
 /// pipe or a permission error proves nothing, and must never read as dead.
-pub(crate) fn classify<T>(attempt: &io::Result<T>) -> Liveness {
+pub fn classify<T>(attempt: &io::Result<T>) -> Liveness {
     match attempt {
         Ok(_) => Liveness::Serving,
         Err(error)

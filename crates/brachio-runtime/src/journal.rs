@@ -1,0 +1,203 @@
+//! Keeps the last known screen of every shell on disk, so a dead runtime can be recovered from.
+
+use std::env;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// What survives a runtime: enough to show the last screen and to start the shell again.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionRecord {
+    pub(crate) key: String,
+    pub(crate) cwd: PathBuf,
+    /// The runtime that wrote this record, so a reader can tell it is not the current one.
+    pub(crate) instance: String,
+    pub(crate) pid: u32,
+    pub(crate) rows: u16,
+    pub(crate) cols: u16,
+    pub(crate) ansi: String,
+    pub(crate) cursor: (u16, u16),
+    pub(crate) alternate_screen: bool,
+    pub(crate) output_bytes: u64,
+    pub(crate) exited: bool,
+    pub(crate) exit_code: Option<u32>,
+    pub(crate) saved_at_ms: u64,
+}
+
+/// A directory of one JSON file per shell key.
+pub(crate) struct Journal {
+    directory: PathBuf,
+}
+
+/// Records read at startup, and the files that could not be read.
+pub(crate) struct Loaded {
+    pub(crate) records: Vec<SessionRecord>,
+    pub(crate) unreadable: Vec<PathBuf>,
+}
+
+impl Journal {
+    pub(crate) fn open(directory: &Path) -> io::Result<Self> {
+        fs::create_dir_all(directory)?;
+        Ok(Self {
+            directory: directory.to_owned(),
+        })
+    }
+
+    /// Replace the record in one step, so a crash leaves the old or the new one, never half.
+    pub(crate) fn save(&self, record: &SessionRecord) -> io::Result<()> {
+        let path = self.path(&record.key);
+        let scratch = path.with_extension("json.tmp");
+        fs::write(
+            &scratch,
+            serde_json::to_vec(record).map_err(io::Error::other)?,
+        )?;
+        fs::rename(&scratch, &path)
+    }
+
+    pub(crate) fn remove(&self, key: &str) -> io::Result<()> {
+        match fs::remove_file(self.path(key)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        }
+    }
+
+    /// Read every record. A damaged file is renamed aside, so it affects no other shell.
+    pub(crate) fn load(&self) -> io::Result<Loaded> {
+        let mut loaded = Loaded {
+            records: Vec::new(),
+            unreadable: Vec::new(),
+        };
+        for entry in fs::read_dir(&self.directory)? {
+            let path = entry?.path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            match fs::read(&path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<SessionRecord>(&bytes).ok())
+            {
+                Some(record) => loaded.records.push(record),
+                None => {
+                    let _ = fs::rename(&path, path.with_extension("json.bad"));
+                    loaded.unreadable.push(path);
+                }
+            }
+        }
+        loaded.records.sort_by(|a, b| a.key.cmp(&b.key));
+        Ok(loaded)
+    }
+
+    fn path(&self, key: &str) -> PathBuf {
+        self.directory.join(format!("{}.json", file_stem(key)))
+    }
+}
+
+/// Keep letters, digits, `-` and `_`; escape every other byte so any key is a safe file name.
+fn file_stem(key: &str) -> String {
+    key.bytes()
+        .map(|byte| match byte {
+            b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'-' | b'_' => char::from(byte).to_string(),
+            _ => format!("%{byte:02x}"),
+        })
+        .collect()
+}
+
+/// Where a runtime keeps its journal unless told otherwise.
+pub(crate) fn default_directory() -> io::Result<PathBuf> {
+    let missing =
+        |name: &str| io::Error::new(io::ErrorKind::NotFound, format!("{name} is not set"));
+    #[cfg(windows)]
+    let base = PathBuf::from(env::var_os("LOCALAPPDATA").ok_or_else(|| missing("LOCALAPPDATA"))?)
+        .join("Brachio");
+    #[cfg(target_os = "macos")]
+    let base = PathBuf::from(env::var_os("HOME").ok_or_else(|| missing("HOME"))?)
+        .join("Library/Application Support/Brachio");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let base = match env::var_os("XDG_STATE_HOME") {
+        Some(state) => PathBuf::from(state),
+        None => {
+            PathBuf::from(env::var_os("HOME").ok_or_else(|| missing("HOME"))?).join(".local/state")
+        }
+    }
+    .join("brachio");
+    Ok(base.join("runtime"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{file_stem, Journal, SessionRecord};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn record(key: &str, output_bytes: u64) -> SessionRecord {
+        SessionRecord {
+            key: key.to_owned(),
+            cwd: PathBuf::from("work"),
+            instance: "runtime-a".to_owned(),
+            pid: 42,
+            rows: 24,
+            cols: 80,
+            ansi: "prompt$ ".to_owned(),
+            cursor: (0, 8),
+            alternate_screen: false,
+            output_bytes,
+            exited: false,
+            exit_code: None,
+            saved_at_ms: 1_000,
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("brachio-journal-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        directory
+    }
+
+    #[test]
+    fn a_saved_record_replaces_the_previous_one_and_loads_back() {
+        let directory = scratch("replace");
+        let journal = Journal::open(&directory).expect("open journal");
+        journal.save(&record("task/one", 5)).expect("save first");
+        journal.save(&record("task/one", 9)).expect("save second");
+        journal.save(&record("task two", 1)).expect("save other");
+
+        let loaded = journal.load().expect("load");
+        let keys: Vec<_> = loaded
+            .records
+            .iter()
+            .map(|r| (r.key.as_str(), r.output_bytes))
+            .collect();
+        assert_eq!(keys, [("task two", 1), ("task/one", 9)]);
+        assert!(loaded.unreadable.is_empty());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn a_damaged_file_is_set_aside_without_hiding_other_records() {
+        let directory = scratch("damaged");
+        let journal = Journal::open(&directory).expect("open journal");
+        journal.save(&record("good", 1)).expect("save");
+        fs::write(directory.join("broken.json"), b"{not json").expect("write damaged file");
+
+        let loaded = journal.load().expect("load");
+        assert_eq!(loaded.records.len(), 1);
+        assert_eq!(loaded.unreadable.len(), 1);
+        assert!(directory.join("broken.json.bad").exists());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn removing_is_idempotent_and_keys_cannot_escape_the_directory() {
+        let directory = scratch("remove");
+        let journal = Journal::open(&directory).expect("open journal");
+        journal.save(&record("../outside", 1)).expect("save");
+        assert_eq!(file_stem("../outside"), "%2e%2e%2foutside");
+        journal.remove("../outside").expect("remove");
+        journal.remove("../outside").expect("remove again");
+        assert!(journal.load().expect("load").records.is_empty());
+        let _ = fs::remove_dir_all(directory);
+    }
+}
