@@ -1,6 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
+import type { AgentKind as TaskAgent } from "./tasks";
+
+/** Agent names as the core spells them. */
 export type AgentKind = "claude_code" | "codex";
+
+/** Maps the UI's short agent names to the core's. */
+export const CORE_AGENT: Record<TaskAgent, AgentKind> = { claude: "claude_code", codex: "codex" };
 
 export interface InstalledAgent {
   kind: AgentKind;

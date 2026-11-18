@@ -2,25 +2,35 @@ import { onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { t } from "../i18n";
 import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
 
-interface Props {
+/** What to run. Without it the pane stays an empty terminal. */
+export interface TerminalSession {
+  /** `null` opens the user's shell. */
   agent: AgentKind | null;
   cwd: string;
-  onExit?: (code: number | null) => void;
 }
+
+const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 // One live terminal bound to one PTY session. Unmounting closes the session;
 // keeping hidden sessions alive and repainting them comes with the core's
 // emulator state.
-export function TerminalPane(props: Props) {
+export function TerminalPane(props: { session?: TerminalSession; onExit?: (code: number | null) => void }) {
   let host!: HTMLDivElement;
   onMount(() => {
     const term = new Terminal({
-      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono"),
-      fontSize: 13,
+      fontFamily: cssVar("--font-mono"),
+      fontSize: Number.parseInt(cssVar("--text-term"), 10) || 13,
+      lineHeight: 1.4,
       cursorBlink: true,
       allowProposedApi: true,
+      theme: {
+        background: cssVar("--color-term-bg"),
+        foreground: cssVar("--color-term-text"),
+        cursor: cssVar("--color-text-2"),
+      },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -34,31 +44,37 @@ export function TerminalPane(props: Props) {
 
     let handle: TerminalHandle | null = null;
     let disposed = false;
-    openTerminal({ agent: props.agent, cwd: props.cwd, rows: term.rows, cols: term.cols }, (m) => {
-      if (m.type === "output") term.write(m.bytes);
-      else {
-        term.writeln(`\r\n[process exited${m.exitCode === null ? "" : ` with code ${m.exitCode}`}]`);
-        props.onExit?.(m.exitCode);
-      }
-    })
-      .then((h) => {
-        if (disposed) void h.close();
-        else handle = h;
+    const session = props.session;
+    if (session) {
+      const options = { ...session, rows: term.rows, cols: term.cols };
+      openTerminal(options, (message) => {
+        if (message.type === "output") {
+          term.write(message.bytes);
+          return;
+        }
+        const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
+        term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
+        props.onExit?.(message.exitCode);
       })
-      .catch((e: unknown) => term.writeln(`\r\nCould not start the terminal: ${String(e)}`));
+        .then((opened) => {
+          if (disposed) void opened.close();
+          else handle = opened;
+        })
+        .catch((error: unknown) => term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`));
+    }
 
-    const input = term.onData((d) => void handle?.write(d));
-    const sized = term.onResize(({ rows, cols }) => void handle?.resize(rows, cols));
+    const input = term.onData((data) => void handle?.write(data));
+    const resized = term.onResize(({ rows, cols }) => void handle?.resize(rows, cols));
     const observer = new ResizeObserver(() => fit.fit());
     observer.observe(host);
     onCleanup(() => {
       disposed = true;
       observer.disconnect();
       input.dispose();
-      sized.dispose();
+      resized.dispose();
       void handle?.close();
       term.dispose();
     });
   });
-  return <div ref={host} class="h-full w-full" />;
+  return <div ref={host} class="terminal-host" />;
 }
