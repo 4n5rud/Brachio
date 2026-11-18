@@ -63,7 +63,7 @@ fn a_new_client_reuses_the_live_shell() {
 
     let mut duplicate = server(&name);
     wait_until(|| duplicate.0.try_wait().expect("poll duplicate").is_some());
-    assert!(!duplicate.0.wait().expect("join duplicate").success());
+    assert_eq!(duplicate.0.wait().expect("join duplicate").code(), Some(75));
 
     let (first, second) = thread::scope(|scope| {
         let first = scope.spawn(|| response(send(&name, &["ensure", "task", cwd])));
@@ -275,4 +275,53 @@ fn a_resize_is_reflected_in_later_snapshots() {
     let frame = response(send(&name, &["snapshot", "sized"]));
     assert_eq!(frame["screen"]["rows"], 40);
     assert_eq!(frame["screen"]["cols"], 120);
+}
+
+fn refusal(output: Output) -> String {
+    assert!(!output.status.success(), "{output:?}");
+    let reply: Value = serde_json::from_slice(&output.stdout).expect("decode refusal");
+    reply["error"].as_str().expect("error text").to_owned()
+}
+
+#[test]
+fn versions_are_negotiated_per_request() {
+    let name = format!("brachio-runtime-test-{}", Uuid::new_v4());
+    let _host = server(&name);
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+
+    let hello = response(send(&name, &["hello"]));
+    assert_eq!(hello["runtime"]["oldest_version"], 1);
+    assert_eq!(hello["runtime"]["current_version"], 2);
+
+    let old = send(&name, &["--protocol", "1", "inspect", "missing"]);
+    let old: Value = serde_json::from_slice(&old.stdout).expect("decode old reply");
+    assert_eq!(old["version"], 1);
+    assert_eq!(old["error"], "no active terminal for missing");
+
+    let future = refusal(send(&name, &["--protocol", "9", "hello"]));
+    assert!(future.contains("speaks 1 through 2"), "{future}");
+    let early = refusal(send(&name, &["--protocol", "1", "hello"]));
+    assert!(early.contains("needs protocol version 2"), "{early}");
+}
+
+#[test]
+fn a_draining_runtime_keeps_its_shells_and_exits_after_the_last_one() {
+    let name = format!("brachio-runtime-test-{}", Uuid::new_v4());
+    let mut host = server(&name);
+    let cwd = std::env::temp_dir();
+    let cwd = cwd.to_str().expect("test directory");
+    wait_until(|| !send(&name, &["inspect", "missing"]).stdout.is_empty());
+    response(send(&name, &["ensure", "kept", cwd]));
+
+    assert_eq!(
+        response(send(&name, &["drain"]))["runtime"]["draining"],
+        true
+    );
+    let refused = refusal(send(&name, &["ensure", "new", cwd]));
+    assert!(refused.contains("draining"), "{refused}");
+    response(send(&name, &["ensure", "kept", cwd]));
+    assert!(host.0.try_wait().expect("poll runtime").is_none());
+
+    response(send(&name, &["stop", "kept"]));
+    wait_until(|| host.0.try_wait().expect("poll runtime").is_some());
 }
