@@ -10,6 +10,7 @@ export function WorkspaceDialog(props: {
   tasks: readonly TaskRow[];
   archived: readonly TaskRow[];
   onRestore: (id: string) => Promise<void>;
+  onDelete: (task: TaskRow) => Promise<void>;
   onOpenArchived?: () => void;
   theme: Theme;
   notifications: boolean;
@@ -42,6 +43,18 @@ export function WorkspaceDialog(props: {
     setRestoreError("");
     try {
       await props.onRestore(id);
+    } catch (failure) {
+      setRestoreError(String(failure));
+    } finally {
+      setRestoring(undefined);
+    }
+  };
+  const remove = async (task: TaskRow) => {
+    if (restoring()) return;
+    setRestoring(task.id);
+    setRestoreError("");
+    try {
+      await props.onDelete(task);
     } catch (failure) {
       setRestoreError(String(failure));
     } finally {
@@ -140,6 +153,8 @@ export function WorkspaceDialog(props: {
                     <span>{task.title} · {task.branch}</span>
                     <button type="button" class="button button-sm" disabled={!!restoring()}
                       onClick={() => void restore(task.id)}>{t("task.restore")}</button>
+                    <button type="button" class="button button-sm" disabled={!!restoring()}
+                      onClick={() => void remove(task)}>{t("task.delete")}</button>
                   </li>
                 )}</For>
               </ul>

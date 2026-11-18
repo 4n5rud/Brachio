@@ -16,7 +16,8 @@ import { notificationKey, notifyIfAway } from "./lib/notify";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
-import { addRepo, archiveTask, createTask, listArchivedTasks, listRepos, listTasks, restoreTask,
+import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTasks,
+  previewTaskDeletion, restoreTask,
   toTaskRow, type RepoRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
@@ -204,6 +205,25 @@ export function App() {
     });
   };
 
+  // Shows what would be lost, and deletes the worktree and branch only after the user agrees.
+  const deleteArchived = async (task: TaskRow) => {
+    const loss = await previewTaskDeletion(task.id);
+    const body = [
+      t("task.deleteBody").replace("{branch}", task.branch),
+      t("task.deleteLoss")
+        .replace("{files}", String(loss.uncommittedFiles))
+        .replace("{commits}", String(loss.unpushedCommits)),
+    ].join("\n\n");
+    const agreed = await confirm(body, {
+      title: `${t("task.delete")} · ${task.title}`,
+      okLabel: t("task.delete"),
+      cancelLabel: t("workspace.close"),
+    });
+    if (!agreed) return;
+    await deleteTask(task.id);
+    setArchived((items) => items.filter((item) => item.id !== task.id));
+  };
+
   const canCreate = () => inTauri && repo() !== undefined;
 
   onMount(() => {
@@ -307,7 +327,7 @@ export function App() {
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} theme={theme()}
-          archived={archived()} onRestore={restore}
+          archived={archived()} onRestore={restore} onDelete={deleteArchived}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
