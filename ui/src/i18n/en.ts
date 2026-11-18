@@ -22,6 +22,7 @@ export const en = {
   "view.tasks": "Tasks",
   "view.board": "Board",
   "activity.title": "Activity",
+  "tray.openTasks": "Open tasks",
   "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 
