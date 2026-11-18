@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { diffRows } from "./diff";
+import { diffRows, splitDiffRows } from "./diff";
 
 test("tracks old and new hunk lines and ignores headers", () => {
   const patch = [
@@ -20,5 +20,30 @@ test("tracks old and new hunk lines and ignores headers", () => {
     { path: "새 이름", line: 10, side: "new" },
     { path: "새 이름", line: 11, side: "new" },
     { path: "old name", line: 20, side: "old" },
+  ]);
+});
+
+test("pairs replacements and keeps adjacent hunks separate", () => {
+  const patch = [
+    "--- a/file",
+    "+++ b/file",
+    "@@ -2,3 +2,2 @@",
+    "-first",
+    "-second",
+    "+replacement",
+    " context",
+    "@@ -10,0 +10 @@",
+    "+inserted",
+  ].join("\n");
+  const [oldPath, newPath, firstHunk, first, second, replacement, context, secondHunk, insertion] = diffRows(patch);
+  expect(splitDiffRows(diffRows(patch))).toEqual([
+    { shared: oldPath },
+    { shared: newPath },
+    { shared: firstHunk },
+    { old: first, next: replacement },
+    { old: second },
+    { shared: context },
+    { shared: secondHunk },
+    { next: insertion },
   ]);
 });
