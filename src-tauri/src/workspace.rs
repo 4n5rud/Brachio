@@ -161,10 +161,15 @@ pub async fn task_changes(
             .map_err(to_text)?;
         let mut patch = git
             .run_text(&[
+                "-c",
+                "core.quotePath=false",
                 "diff",
                 "--no-ext-diff",
                 "--no-textconv",
                 "--no-color",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--submodule=short",
                 &base,
                 "--",
             ])

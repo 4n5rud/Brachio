@@ -3,11 +3,15 @@ import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { DiffStat } from "./DiffStat";
+import { DiffReview } from "./DiffReview";
 
 type Pane = "changes" | "qa" | "activity";
 
 /** Right column: a compact summary of the selected task. */
-export function Inspector(props: { task: TaskRow }) {
+export function Inspector(props: {
+  task: TaskRow;
+  onDraft: (taskId: string, text: string) => Promise<boolean>;
+}) {
   const [pane, setPane] = createSignal<Pane>("changes");
   const [changes, { refetch }] = createResource(
     () => pane() === "changes" && props.task.worktreePath && props.task.id,
@@ -58,8 +62,9 @@ export function Inspector(props: { task: TaskRow }) {
               <Show when={currentChanges()?.data}>
                 {(data) => (
                   <>
-                    <Show when={data().patch}>
-                      <pre class="inspector-patch" tabIndex={0}>{data().patch}</pre>
+                    <Show when={data().patch ? currentChanges() : undefined} keyed>
+                      {(snapshot) => <DiffReview patch={snapshot.data?.patch ?? ""}
+                        onDraft={(text) => props.onDraft(snapshot.id, text)} />}
                     </Show>
                     <Show when={data().truncated}>
                       <p class="muted">{t("inspector.truncated")}</p>
