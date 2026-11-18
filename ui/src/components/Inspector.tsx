@@ -7,6 +7,7 @@ import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";
 import { TaskMergePreview } from "./TaskMergePreview";
+import { TaskPorts } from "./TaskPorts";
 
 type Pane = "changes" | "qa" | "activity";
 
@@ -125,6 +126,9 @@ export function Inspector(props: {
           </section>
         </Match>
       </Switch>
+      <Show when={props.task.worktreePath && props.task.id} keyed>
+        {(id) => <TaskPorts taskId={id} />}
+      </Show>
     </aside>
   );
 }
