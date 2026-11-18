@@ -37,7 +37,9 @@ export interface CreateTaskRequest {
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
 export const addRepo = (path: string) => invoke<RepoRecord>("repo_add", { path });
 export const listTasks = () => invoke<TaskRecord[]>("task_list");
-export const createTask = (request: CreateTaskRequest) => invoke<TaskRecord>("task_create", { request });
+/** A task that was just created, with the setup commands its repository asks to run. */
+export type CreatedTask = TaskRecord & { setupCommands: string[] };
+export const createTask = (request: CreateTaskRequest) => invoke<CreatedTask>("task_create", { request });
 export const archiveTask = (id: string) => invoke<void>("task_archive", { id });
 export const listArchivedTasks = () => invoke<TaskRecord[]>("task_list_archived");
 export const restoreTask = (id: string) => invoke<TaskRecord>("task_restore", { id });
@@ -54,6 +56,7 @@ interface TaskChanges {
   patch: string;
   untracked: string[];
   staged: string[];
+  conflicts: string[];
   truncated: boolean;
 }
 

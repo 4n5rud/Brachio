@@ -80,15 +80,29 @@ pub fn task_list(database: State<'_, Database>) -> Result<Vec<TaskRecord>, Strin
     TaskRecord::list_open(&*database.lock()?).map_err(to_text)
 }
 
-/// Creates a worktree on a fresh branch and stores the task.
+/// A task that was just created.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedTask {
+    #[serde(flatten)]
+    task: TaskRecord,
+    /// Commands from the repository's `brachio.toml` that the user is asked to run in the new
+    /// worktree. Nothing runs without the user's say-so.
+    setup_commands: Vec<String>,
+}
+
+/// Creates a worktree on a fresh branch and stores the task. Files named in the repository's
+/// `brachio.toml` are copied into the worktree, and its setup commands are returned.
 ///
 /// git runs off the UI thread, since `worktree add` checks out files.
 #[tauri::command]
 pub async fn task_create(
     database: State<'_, Database>,
     request: CreateTaskRequest,
-) -> Result<TaskRecord, String> {
+) -> Result<CreatedTask, String> {
     let repo = RepoRecord::get(&*database.lock()?, &request.repo_id).map_err(to_text)?;
+    // Read first, so a broken file stops the task before anything is created.
+    let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
     let id = new_id();
     let branch = brachio_git::branch_name(&request.title, &id[..6]);
     let path = brachio_git::worktree_path(&repo.path, &branch);
@@ -122,7 +136,16 @@ pub async fn task_create(
         agent_session_id: session_id.as_deref(),
         created_at_ms: now_ms(),
     };
-    TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)
+    let task = TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)?;
+    match brachio_git::copy_setup_files(&repo.path, &path, &setup) {
+        Ok(copied) if !copied.is_empty() => tracing::info!(?copied, "copied setup files"),
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "could not copy setup files"),
+    }
+    Ok(CreatedTask {
+        task,
+        setup_commands: setup.run,
+    })
 }
 
 /// Hides a task from the list. The worktree and branch stay on disk.
@@ -203,6 +226,7 @@ pub struct TaskChanges {
     patch: String,
     untracked: Vec<String>,
     staged: Vec<String>,
+    conflicts: Vec<String>,
     truncated: bool,
 }
 
@@ -249,6 +273,17 @@ pub async fn task_changes(
             patch.truncate(end);
         }
         let untracked = git_paths(&git, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+        let conflicts = git_paths(
+            &git,
+            &[
+                "diff",
+                "--cached",
+                "--diff-filter=U",
+                "--name-only",
+                "-z",
+                "--",
+            ],
+        )?;
         let staged = git_paths(
             &git,
             &[
@@ -264,6 +299,7 @@ pub async fn task_changes(
             patch,
             untracked,
             staged,
+            conflicts,
             truncated,
         })
     })

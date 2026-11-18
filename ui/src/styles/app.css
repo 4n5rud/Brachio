@@ -656,6 +656,16 @@ kbd {
   border: 1px solid var(--color-line);
   font: 12px/1.5 var(--font-mono);
 }
+.worktree-conflicts {
+  padding: var(--space-2);
+  border-inline-start: 3px solid var(--color-status-blocked);
+  background: var(--color-panel);
+  overflow-wrap: anywhere;
+}
+.worktree-conflicts ul {
+  margin-block: var(--space-1) 0;
+  padding-inline-start: 1.5em;
+}
 .diff-row {
   display: grid;
   grid-template-columns: 4em max-content;
@@ -669,6 +679,34 @@ kbd {
 }
 .diff-row button[aria-pressed="true"] {
   text-decoration: underline;
+}
+.diff-layout {
+  margin-block-end: var(--space-2);
+}
+.diff-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.diff-column-head {
+  color: var(--color-text-2);
+  border-bottom: 1px solid var(--color-line);
+}
+.diff-column-head span {
+  padding-inline: var(--space-2);
+}
+.diff-pair > :nth-child(2) {
+  border-inline-start: 1px solid var(--color-line);
+}
+.inspector-patch-split .diff-row {
+  grid-template-columns: 3em minmax(0, 1fr);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-removed:has(.diff-row) {
+  background: var(--color-del-bg);
+}
+.diff-added:has(.diff-row) {
+  background: var(--color-add-bg);
 }
 .diff-comment {
   margin-top: var(--space-2);
@@ -883,6 +921,26 @@ kbd {
 }
 .quick-open-result span {
   color: var(--color-text-2);
+}
+.activity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-list li + li {
+  border-top: 1px solid var(--color-line);
+}
+.activity-result {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.activity-result time {
+  color: var(--color-text-2);
+}
+.activity-result span {
+  grid-column: 1 / -1;
+}
+.activity-detail {
+  white-space: pre-wrap;
 }
 .workspace-shortcuts {
   display: grid;

@@ -444,8 +444,10 @@ dependencies = [
 name = "brachio-git"
 version = "0.0.1"
 dependencies = [
+ "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "toml 0.8.2",
  "tracing",
 ]
 

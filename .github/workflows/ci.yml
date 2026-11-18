@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain pinned in rust-toolchain.toml
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  # The app is built for Windows and macOS only. Linux checks the crates that do not need a
+  # web view, and the runtime's Unix socket transport.
+  rust-linux:
+    name: Rust (ubuntu-24.04, without the app shell)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain pinned in rust-toolchain.toml
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Lint
+        run: cargo clippy --workspace --exclude brachio-app --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --exclude brachio-app --locked
+
+  ui:
+    name: UI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm --dir ui install --frozen-lockfile
+      - run: pnpm --dir ui typecheck
+      - run: pnpm --dir ui test
+      - run: pnpm --dir ui build
+
+  # One version, kept in two files. Only a release changes it.
+  versions:
+    name: Version files agree
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare Cargo.toml and ui/package.json
+        run: |
+          cargo_version=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          ui_version=$(node -p "require('./ui/package.json').version")
+          echo "Cargo.toml: $cargo_version"
+          echo "ui/package.json: $ui_version"
+          test "$cargo_version" = "$ui_version"

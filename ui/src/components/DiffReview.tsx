@@ -1,12 +1,14 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { t } from "../i18n";
-import { diffRows, type DiffLocation } from "../lib/diff";
+import { diffRows, splitDiffRows, type DiffLocation, type DiffRow } from "../lib/diff";
 
 export function DiffReview(props: {
   patch: string;
   onDraft: (text: string) => Promise<boolean>;
 }) {
   const rows = createMemo(() => diffRows(props.patch));
+  const [split, setSplit] = createSignal(false);
+  const paired = createMemo(() => split() ? splitDiffRows(rows()) : []);
   const [location, setLocation] = createSignal<DiffLocation>();
   const [comment, setComment] = createSignal("");
   const [sending, setSending] = createSignal(false);
@@ -32,26 +34,41 @@ export function DiffReview(props: {
     }
   };
 
+  const line = (row: DiffRow) => (
+    <div class="diff-row">
+      <Show when={row.location} fallback={<span aria-hidden="true" />}>
+        {(target) => (
+          <button type="button" disabled={sending()}
+            aria-label={`${t("diff.comment")} ${target().path}:${target().line} ${t(target().side === "old" ? "diff.oldLine" : "diff.newLine")}`}
+            aria-pressed={location() === target()}
+            onClick={() => { setLocation(target()); setError(""); }}>
+            {target().line}
+          </button>
+        )}
+      </Show>
+      <code>{row.text}</code>
+    </div>
+  );
+
   return (
     <>
-      <div class="inspector-patch" tabIndex={0} aria-label={t("inspector.changes")}>
-        <For each={rows()}>
-          {(row) => (
-            <div class="diff-row">
-              <Show when={row.location} fallback={<span aria-hidden="true" />}>
-                {(target) => (
-                  <button type="button" disabled={sending()}
-                    aria-label={`${t("diff.comment")} ${target().path}:${target().line}`}
-                    aria-pressed={location() === target()}
-                    onClick={() => { setLocation(target()); setError(""); }}>
-                    {target().line}
-                  </button>
-                )}
-              </Show>
-              <code>{row.text}</code>
+      <div class="segmented diff-layout" role="group" aria-label={t("diff.layout")}>
+        <button type="button" aria-pressed={!split()} onClick={() => setSplit(false)}>{t("diff.unified")}</button>
+        <button type="button" aria-pressed={split()} onClick={() => setSplit(true)}>{t("diff.split")}</button>
+      </div>
+      <div class="inspector-patch" classList={{ "inspector-patch-split": split() }}
+        tabIndex={0} aria-label={t("inspector.changes")}>
+        <Show when={split()} fallback={<For each={rows()}>{line}</For>}>
+          <div class="diff-pair diff-column-head">
+            <span>{t("diff.oldLine")}</span><span>{t("diff.newLine")}</span>
+          </div>
+          <For each={paired()}>{(row) => "shared" in row ? line(row.shared) : (
+            <div class="diff-pair">
+              <div class="diff-removed">{row.old && line(row.old)}</div>
+              <div class="diff-added">{row.next && line(row.next)}</div>
             </div>
-          )}
-        </For>
+          )}</For>
+        </Show>
       </div>
       <Show when={location()}>
         {(target) => (
