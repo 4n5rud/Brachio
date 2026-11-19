@@ -10,6 +10,8 @@ export interface RepoRecord {
   path: string;
   defaultBranch: string;
   addedAtMs: number;
+  /** False for a plain folder: its tasks run in the folder, with no branch or worktree. */
+  isGit: boolean;
 }
 
 /** A task as the core stores it. */

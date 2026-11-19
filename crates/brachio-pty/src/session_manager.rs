@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::exit_watch::ExitWatch;
 use crate::output_batcher::{BatchConfig, OutputBatcher};
 use crate::pty_session::{PtySession, SpawnSpec};
+use crate::terminal_reply::input_for_reply;
 
 /// Identifies one PTY session for its lifetime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -213,7 +214,7 @@ impl StatusWatch {
                 if let Some(session) = session.upgrade() {
                     if let Ok(session) = lock_session(&session) {
                         // A failed write means the PTY is closing; the exit event follows.
-                        let _ = session.write_input(QUERY_REPLY);
+                        let _ = session.write_input(&input_for_reply(QUERY_REPLY));
                     }
                 }
             }
