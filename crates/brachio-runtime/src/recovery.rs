@@ -7,7 +7,7 @@ use brachio_runtime::wire::{LostInfo, ResponseResult, ScreenSnapshot};
 
 use crate::journal::{Journal, SessionRecord};
 use crate::runtime::Runtime;
-use crate::session::{lock, lost_info, ScreenMark, Session};
+use crate::session::{lock, lost_info, Session};
 
 impl Journal {
     /// Records left by runtimes that are gone. Unreadable files are reported and set aside.
@@ -35,31 +35,30 @@ impl Runtime {
     /// Write the screen of every shell that changed since the last write.
     pub(crate) fn persist(&self) {
         let Some(journal) = &self.journal else { return };
-        // Only a session that changed since its last save has its screen formatted, and the
-        // sessions lock is not held while writing to disk.
-        let (records, mut saved) = {
+        let (candidates, mut saved) = {
             let Ok(sessions) = lock(&self.sessions) else {
                 return;
             };
             let Ok(saved) = lock(&self.saved) else {
                 return;
             };
-            let records: Vec<(SessionRecord, ScreenMark)> = sessions
+            let candidates: Vec<_> = sessions
                 .iter()
-                .filter(|(key, session)| {
-                    session
-                        .mark()
-                        .is_ok_and(|mark| saved.get(key.as_str()) != Some(&mark))
-                })
-                .filter_map(|(key, session)| session.record(key, &self.instance).ok())
+                .map(|(key, session)| (key.clone(), session.clone()))
                 .collect();
-            // Retain save ordering across the unlocked disk write. A stop or exit may take
-            // the sessions lock now, but it must update the journal after this snapshot.
-            (records, saved)
+            // Keep journal ordering with stop and exit, but allow requests to the other
+            // sessions while changed frames are formatted and written.
+            (candidates, saved)
         };
-        for (record, mark) in records {
-            if saved.get(&record.key) != Some(&mark) && journal.save(&record).is_ok() {
-                saved.insert(record.key, mark);
+        for (key, session) in candidates {
+            let Ok(mark) = session.mark() else { continue };
+            if saved.get(&key) == Some(&mark) {
+                continue;
+            }
+            if let Ok((record, mark)) = session.record(&key, &self.instance) {
+                if journal.save(&record).is_ok() {
+                    saved.insert(key, mark);
+                }
             }
         }
     }
