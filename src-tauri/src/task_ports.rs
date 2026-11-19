@@ -64,16 +64,28 @@ fn assign(database: &Database, id: &str) -> Result<u16, String> {
         .map_err(sql_error)?
         .ok_or_else(|| "Only open tasks can reserve a local port.".to_owned())?;
     if let Some(port) = current {
-        return Ok(port);
+        // A restored task may have had its port given to another task while it was archived.
+        let taken_by_another: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE port_base = ?1 AND id != ?2 AND archived_at_ms IS NULL",
+                (port, id),
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if taken_by_another == 0 {
+            return Ok(port);
+        }
     }
 
     let mut pool = PortPool::new(FIRST_PORT, 1, PORT_COUNT);
     {
         let mut statement = transaction
-            .prepare("SELECT port_base FROM tasks WHERE port_base IS NOT NULL")
+            .prepare(
+                "SELECT port_base FROM tasks WHERE port_base IS NOT NULL AND archived_at_ms IS NULL AND id != ?1",
+            )
             .map_err(sql_error)?;
         let ports = statement
-            .query_map([], |row| row.get::<_, u16>(0))
+            .query_map([id], |row| row.get::<_, u16>(0))
             .map_err(sql_error)?;
         for port in ports {
             pool.restore(PortBlock {
@@ -83,7 +95,8 @@ fn assign(database: &Database, id: &str) -> Result<u16, String> {
         }
     }
     let assigned = pool
-        .allocate(|block| TcpListener::bind((Ipv4Addr::UNSPECIFIED, block.base)).is_ok())
+        // Loopback is enough to see a busy port and does not raise a firewall prompt.
+        .allocate(|block| TcpListener::bind((Ipv4Addr::LOCALHOST, block.base)).is_ok())
         .ok_or_else(|| "No free development port is available.".to_owned())?
         .base;
     transaction
@@ -111,7 +124,7 @@ mod tests {
                     ('second', 'r', 'Second', '', 'second', 'second', 'active', 2);"
         ).expect("insert test tasks");
         let database = Database(Mutex::new(connection));
-        let busy = TcpListener::bind((Ipv4Addr::UNSPECIFIED, FIRST_PORT)).ok();
+        let busy = TcpListener::bind((Ipv4Addr::LOCALHOST, FIRST_PORT)).ok();
         let first = assign(&database, "first").expect("assign first");
         let second = assign(&database, "second").expect("assign second");
         if busy.is_some() {
@@ -126,6 +139,41 @@ mod tests {
         assert_eq!(
             assign(&database, "second").expect("read saved assignment"),
             second
+        );
+    }
+
+    #[test]
+    fn an_archived_task_gives_its_port_back_and_a_restored_one_never_shares_it() {
+        let connection = brachio_store::open_in_memory().expect("open test database");
+        connection.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+             VALUES ('first', 'r', 'First', '', 'first', 'first', 'active', 1),
+                    ('third', 'r', 'Third', '', 'third', 'third', 'active', 3);"
+        ).expect("insert test tasks");
+        let database = Database(Mutex::new(connection));
+        let first = assign(&database, "first").expect("assign first");
+
+        database
+            .lock()
+            .expect("lock")
+            .execute("UPDATE tasks SET archived_at_ms = 5 WHERE id = 'first'", [])
+            .expect("archive");
+        let third = assign(&database, "third").expect("assign third");
+        assert_eq!(third, first, "the archived task's port is free again");
+
+        database
+            .lock()
+            .expect("lock")
+            .execute(
+                "UPDATE tasks SET archived_at_ms = NULL WHERE id = 'first'",
+                [],
+            )
+            .expect("restore");
+        let again = assign(&database, "first").expect("assign restored task");
+        assert_ne!(
+            again, third,
+            "a restored task must not share a port with an open one"
         );
     }
 }
