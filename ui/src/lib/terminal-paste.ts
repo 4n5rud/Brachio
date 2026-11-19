@@ -13,3 +13,49 @@ export function pasteText(text: string, multiline = false): string {
 export function bracketedPaste(text: string, multiline = false): string {
   return `\x1b[200~${pasteText(text, multiline)}\x1b[201~`;
 }
+
+/** Keep clipboard formatting and remove keys that could escape the paste. */
+export function terminalClipboardText(text: string): string {
+  return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/gu, "");
+}
+
+// An escaped UTF-16 unit can use six JSON bytes. This leaves room for the
+// protocol envelope inside the runtime's 64 KiB message limit.
+const MAX_INPUT_UNITS = 8 * 1024;
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+
+export function* terminalInputFrames(data: string): Iterable<string> {
+  const closing = data.startsWith(PASTE_START) ? data.lastIndexOf(PASTE_END) : -1;
+  for (let start = 0; start < data.length;) {
+    let end = Math.min(start + MAX_INPUT_UNITS, data.length);
+    if (end < data.length) {
+      const last = data.charCodeAt(end - 1);
+      const next = data.charCodeAt(end);
+      if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+    }
+    if (closing > start && end > closing && end < closing + PASTE_END.length) end = closing;
+    yield data.slice(start, end);
+    start = end;
+  }
+}
+
+export function terminalInputWriter(send: (data: string) => Promise<void>) {
+  let tail = Promise.resolve();
+  return (data: string) => {
+    const write = tail.then(async () => {
+      let openedPaste = false;
+      try {
+        for (const frame of terminalInputFrames(data)) {
+          await send(frame);
+          openedPaste = (openedPaste || frame.startsWith(PASTE_START)) && !frame.includes(PASTE_END);
+        }
+      } catch (error) {
+        if (openedPaste) await send(PASTE_END).catch(() => {});
+        throw error;
+      }
+    });
+    tail = write.catch(() => {});
+    return write;
+  };
+}

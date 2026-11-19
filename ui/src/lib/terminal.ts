@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import type { AgentState } from "./status";
 import type { AgentKind as TaskAgent } from "./tasks";
+import { terminalInputWriter } from "./terminal-paste";
 
 /** Agent names as the core spells them. */
 export type AgentKind = "claude_code" | "codex";
@@ -93,7 +94,7 @@ export async function openTerminal(
     promptDelivery: opened.promptDelivery,
     resumed: opened.resumed,
     attached: opened.attached,
-    write: (data) => invoke("terminal_write", { id, data }),
+    write: terminalInputWriter((data) => invoke("terminal_write", { id, data })),
     resize: (rows, cols) => invoke("terminal_resize", { id, rows, cols }),
     close: () => invoke("terminal_close", { id }),
   };
