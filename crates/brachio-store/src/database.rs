@@ -9,6 +9,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_repo_name_task_agent.sql"),
     include_str!("../migrations/0003_task_agent_session.sql"),
     include_str!("../migrations/0004_task_secondary_tabs.sql"),
+    include_str!("../migrations/0005_task_pr_status.sql"),
 ];
 
 /// Why a storage call failed.
