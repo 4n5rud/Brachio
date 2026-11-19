@@ -45,7 +45,15 @@ pub(crate) async fn serve(pipe: &str, state_dir: Option<PathBuf>) -> Result<()> 
     let mut check = tokio::time::interval(Duration::from_secs(1));
     loop {
         let stream = tokio::select! {
-            stream = listener.accept() => stream?,
+            accepted = listener.accept() => match accepted {
+                Ok(stream) => stream,
+                // One failed accept must not end the process that keeps every session alive.
+                Err(error) => {
+                    eprintln!("runtime could not accept a connection: {error}");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+            },
             _ = check.tick() => {
                 runtime.persist();
                 if runtime.finished() {
