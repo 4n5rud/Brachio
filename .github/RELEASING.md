@@ -30,7 +30,7 @@ GitHub writes them from the pull requests merged since the previous release (for
 ## What a release does not do yet
 
 - The installers are not signed. Windows shows SmartScreen and macOS asks the user to allow the app. Say so in the draft until signing is set up.
-- The installers do not include `brachio-runtime`. Without it the app keeps terminals inside itself and they end when the window closes. Bundling it needs its own change and a check on both platforms.
+- The release build bundles `brachio-runtime` and the `brachio` helper next to the app (`tauri.release.conf.json` lists them as `externalBin`, and `scripts/stage-sidecars.mjs` builds them before the bundle). Before a release, check on each platform that both files sit beside the installed app, and that closing the window leaves a shell running. The macOS runtime is not tested yet.
 - The macOS build is for Apple silicon only.
 - There is no automatic update.
 
