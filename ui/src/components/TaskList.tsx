@@ -1,8 +1,7 @@
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
-import { t, type MessageKey } from "../i18n";
+import { t } from "../i18n";
 import { statusTone } from "../lib/status";
-import { AGENT_NAME, GROUP_ORDER, groupTasks, shortBranch, type TaskGroup, type TaskRow } from "../lib/tasks";
-import { NEW_TASK_KEYS } from "../lib/shortcut";
+import { AGENT_NAME, shortBranch, type TaskRow } from "../lib/tasks";
 import { chipOf } from "../lib/pr-status";
 import { prReport, watchPrStatuses } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
@@ -10,76 +9,90 @@ import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
 import { StatusGlyph } from "./StatusGlyph";
 
-const GROUP_LABEL: Record<TaskGroup, MessageKey> = {
-  needs: "group.needs",
-  working: "group.working",
-  review: "group.review",
-  done: "group.done",
-};
+const COLLAPSED_KEY = "brachio.collapsedProjects";
 
-/** Sidebar task list, grouped by what needs a person first. */
+function loadCollapsedProjects(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Sidebar task list across all registered projects. */
 export function TaskList(props: {
   tasks: readonly TaskRow[];
+  repos: readonly { id: string; name: string }[];
   selectedId: string | undefined;
   onSelect: (id: string) => void;
-  onNewTask?: () => void;
+  onNewTask?: (repoId: string) => void;
+  onAddRepo?: () => void;
+  needsYou: number;
   now: number;
 }) {
-  const groups = createMemo(() => groupTasks(props.tasks));
+  const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
+  const groupIds = createMemo(() => [...projects().keys(), ""]);
+  const tasksByGroup = createMemo(() => {
+    const groups = new Map(props.repos.map((repo) => [repo.id, [] as TaskRow[]]));
+    const folders: TaskRow[] = [];
+    for (const task of props.tasks) {
+      (groups.get(task.repoId ?? "") ?? folders).push(task);
+    }
+    groups.set("", folders);
+    return groups;
+  });
   // Pull request status of every task with a worktree, read one at a time. It only runs inside
   // the app, where the backend can answer.
   if ("__TAURI_INTERNALS__" in window) {
     onCleanup(watchPrStatuses(() => props.tasks.filter((task) => task.worktreePath).map((task) => task.id)));
   }
-  const [collapsed, setCollapsed] = createSignal<ReadonlySet<TaskGroup>>(new Set(["done"]));
-  const toggle = (g: TaskGroup) =>
+  const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(loadCollapsedProjects());
+  const toggle = (id: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
-      if (!next.delete(g)) next.add(g);
+      if (!next.delete(id)) next.add(id);
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // The groups remain usable for this run.
+      }
       return next;
     });
 
   return (
     <aside class="sidebar">
       <div class="sidebar-head">
-        <h2>{t("sidebar.title")}</h2>
-        <span class="count">{props.tasks.length}</span>
-        <button
-          class="button button-primary button-sm"
-          type="button"
-          title={`${t("sidebar.newTask")} (${NEW_TASK_KEYS})`}
-          disabled={!props.onNewTask}
-          onClick={() => props.onNewTask?.()}
-        >
-          <Icon name="plus" />
-          {t("sidebar.newTask")}
-        </button>
+        <h2>{t("sidebar.projects")}</h2>
+        <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
+        <Show when={props.onAddRepo}>
+          <button class="button button-primary button-sm" type="button" onClick={() => props.onAddRepo?.()}>
+            <Icon name="plus" />{t("sidebar.addProject")}
+          </button>
+        </Show>
       </div>
-      <Show
-        when={props.tasks.length > 0}
-        fallback={
-          <div class="sidebar-empty">
-            <p class="sidebar-empty-title">{t("sidebar.empty.title")}</p>
-            <p>{t("sidebar.empty.body")}</p>
-          </div>
-        }
-      >
-        <nav class="task-groups">
-          <For each={GROUP_ORDER.filter((g) => (groups().get(g)?.length ?? 0) > 0)}>
-            {(group) => (
+      <nav class="task-groups" aria-label={t("sidebar.projects")}>
+        <For each={groupIds()}>
+          {(id) => {
+            const name = () => projects().get(id) ?? t("sidebar.folderWorkspaces");
+            const tasks = () => tasksByGroup().get(id) ?? [];
+            const expanded = () => !collapsed().has(id);
+            return (
               <section>
-                <button
-                  class={`group-head ${group === "needs" ? "group-head-needs" : ""}`}
-                  type="button"
-                  aria-expanded={!collapsed().has(group)}
-                  onClick={() => toggle(group)}
-                >
-                  <Icon name={collapsed().has(group) ? "chevronRight" : "chevronDown"} class="icon-xs" />
-                  {t(GROUP_LABEL[group])}
-                  <span class="count">{groups().get(group)?.length}</span>
-                </button>
-                <Show when={!collapsed().has(group)}>
-                  <For each={groups().get(group)}>
+                <div class="project-heading">
+                  <button class="group-head" type="button" aria-expanded={expanded()} onClick={() => toggle(id)}>
+                    <Icon name={expanded() ? "chevronDown" : "chevronRight"} class="icon-xs" />
+                    <span class="project-name" title={name()}>{name()}</span>
+                    <span class="count">{tasks().length}</span>
+                  </button>
+                  <Show when={id && props.onNewTask}>
+                    <button class="icon-button icon-button-sm project-new-task" type="button"
+                      title={t("sidebar.newTask")} aria-label={`${t("sidebar.newTask")} · ${name()}`}
+                      onClick={() => props.onNewTask?.(id)}><Icon name="plus" /></button>
+                  </Show>
+                </div>
+                <Show when={expanded()}>
+                  <For each={tasks()} fallback={<p class="project-empty">{t("sidebar.noProjectTasks")}</p>}>
                     {(task) => (
                       <TaskItem
                         task={task}
@@ -91,10 +104,10 @@ export function TaskList(props: {
                   </For>
                 </Show>
               </section>
-            )}
-          </For>
-        </nav>
-      </Show>
+            );
+          }}
+        </For>
+      </nav>
     </aside>
   );
 }

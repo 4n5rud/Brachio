@@ -257,19 +257,12 @@ kbd {
   height: 20px;
   flex: none;
 }
-.repo-switch {
-  height: var(--size-row);
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+.active-project {
+  max-width: 18vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.repo-switch:hover {
-  background: var(--color-hover);
 }
 .search {
   position: absolute;
@@ -359,26 +352,25 @@ kbd {
 .sidebar-head .button {
   margin-left: auto;
 }
-.sidebar-empty {
-  padding: var(--space-4) 14px;
+.project-empty {
+  padding: var(--space-1) 14px var(--space-2) 30px;
   color: var(--color-text-3);
-  font-size: var(--text-sm);
-  display: grid;
-  gap: var(--space-1);
-}
-.sidebar-empty-title {
-  color: var(--color-text);
-  font-weight: 500;
+  font-size: var(--text-xs);
 }
 .task-groups {
   overflow-y: auto;
   padding-bottom: var(--space-3);
 }
+.project-heading {
+  display: flex;
+  align-items: center;
+}
 .group-head {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 0;
   background: transparent;
-  padding: var(--space-3) 14px var(--space-1);
+  padding: var(--space-2) 14px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -387,8 +379,20 @@ kbd {
   color: var(--color-text-3);
   text-align: left;
 }
-.group-head-needs {
-  color: var(--color-status-blocked);
+.group-head:hover {
+  background: var(--color-hover);
+}
+.group-head .icon-xs {
+  flex: none;
+}
+.project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-new-task {
+  flex: none;
+  margin-inline-end: var(--space-2);
 }
 .task-item {
   width: calc(100% - 12px);
