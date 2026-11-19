@@ -17,6 +17,11 @@ pub async fn open_external_link(url: String) -> Result<(), String> {
     if !is_safe(&url) {
         return Err("Only plain https addresses can be opened.".to_owned());
     }
+    open_in_browser(url).await
+}
+
+/// Hands an address the app already trusts to the system browser, as a single argument.
+pub(crate) async fn open_in_browser(url: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(windows)]
         let mut command = {
