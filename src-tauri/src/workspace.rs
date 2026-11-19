@@ -72,25 +72,55 @@ pub fn repo_list(database: State<'_, Database>) -> Result<Vec<RepoRecord>, Strin
     RepoRecord::list(&*database.lock()?).map_err(to_text)
 }
 
-/// Adds the repository that contains `path`. Adding it twice returns the
-/// existing entry.
+/// Adds the repository that contains `path`, or the folder itself when it is not in a git
+/// repository: a folder project runs its tasks in the folder, with no branch or worktree. Adding
+/// it twice returns the existing entry.
 #[tauri::command]
 pub fn repo_add(database: State<'_, Database>, path: PathBuf) -> Result<RepoRecord, String> {
-    let info = brachio_git::inspect_repo(&path).map_err(to_text)?;
+    add_project(&database, &path)
+}
+
+fn add_project(database: &Database, path: &Path) -> Result<RepoRecord, String> {
+    let (root, default_branch, is_git) = match brachio_git::inspect_repo(path) {
+        Ok(info) => (info.root, info.default_branch, true),
+        Err(brachio_git::GitError::NotARepository { .. }) => {
+            let folder = path.canonicalize().map_err(to_text)?;
+            if !folder.is_dir() {
+                return Err(format!("{} is not a folder.", path.display()));
+            }
+            (
+                brachio_pty::without_verbatim_prefix(&folder),
+                String::new(),
+                false,
+            )
+        }
+        Err(error) => return Err(to_text(error)),
+    };
     let connection = database.lock()?;
-    if let Some(existing) = RepoRecord::find_by_path(&connection, &info.root).map_err(to_text)? {
+    if let Some(existing) = RepoRecord::find_by_path(&connection, &root).map_err(to_text)? {
         return Ok(existing);
     }
     let id = new_id();
     let repo = NewRepo {
         id: &id,
-        name: &folder_name(&info.root),
-        path: &info.root,
-        default_branch: &info.default_branch,
+        name: &folder_name(&root),
+        path: &root,
+        default_branch: &default_branch,
         added_at_ms: now_ms(),
+        is_git,
     };
     RepoRecord::insert(&connection, &repo).map_err(to_text)
 }
+
+/// Whether the task belongs to a plain folder project, where no git feature applies.
+fn is_folder_task(database: &Database, task: &TaskRecord) -> Result<bool, String> {
+    let connection = database.lock()?;
+    Ok(!RepoRecord::get(&connection, &task.repo_id)
+        .map_err(to_text)?
+        .is_git)
+}
+
+const NOT_GIT: &str = "This project is a plain folder, so this needs git, which it does not use.";
 
 /// Removes a repository from Brachio. Files on disk are not touched.
 #[tauri::command]
@@ -147,6 +177,9 @@ pub async fn task_create(
         };
         (repo, parent_branch)
     };
+    if !repo.is_git {
+        return create_folder_task(&database, &repo, &request);
+    }
     // Read first, so a broken file stops the task before anything is created.
     let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
     let id = new_id();
@@ -219,6 +252,38 @@ pub async fn task_create(
     })
 }
 
+/// A task in a plain folder: it runs in the folder itself, so there is no branch to make and no
+/// setup to copy.
+fn create_folder_task(
+    database: &Database,
+    repo: &RepoRecord,
+    request: &CreateTaskRequest,
+) -> Result<CreatedTask, String> {
+    let id = new_id();
+    let session_id = request
+        .agent
+        .accepts_session_id()
+        .then(|| uuid::Uuid::new_v4().hyphenated().to_string());
+    let task = NewTask {
+        id: &id,
+        repo_id: &repo.id,
+        parent_task_id: None,
+        title: request.title.trim(),
+        prompt: &request.prompt,
+        branch: "",
+        worktree_path: &repo.path,
+        agent_kind: Some(agent_name(request.agent)),
+        agent_session_id: session_id.as_deref(),
+        created_at_ms: now_ms(),
+    };
+    let record = TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)?;
+    Ok(CreatedTask {
+        task: record,
+        setup_commands: Vec::new(),
+        setup_copy_error: None,
+    })
+}
+
 /// Retries only missing setup files, preserving any files already present.
 #[tauri::command]
 pub async fn task_retry_setup_copy(
@@ -234,6 +299,9 @@ pub async fn task_retry_setup_copy(
         let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
         (repo, task)
     };
+    if !repo.is_git {
+        return Ok(());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
         brachio_git::retry_setup_files(&repo.path, &task.worktree_path, &setup)
@@ -314,12 +382,50 @@ pub async fn task_drop_paths(
 #[tauri::command]
 pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec<String>, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    let folder = is_folder_task(&database, &task)?;
     tauri::async_runtime::spawn_blocking(move || {
-        brachio_git::list_files(&Git::new(&task.worktree_path))
+        if folder {
+            return Ok(list_folder_files(&task.worktree_path));
+        }
+        brachio_git::list_files(&Git::new(&task.worktree_path)).map_err(to_text)
     })
     .await
     .map_err(to_text)?
-    .map_err(to_text)
+}
+
+/// The files of a plain folder, relative and with `/`, skipping folders that only hold
+/// dependencies, build output or git data. Capped like a git listing.
+fn list_folder_files(root: &Path) -> Vec<String> {
+    const SKIPPED: [&str; 4] = [".git", "node_modules", "target", ".venv"];
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if !SKIPPED.contains(&name.as_str()) {
+                    pending.push(path);
+                }
+            } else if kind.is_file() {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    files.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+            if files.len() >= brachio_git::MAX_FILES {
+                files.sort();
+                return files;
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 #[derive(Serialize)]
@@ -469,6 +575,14 @@ pub async fn task_delete_preview(
     id: String,
 ) -> Result<TaskLoss, String> {
     let (task, repo) = archived_task(&database, &id)?;
+    if !repo.is_git {
+        return Ok(TaskLoss {
+            uncommitted_files: 0,
+            unpushed_commits: 0,
+            ignored_entries: 0,
+            ignored_examples: Vec::new(),
+        });
+    }
     let work = tauri::async_runtime::spawn_blocking(move || {
         brachio_git::unsaved_work(&Git::new(&repo.path), &task.worktree_path, &task.branch)
     })
@@ -496,12 +610,15 @@ pub async fn task_delete(
         .repo_id;
     let _guard = worktrees.acquire(&repo_id).await?;
     let (task, repo) = archived_task(&database, &id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        brachio_git::discard_worktree(&Git::new(&repo.path), &task.worktree_path, &task.branch)
-    })
-    .await
-    .map_err(to_text)?
-    .map_err(to_text)?;
+    // A folder project's task runs in the user's own folder, which must never be removed.
+    if repo.is_git {
+        tauri::async_runtime::spawn_blocking(move || {
+            brachio_git::discard_worktree(&Git::new(&repo.path), &task.worktree_path, &task.branch)
+        })
+        .await
+        .map_err(to_text)?
+        .map_err(to_text)?;
+    }
     let connection = database.lock()?;
     // Its messages go with it, so a later task cannot be sent mail meant for this one.
     brachio_store::forget_task_messages(&connection, &id).map_err(to_text)?;
@@ -531,6 +648,15 @@ pub async fn task_changes(
         let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
         (task, repo)
     };
+    if !repo.is_git {
+        return Ok(TaskChanges {
+            patch: String::new(),
+            untracked: Vec::new(),
+            staged: Vec::new(),
+            conflicts: Vec::new(),
+            truncated: false,
+        });
+    }
     tauri::async_runtime::spawn_blocking(move || {
         const PATCH_LIMIT: usize = 256 * 1024;
         let git = Git::new(&task.worktree_path);
@@ -603,6 +729,78 @@ fn index_paths(output: &str) -> Result<(Vec<String>, Vec<String>), String> {
 }
 
 #[cfg(test)]
+mod folder_project_tests {
+    use std::sync::Mutex;
+
+    use brachio_agent::AgentKind;
+
+    use super::{add_project, create_folder_task, list_folder_files, CreateTaskRequest, Database};
+
+    fn database() -> Database {
+        Database(Mutex::new(
+            brachio_store::open_in_memory().expect("open database"),
+        ))
+    }
+
+    #[test]
+    fn a_folder_that_is_not_a_repository_becomes_a_folder_project_once() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let database = database();
+        let project = add_project(&database, folder.path()).expect("add the folder");
+        assert!(!project.is_git);
+        assert!(project.default_branch.is_empty());
+        assert_eq!(
+            brachio_pty::without_verbatim_prefix(&folder.path().canonicalize().expect("path")),
+            project.path
+        );
+        let again = add_project(&database, folder.path()).expect("add it again");
+        assert_eq!(again.id, project.id);
+        assert!(add_project(&database, &folder.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn a_task_in_a_folder_project_runs_in_the_folder_without_a_branch() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let database = database();
+        let project = add_project(&database, folder.path()).expect("add the folder");
+        let request = CreateTaskRequest {
+            repo_id: project.id.clone(),
+            parent_task_id: None,
+            title: "Notes".to_owned(),
+            prompt: String::new(),
+            agent: AgentKind::ClaudeCode,
+            base: Some("main".to_owned()),
+        };
+        let created = create_folder_task(&database, &project, &request).expect("create task");
+        assert_eq!(created.task.worktree_path, project.path);
+        assert!(created.task.branch.is_empty());
+        assert!(created.setup_commands.is_empty());
+        let other = create_folder_task(&database, &project, &request).expect("a second task");
+        assert_ne!(
+            other.task.id, created.task.id,
+            "several tasks may share the folder"
+        );
+    }
+
+    #[test]
+    fn listing_a_folder_skips_dependency_and_git_folders_and_uses_forward_slashes() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        for path in [
+            "a.txt",
+            "src/b.rs",
+            "node_modules/x.js",
+            ".git/config",
+            "target/out.bin",
+        ] {
+            let file = folder.path().join(path);
+            std::fs::create_dir_all(file.parent().expect("parent")).expect("make folder");
+            std::fs::write(file, "x").expect("write file");
+        }
+        assert_eq!(list_folder_files(folder.path()), ["a.txt", "src/b.rs"]);
+    }
+}
+
+#[cfg(test)]
 mod index_tests {
     use super::index_paths;
 
@@ -638,12 +836,18 @@ pub async fn task_merge_preview(
     database: State<'_, Database>,
     id: String,
 ) -> Result<TaskMergePreview, String> {
-    let (worktree_path, base_branch) = {
+    let (worktree_path, base_branch, is_git) = {
         let connection = database.lock()?;
         let task = TaskRecord::get(&connection, &id).map_err(to_text)?;
         let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
-        (task.worktree_path, repo.default_branch)
+        (task.worktree_path, repo.default_branch, repo.is_git)
     };
+    if !is_git {
+        return Ok(TaskMergePreview {
+            base_branch,
+            conflicts: Vec::new(),
+        });
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&worktree_path);
         let base_ref = brachio_git::merge_target_ref(&git, &base_branch);
@@ -697,6 +901,9 @@ pub async fn task_git_action(
     request: TaskGitAction,
 ) -> Result<Option<String>, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    if is_folder_task(&database, &task)? {
+        return Err(NOT_GIT.to_owned());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&task.worktree_path);
         let branch_ref = format!("refs/heads/{}", task.branch);
@@ -762,6 +969,9 @@ pub async fn task_pr_feedback(
     id: String,
 ) -> Result<serde_json::Value, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    if is_folder_task(&database, &task)? {
+        return Err(NOT_GIT.to_owned());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let output = github_command()
             .current_dir(&task.worktree_path)

@@ -700,6 +700,7 @@ export function App() {
         {(current) => (
           <NewTaskDialog
             defaultBranch={current().defaultBranch}
+            isGit={current().isGit}
             parents={repoRows()}
             onCreate={create}
             onClose={() => setDialogOpen(false)}

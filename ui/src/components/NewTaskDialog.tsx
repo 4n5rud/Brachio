@@ -22,6 +22,8 @@ const AGENTS: readonly AgentKind[] = ["claude", "codex"];
 /** "New task" dialog: prompt, name, agent and base branch. */
 export function NewTaskDialog(props: {
   defaultBranch: string;
+  /** A plain folder has no branch to base a task on and no parent task. */
+  isGit: boolean;
   parents?: readonly TaskRow[];
   onCreate: (input: NewTaskInput) => Promise<void>;
   onClose: () => void;
@@ -106,17 +108,19 @@ export function NewTaskDialog(props: {
                 onInput={(event) => setTitle(event.currentTarget.value)}
               />
             </label>
-            <label class="form-field">
-              <span class="form-label">{t("newTask.base")}</span>
-              <input
-                class="input input-mono"
-                value={base()}
-                placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
-                onInput={(event) => setBase(event.currentTarget.value)}
-              />
-            </label>
+            <Show when={props.isGit}>
+              <label class="form-field">
+                <span class="form-label">{t("newTask.base")}</span>
+                <input
+                  class="input input-mono"
+                  value={base()}
+                  placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
+                  onInput={(event) => setBase(event.currentTarget.value)}
+                />
+              </label>
+            </Show>
           </div>
-          <Show when={props.parents?.length}>
+          <Show when={props.isGit && props.parents?.length}>
             <label class="form-field">
               <span class="form-label">{t("newTask.parent")}</span>
               <select class="input" value={parentTaskId()} onChange={(event) => setParentTaskId(event.currentTarget.value)}>
