@@ -2,11 +2,13 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use brachio_core::status::AgentState;
+use brachio_pty::SessionId;
 use brachio_runtime::client::{Client, ClientError, Following};
 use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
 use tauri::async_runtime::{spawn, JoinHandle};
@@ -37,6 +39,11 @@ pub struct Launch {
     pub cols: u16,
 }
 
+/// Handles of runtime-hosted terminals start here, far above the small numbers the in-app terminal
+/// manager hands out. Each runtime numbers its sessions from 1 on its own, and an old runtime
+/// can run beside the current one, so a runtime's own session id cannot name a terminal here.
+const HOSTED_HANDLE_BASE: u64 = 1 << 40;
+
 /// A terminal this app is attached to, and the runtime that hosts it: after an update that may be
 /// an older one than the app would start now.
 struct Attached {
@@ -45,13 +52,14 @@ struct Attached {
     pump: JoinHandle<()>,
 }
 
-/// App state for runtime-hosted terminals. An attachment ID belongs to the app,
-/// because different runtime generations can issue the same process-local ID.
+/// App state for runtime-hosted terminals. Whether the runtime is used is decided once, so
+/// terminals of the two kinds never share the session id space.
 #[derive(Default)]
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
     restart: AsyncMutex<()>,
-    attached: Mutex<HashMap<String, Attached>>,
+    attached: Mutex<HashMap<SessionId, Attached>>,
+    handles: AtomicU64,
 }
 
 impl RuntimeTerminals {
@@ -67,7 +75,7 @@ impl RuntimeTerminals {
         launch: Launch,
         channel: Channel<InvokeResponseBody>,
         agent: bool,
-    ) -> Result<Option<(String, bool)>> {
+    ) -> Result<Option<(SessionId, bool)>> {
         let Some(current) = self.client().await? else {
             return Ok(None);
         };
@@ -94,53 +102,48 @@ impl RuntimeTerminals {
                 .await?
         };
         let pump = spawn(pump(first, following, channel, agent));
-        let id = self.register_attachment(key, client, pump)?;
+        let id = self.new_handle();
+        let previous = self
+            .attached
+            .lock()
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?
+            .insert(id, Attached { key, client, pump });
+        if let Some(previous) = previous {
+            previous.pump.abort();
+        }
         Ok(Some((id, attached)))
     }
 
-    fn register_attachment(
-        &self,
-        key: String,
-        client: Client,
-        pump: JoinHandle<()>,
-    ) -> Result<String> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let mut attached = self
-            .attached
-            .lock()
-            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
-        attached.retain(|_, entry| {
-            if entry.key != key {
-                return true;
-            }
-            entry.pump.abort();
-            false
-        });
-        attached.insert(id.clone(), Attached { key, client, pump });
-        Ok(id)
+    /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
+    pub async fn write(&self, id: SessionId, data: String) -> Option<Result<()>> {
+        let (client, key) = self.target(id).await?;
+        Some(
+            client
+                .call(Action::Write { key, text: data })
+                .await
+                .map(|_| ())
+                .map_err(Into::into),
+        )
     }
 
-    /// Sends input to the attached terminal identified by the app.
-    pub async fn write(&self, id: &str, data: String) -> Result<()> {
-        let (client, key) = self.target(id)?;
-        client.call(Action::Write { key, text: data }).await?;
-        Ok(())
+    /// Resizes an attached terminal. `None` when `id` is not runtime-hosted.
+    pub async fn resize(&self, id: SessionId, rows: u16, cols: u16) -> Option<Result<()>> {
+        let (client, key) = self.target(id).await?;
+        Some(
+            client
+                .call(Action::Resize { key, rows, cols })
+                .await
+                .map(|_| ())
+                .map_err(Into::into),
+        )
     }
 
-    /// Resizes an attached terminal.
-    pub async fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<()> {
-        let (client, key) = self.target(id)?;
-        client.call(Action::Resize { key, rows, cols }).await?;
-        Ok(())
-    }
-
-    /// Ends the program on purpose.
-    pub async fn stop(&self, id: &str) -> Result<()> {
-        let (client, key) = self.target(id)?;
+    /// Ends the program on purpose. `None` when `id` is not runtime-hosted.
+    pub async fn stop(&self, id: SessionId) -> Option<Result<()>> {
+        let (client, key) = self.target(id).await?;
         let stopped = client.call(Action::Stop { key }).await;
         self.drop_attachment(id);
-        stopped?;
-        Ok(())
+        Some(stopped.map(|_| ()).map_err(Into::into))
     }
 
     /// The runtime client, connecting on first use. `None` when the runtime is not used. A failed
@@ -160,8 +163,8 @@ impl RuntimeTerminals {
     ) -> Result<(Client, Option<Reply>)> {
         match locate(current, key).await {
             Err(ClientError::NotRunning) => {
-                // Only a confirmed-dead endpoint is safe to restart. The connector
-                // rechecks it under this lock so simultaneous reopens share one start.
+                // The connector rechecks the endpoint under this lock so concurrent reopens
+                // share one start. Only a confirmed missing endpoint is safe to restart.
                 let _restart = self.restart.lock().await;
                 let current = runtime_client::connect().await?;
                 Ok(locate(&current, key).await?)
@@ -170,19 +173,23 @@ impl RuntimeTerminals {
         }
     }
 
-    fn target(&self, id: &str) -> Result<(Client, String)> {
-        let attached = self
-            .attached
-            .lock()
-            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
-        let found = attached
-            .get(id)
-            .ok_or_else(|| anyhow!("terminal attachment is no longer active"))?;
-        Ok((found.client.clone(), found.key.clone()))
+    /// A handle for a newly attached terminal, unique in this app whichever runtime hosts it.
+    fn new_handle(&self) -> SessionId {
+        SessionId::from_raw(HOSTED_HANDLE_BASE + self.handles.fetch_add(1, Ordering::Relaxed))
     }
 
-    fn drop_attachment(&self, id: &str) {
-        let removed = self.attached.lock().ok().and_then(|mut map| map.remove(id));
+    async fn target(&self, id: SessionId) -> Option<(Client, String)> {
+        let attached = self.attached.lock().ok()?;
+        let found = attached.get(&id)?;
+        Some((found.client.clone(), found.key.clone()))
+    }
+
+    fn drop_attachment(&self, id: SessionId) {
+        let removed = self
+            .attached
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(&id));
         if let Some(attached) = removed {
             attached.pump.abort();
         }
@@ -339,8 +346,10 @@ fn deliver(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod handle_tests {
+    use brachio_pty::SessionId;
+
+    use super::{locate, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE};
 
     #[tokio::test]
     async fn a_missing_current_runtime_is_distinct_from_a_missing_terminal() {
@@ -351,31 +360,13 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn attachment_handles_keep_runtime_routes_distinct_and_expire_on_reattach() {
+    #[test]
+    fn hosted_terminals_get_distinct_handles_that_cannot_equal_an_in_app_session_id() {
         let terminals = RuntimeTerminals::default();
-        let register = |key: &str, endpoint: &str| {
-            terminals
-                .register_attachment(key.into(), Client::new(endpoint), spawn(async {}))
-                .expect("register attachment")
-        };
-
-        let old = register("first:agent", "runtime-old");
-        let current = register("second:agent", "runtime-current");
-        assert_ne!(old, current);
-        assert_eq!(terminals.target(&old).expect("old route").1, "first:agent");
-        assert_eq!(
-            terminals.target(&current).expect("new route").1,
-            "second:agent"
-        );
-
-        let reopened = register("first:agent", "runtime-current");
-        assert_ne!(reopened, old);
-        assert!(terminals.target(&old).is_err());
-        assert_eq!(
-            terminals.target(&reopened).expect("replacement route").1,
-            "first:agent"
-        );
-        assert!(terminals.target(&current).is_ok());
+        let first = terminals.new_handle();
+        let second = terminals.new_handle();
+        assert_ne!(first, second, "two runtimes can both have a session 1");
+        assert!(first > SessionId::from_raw(HOSTED_HANDLE_BASE - 1));
+        assert!(first > SessionId::from_raw(1_000_000));
     }
 }

@@ -60,14 +60,14 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
 }
 
 interface OpenedTerminal {
-  id: number | string;
+  id: number;
   promptDelivery: PromptDelivery;
   resumed: boolean;
   attached: boolean;
 }
 
 export interface TerminalHandle {
-  id: OpenedTerminal["id"];
+  id: number;
   /** `type_in` means the caller still has to type the prompt. */
   promptDelivery: PromptDelivery;
   /** Whether setup input and first prompts should be suppressed. */

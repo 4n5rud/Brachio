@@ -24,7 +24,7 @@ pub use pull_request_status::{
     Conflict, FailedCheck, PullRequestSnapshot, PullRequestState, ReviewState, StatusError,
 };
 pub use push_target::push_remote;
-pub use repo_info::{inspect_repo, RepoInfo};
+pub use repo_info::{find_repositories, inspect_repo, RepoInfo};
 pub use worktree::{
     add_worktree, discard_worktree, remove_worktree, unsaved_work, worktree_path, AddWorktree,
     UnsavedWork,

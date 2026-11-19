@@ -51,21 +51,13 @@ pub struct OpenRequest {
 #[serde(rename_all = "camelCase")]
 pub struct Opened {
     /// Session handle for later calls.
-    pub id: TerminalId,
+    pub id: SessionId,
     /// Whether the UI still has to type the first prompt in.
     pub prompt_delivery: PromptDelivery,
     /// Whether setup input and first prompts should be suppressed.
     pub resumed: bool,
     /// Whether the runtime already owned this live process.
     pub attached: bool,
-}
-
-/// Local PTYs use numeric IDs. Runtime attachments use app-issued opaque strings.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum TerminalId {
-    Local(SessionId),
-    Hosted(String),
 }
 
 /// Sent as JSON on the channel. Output frames are raw bytes instead.
@@ -179,7 +171,7 @@ pub async fn terminal_open(
             .await;
         if let Some((id, attached)) = opened.map_err(|error| to_message(&error))? {
             return Ok(Opened {
-                id: TerminalId::Hosted(id),
+                id,
                 prompt_delivery: if attached {
                     PromptDelivery::None
                 } else {
@@ -205,7 +197,7 @@ pub async fn terminal_open(
         .map_err(|error| error.to_string())?;
     let id = spawned.map_err(|error| to_message(&error))?;
     Ok(Opened {
-        id: TerminalId::Local(id),
+        id,
         prompt_delivery,
         resumed,
         attached: false,
@@ -217,14 +209,16 @@ pub async fn terminal_open(
 pub async fn terminal_write(
     terminals: State<'_, Terminals>,
     hosted: State<'_, RuntimeTerminals>,
-    id: TerminalId,
+    id: SessionId,
     data: String,
 ) -> CommandResult<()> {
-    let result = match id {
-        TerminalId::Local(id) => terminals.0.write(id, data.as_bytes()),
-        TerminalId::Hosted(id) => hosted.write(&id, data).await,
-    };
-    result.map_err(|error| to_message(&error))
+    if let Some(result) = hosted.write(id, data.clone()).await {
+        return result.map_err(|error| to_message(&error));
+    }
+    terminals
+        .0
+        .write(id, data.as_bytes())
+        .map_err(|error| to_message(&error))
 }
 
 /// Changes a terminal's size.
@@ -232,15 +226,15 @@ pub async fn terminal_write(
 pub async fn terminal_resize(
     terminals: State<'_, Terminals>,
     hosted: State<'_, RuntimeTerminals>,
-    id: TerminalId,
+    id: SessionId,
     rows: u16,
     cols: u16,
 ) -> CommandResult<()> {
     let (rows, cols) = (rows.max(1), cols.max(1));
-    let resized = match id {
-        TerminalId::Local(id) => terminals.0.resize(id, rows, cols),
-        TerminalId::Hosted(id) => hosted.resize(&id, rows, cols).await,
-    };
+    if let Some(result) = hosted.resize(id, rows, cols).await {
+        return result.map_err(|error| to_message(&error));
+    }
+    let resized = terminals.0.resize(id, rows, cols);
     resized.map_err(|error| to_message(&error))
 }
 
@@ -249,13 +243,12 @@ pub async fn terminal_resize(
 pub async fn terminal_close(
     terminals: State<'_, Terminals>,
     hosted: State<'_, RuntimeTerminals>,
-    id: TerminalId,
+    id: SessionId,
 ) -> CommandResult<()> {
-    let result = match id {
-        TerminalId::Local(id) => terminals.0.kill(id),
-        TerminalId::Hosted(id) => hosted.stop(&id).await,
-    };
-    result.map_err(|error| to_message(&error))
+    if let Some(result) = hosted.stop(id).await {
+        return result.map_err(|error| to_message(&error));
+    }
+    terminals.0.kill(id).map_err(|error| to_message(&error))
 }
 
 /// The command for an agent: its earlier conversation when asked to resume
