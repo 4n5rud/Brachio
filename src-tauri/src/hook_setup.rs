@@ -15,6 +15,7 @@ use brachio_runtime::approval::{DEFAULT_WAIT, ENDPOINT_VARIABLE, KEY_VARIABLE};
 pub struct HookSetup {
     endpoint: String,
     settings: Option<PathBuf>,
+    helper_folder: Option<PathBuf>,
 }
 
 impl HookSetup {
@@ -28,7 +29,35 @@ impl HookSetup {
                 None
             }
         };
-        Self { endpoint, settings }
+        let helper_folder = helper_beside_app()
+            .ok()
+            .flatten()
+            .and_then(|helper| helper.parent().map(Path::to_path_buf));
+        Self {
+            endpoint,
+            settings,
+            helper_folder,
+        }
+    }
+
+    /// What an agent needs to use `brachio send` and `brachio check`: where the app listens, who
+    /// the agent is, and the helper on its `PATH`. Empty when the helper is not installed.
+    pub fn mail_environment(&self, key: &str) -> Vec<(String, String)> {
+        let Some(folder) = &self.helper_folder else {
+            return Vec::new();
+        };
+        let mut folders = vec![folder.clone()];
+        if let Some(existing) = env::var_os("PATH") {
+            folders.extend(env::split_paths(&existing));
+        }
+        let mut variables = vec![
+            (ENDPOINT_VARIABLE.to_owned(), self.endpoint.clone()),
+            (KEY_VARIABLE.to_owned(), key.to_owned()),
+        ];
+        if let Ok(path) = env::join_paths(folders) {
+            variables.push(("PATH".to_owned(), path.to_string_lossy().into_owned()));
+        }
+        variables
     }
 
     /// Arguments that add the hook to a Claude Code session.

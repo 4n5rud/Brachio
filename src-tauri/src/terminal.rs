@@ -132,11 +132,13 @@ pub async fn terminal_open(
     }
     let mut options = Vec::new();
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
-        let extra = hook.environment(key);
-        if !extra.is_empty() {
+        if !hook.environment(key).is_empty() {
             options = hook.claude_arguments();
-            environment.extend(extra);
         }
+    }
+    // Every agent, not only Claude Code, can send and read messages.
+    if let (Some(_), Some(key)) = (request.agent, request.key.as_deref()) {
+        environment.extend(hook.mail_environment(key));
     }
     let (command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => {
