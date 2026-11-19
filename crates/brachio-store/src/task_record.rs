@@ -109,12 +109,12 @@ impl TaskRecord {
     /// # Errors
     /// Fails when the query fails.
     pub fn count_for_repo(connection: &Connection, repo_id: &str) -> Result<u64, StoreError> {
-        let count: u64 = connection.query_row(
+        let count: i64 = connection.query_row(
             "SELECT count(*) FROM tasks WHERE repo_id = ?1",
             [repo_id],
             |row| row.get(0),
         )?;
-        Ok(count)
+        Ok(u64::try_from(count).unwrap_or(0))
     }
 
     /// One task by id.

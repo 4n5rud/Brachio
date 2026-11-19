@@ -75,15 +75,19 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
     for (index, sql) in MIGRATIONS.iter().enumerate().skip(current) {
         let transaction = connection.transaction()?;
         transaction.execute_batch(sql)?;
-        transaction.pragma_update(None, "user_version", index + 1)?;
+        transaction.pragma_update(
+            None,
+            "user_version",
+            i64::try_from(index + 1).unwrap_or(i64::MAX),
+        )?;
         transaction.commit()?;
     }
     Ok(())
 }
 
 fn user_version(connection: &Connection) -> Result<usize, StoreError> {
-    let version: usize = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    Ok(version)
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    Ok(usize::try_from(version).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -112,7 +116,11 @@ mod tests {
     fn a_database_from_a_newer_brachio_is_refused() {
         let mut connection = open_in_memory().expect("open database");
         connection
-            .pragma_update(None, "user_version", MIGRATIONS.len() + 1)
+            .pragma_update(
+                None,
+                "user_version",
+                i64::try_from(MIGRATIONS.len() + 1).unwrap_or(i64::MAX),
+            )
             .expect("pretend a newer schema");
         let error = migrate(&mut connection).expect_err("must not run on a newer schema");
         assert!(matches!(error, StoreError::NewerSchema { .. }), "{error}");
