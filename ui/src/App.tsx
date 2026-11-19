@@ -11,7 +11,7 @@ import { Inspector } from "./components/Inspector";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
-import { TaskView } from "./components/TaskView";
+import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { WorkspaceDialog, type TaskActivity, type Theme } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
@@ -22,6 +22,7 @@ import type { CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
+import { pasteText } from "./lib/terminal-paste";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
@@ -106,7 +107,7 @@ export function App() {
   };
   const insertFile = (path: string) => {
     const task = selected();
-    if (task) void draftComment(task.id, `@${path} `);
+    if (task) void draftComment(task.id, `@${path} `).catch(report);
   };
   const savedTheme = localStorage.getItem("brachio.theme");
   const [theme, setTheme] = createSignal<Theme>(
@@ -159,11 +160,11 @@ export function App() {
       window.clearInterval(interval);
     });
   });
-  const draftWriters = new Map<string, (text: string) => Promise<boolean>>();
-  const registerDraftWriter = (id: string, writer: (text: string) => Promise<boolean>) => {
-    draftWriters.set(id, writer);
+  const draftTargets = new Map<string, () => DraftTarget | undefined>();
+  const registerDraftTarget = (id: string, target: () => DraftTarget | undefined) => {
+    draftTargets.set(id, target);
     return () => {
-      if (draftWriters.get(id) === writer) draftWriters.delete(id);
+      if (draftTargets.get(id) === target) draftTargets.delete(id);
     };
   };
 
@@ -245,10 +246,33 @@ export function App() {
     firstPrompts.delete(taskId);
     return prompt;
   };
-  const draftComment = (id: string, text: string) => {
+  const draftComment = async (id: string, text: string) => {
     const task = selected();
-    if (task?.id !== id) return Promise.resolve(false);
-    return draftWriters.get(id)?.(text) ?? Promise.resolve(false);
+    const getTarget = draftTargets.get(id);
+    const target = getTarget?.();
+    const draft = pasteText(text, true);
+    if (task?.id !== id || !getTarget || !target || !draft.trim()) return false;
+    const stillAvailable = () => {
+      const current = getTarget();
+      return selected()?.id === id && draftTargets.get(id) === getTarget
+        && current?.key === target.key && current.prepare === target.prepare
+        && activeAgentKey(id, target.key)
+        && !questions().some((question) => question.key === target.key);
+    };
+    if (!stillAvailable()) return false;
+    const insert = target.prepare(draft);
+    if (!insert) return false;
+    const body = [
+      t("draft.target").replace("{agent}", () => target.agent).replace("{task}", () => task.title),
+      t("draft.review"),
+      draft,
+    ].join("\n\n");
+    const agreed = await confirm(body, {
+      title: t("draft.title"),
+      okLabel: t("draft.insert"),
+      cancelLabel: t("workspace.close"),
+    });
+    return agreed && stillAvailable() && await insert();
   };
 
   const report = (failure: unknown) => setError(String(failure));
@@ -596,7 +620,7 @@ export function App() {
               setupFailure={setupFailures().get(task().id)}
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
-              registerDraftWriter={registerDraftWriter}
+              registerDraftTarget={registerDraftTarget}
             />
           )}
         </Show>

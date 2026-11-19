@@ -46,6 +46,8 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
  * tasks is instant. It gives up its WebGL context, since browsers allow only
  * a handful at once.
  */
+export type PrepareDraft = (text: string) => (() => Promise<boolean>) | undefined;
+
 export function TerminalPane(props: {
   session?: TerminalSession;
   active?: boolean;
@@ -53,7 +55,7 @@ export function TerminalPane(props: {
   theme?: string;
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
-  registerDraftWriter?: (writer: (text: string) => Promise<boolean>) => () => void;
+  registerDraftWriter?: (prepare: PrepareDraft) => () => void;
 }) {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
@@ -125,6 +127,8 @@ export function TerminalPane(props: {
     let handle: TerminalHandle | null = null;
     let exited = false;
     let blocked = false;
+    let working = false;
+    let inputRevision = 0;
     let disposed = false;
     let generation = 0;
     let promptTimer: ReturnType<typeof setTimeout> | undefined;
@@ -134,6 +138,7 @@ export function TerminalPane(props: {
     const start = (resume: boolean, initialPrompt: string | null) => {
       setContinuity(undefined);
       blocked = false;
+      working = false;
       if (!session) return;
       const launch = ++generation;
       const earlyOutput: Uint8Array[] = [];
@@ -163,6 +168,7 @@ export function TerminalPane(props: {
         if (message.type === "status") {
           if (exited) return;
           blocked = message.status.state === "blocked";
+          working = message.status.state === "working";
           props.onStatus?.(message.status, message.message);
           return;
         }
@@ -227,15 +233,19 @@ export function TerminalPane(props: {
       term.focus();
     };
     start(session?.resume === true && session.agent !== null, session?.prompt ?? null);
-    const unregister = props.registerDraftWriter?.(async (text) => {
-      if (!handle || !session?.agent || exited || disposed || blocked || !props.active
-        || !term.modes.bracketedPasteMode) {
-        return false;
-      }
-      // Send printable text as a paste, without a key that submits the prompt.
-      await handle.write(bracketedPaste(text));
-      term.focus();
-      return true;
+    const canPasteDraft = () => session?.agent && !exited && !disposed && !blocked
+      && !working && props.active && term.modes.bracketedPasteMode;
+    const unregister = props.registerDraftWriter?.((text) => {
+      const destination = handle;
+      if (!destination || !canPasteDraft()) return undefined;
+      const revision = inputRevision;
+      return async () => {
+        if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
+        inputRevision += 1;
+        await destination.write(bracketedPaste(text, true));
+        if (destination === handle && props.active) term.focus();
+        return true;
+      };
     });
 
     function writeOutput(bytes: Uint8Array) {
@@ -269,6 +279,7 @@ export function TerminalPane(props: {
 
     let lastWriteFailure = "";
     const input = term.onData((data) => {
+      inputRevision += 1;
       const destination = handle;
       if (!destination || exited) return;
       void destination.write(data).then(() => { lastWriteFailure = ""; }).catch((failure: unknown) => {
