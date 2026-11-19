@@ -8,6 +8,18 @@ interface UnreadRow {
 
 export const MAILBOX_REMINDER = "Brachio message: run brachio check";
 
+export interface MailboxMessage {
+  id: string;
+  fromKey: string;
+  subject: string;
+  preview: string;
+  createdAtMs: number;
+}
+
+export function readMailbox(tabKey: string) {
+  return invoke<MailboxMessage[]>("mailbox_inbox", { tabKey });
+}
+
 /** Subscribes before the initial read, then refreshes once for each burst of changes. */
 export function watchMailbox(onUnread: (counts: ReadonlyMap<string, number>) => void): () => void {
   let disposed = false;

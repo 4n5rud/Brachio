@@ -637,7 +637,7 @@ export function App() {
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
               registerDraftTarget={registerDraftTarget}
-              unreadForTab={unreadForTab}
+              unreadForTab={inTauri ? unreadForTab : undefined}
               onMailboxReminder={(key) => {
                 void draftComment(task().id, MAILBOX_REMINDER, key)
                   .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
