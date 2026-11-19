@@ -1,4 +1,5 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind } from "../lib/tasks";
 import { SUBMIT_KEYS } from "../lib/shortcut";
@@ -27,10 +28,29 @@ export function NewTaskDialog(props: {
   const [agent, setAgent] = createSignal<AgentKind>("claude");
   const [base, setBase] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [confirmingClose, setConfirmingClose] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
   const finalTitle = () => title().trim() || titleFromPrompt(prompt());
-  const canCreate = () => !busy() && finalTitle() !== "";
+  const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "";
+  const requestClose = async () => {
+    if (busy() || confirmingClose()) return;
+    if (!prompt().trim() && !title().trim() && !base().trim() && agent() === "claude") {
+      props.onClose();
+      return;
+    }
+    setConfirmingClose(true);
+    try {
+      const discard = "__TAURI_INTERNALS__" in window
+        ? await confirm(t("newTask.discardDraft"), { kind: "warning" })
+        : window.confirm(t("newTask.discardDraft"));
+      if (discard) props.onClose();
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      setConfirmingClose(false);
+    }
+  };
 
   const submit = async () => {
     if (!canCreate()) return;
@@ -47,14 +67,15 @@ export function NewTaskDialog(props: {
   let promptBox!: HTMLTextAreaElement;
   onMount(() => promptBox.focus());
   const onKey = (event: KeyboardEvent) => {
-    if (event.key === "Escape") props.onClose();
+    if (event.isComposing || event.defaultPrevented) return;
+    if (event.key === "Escape") void requestClose();
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit();
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
   return (
-    <div class="scrim" onClick={(event) => event.target === event.currentTarget && props.onClose()}>
+    <div class="scrim" onClick={(event) => { if (event.target === event.currentTarget) void requestClose(); }}>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="new-task-title">
         <div class="modal-head">
           <h2 id="new-task-title">{t("newTask.title")}</h2>
@@ -111,7 +132,8 @@ export function NewTaskDialog(props: {
           <Show when={error()}>{(message) => <p class="form-error">{message()}</p>}</Show>
         </div>
         <div class="modal-foot">
-          <button class="button button-ghost" type="button" onClick={() => props.onClose()}>
+          <button class="button button-ghost" type="button" disabled={busy() || confirmingClose()}
+            onClick={() => void requestClose()}>
             {t("newTask.cancel")}
           </button>
           <button class="button button-primary" type="button" disabled={!canCreate()} onClick={() => void submit()}>

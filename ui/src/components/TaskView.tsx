@@ -160,17 +160,6 @@ export function TaskView(props: {
               )}</For>
             </select>
           </Show>
-          <button class="icon-button" type="button" aria-label={t("task.openInEditor")}>
-            <Icon name="external" />
-          </button>
-          <button class="button button-sm" type="button">
-            <Icon name="diff" />
-            {t("task.reviewChanges")}
-          </button>
-          <button class="button button-sm" type="button">
-            <Icon name="pr" />
-            {t("task.createPr")}
-          </button>
           <Show when={props.task.worktreePath}>
             <button class="button button-sm" type="button" disabled={!props.onArchive}
               onClick={() => props.onArchive?.()}>{t("task.archive")}</button>
@@ -234,6 +223,7 @@ export function TaskView(props: {
         <div class="pane-body">
           <For each={props.openIds}>
             {(id) => {
+              const primarySession = sessionFor(id);
               const selected = () => props.visible && id === props.task.id;
               const mode = () => shells().get(id);
               const extraSelected = () => isSecondarySelected(id);
@@ -243,7 +233,7 @@ export function TaskView(props: {
                   <div class="terminal-cell" hidden={mode() === "shell"}>
                     <div class="terminal-cell" hidden={extraSelected()}>
                       <TerminalPane
-                        session={sessionFor(id)}
+                        session={primarySession}
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, status, message)}
@@ -287,9 +277,7 @@ export function TaskView(props: {
             }}
           </For>
         </div>
-        <Show when={props.question} fallback={
-          <Show when={props.task.pendingCommand}>{(command) => <ApprovalBar command={command()} />}</Show>
-        }>
+        <Show when={props.question && props.onAnswer && props.question}>
           {(question) => (
             <ApprovalBar command={summarize(question())}
               onAllow={() => props.onAnswer?.(question().id, true)}

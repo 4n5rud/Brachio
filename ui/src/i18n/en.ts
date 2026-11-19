@@ -103,6 +103,8 @@ export const en = {
   "terminal.reopening": "Reopening session",
   "terminal.restored": "Last screen restored, restarting",
   "terminal.resumeFailed": "Nothing to resume, starting a new conversation",
+  "terminal.promptNotSent": "The terminal was not ready for a safe paste. The initial prompt was not sent.",
+  "terminal.inputFailed": "Could not send terminal input.",
   "terminal.startFailed": "Could not start the terminal",
 
   "inspector.changes": "Changes",
@@ -229,6 +231,7 @@ export const en = {
   "empty.repo.add": "Add repository",
 
   "newTask.title": "New task",
+  "newTask.discardDraft": "Discard the changes in this new task draft?",
   "newTask.prompt": "What should the agent do?",
   "newTask.name": "Task name",
   "newTask.base": "Base",
