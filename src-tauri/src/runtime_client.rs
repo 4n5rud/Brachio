@@ -31,20 +31,64 @@ pub fn enabled() -> bool {
 }
 
 /// The endpoint of this user's runtime. Only letters, digits and `-` survive, so it is a valid
-/// pipe name and a valid file name on every platform.
+/// pipe name and a valid file name on every platform. A hash of the full user name and home folder
+/// keeps accounts apart whose names look alike once cut down, such as `john.doe` and `johndoe`,
+/// or are not ASCII at all.
 pub fn endpoint() -> String {
     if let Ok(name) = env::var(ENDPOINT_VARIABLE) {
         return name;
     }
-    let user = env::var("USERNAME")
+    endpoint_for(&current_user(), &home_folder())
+}
+
+fn current_user() -> String {
+    env::var("USERNAME")
         .or_else(|_| env::var("USER"))
-        .unwrap_or_default();
-    let clean: String = user
-        .chars()
+        .unwrap_or_default()
+}
+
+fn home_folder() -> String {
+    env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .unwrap_or_default()
+}
+
+fn endpoint_for(user: &str, home: &str) -> String {
+    let clean = readable_part(user);
+    let hash = stable_hash(&format!("{user}\0{home}"));
+    if clean.is_empty() {
+        format!("brachio-{hash:08x}")
+    } else {
+        format!("brachio-{clean}-{hash:08x}")
+    }
+}
+
+fn readable_part(user: &str) -> String {
+    user.chars()
         .filter(|character| character.is_ascii_alphanumeric())
         .take(16)
-        .collect();
-    format!("brachio-{clean}")
+        .collect()
+}
+
+/// FNV-1a, folded to 32 bits. Unlike the standard hasher it gives the same answer in every build,
+/// which matters because a new build must find the runtime an old build started.
+fn stable_hash(text: &str) -> u32 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    u32::try_from((hash >> 32) ^ (hash & 0xffff_ffff)).unwrap_or(0)
+}
+
+/// The name earlier versions used, without the hash. A runtime still running under it is kept
+/// until it ends, so sessions started before an update are not lost from view.
+fn legacy_endpoint() -> Option<String> {
+    if env::var(ENDPOINT_VARIABLE).is_ok() {
+        return None;
+    }
+    let clean = readable_part(&current_user());
+    (!clean.is_empty()).then(|| format!("brachio-{clean}"))
 }
 
 /// A client for this user's runtime, after making sure one is running.
@@ -52,6 +96,12 @@ pub fn endpoint() -> String {
 /// # Errors
 /// Fails when no runtime answers and none could be started.
 pub async fn connect() -> Result<Client> {
+    if let Some(legacy) = legacy_endpoint() {
+        let old = Client::new(&legacy);
+        if old.call(Action::Hello).await.is_ok() {
+            return Ok(old);
+        }
+    }
     let name = endpoint();
     let client = Client::new(&name);
     match client.call(Action::Hello).await {
@@ -167,5 +217,47 @@ mod tests {
         assert!(name
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '-'));
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::endpoint_for;
+
+    #[test]
+    fn accounts_with_alike_or_non_ascii_names_get_different_endpoints() {
+        let a = endpoint_for("john.doe", r"C:\Users\john.doe");
+        let b = endpoint_for("johndoe", r"C:\Users\johndoe");
+        assert_ne!(a, b);
+        assert_ne!(
+            endpoint_for("홍길동", r"C:\Users\홍길동"),
+            endpoint_for("김철수", r"C:\Users\김철수")
+        );
+        assert_ne!(
+            endpoint_for("averyveryverylongusername1", "/home/a"),
+            endpoint_for("averyveryverylongusername2", "/home/b")
+        );
+    }
+
+    #[test]
+    fn an_endpoint_is_stable_and_only_letters_digits_and_hyphens() {
+        let name = endpoint_for("홍길동", r"C:\Users\홍길동");
+        assert_eq!(name, endpoint_for("홍길동", r"C:\Users\홍길동"));
+        assert!(name.starts_with("brachio-"));
+        assert!(name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-'));
+        assert_eq!(
+            endpoint_for("4n5rud", "x"),
+            "brachio-4n5rud-".to_owned() + &name_hash("4n5rud", "x")
+        );
+    }
+
+    fn name_hash(user: &str, home: &str) -> String {
+        endpoint_for(user, home)
+            .rsplit('-')
+            .next()
+            .expect("hash part")
+            .to_owned()
     }
 }
