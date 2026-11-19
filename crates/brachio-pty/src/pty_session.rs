@@ -1,7 +1,7 @@
 //! One child process running inside a pseudoterminal.
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -52,7 +52,7 @@ impl PtySession {
             .context("open pty")?;
         let mut command = CommandBuilder::new(&spec.program);
         command.args(&spec.args);
-        command.cwd(&spec.cwd);
+        command.cwd(without_verbatim_prefix(&spec.cwd));
         for (name, value) in &spec.env {
             command.env(name, value);
         }
@@ -127,12 +127,53 @@ fn write_queued(mut writer: Box<dyn Write + Send>, queued: &Receiver<Vec<u8>>) {
     }
 }
 
+/// `canonicalize` on Windows gives `\\?\C:\dir`, which `cmd.exe` and PowerShell refuse as a working
+/// directory (they fall back to the Windows folder). Drive and share paths are given back in the
+/// ordinary form; every other path is left alone.
+#[must_use]
+pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let mut characters = rest.chars();
+        let drive = characters
+            .next()
+            .is_some_and(|letter| letter.is_ascii_alphabetic());
+        if drive && characters.next() == Some(':') {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
 fn size(rows: u16, cols: u16) -> PtySize {
     PtySize {
         rows,
         cols,
         pixel_width: 0,
         pixel_height: 0,
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::without_verbatim_prefix;
+
+    #[test]
+    fn a_verbatim_drive_path_becomes_an_ordinary_one_and_other_paths_stay() {
+        let plain = |text: &str| without_verbatim_prefix(Path::new(text));
+        assert_eq!(plain(r"\\?\C:\work\repo"), PathBuf::from(r"C:\work\repo"));
+        assert_eq!(
+            plain(r"\\?\UNC\server\share\repo"),
+            PathBuf::from(r"\\server\share\repo")
+        );
+        assert_eq!(plain(r"C:\work\repo"), PathBuf::from(r"C:\work\repo"));
+        assert_eq!(plain("/home/me/repo"), PathBuf::from("/home/me/repo"));
+        assert_eq!(plain(r"\\?\Volume{1}\x"), PathBuf::from(r"\\?\Volume{1}\x"));
     }
 }
 
