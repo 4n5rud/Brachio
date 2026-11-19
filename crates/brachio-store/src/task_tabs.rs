@@ -7,6 +7,9 @@ use rusqlite::{params, Connection};
 use crate::StoreError;
 
 /// Imports legacy tab IDs without overwriting a saved tab or close.
+///
+/// # Errors
+/// Fails when the database cannot be read or written.
 pub fn load_secondary_tabs(
     connection: &mut Connection,
     legacy: &HashMap<String, String>,
@@ -31,6 +34,9 @@ pub fn load_secondary_tabs(
 }
 
 /// Saves a tab ID or remembers that the user closed it.
+///
+/// # Errors
+/// Fails when the task is not an open task, or the database cannot be written.
 pub fn set_secondary_tab(
     connection: &Connection,
     task_id: &str,
