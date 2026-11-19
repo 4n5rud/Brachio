@@ -138,7 +138,30 @@ pub async fn task_create(
         agent_session_id: session_id.as_deref(),
         created_at_ms: now_ms(),
     };
-    let task = TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)?;
+    let saved = database.lock().and_then(|mut connection| {
+        let transaction = connection.transaction().map_err(to_text)?;
+        let record = TaskRecord::insert(&transaction, &task).map_err(to_text)?;
+        transaction.commit().map_err(to_text)?;
+        Ok(record)
+    });
+    let task = match saved {
+        Ok(task) => task,
+        Err(error) => {
+            let location = path.display().to_string();
+            let cleanup = tauri::async_runtime::spawn_blocking(move || {
+                brachio_git::remove_worktree(&Git::new(&repo.path), &path, &branch)
+            })
+            .await
+            .map_err(to_text)
+            .and_then(|result| result.map_err(to_text));
+            return Err(match cleanup {
+                Ok(()) => format!("Could not register task. The new worktree was removed. {error}"),
+                Err(cleanup_error) => format!(
+                    "Could not register task. Git could not finish cleanup at {location}: {cleanup_error}. {error}"
+                ),
+            });
+        }
+    };
     let setup_copy_error = brachio_git::copy_setup_files(&repo.path, &path, &setup)
         .err()
         .map(to_text);

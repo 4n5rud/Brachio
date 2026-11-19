@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
@@ -9,8 +10,8 @@ import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
 import { summarize, type ApprovalQuestion } from "../lib/approvals";
-import { loadLayouts, loadSecondaryAgents, saveLayouts, saveSecondaryAgents, terminalKey,
-  type TerminalLayout } from "../lib/terminal-layout";
+import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
+  saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
 /**
@@ -25,6 +26,8 @@ export function TaskView(props: {
   theme?: string;
   /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
   openIds: readonly string[];
+  workspaceTasks: readonly TaskRow[];
+  onOpenTask: (id: string) => void;
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
@@ -43,29 +46,64 @@ export function TaskView(props: {
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
-  const restoredAgents = loadSecondaryAgents();
-  const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(restoredAgents);
-  const [selectedSecondary, setSelectedSecondary] = createSignal<ReadonlySet<string>>(new Set());
+  const restoredAgents = new Map<string, string>();
+  const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const [tabsReady, setTabsReady] = createSignal(false);
+  const [tabsSaving, setTabsSaving] = createSignal(false);
+  const [tabError, setTabError] = createSignal("");
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
+  onMount(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const legacy = Object.fromEntries(loadSecondaryAgents());
+    void invoke<Record<string, string>>("task_secondary_tabs", { legacy }).then((tabs) => {
+      if (disposed) return;
+      for (const [id, tab] of Object.entries(tabs)) restoredAgents.set(id, tab);
+      const saved = new Map(restoredAgents);
+      setSecondary(saved);
+      saveSecondaryAgents(saved);
+      setTabsReady(true);
+    }).catch((failure) => { if (!disposed) setTabError(String(failure)); });
+  });
+  const [selectedSecondary, setSelectedSecondary] =
+    createSignal<ReadonlyMap<string, string>>(loadSelectedSecondaryAgents());
+  const isSecondarySelected = (id: string) => {
+    const session = secondary().get(id);
+    return session !== undefined && selectedSecondary().get(id) === session;
+  };
   const secondaryWriters = new Map<string, (text: string) => Promise<boolean>>();
   const secondaryKind = (task: TaskRow) => task.agent === "claude" ? "codex" : "claude";
   const selectAgent = (id: string, extra: boolean) => {
     setSelectedSecondary((current) => {
-      const next = new Set(current);
-      if (extra) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-    if (layout() === "shell") setLayout("agent");
-  };
-  const changeSecondary = (id: string, sessionId?: string) => {
-    setSecondary((current) => {
       const next = new Map(current);
-      if (sessionId) next.set(id, sessionId);
+      const session = secondary().get(id);
+      if (extra && session) next.set(id, session);
       else next.delete(id);
       return next;
     });
-    saveSecondaryAgents(secondary());
-    selectAgent(id, sessionId !== undefined);
+    saveSelectedSecondaryAgents(selectedSecondary());
+    if (props.task.id === id && layout() === "shell") setLayout("agent");
+  };
+  const changeSecondary = async (id: string, sessionId?: string) => {
+    if (!tabsReady() || tabsSaving()) return;
+    setTabsSaving(true);
+    setTabError("");
+    try {
+      await invoke("task_set_secondary_tab", { taskId: id, tabId: sessionId ?? null });
+      if (disposed) return;
+      setSecondary((current) => {
+        const next = new Map(current);
+        if (sessionId) next.set(id, sessionId);
+        else next.delete(id);
+        return next;
+      });
+      saveSecondaryAgents(secondary());
+      selectAgent(id, sessionId !== undefined);
+    } catch (failure) {
+      setTabError(String(failure));
+    } finally {
+      setTabsSaving(false);
+    }
   };
   const setShells = (update: (current: ReadonlyMap<string, TerminalLayout>) => ReadonlyMap<string, TerminalLayout>) => {
     setLayouts((current) => update(current));
@@ -117,6 +155,14 @@ export function TaskView(props: {
         </div>
         <StatusBadge status={props.task.status} />
         <div class="task-header-actions">
+          <Show when={props.workspaceTasks.length > 1}>
+            <select class="input workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
+              onChange={(event) => props.onOpenTask(event.currentTarget.value)}>
+              <For each={props.workspaceTasks}>{(task) => (
+                <option value={task.id}>{task.title} · {task.branch}</option>
+              )}</For>
+            </select>
+          </Show>
           <button class="icon-button" type="button" aria-label={t("task.openInEditor")}>
             <Icon name="external" />
           </button>
@@ -135,14 +181,14 @@ export function TaskView(props: {
         </div>
       </div>
       <div class="tabs" role="tablist">
-        <button class="tab" role="tab" aria-selected={layout() !== "shell" && !selectedSecondary().has(props.task.id)} type="button"
+        <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={statusTone(props.task.status)} />
           {AGENT_NAME[props.task.agent]}
         </button>
         <Show when={secondary().has(props.task.id)}>
           <button class="tab" role="tab" type="button"
-            aria-selected={layout() !== "shell" && selectedSecondary().has(props.task.id)}
+            aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
             onClick={() => selectAgent(props.task.id, true)}>{AGENT_NAME[secondaryKind(props.task)]}</button>
         </Show>
         <Show when={shells().has(props.task.id)} fallback={
@@ -159,16 +205,17 @@ export function TaskView(props: {
         <div class="pane-head">
           <Icon name="bot" class="icon-sm" />
           {layout() === "shell" ? t("task.shell") :
-            AGENT_NAME[selectedSecondary().has(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
+            AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
           <div class="pane-actions">
             <Show when={props.task.worktreePath && !secondary().has(props.task.id)}>
-              <button class="button button-sm" type="button"
-                onClick={() => changeSecondary(props.task.id, crypto.randomUUID())}>
+              <button class="button button-sm" type="button" disabled={!tabsReady() || tabsSaving()}
+                onClick={() => void changeSecondary(props.task.id, crypto.randomUUID())}>
                 {t("task.addAgent")} {AGENT_NAME[secondaryKind(props.task)]}
               </button>
             </Show>
-            <Show when={layout() !== "shell" && selectedSecondary().has(props.task.id)}>
-              <button class="button button-sm" type="button" onClick={() => changeSecondary(props.task.id)}>
+            <Show when={layout() !== "shell" && isSecondarySelected(props.task.id)}>
+              <button class="button button-sm" type="button" disabled={tabsSaving()}
+                onClick={() => void changeSecondary(props.task.id)}>
                 {t("task.closeAgent")}
               </button>
             </Show>
@@ -186,12 +233,13 @@ export function TaskView(props: {
             </Show>
           </div>
         </div>
+        <Show when={tabError()}>{(message) => <p role="alert">{message()}</p>}</Show>
         <div class="pane-body">
           <For each={props.openIds}>
             {(id) => {
               const selected = () => props.visible && id === props.task.id;
               const mode = () => shells().get(id);
-              const extraSelected = () => selectedSecondary().has(id);
+              const extraSelected = () => isSecondarySelected(id);
               return (
                 <div class="terminal-slot" classList={{ "terminal-split": mode() === "split" }}
                   hidden={id !== props.task.id}>

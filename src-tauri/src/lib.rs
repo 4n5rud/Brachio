@@ -1,10 +1,13 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
 mod agent_accounts;
+mod external_link;
 mod hook_setup;
 mod hook_socket;
+mod pr_status;
 mod runtime_client;
 mod runtime_terminals;
+mod task_tabs;
 mod terminal;
 mod update_release;
 mod workspace;
@@ -117,6 +120,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
         .manage(runtime_terminals::RuntimeTerminals::default())
+        .manage(pr_status::PrStatuses::default())
         .setup(|app| {
             open_database(app)?;
             start_approvals(app)?;
@@ -134,6 +138,8 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            task_tabs::task_secondary_tabs,
+            task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
             hook_socket::approval_answer,
             workspace::repo_list,
@@ -155,6 +161,8 @@ pub fn run() {
             workspace::task_file_preview,
             workspace::task_file_media,
             workspace::task_changes,
+            pr_status::task_pr_status,
+            external_link::open_external_link,
             workspace::task_merge_preview,
             workspace::task_pr_feedback,
             workspace::task_git_action,

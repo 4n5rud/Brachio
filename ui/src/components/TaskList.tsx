@@ -1,8 +1,10 @@
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { statusTone } from "../lib/status";
 import { AGENT_NAME, GROUP_ORDER, groupTasks, shortBranch, type TaskGroup, type TaskRow } from "../lib/tasks";
 import { NEW_TASK_KEYS } from "../lib/shortcut";
+import { chipOf } from "../lib/pr-status";
+import { prReport, watchPrStatuses } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
@@ -24,6 +26,11 @@ export function TaskList(props: {
   now: number;
 }) {
   const groups = createMemo(() => groupTasks(props.tasks));
+  // Pull request status of every task with a worktree, read one at a time. It only runs inside
+  // the app, where the backend can answer.
+  if ("__TAURI_INTERNALS__" in window) {
+    onCleanup(watchPrStatuses(() => props.tasks.filter((task) => task.worktreePath).map((task) => task.id)));
+  }
   const [collapsed, setCollapsed] = createSignal<ReadonlySet<TaskGroup>>(new Set(["done"]));
   const toggle = (g: TaskGroup) =>
     setCollapsed((prev) => {
@@ -109,6 +116,15 @@ function TaskItem(props: { task: TaskRow; selected: boolean; now: number; onSele
         <span class="agent-chip">{AGENT_NAME[props.task.agent]}</span>
         <span class="task-branch">{shortBranch(props.task.branch)}</span>
         <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+        <Show when={chipOf(prReport(props.task.id))}>
+          {(chip) => (
+            <span class={`pr-chip pr-chip-${chip().tone}`} classList={{ "pr-chip-stale": chip().stale }}
+              title={chip().stale ? t("prChip.stale") : undefined}>
+              PR #{chip().number} · {t(chip().key)}
+              <Show when={chip().stale}> · {t("prChip.offline")}</Show>
+            </span>
+          )}
+        </Show>
       </span>
       <Show when={props.task.note}>
         <span class={`task-note task-note-${tone()}`}>{props.task.note}</span>

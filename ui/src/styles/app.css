@@ -498,6 +498,9 @@ kbd {
   display: flex;
   gap: 6px;
 }
+.workspace-task-switch {
+  width: clamp(7rem, 16vw, 13rem);
+}
 .tabs {
   height: var(--size-tabs);
   display: flex;
@@ -664,6 +667,57 @@ kbd {
   width: 100%;
   min-height: 24rem;
   border: 1px solid var(--color-line);
+}
+.pr-status {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-panel);
+  overflow-wrap: anywhere;
+}
+.pr-status h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+}
+.pr-status p {
+  margin: 0;
+}
+.pr-status .pr-bad {
+  border-inline-start: 3px solid var(--color-status-error);
+  padding-inline-start: var(--space-1);
+}
+.pr-status .pr-offline {
+  border-inline-start: 3px solid var(--color-status-blocked);
+  padding-inline-start: var(--space-1);
+}
+.pr-chip {
+  padding-inline: var(--space-1);
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+.pr-chip-error { color: var(--color-status-error); }
+.pr-chip-blocked { color: var(--color-status-blocked); }
+.pr-chip-working { color: var(--color-status-working); }
+.pr-chip-ready { color: var(--color-status-ready); }
+.pr-chip-neutral { color: var(--color-status-neutral); }
+.pr-chip-stale { border-style: dashed; }
+.pr-failed-checks {
+  margin: 0;
+  padding-inline-start: 1.5em;
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-status-working);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .worktree-conflicts {
   padding: var(--space-2);
