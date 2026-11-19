@@ -170,7 +170,7 @@ impl PrStatuses {
     }
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
