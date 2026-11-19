@@ -380,6 +380,62 @@ mod windows_tests {
     use crate::{PtyEvent, SessionManager, SpawnSpec};
 
     #[test]
+    fn conpty_reports_unsolicited_agent_status() {
+        let manager = Arc::new(SessionManager::default());
+        let (sender, receiver) = mpsc::channel();
+        let spec = SpawnSpec {
+            program: "powershell.exe".into(),
+            args: [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::Write([char]27 + ']7501;state=working' + [char]7)",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        };
+        let id = manager
+            .spawn(
+                &spec,
+                Arc::new(move |event| {
+                    let _ = sender.send(event);
+                }),
+            )
+            .expect("start ConPTY child");
+        let end = Instant::now() + Duration::from_secs(10);
+        let mut output = Vec::new();
+        let mut answered_cursor = false;
+        let mut status = None;
+        while let Some(remaining) = end.checked_duration_since(Instant::now()) {
+            match receiver.recv_timeout(remaining) {
+                Ok(PtyEvent::Output(bytes)) => {
+                    output.extend(bytes);
+                    if !answered_cursor && output.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                        manager
+                            .write(id, b"\x1b[1;1R")
+                            .expect("answer cursor request");
+                        answered_cursor = true;
+                    }
+                }
+                Ok(PtyEvent::Status(report)) => status = Some(report.state),
+                Ok(PtyEvent::Exit(_)) | Err(_) => break,
+            }
+        }
+        let _ = manager.kill(id);
+        assert_eq!(
+            status,
+            Some(brachio_core::status::AgentState::Working),
+            "output: {:?}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
+    #[test]
     fn conpty_reports_output_and_exit_after_cursor_response() {
         let manager = Arc::new(SessionManager::default());
         let (sender, receiver) = mpsc::channel();
