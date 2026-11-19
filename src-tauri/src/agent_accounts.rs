@@ -22,9 +22,12 @@ fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
     let executable = find_on_path(kind.program(), path.as_deref(), extensions.as_deref())
         .ok_or_else(|| format!("{} is not installed or not on PATH", kind.program()))?;
     let args: Vec<_> = args.iter().map(|arg| (*arg).to_owned()).collect();
-    let resolved = ResolvedCommand::new(&executable, &args);
+    let resolved = ResolvedCommand::new(&executable, &args).map_err(|error| error.to_string())?;
     let mut command = Command::new(resolved.program);
-    command.args(resolved.args).kill_on_drop(true);
+    command
+        .args(resolved.args)
+        .envs(resolved.env)
+        .kill_on_drop(true);
     Ok(command)
 }
 
