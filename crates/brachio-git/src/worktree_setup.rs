@@ -99,6 +99,9 @@ pub fn copy_setup_files(
 }
 
 /// Retries setup file copy while preserving files already in the worktree.
+///
+/// # Errors
+/// Fails on an unsafe path or when a missing file cannot be copied.
 pub fn retry_setup_files(
     repo_root: &Path,
     worktree: &Path,
@@ -202,8 +205,7 @@ fn copy_files(
 }
 
 fn is_plain_relative(entry: &str) -> bool {
-    !entry.is_empty()
-        && !(cfg!(windows) && entry.contains(':'))
+    !(entry.is_empty() || cfg!(windows) && entry.contains(':'))
         && Path::new(entry).components().all(|component| {
             matches!(component, Component::Normal(name)
                 if !name.eq_ignore_ascii_case(".git"))
