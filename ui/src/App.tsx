@@ -22,6 +22,7 @@ import type { CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
+import type { DiffTotals } from "./lib/diff";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
@@ -59,6 +60,19 @@ export function App() {
       .catch((error) => console.warn("Could not update tray tasks", error));
   });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
+  const [diffByTask, setDiffByTask] = createSignal<ReadonlyMap<string, DiffTotals>>(new Map());
+  const recordDiffTotals = (id: string, totals: DiffTotals | undefined) => {
+    setDiffByTask((current) => {
+      const previous = current.get(id);
+      if (previous?.additions === totals?.additions && previous?.deletions === totals?.deletions) {
+        return current;
+      }
+      const next = new Map(current);
+      if (totals) next.set(id, totals);
+      else next.delete(id);
+      return next;
+    });
+  };
   const [live, setLive] = createSignal<ReadonlyMap<string, ReadonlyMap<string, LiveStatus>>>(new Map());
   const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
   const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, string>>(new Map());
@@ -66,7 +80,9 @@ export function App() {
   const activeAgentKey = (taskId: string, key: string) =>
     key === `${taskId}:agent` || key === secondaryKeys().get(taskId);
   const rows = createMemo(() =>
-    tasks().map((task) => {
+    tasks().map((stored) => {
+      const totals = diffByTask().get(stored.id);
+      const task = totals ? { ...stored, ...totals } : stored;
       const pending = questions().find((question) =>
         taskIdOf(question.key) === task.id && activeAgentKey(task.id, question.key));
       const statuses = live().get(task.id);
@@ -610,7 +626,7 @@ export function App() {
           )}
         </Show>
         <Show when={selected()} fallback={noTask()}>
-          {(task) => <Inspector task={task()} onDraft={draftComment} />}
+          {(task) => <Inspector task={task()} onDraft={draftComment} onDiffTotals={recordDiffTotals} />}
         </Show>
       </main>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />

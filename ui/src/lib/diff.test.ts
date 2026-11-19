@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { diffRows, splitDiffRows } from "./diff";
+import { diffRows, diffTotals, splitDiffRows } from "./diff";
 
 test("tracks old and new hunk lines and ignores headers", () => {
   const patch = [
@@ -21,6 +21,8 @@ test("tracks old and new hunk lines and ignores headers", () => {
     { path: "새 이름", line: 11, side: "new" },
     { path: "old name", line: 20, side: "old" },
   ]);
+  expect(diffTotals(patch)).toEqual({ additions: 1, deletions: 2 });
+  expect(diffTotals("")).toEqual({ additions: 0, deletions: 0 });
 });
 
 test("pairs replacements and keeps adjacent hunks separate", () => {

@@ -149,6 +149,7 @@ export const ko: Messages = {
   "diff.newLine": "변경 후",
   "diff.insert": "에이전트 입력란에 넣기",
   "diff.notReady": "에이전트 입력란을 사용할 수 없습니다. 터미널 상태를 확인하세요.",
+  "diff.totalsUnavailable": "변경 줄 수를 확인할 수 없습니다. 변경 사항을 열거나 새로고침해 추적 파일의 diff를 확인하세요.",
   "git.stageFile": "스테이징",
   "git.unstageFile": "스테이징 해제",
   "git.stageTracked": "추적 중인 변경 스테이징",

@@ -91,7 +91,7 @@ const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "
 
 /**
  * Shapes a stored task for the list. Live status and diff counts are not
- * tracked yet, so every task starts as "checking" with no changes.
+ * loaded yet, so the row starts without line totals.
  */
 export function toTaskRow(record: TaskRecord): TaskRow {
   return {
@@ -102,8 +102,6 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     agent: UI_AGENT[record.agentKind ?? "claude_code"],
     branch: record.branch,
     status: { state: "unknown" },
-    additions: 0,
-    deletions: 0,
     updatedAt: record.createdAtMs,
     worktreePath: record.worktreePath,
     agentSessionId: record.agentSessionId ?? undefined,

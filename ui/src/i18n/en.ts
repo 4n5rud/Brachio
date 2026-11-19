@@ -147,6 +147,7 @@ export const en = {
   "diff.newLine": "after",
   "diff.insert": "Insert in agent prompt",
   "diff.notReady": "The agent prompt is unavailable. Check the terminal.",
+  "diff.totalsUnavailable": "Line totals unavailable. Open or refresh Changes to read the tracked diff.",
   "git.stageFile": "Stage",
   "git.unstageFile": "Unstage",
   "git.stageTracked": "Stage tracked changes",
