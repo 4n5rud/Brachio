@@ -588,6 +588,16 @@ kbd {
   flex: none;
   padding-top: var(--space-2);
 }
+.terminal-conversations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-height: 40%;
+  overflow: auto;
+}
+.terminal-conversations p {
+  flex-basis: 100%;
+}
 .approval {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

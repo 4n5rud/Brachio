@@ -114,6 +114,10 @@ export const en = {
   "terminal.newConversation": "Starting a new conversation",
   "terminal.resumeFailed": "Nothing to resume, starting a new conversation",
   "terminal.promptNotSent": "The terminal was not ready for a safe paste. The initial prompt was not sent.",
+  "terminal.checkingConversations": "Checking for Codex conversations…",
+  "terminal.chooseConversation": "Choose a Codex conversation from this worktree to resume.",
+  "terminal.startNewConversation": "Start a new conversation",
+  "terminal.conversationCheckFailed": "Could not check this worktree for Codex conversations.",
   "terminal.inputFailed": "Could not send terminal input.",
   "terminal.startFailed": "Could not start the terminal",
 

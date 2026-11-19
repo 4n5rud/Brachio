@@ -1,11 +1,11 @@
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { t } from "../i18n";
 import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
-import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
+import { codexConversations, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste } from "../lib/terminal-paste";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -64,6 +64,10 @@ export function TerminalPane(props: {
   const [restoredFrame, setRestoredFrame] = createSignal(false);
   const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation">();
   let reopen: () => void;
+  let chooseConversation: (id?: string) => void;
+  const [choices, setChoices] = createSignal<readonly CodexConversation[]>();
+  const [checkingConversations, setCheckingConversations] = createSignal(false);
+  const [conversationCheckFailed, setConversationCheckFailed] = createSignal(false);
   onMount(() => {
     const term = new Terminal({
       fontFamily: cssVar("--font-mono"),
@@ -137,7 +141,7 @@ export function TerminalPane(props: {
     const session = props.session;
     let typeInPrompt: string | null = null;
     let initialInputPending = session?.initialInput ?? null;
-    const start = (resume: boolean, initialPrompt: string | null) => {
+    const start = (resume: boolean, initialPrompt: string | null, codexConversationId?: string) => {
       setContinuity(undefined);
       blocked = false;
       working = false;
@@ -156,6 +160,7 @@ export function TerminalPane(props: {
         prompt: initialPrompt,
         resume,
         sessionId: session.sessionId ?? null,
+        codexConversationId,
         key: session.key ?? null,
         rows: term.rows,
         cols: term.cols,
@@ -227,14 +232,37 @@ export function TerminalPane(props: {
           props.onStatus?.({ state: "error" }, null);
         });
     };
+    const prepareOpen = async (resume: boolean, initialPrompt: string | null) => {
+      if (resume && session?.agent === "codex" && session.key) {
+        setCanReopen(false);
+        setCheckingConversations(true);
+        setConversationCheckFailed(false);
+        const candidates = await codexConversations(session.key).catch(() => undefined);
+        if (disposed) return;
+        setCheckingConversations(false);
+        if (!candidates || candidates.length > 0) {
+          setConversationCheckFailed(!candidates);
+          setChoices(candidates ?? []);
+          return;
+        }
+      }
+      start(resume, initialPrompt);
+    };
+    chooseConversation = (id) => {
+      if (!choices()) return;
+      setChoices(undefined);
+      start(id !== undefined, null, id);
+      if (!id) setContinuity("terminal.newConversation");
+      term.focus();
+    };
     reopen = () => {
       if (!canReopen() || !session) return;
       props.onStatus?.({ state: "unknown" }, null);
       term.writeln(`\r\n[${t("terminal.reopening")}]\r\n`);
-      start(session.agent !== null, null);
+      void prepareOpen(session.agent !== null, null);
       term.focus();
     };
-    start(session?.resume === true && session.agent !== null, session?.prompt ?? null);
+    void prepareOpen(session?.resume === true && session.agent !== null, session?.prompt ?? null);
     const canPasteDraft = () => session?.agent && !exited && !disposed && !blocked
       && !working && props.active && term.modes.bracketedPasteMode;
     const unregister = props.registerDraftWriter?.((text) => {
@@ -334,6 +362,29 @@ export function TerminalPane(props: {
         </div>
       </Show>
       <div ref={host} class="terminal-host" data-agent-terminal={props.session?.agent ? "" : undefined} />
+      <Show when={checkingConversations()}>
+        <div class="terminal-recovery" role="status">{t("terminal.checkingConversations")}</div>
+      </Show>
+      <Show when={choices()}>
+        {(candidates) => (
+          <section class="terminal-recovery terminal-conversations" aria-label={t("terminal.chooseConversation")}>
+            <Show when={conversationCheckFailed()} fallback={<p>{t("terminal.chooseConversation")}</p>}>
+              <p role="alert">{t("terminal.conversationCheckFailed")}</p>
+            </Show>
+            <For each={candidates()}>{(candidate) => (
+              <button class="button button-sm" type="button" title={candidate.id}
+                onClick={() => chooseConversation(candidate.id)}>
+                {candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))
+                  ? new Date(candidate.timestamp).toLocaleString() + " · " : ""}
+                {candidate.id.slice(-8)}
+              </button>
+            )}</For>
+            <button class="button button-sm" type="button" onClick={() => chooseConversation()}>
+              {t("terminal.startNewConversation")}
+            </button>
+          </section>
+        )}
+      </Show>
       <Show when={canReopen()}>
         <div class="terminal-recovery">
           <button type="button" class="button button-sm" onClick={() => reopen()}>

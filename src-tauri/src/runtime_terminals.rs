@@ -53,6 +53,23 @@ pub struct RuntimeTerminals {
 }
 
 impl RuntimeTerminals {
+    /// Checks whether a key can be reattached without starting another process.
+    pub async fn has_session(&self, key: &str) -> Result<bool> {
+        let Some(client) = self.client().await? else {
+            return Ok(false);
+        };
+        match client
+            .call(Action::Inspect {
+                key: key.to_owned(),
+            })
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(ClientError::Refused(_)) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
     /// is gone but its last screen was kept, that screen is shown first.
     /// Returns `None` when the runtime is not used, so the caller can host it in the app.

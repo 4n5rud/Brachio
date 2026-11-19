@@ -26,9 +26,18 @@ export interface OpenOptions {
   resume: boolean;
   /** The task's conversation id, for agents that take one. */
   sessionId: string | null;
+  codexConversationId?: string;
   /** Stable name of this terminal. With it the terminal can survive a restart and be attached again. */
   key?: string | null;
 }
+
+export interface CodexConversation {
+  id: string;
+  timestamp: string | null;
+}
+
+export const codexConversations = (key: string) =>
+  invoke<CodexConversation[]>("terminal_codex_conversations", { key });
 
 /** How the first prompt reaches the agent, as the core reports it. */
 export type PromptDelivery = "none" | "argument" | "type_in";
