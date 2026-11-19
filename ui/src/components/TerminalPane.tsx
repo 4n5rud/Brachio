@@ -6,7 +6,7 @@ import { t } from "../i18n";
 import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
 import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
-import { bracketedPaste } from "../lib/terminal-paste";
+import { bracketedPaste, terminalClipboardText } from "../lib/terminal-paste";
 
 /** What to run. Without it the pane stays an empty terminal. */
 export interface TerminalSession {
@@ -278,6 +278,25 @@ export function TerminalPane(props: {
     }
 
     let lastWriteFailure = "";
+    const pasteClipboard = (event: ClipboardEvent) => {
+      if (!event.clipboardData) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const text = terminalClipboardText(event.clipboardData.getData("text/plain"));
+      if (text) term.paste(text);
+    };
+    host.addEventListener("paste", pasteClipboard, true);
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.isComposing || event.altKey || (!event.ctrlKey && !event.metaKey)) return true;
+      const key = event.key.toLowerCase();
+      if (key === "v") return false; // Let the WebView dispatch the native paste event.
+      if (key !== "c" || (!event.shiftKey && !term.hasSelection())) return true;
+      if (event.shiftKey && event.type === "keydown") {
+        event.preventDefault();
+        if (term.hasSelection()) document.execCommand("copy");
+      }
+      return false; // xterm already supplies the text for native copy events.
+    });
     const input = term.onData((data) => {
       inputRevision += 1;
       const destination = handle;
@@ -309,6 +328,7 @@ export function TerminalPane(props: {
       clearTimeout(promptTimer);
       unregister?.();
       observer.disconnect();
+      host.removeEventListener("paste", pasteClipboard, true);
       input.dispose();
       resized.dispose();
       stopWebgl();
