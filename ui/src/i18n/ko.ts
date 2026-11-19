@@ -65,7 +65,10 @@ export const ko: Messages = {
   "terminal.exited": "프로세스가 끝났어요",
   "terminal.reopen": "세션 다시 열기",
   "terminal.reopening": "세션을 다시 여는 중",
-  "terminal.restored": "마지막 화면을 복원하고 다시 시작해요",
+  "terminal.restored": "마지막 화면 복구됨",
+  "terminal.liveAttached": "실행 중인 터미널에 다시 연결됨",
+  "terminal.conversationResuming": "저장된 대화를 이어서 여는 중",
+  "terminal.newConversation": "새 대화 시작",
   "terminal.resumeFailed": "이어갈 대화가 없어서 새로 시작해요",
   "terminal.startFailed": "터미널을 시작하지 못했어요",
 

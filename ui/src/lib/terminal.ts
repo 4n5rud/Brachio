@@ -62,14 +62,16 @@ interface OpenedTerminal {
   id: number;
   promptDelivery: PromptDelivery;
   resumed: boolean;
+  attached: boolean;
 }
 
 export interface TerminalHandle {
   id: number;
   /** `type_in` means the caller still has to type the prompt. */
   promptDelivery: PromptDelivery;
-  /** Whether the agent continued an earlier conversation. */
+  /** Whether setup input and first prompts should be suppressed. */
   resumed: boolean;
+  attached: boolean;
   write(data: string): Promise<void>;
   resize(rows: number, cols: number): Promise<void>;
   close(): Promise<void>;
@@ -90,6 +92,7 @@ export async function openTerminal(
     id,
     promptDelivery: opened.promptDelivery,
     resumed: opened.resumed,
+    attached: opened.attached,
     write: (data) => invoke("terminal_write", { id, data }),
     resize: (rows, cols) => invoke("terminal_resize", { id, rows, cols }),
     close: () => invoke("terminal_close", { id }),
