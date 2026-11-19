@@ -1,6 +1,7 @@
 import { For, createMemo } from "solid-js";
 import { t } from "../i18n";
 import { AGENT_NAME, GROUP_ORDER, groupTasks, shortBranch, type TaskRow } from "../lib/tasks";
+import { AgentIcon } from "./AgentIcon";
 import { formatAge } from "../lib/time";
 import { DiffStat } from "./DiffStat";
 import { StatusBadge } from "./StatusBadge";
@@ -30,7 +31,7 @@ export function Board(props: { tasks: readonly TaskRow[]; now: number; onOpen: (
                 <h2>{task.title}</h2>
                 <StatusBadge status={task.status} />
                 <div class="tile-meta">
-                  <span class="agent-chip">{AGENT_NAME[task.agent]}</span>
+                  <span class="agent-chip"><AgentIcon agent={task.agent} />{AGENT_NAME[task.agent]}</span>
                   <span>{shortBranch(task.branch)}</span>
                 </div>
               </header>

@@ -115,6 +115,13 @@ kbd {
 .diffstat-del {
   color: var(--color-del);
 }
+.agent-icon {
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.35em;
+  vertical-align: -0.15em;
+  flex: none;
+}
 .agent-chip {
   font: 600 11px/16px var(--font-sans);
   padding: 0 5px;

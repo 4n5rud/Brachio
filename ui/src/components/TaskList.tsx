@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { statusTone } from "../lib/status";
 import { AGENT_NAME, shortBranch, type TaskRow } from "../lib/tasks";
+import { AgentIcon } from "./AgentIcon";
 import { chipOf } from "../lib/pr-status";
 import { prReport, watchPrStatuses } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
@@ -129,7 +130,7 @@ function TaskItem(props: { task: TaskRow; selected: boolean; now: number; unread
       <span class="task-title">{props.task.title}</span>
       <span class="task-age">{formatAge(props.task.updatedAt, props.now)}</span>
       <span class="task-meta">
-        <span class="agent-chip">{AGENT_NAME[props.task.agent]}</span>
+        <span class="agent-chip"><AgentIcon agent={props.task.agent} />{AGENT_NAME[props.task.agent]}</span>
         <span class="task-branch">{shortBranch(props.task.branch)}</span>
         <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
         <MailboxBadge count={props.unread} />
