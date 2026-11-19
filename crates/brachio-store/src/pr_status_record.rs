@@ -26,6 +26,15 @@ pub fn save_pr_status(
     Ok(())
 }
 
+/// Drops the saved snapshot, for a branch whose pull request is gone.
+///
+/// # Errors
+/// Fails when the database cannot be written.
+pub fn forget_pr_status(connection: &Connection, task_id: &str) -> Result<(), StoreError> {
+    connection.execute("DELETE FROM task_pr_status WHERE task_id = ?1", [task_id])?;
+    Ok(())
+}
+
 /// The saved snapshot and when it was read, if any.
 ///
 /// # Errors
@@ -74,5 +83,14 @@ mod tests {
             .execute("DELETE FROM tasks WHERE id = 't'", [])
             .expect("delete task");
         assert_eq!(load_pr_status(&connection, "t").expect("load"), None);
+    }
+
+    #[test]
+    fn a_snapshot_can_be_dropped_on_its_own() {
+        let connection = with_task();
+        save_pr_status(&connection, "t", "{}", 1).expect("save");
+        forget_pr_status(&connection, "t").expect("forget");
+        assert_eq!(load_pr_status(&connection, "t").expect("load"), None);
+        forget_pr_status(&connection, "t").expect("forgetting nothing is fine");
     }
 }

@@ -12,7 +12,7 @@ use brachio_git::{
     backoff_seconds, fetch_pull_request, local_head, repository_of, PullRequestSnapshot,
     PullRequestState, StatusError,
 };
-use brachio_store::{load_pr_status, save_pr_status, TaskRecord};
+use brachio_store::{forget_pr_status, load_pr_status, save_pr_status, TaskRecord};
 use serde::Serialize;
 use tauri::State;
 
@@ -192,6 +192,15 @@ fn restore_saved(database: &Database, statuses: &PrStatuses, id: &str) -> Result
     Ok(())
 }
 
+fn forget_snapshot(database: &Database, id: &str) {
+    let forgotten = database.lock().and_then(|connection| {
+        forget_pr_status(&connection, id).map_err(|error| error.to_string())
+    });
+    if let Err(error) = forgotten {
+        tracing::warn!(%error, "could not drop the saved pull request status");
+    }
+}
+
 fn save_snapshot(database: &Database, id: &str, snapshot: &PullRequestSnapshot, at: i64) {
     let Ok(json) = serde_json::to_string(snapshot) else {
         return;
@@ -223,10 +232,19 @@ pub async fn task_pr_status(
             fetch_pull_request(&worktree, &repository, &branch)
         })
         .await
-        .map_err(|error| error.to_string())?;
+        // A lookup that panicked must still be finished, or the task stays "being looked up".
+        .unwrap_or_else(|error| {
+            Err(StatusError::Failed {
+                message: error.to_string(),
+                rate_limited: false,
+            })
+        });
         let at = now_ms();
-        if let Ok(Some(snapshot)) = &outcome {
-            save_snapshot(&database, &id, snapshot, at);
+        match &outcome {
+            Ok(Some(snapshot)) => save_snapshot(&database, &id, snapshot, at),
+            // The pull request is gone, so the saved one must not come back after a restart.
+            Ok(None) => forget_snapshot(&database, &id),
+            Err(_) => {}
         }
         statuses.tracker()?.finish(&id, at, outcome);
     }
