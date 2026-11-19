@@ -15,8 +15,12 @@ pub struct TaskRecord {
     pub id: String,
     /// Repository the task belongs to.
     pub repo_id: String,
+    /// Optional parent task in the same repository.
+    pub parent_task_id: Option<String>,
     /// Title the user gave.
     pub title: String,
+    /// User's original task prompt.
+    pub prompt: String,
     /// Branch created for the task.
     pub branch: String,
     /// Worktree folder.
@@ -38,8 +42,12 @@ pub struct NewTask<'a> {
     pub id: &'a str,
     /// Repository the task belongs to.
     pub repo_id: &'a str,
+    /// Optional parent task.
+    pub parent_task_id: Option<&'a str>,
     /// Title the user gave.
     pub title: &'a str,
+    /// User's original task prompt.
+    pub prompt: &'a str,
     /// Branch created for the task.
     pub branch: &'a str,
     /// Worktree folder.
@@ -54,7 +62,7 @@ pub struct NewTask<'a> {
 
 const COLUMNS: &str =
     "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms, \
-     agent_session_id";
+     agent_session_id, prompt, parent_task_id";
 
 impl TaskRecord {
     /// Adds a task.
@@ -64,8 +72,8 @@ impl TaskRecord {
     pub fn insert(connection: &Connection, task: &NewTask<'_>) -> Result<Self, StoreError> {
         connection.execute(
             "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path,
-                                agent_kind, state, created_at_ms, agent_session_id)
-             VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, 'active', ?7, ?8)",
+                                agent_kind, state, created_at_ms, agent_session_id, parent_task_id)
+             VALUES (?1, ?2, ?3, ?9, ?4, ?5, ?6, 'active', ?7, ?8, ?10)",
             params![
                 task.id,
                 task.repo_id,
@@ -74,7 +82,9 @@ impl TaskRecord {
                 task.worktree_path.to_string_lossy(),
                 task.agent_kind,
                 task.created_at_ms,
-                task.agent_session_id
+                task.agent_session_id,
+                task.prompt,
+                task.parent_task_id,
             ],
         )?;
         Self::get(connection, task.id)
@@ -179,6 +189,18 @@ impl TaskRecord {
         Ok(())
     }
 
+    /// Returns whether another task still references this task as a parent.
+    ///
+    /// # Errors
+    /// Fails if SQLite cannot query the task records.
+    pub fn has_children(connection: &Connection, id: &str) -> Result<bool, StoreError> {
+        Ok(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE parent_task_id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
         let worktree_path: String = row.get(4)?;
         Ok(Self {
@@ -191,6 +213,8 @@ impl TaskRecord {
             created_at_ms: row.get(6)?,
             archived_at_ms: row.get(7)?,
             agent_session_id: row.get(8)?,
+            prompt: row.get(9)?,
+            parent_task_id: row.get(10)?,
         })
     }
 }
@@ -218,7 +242,9 @@ mod tests {
         NewTask {
             id,
             repo_id: "r1",
+            parent_task_id: None,
             title: "Fix login",
+            prompt: "Fix login without changing the API",
             branch: "brachio/fix-login-a1b2c3",
             worktree_path: Path::new("/src/brachio.worktrees/fix-login-a1b2c3"),
             agent_kind: Some("claude_code"),
@@ -230,7 +256,14 @@ mod tests {
     #[test]
     fn open_tasks_are_listed_newest_first() {
         let connection = connection_with_repo();
-        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert t1");
+        let first = sample("t1", 1);
+        TaskRecord::insert(&connection, &first).expect("insert t1");
+        assert_eq!(
+            TaskRecord::get(&connection, first.id)
+                .expect("read t1")
+                .prompt,
+            first.prompt
+        );
         TaskRecord::insert(&connection, &sample("t2", 2)).expect("insert t2");
 
         let ids: Vec<String> = TaskRecord::list_open(&connection)

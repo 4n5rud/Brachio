@@ -7,8 +7,10 @@ mod hook_socket;
 mod pr_status;
 mod runtime_client;
 mod runtime_terminals;
+mod task_ports;
 mod task_tabs;
 mod terminal;
+mod terminal_authorization;
 mod update_release;
 mod workspace;
 
@@ -198,6 +200,7 @@ pub fn run() {
             workspace::task_list,
             workspace::task_create,
             workspace::task_archive,
+            workspace::task_retry_setup_copy,
             workspace::task_list_archived,
             workspace::task_restore,
             workspace::task_delete_preview,
@@ -209,6 +212,7 @@ pub fn run() {
             pr_status::task_pr_status,
             external_link::open_external_link,
             workspace::task_merge_preview,
+            task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,
             open_local_port,
@@ -253,22 +257,12 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Whether the primary or secondary terminal belongs to an open task.
 fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
-    let Some((id, terminal)) = key.split_once(':') else {
-        return false;
-    };
-    if terminal != "agent"
-        && terminal
-            .strip_prefix("agent-")
-            .and_then(|value| uuid::Uuid::parse_str(value).ok())
-            .is_none()
-    {
-        return false;
-    }
     let database = app.state::<workspace::Database>();
     let Ok(connection) = database.lock() else {
         return false;
     };
-    brachio_store::TaskRecord::get(&connection, id).is_ok_and(|task| task.archived_at_ms.is_none())
+    terminal_authorization::resolve(&connection, key)
+        .is_ok_and(|owner| owner.agent == Some(brachio_agent::AgentKind::ClaudeCode))
 }
 
 fn install_tray(app: &App) -> tauri::Result<()> {
@@ -317,5 +311,6 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&folder)?;
     let connection = brachio_store::open(&folder.join("brachio.db"))?;
     app.manage(workspace::Database(Mutex::new(connection)));
+    app.manage(workspace::TaskWorktreeLocks::default());
     Ok(())
 }

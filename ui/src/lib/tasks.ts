@@ -12,6 +12,7 @@ export interface TaskRow {
   repoId?: string;
   id: string;
   title: string;
+  prompt?: string;
   agent: AgentKind;
   branch: string;
   status: AgentState;
