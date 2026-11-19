@@ -40,15 +40,18 @@ impl PortPool {
         self.taken.insert(block.base);
     }
 
-    /// Returns the first block that is neither taken nor busy on the host.
+    /// Returns the first nonempty block that is neither taken nor busy on the host.
     pub fn allocate(&mut self, is_free: impl Fn(PortBlock) -> bool) -> Option<PortBlock> {
+        if self.block_len == 0 {
+            return None;
+        }
         let block = (0..self.max_blocks)
             .filter_map(|index| self.start.checked_add(index.checked_mul(self.block_len)?))
             .map(|base| PortBlock {
                 base,
                 len: self.block_len,
             })
-            .filter(|block| block.base.checked_add(block.len).is_some())
+            .filter(|block| block.base.checked_add(block.len - 1).is_some())
             .find(|block| !self.taken.contains(&block.base) && is_free(*block))?;
         self.taken.insert(block.base);
         Some(block)
@@ -101,6 +104,30 @@ mod tests {
     fn returns_none_when_exhausted() {
         let mut pool = PortPool::new(41_000, 10, 1);
         assert!(pool.allocate(|_| true).is_some(), "the only block is free");
+        assert_eq!(pool.allocate(|_| true), None);
+    }
+
+    #[test]
+    fn accepts_block_ending_at_max_port() {
+        let mut pool = PortPool::new(u16::MAX, 1, 1);
+        assert_eq!(
+            pool.allocate(|_| true),
+            Some(PortBlock {
+                base: u16::MAX,
+                len: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_zero_length_blocks() {
+        let mut pool = PortPool::new(41_000, 0, 3);
+        assert_eq!(pool.allocate(|_| true), None);
+    }
+
+    #[test]
+    fn rejects_block_extending_past_max_port() {
+        let mut pool = PortPool::new(u16::MAX, 2, 1);
         assert_eq!(pool.allocate(|_| true), None);
     }
 
