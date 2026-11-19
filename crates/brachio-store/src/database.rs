@@ -10,6 +10,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003_task_agent_session.sql"),
     include_str!("../migrations/0004_task_secondary_tabs.sql"),
     include_str!("../migrations/0005_task_pr_status.sql"),
+    include_str!("../migrations/0006_messages.sql"),
 ];
 
 /// Why a storage call failed.
@@ -26,6 +27,9 @@ pub enum StoreError {
         /// The id that was not found.
         id: String,
     },
+    /// The request is not acceptable as given.
+    #[error("{0}")]
+    Invalid(String),
     /// A newer Brachio changed the database in a way this version does not understand.
     #[error("this database was written by a newer Brachio (schema {found}, this one knows {known}); update Brachio")]
     NewerSchema {
