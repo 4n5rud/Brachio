@@ -116,3 +116,32 @@ mod platform {
         }
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{connect, listen, reclaim};
+    use std::io;
+
+    #[test]
+    fn rejects_unsafe_unix_endpoint_names() {
+        for endpoint in ["", "../escape", "nested/path", r"nested\\path"] {
+            assert_eq!(
+                listen(endpoint).err().map(|error| error.kind()),
+                Some(io::ErrorKind::InvalidInput),
+                "endpoint: {endpoint}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unix_socket_smoke_connects_and_reclaims() {
+        let endpoint = format!("brachio-smoke-{}", uuid::Uuid::new_v4());
+        let listener = listen(&endpoint).expect("listen on owner-only socket");
+        let client = connect(&endpoint).await.expect("connect to runtime");
+        let server = listener.accept().await.expect("accept connection");
+        drop(client);
+        drop(server);
+        drop(listener);
+        reclaim(&endpoint).expect("reclaim socket");
+    }
+}
