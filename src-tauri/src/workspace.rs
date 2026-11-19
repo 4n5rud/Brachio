@@ -531,28 +531,29 @@ pub async fn task_changes(
         let base = git
             .run(&["merge-base", "HEAD", &base_ref])
             .map_err(to_text)?;
-        let mut patch = git
-            .run_text(&[
-                "-c",
-                "core.quotePath=false",
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-color",
-                "--src-prefix=a/",
-                "--dst-prefix=b/",
-                "--submodule=short",
-                &base,
-                "--",
-            ])
+        let (mut patch, truncated) = git
+            .run_text_capped(
+                &[
+                    "-c",
+                    "core.quotePath=false",
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--no-color",
+                    "--src-prefix=a/",
+                    "--dst-prefix=b/",
+                    "--submodule=short",
+                    &base,
+                    "--",
+                ],
+                PATCH_LIMIT,
+            )
             .map_err(to_text)?;
-        let truncated = patch.len() > PATCH_LIMIT;
         if truncated {
-            let mut end = PATCH_LIMIT;
-            while !patch.is_char_boundary(end) {
-                end -= 1;
+            // Show whole lines only, so the last hunk is not broken mid-line.
+            if let Some(end) = patch.rfind('\n') {
+                patch.truncate(end + 1);
             }
-            patch.truncate(end);
         }
         let untracked = git_paths(&git, &["ls-files", "--others", "--exclude-standard", "-z"])?;
         let conflicts = git_paths(

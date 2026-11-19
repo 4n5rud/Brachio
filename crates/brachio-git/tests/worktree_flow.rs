@@ -227,3 +227,24 @@ fn inspect_uses_the_checked_out_branch_in_a_repository_without_remotes() {
     let info = brachio_git::inspect_repo(repo.path()).expect("inspect");
     assert_eq!(info.default_branch, "feature-x");
 }
+
+#[test]
+fn a_worktree_can_be_made_for_a_korean_task_title() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    let first = brachio_git::branch_name("로그인 버그 수정", "a1b2c3");
+    let second = brachio_git::branch_name("결제 오류", "d4e5f6");
+    assert_ne!(first, second);
+
+    let trees = temp_dir();
+    let path = trees.path().join(first.rsplit('/').next().expect("leaf"));
+    add(&git, &first, &path);
+
+    assert!(path.join("a.txt").exists());
+    assert_eq!(
+        Git::new(&path)
+            .run(&["branch", "--show-current"])
+            .expect("current branch"),
+        first
+    );
+}
