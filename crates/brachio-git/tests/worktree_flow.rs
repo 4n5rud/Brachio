@@ -248,3 +248,31 @@ fn a_worktree_can_be_made_for_a_korean_task_title() {
         first
     );
 }
+
+#[test]
+fn push_goes_to_the_only_remote_even_when_it_is_not_called_origin() {
+    let repo = temp_dir();
+    let remote = temp_dir();
+    let git = init_repo(repo.path());
+    run(&Git::new(remote.path()), &["init", "-q", "--bare"]);
+    run(
+        &git,
+        &["remote", "add", "backup", &remote.path().to_string_lossy()],
+    );
+
+    assert_eq!(
+        brachio_git::push_remote(&git, "main").expect("pick remote"),
+        "backup"
+    );
+
+    run(
+        &git,
+        &["remote", "add", "mirror", &remote.path().to_string_lossy()],
+    );
+    assert!(brachio_git::push_remote(&git, "main").is_err());
+    run(&git, &["config", "branch.main.pushRemote", "mirror"]);
+    assert_eq!(
+        brachio_git::push_remote(&git, "main").expect("configured remote wins"),
+        "mirror"
+    );
+}
