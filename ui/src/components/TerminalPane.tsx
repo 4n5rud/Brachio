@@ -36,6 +36,8 @@ const RESUME_GRACE_MS = 5_000;
  * output so its input box is ready.
  */
 const TYPE_IN_DELAY_MS = 1_000;
+/** How long the size must stay unchanged before the PTY is told, so a window drag sends one resize. */
+const RESIZE_SETTLE_MS = 80;
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -289,7 +291,13 @@ export function TerminalPane(props: {
         term.writeln(`\r\n[${t("terminal.inputFailed")} ${message}]`);
       });
     });
-    const resized = term.onResize(({ rows, cols }) => void handle?.resize(rows, cols));
+    // Dragging a window edge changes the size every frame, and each change makes the PTY redraw.
+    // The screen follows at once; the PTY is told once the size has stopped changing.
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const resized = term.onResize(({ rows, cols }) => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => void handle?.resize(rows, cols), RESIZE_SETTLE_MS);
+    });
     createEffect(() => {
       if (props.active === false) {
         stopWebgl();
@@ -307,6 +315,7 @@ export function TerminalPane(props: {
     onCleanup(() => {
       disposed = true;
       clearTimeout(promptTimer);
+      clearTimeout(resizeTimer);
       unregister?.();
       observer.disconnect();
       input.dispose();
