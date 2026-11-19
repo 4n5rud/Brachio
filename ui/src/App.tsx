@@ -26,7 +26,7 @@ import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
-  previewTaskDeletion, resolveDroppedTaskPaths, restoreTask,
+  previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type RepoRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
@@ -216,6 +216,24 @@ export function App() {
   };
   // Setup commands of tasks created in this run, typed into the task's shell once.
   const setupInputs = new Map<string, string>();
+  const [setupFailures, setSetupFailures] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const [retryingSetup, setRetryingSetup] = createSignal(false);
+  const retrySetup = async (id: string) => {
+    if (retryingSetup()) return;
+    setRetryingSetup(true);
+    try {
+      await retrySetupCopy(id);
+      setSetupFailures((items) => {
+        const next = new Map(items);
+        next.delete(id);
+        return next;
+      });
+    } catch (error) {
+      setSetupFailures((items) => new Map(items).set(id, String(error)));
+    } finally {
+      setRetryingSetup(false);
+    }
+  };
   const hasSetupInput = (taskId: string) => setupInputs.has(taskId);
   const takeSetupInput = (taskId: string) => {
     const input = setupInputs.get(taskId);
@@ -321,6 +339,10 @@ export function App() {
       base: input.base === "" ? null : input.base,
     });
     createdThisRun.add(record.id);
+    const setupCopyError = record.setupCopyError;
+    if (setupCopyError) {
+      setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
+    }
     if (input.prompt !== "") firstPrompts.set(record.id, input.prompt);
     if (record.setupCommands.length > 0 && await approveSetup(current.id, record.setupCommands)) {
       setupInputs.set(record.id, record.setupCommands.join("\r"));
@@ -356,6 +378,11 @@ export function App() {
       });
       firstPrompts.delete(task.id);
       createdThisRun.delete(task.id);
+      setSetupFailures((items) => {
+        const next = new Map(items);
+        next.delete(task.id);
+        return next;
+      });
     } catch (failure) {
       report(failure);
     } finally {
@@ -564,6 +591,9 @@ export function App() {
               onStatus={onStatus}
               statusForKey={(id, key) => live().get(id)?.get(key)?.status}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
+              setupFailure={setupFailures().get(task().id)}
+              retryingSetup={retryingSetup()}
+              onRetrySetup={() => void retrySetup(task().id)}
               registerDraftWriter={registerDraftWriter}
             />
           )}

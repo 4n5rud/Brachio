@@ -63,6 +63,8 @@ export const ko: Messages = {
   "setup.title": "설정 명령을 실행할까요?",
   "setup.body": "이 저장소의 brachio.toml이 새 worktree마다 아래 명령을 실행하라고 해요. 에이전트 옆 셸에 입력돼요.",
   "setup.run": "실행",
+  "setup.copyFailed": "셋업 파일 복사 실패.",
+  "setup.retryCopy": "파일 복사 재시도",
   "prChip.conflict": "충돌",
   "prChip.failed": "CI 실패",
   "prChip.changes": "변경 요청",
