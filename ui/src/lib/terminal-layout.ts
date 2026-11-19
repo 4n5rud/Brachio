@@ -30,10 +30,11 @@ export function saveLayouts(layouts: ReadonlyMap<string, TerminalLayout>): void 
 export const terminalKey = (taskId: string, kind: "agent" | "shell"): string => `${taskId}:${kind}`;
 
 const SECONDARY_KEY = "brachio.secondaryAgents";
+const SELECTED_AGENT_KEY = "brachio.selectedSecondaryAgents";
 
-export function loadSecondaryAgents(): Map<string, string> {
+function loadAgentIds(key: string): Map<string, string> {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(SECONDARY_KEY) ?? "{}");
+    const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return new Map();
     return new Map(Object.entries(stored).filter((entry): entry is [string, string] =>
       typeof entry[1] === "string" && /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(entry[1])));
@@ -42,10 +43,15 @@ export function loadSecondaryAgents(): Map<string, string> {
   }
 }
 
-export function saveSecondaryAgents(agents: ReadonlyMap<string, string>) {
+function saveAgentIds(key: string, agents: ReadonlyMap<string, string>) {
   try {
-    localStorage.setItem(SECONDARY_KEY, JSON.stringify(Object.fromEntries(agents)));
+    localStorage.setItem(key, JSON.stringify(Object.fromEntries(agents)));
   } catch {
     // The open tabs remain available for this run.
   }
 }
+
+export const loadSecondaryAgents = () => loadAgentIds(SECONDARY_KEY);
+export const saveSecondaryAgents = (agents: ReadonlyMap<string, string>) => saveAgentIds(SECONDARY_KEY, agents);
+export const loadSelectedSecondaryAgents = () => loadAgentIds(SELECTED_AGENT_KEY);
+export const saveSelectedSecondaryAgents = (agents: ReadonlyMap<string, string>) => saveAgentIds(SELECTED_AGENT_KEY, agents);

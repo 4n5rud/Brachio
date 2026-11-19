@@ -9,8 +9,8 @@ import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
 import { summarize, type ApprovalQuestion } from "../lib/approvals";
-import { loadLayouts, loadSecondaryAgents, saveLayouts, saveSecondaryAgents, terminalKey,
-  type TerminalLayout } from "../lib/terminal-layout";
+import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
+  saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
 import { TerminalPane, type TerminalSession } from "./TerminalPane";
 
 /**
@@ -42,16 +42,23 @@ export function TaskView(props: {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const restoredAgents = loadSecondaryAgents();
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(restoredAgents);
-  const [selectedSecondary, setSelectedSecondary] = createSignal<ReadonlySet<string>>(new Set());
+  const [selectedSecondary, setSelectedSecondary] =
+    createSignal<ReadonlyMap<string, string>>(loadSelectedSecondaryAgents());
+  const isSecondarySelected = (id: string) => {
+    const session = secondary().get(id);
+    return session !== undefined && selectedSecondary().get(id) === session;
+  };
   const secondaryWriters = new Map<string, (text: string) => Promise<boolean>>();
   const secondaryKind = (task: TaskRow) => task.agent === "claude" ? "codex" : "claude";
   const selectAgent = (id: string, extra: boolean) => {
     setSelectedSecondary((current) => {
-      const next = new Set(current);
-      if (extra) next.add(id);
+      const next = new Map(current);
+      const session = secondary().get(id);
+      if (extra && session) next.set(id, session);
       else next.delete(id);
       return next;
     });
+    saveSelectedSecondaryAgents(selectedSecondary());
     if (layout() === "shell") setLayout("agent");
   };
   const changeSecondary = (id: string, sessionId?: string) => {
@@ -132,14 +139,14 @@ export function TaskView(props: {
         </div>
       </div>
       <div class="tabs" role="tablist">
-        <button class="tab" role="tab" aria-selected={layout() !== "shell" && !selectedSecondary().has(props.task.id)} type="button"
+        <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={statusTone(props.task.status)} />
           {AGENT_NAME[props.task.agent]}
         </button>
         <Show when={secondary().has(props.task.id)}>
           <button class="tab" role="tab" type="button"
-            aria-selected={layout() !== "shell" && selectedSecondary().has(props.task.id)}
+            aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
             onClick={() => selectAgent(props.task.id, true)}>{AGENT_NAME[secondaryKind(props.task)]}</button>
         </Show>
         <Show when={shells().has(props.task.id)} fallback={
@@ -156,7 +163,7 @@ export function TaskView(props: {
         <div class="pane-head">
           <Icon name="bot" class="icon-sm" />
           {layout() === "shell" ? t("task.shell") :
-            AGENT_NAME[selectedSecondary().has(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
+            AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
           <div class="pane-actions">
             <Show when={props.task.worktreePath && !secondary().has(props.task.id)}>
               <button class="button button-sm" type="button"
@@ -164,7 +171,7 @@ export function TaskView(props: {
                 {t("task.addAgent")} {AGENT_NAME[secondaryKind(props.task)]}
               </button>
             </Show>
-            <Show when={layout() !== "shell" && selectedSecondary().has(props.task.id)}>
+            <Show when={layout() !== "shell" && isSecondarySelected(props.task.id)}>
               <button class="button button-sm" type="button" onClick={() => changeSecondary(props.task.id)}>
                 {t("task.closeAgent")}
               </button>
@@ -188,7 +195,7 @@ export function TaskView(props: {
             {(id) => {
               const selected = () => props.visible && id === props.task.id;
               const mode = () => shells().get(id);
-              const extraSelected = () => selectedSecondary().has(id);
+              const extraSelected = () => isSecondarySelected(id);
               return (
                 <div class="terminal-slot" classList={{ "terminal-split": mode() === "split" }}
                   hidden={id !== props.task.id}>
