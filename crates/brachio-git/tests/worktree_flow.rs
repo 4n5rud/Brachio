@@ -203,3 +203,27 @@ fn listing_files_includes_untracked_ones_and_skips_ignored_ones() {
     let files = brachio_git::list_files(&git).expect("list files");
     assert_eq!(files, [".gitignore", "a.txt", "src/deep/new file.rs"]);
 }
+
+#[test]
+fn inspect_does_not_adopt_a_checked_out_branch_when_a_remote_names_no_default() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    run(&git, &["branch", "-m", "feature-x"]);
+    run(
+        &git,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+
+    let error = brachio_git::inspect_repo(repo.path()).expect_err("no way to tell");
+    assert!(matches!(error, GitError::NoDefaultBranch { .. }), "{error}");
+}
+
+#[test]
+fn inspect_uses_the_checked_out_branch_in_a_repository_without_remotes() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    run(&git, &["branch", "-m", "feature-x"]);
+
+    let info = brachio_git::inspect_repo(repo.path()).expect("inspect");
+    assert_eq!(info.default_branch, "feature-x");
+}

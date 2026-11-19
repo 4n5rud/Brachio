@@ -16,11 +16,13 @@ pub struct RepoInfo {
 
 /// Reads the root and default branch of the repository that contains `path`.
 ///
-/// The default branch is the one `origin/HEAD` points at. Without a remote,
-/// it is the branch currently checked out.
+/// The default branch is the one `origin/HEAD` points at, else a local `main` or `master`. Only a
+/// repository without any remote falls back to its checked-out branch: with a remote, whatever
+/// happens to be checked out says nothing about where tasks should start.
 ///
 /// # Errors
-/// Fails with [`GitError::NotARepository`] when `path` is not inside a git repository. The error
+/// Fails with [`GitError::NoDefaultBranch`] when the default branch cannot be told apart, and
+/// with [`GitError::NotARepository`] when `path` is not inside a git repository. That error
 /// lists repositories directly inside `path`, because a common mistake is choosing the folder
 /// above the repository.
 pub fn inspect_repo(path: &Path) -> Result<RepoInfo, GitError> {
@@ -37,8 +39,9 @@ pub fn inspect_repo(path: &Path) -> Result<RepoInfo, GitError> {
     };
     let git = Git::new(&root);
     let default_branch = remote_default_branch(&git)
-        .or_else(|| current_branch(&git))
-        .unwrap_or_else(|| "main".to_owned());
+        .or_else(|| conventional_branch(&git))
+        .or_else(|| current_branch(&git).filter(|_| !has_remote(&git)))
+        .ok_or_else(|| GitError::NoDefaultBranch { path: root.clone() })?;
     Ok(RepoInfo {
         root,
         default_branch,
@@ -71,6 +74,20 @@ fn remote_default_branch(git: &Git) -> Option<String> {
         .ok()?;
     let branch = reference.strip_prefix("origin/").unwrap_or(&reference);
     (!branch.is_empty()).then(|| branch.to_owned())
+}
+
+fn conventional_branch(git: &Git) -> Option<String> {
+    ["main", "master"].into_iter().find_map(|name| {
+        let reference = format!("refs/heads/{name}");
+        git.run(&["rev-parse", "--verify", "--quiet", &reference])
+            .ok()
+            .map(|_| name.to_owned())
+    })
+}
+
+fn has_remote(git: &Git) -> bool {
+    git.run(&["remote"])
+        .is_ok_and(|remotes| !remotes.is_empty())
 }
 
 fn current_branch(git: &Git) -> Option<String> {
