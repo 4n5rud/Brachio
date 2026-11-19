@@ -38,6 +38,7 @@ export const en = {
   "task.shell": "Shell",
   "task.addAgent": "Add",
   "task.closeAgent": "Close agent tab",
+  "task.openedTasks": "Previously opened tasks",
   "task.closeShell": "Close shell",
   "task.archive": "Archive task",
   "task.archived": "Archived tasks",

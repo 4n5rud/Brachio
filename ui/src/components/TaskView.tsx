@@ -26,6 +26,8 @@ export function TaskView(props: {
   theme?: string;
   /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
   openIds: readonly string[];
+  workspaceTasks: readonly TaskRow[];
+  onOpenTask: (id: string) => void;
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
   takePrompt?: (taskId: string) => string | undefined;
@@ -150,6 +152,14 @@ export function TaskView(props: {
         </div>
         <StatusBadge status={props.task.status} />
         <div class="task-header-actions">
+          <Show when={props.workspaceTasks.length > 1}>
+            <select class="input workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
+              onChange={(event) => props.onOpenTask(event.currentTarget.value)}>
+              <For each={props.workspaceTasks}>{(task) => (
+                <option value={task.id}>{task.title} · {task.branch}</option>
+              )}</For>
+            </select>
+          </Show>
           <button class="icon-button" type="button" aria-label={t("task.openInEditor")}>
             <Icon name="external" />
           </button>
