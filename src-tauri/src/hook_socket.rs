@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use brachio_runtime::approval::{ApprovalRequest, Decision};
+use brachio_runtime::mailbox::{self, MailRequest, MailResponse};
 use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::tokio::{Listener, Stream};
@@ -51,20 +52,35 @@ pub struct Approvals {
     next: AtomicU64,
     knows: Box<dyn Fn(&str) -> bool + Send + Sync>,
     notify: Box<dyn Fn(Notice) + Send + Sync>,
+    mail: Box<dyn Fn(MailRequest) -> MailResponse + Send + Sync>,
 }
 
 impl Approvals {
     /// `knows` says whether a terminal key belongs to a task of this app; questions from any
     /// other key are dropped. `notify` is called for every change.
+    #[cfg(test)]
     pub fn new(
         knows: impl Fn(&str) -> bool + Send + Sync + 'static,
         notify: impl Fn(Notice) + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Self::with_mail(knows, notify, |_| MailResponse::Error {
+            message: "Messages are not available.".to_owned(),
+        })
+    }
+
+    /// Like [`Approvals::new`], and `mail` answers the message requests that arrive on the same
+    /// socket.
+    pub fn with_mail(
+        knows: impl Fn(&str) -> bool + Send + Sync + 'static,
+        notify: impl Fn(Notice) + Send + Sync + 'static,
+        mail: impl Fn(MailRequest) -> MailResponse + Send + Sync + 'static,
     ) -> Arc<Self> {
         Arc::new(Self {
             pending: Mutex::default(),
             next: AtomicU64::new(1),
             knows: Box::new(knows),
             notify: Box::new(notify),
+            mail: Box::new(mail),
         })
     }
 
@@ -91,7 +107,14 @@ impl Approvals {
         let message = tokio::time::timeout(READ_TIMEOUT, read_message(&mut reader, MAX_MESSAGE))
             .await??
             .ok_or_else(|| anyhow!("connection closed before a question"))?;
-        let request: ApprovalRequest = serde_json::from_slice(&message)?;
+        let value: Value = serde_json::from_slice(&message)?;
+        if mailbox::is_mail(&value) {
+            let request: MailRequest = serde_json::from_value(value)?;
+            let response = (self.mail)(request);
+            write_message(reader.get_mut(), &response, MAX_RESPONSE).await?;
+            return Ok(());
+        }
+        let request: ApprovalRequest = serde_json::from_value(value)?;
         if !(self.knows)(&request.key) {
             return Ok(());
         }
@@ -242,6 +265,44 @@ mod tests {
             .await;
             assert_eq!(answer, None);
             assert!(notices.lock().expect("lock").is_empty());
+        });
+    }
+
+    #[test]
+    fn message_requests_on_the_same_socket_reach_the_mail_handler() {
+        tauri::async_runtime::block_on(async {
+            use brachio_runtime::mailbox::{self, MailRequest, MailResponse};
+
+            let name = format!("mail-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+            let approvals = Approvals::with_mail(
+                |_| false,
+                |_| {},
+                |request| match request {
+                    MailRequest::Peers { key } => MailResponse::Error {
+                        message: format!("asked by {key}"),
+                    },
+                    _ => MailResponse::Error {
+                        message: "other".to_owned(),
+                    },
+                },
+            );
+            let listener = transport::listen(&name).expect("listen");
+            tauri::async_runtime::spawn(approvals.serve(listener));
+
+            let answer = mailbox::call(
+                &name,
+                &MailRequest::Peers {
+                    key: "t:agent".to_owned(),
+                },
+            )
+            .await
+            .expect("answer");
+            assert_eq!(
+                answer,
+                MailResponse::Error {
+                    message: "asked by t:agent".to_owned()
+                }
+            );
         });
     }
 }

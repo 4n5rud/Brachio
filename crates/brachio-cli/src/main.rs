@@ -2,6 +2,8 @@
 //! agent's permission question to the running app; `brachio notify` and `brachio mcp` are
 //! placeholders for later.
 
+mod mail;
+
 use std::io::Read;
 use std::time::Duration;
 
@@ -28,6 +30,14 @@ enum Command {
     },
     /// Run the Brachio MCP server on stdio.
     Mcp,
+    /// Send a message to another task's agent.
+    Send(mail::SendArgs),
+    /// Read the messages other agents sent to this one.
+    Check(mail::CheckArgs),
+    /// List recent messages to and from this agent, read or not.
+    Inbox(mail::InboxArgs),
+    /// List the open tasks a message can be sent to.
+    Peers,
     /// Commands that an agent's hooks run.
     Hook {
         #[command(subcommand)]
@@ -51,6 +61,10 @@ fn main() -> Result<()> {
             permission_request();
             Ok(())
         }
+        Command::Send(args) => mail::send(args),
+        Command::Check(args) => mail::check(&args),
+        Command::Inbox(args) => mail::inbox(&args),
+        Command::Peers => mail::peers(),
         Command::Notify { event } => bail!("notify is not implemented yet (event {event}); M1"),
         Command::Mcp => bail!("mcp is not implemented yet; M3"),
     }

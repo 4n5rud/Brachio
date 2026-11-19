@@ -3,6 +3,7 @@
 pub mod approval;
 pub mod client;
 pub mod endpoint;
+pub mod mailbox;
 pub mod paths;
 pub mod protocol;
 pub mod transport;

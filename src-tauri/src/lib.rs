@@ -4,6 +4,7 @@ mod agent_accounts;
 mod external_link;
 mod hook_setup;
 mod hook_socket;
+mod mailbox;
 mod pr_status;
 mod runtime_client;
 mod runtime_terminals;
@@ -191,6 +192,8 @@ pub fn run() {
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
             hook_socket::approval_answer,
+            mailbox::mailbox_unread,
+            mailbox::mailbox_inbox,
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,
@@ -234,7 +237,8 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     let knows = app.handle().clone();
     let notify = app.handle().clone();
-    let approvals = hook_socket::Approvals::new(
+    let mail_app = app.handle().clone();
+    let approvals = hook_socket::Approvals::with_mail(
         move |key| task_is_open(&knows, key),
         move |notice| {
             let sent = match notice {
@@ -245,6 +249,7 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                 tracing::debug!(%error, "could not tell the window about a permission question");
             }
         },
+        move |request| mailbox::serve(&mail_app, request),
     );
     app.manage(Arc::clone(&approvals));
     tauri::async_runtime::spawn(async move {
