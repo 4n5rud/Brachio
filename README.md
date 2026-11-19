@@ -23,7 +23,7 @@ Brachio runs several Claude Code and Codex sessions side by side, each in its ow
 - Keeps terminals running when the window closes, through the independent runtime (see below).
 - Shows the Claude Code and Codex marks beside agent names, and uses one title bar on Windows.
 
-Not built yet: a lead agent that splits a task among workers and creating pull requests from the app. Codex has no in-app status or approval hooks yet, so approvals and hook-based status cover Claude Code only.
+Not built yet: a lead agent that splits a task among workers. Codex has no in-app status or approval hooks yet, so approvals and hook-based status cover Claude Code only.
 
 Brachio supports macOS and Windows. It runs entirely on your machine with no server, and agents run under your own accounts.
 
@@ -50,7 +50,7 @@ Not every number favors Brachio. On Linux with WebKitGTK, the idle app used abou
 
 ## Messages between agent sessions
 
-Agents in different tasks can talk through the `brachio` helper: `brachio peers` lists the sessions you can reach, `brachio send` sends one a message, `brachio check` looks for waiting mail, and `brachio inbox` reads it. Claude Code sessions are taught this through a `brachio-send` skill and are told about waiting mail by a hook; the hook costs nothing when there is none. Unread messages show in the app, and a deleted task's messages are removed with it.
+Agents in different tasks can talk through the `brachio` helper: `brachio peers` lists the sessions you can reach, `brachio send` sends one a message, `brachio check` reads new messages and marks them read, and `brachio inbox` lists recent messages, read or not. Claude Code sessions are taught this through a `brachio-send` skill and are told about waiting mail by a hook; the hook costs nothing when there is none. Unread messages show in the app, and a deleted task's messages are removed with it.
 
 ## Independent terminal runtime (experimental)
 
