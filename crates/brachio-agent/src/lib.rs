@@ -8,4 +8,6 @@ mod installed;
 
 pub use agent_kind::{AgentKind, Launch};
 pub use codex_sessions::{latest_codex_session, latest_session_in};
-pub use installed::{detect, detect_all, find_on_path, Installed, PromptDelivery, ResolvedCommand};
+pub use installed::{
+    detect, detect_all, find_on_path, locate, Installed, PromptDelivery, ResolvedCommand,
+};
