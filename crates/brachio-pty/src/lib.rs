@@ -9,5 +9,5 @@ mod pty_session;
 mod session_manager;
 
 pub use output_batcher::{BatchConfig, OutputBatcher};
-pub use pty_session::{PtySession, SpawnSpec};
+pub use pty_session::{without_verbatim_prefix, PtySession, SpawnSpec};
 pub use session_manager::{EventSink, PtyEvent, SessionId, SessionManager};
