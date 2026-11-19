@@ -15,6 +15,8 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const QUOTA_TIMEOUT: Duration = Duration::from_secs(15);
 const PROTOCOL_LIMIT: u64 = 512 * 1024;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
     let path = env::var_os("PATH");
@@ -24,6 +26,8 @@ fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
     let args: Vec<_> = args.iter().map(|arg| (*arg).to_owned()).collect();
     let resolved = ResolvedCommand::new(&executable, &args).map_err(|error| error.to_string())?;
     let mut command = Command::new(resolved.program);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
     command
         .args(resolved.args)
         .envs(resolved.env)
@@ -219,7 +223,6 @@ pub async fn open_claude_usage() -> Result<(), String> {
     const URL: &str = "https://claude.ai/settings/usage";
     #[cfg(windows)]
     let mut command = {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut command = Command::new("cmd.exe");
         command
             .creation_flags(CREATE_NO_WINDOW)

@@ -139,7 +139,16 @@ pub async fn terminal_open(
         }
     }
     let (command, prompt_delivery, resumed) = match request.agent {
-        Some(kind) => agent_command(kind, &request, options)?,
+        Some(kind) => {
+            let (prepared, returned_request) = tauri::async_runtime::spawn_blocking(move || {
+                let result = agent_command(kind, &request, options);
+                (result, request)
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+            request = returned_request;
+            prepared?
+        }
         None => (shell_command(), PromptDelivery::None, false),
     };
     environment.extend(command.env);
@@ -179,9 +188,11 @@ pub async fn terminal_open(
         rows: request.rows.max(1),
         cols: request.cols.max(1),
     };
-    let spawned = terminals
-        .0
-        .spawn(&spec, sink_for(on_event, request.agent.is_some()));
+    let manager = Arc::clone(&terminals.0);
+    let sink = sink_for(on_event, request.agent.is_some());
+    let spawned = tauri::async_runtime::spawn_blocking(move || manager.spawn(&spec, sink))
+        .await
+        .map_err(|error| error.to_string())?;
     let id = spawned.map_err(|error| to_message(&error))?;
     Ok(Opened {
         id,
@@ -280,7 +291,7 @@ fn earlier_conversation(kind: AgentKind, session_id: Option<&str>) -> Option<Str
 }
 
 fn installed(kind: AgentKind) -> CommandResult<Installed> {
-    brachio_agent::detect(kind)
+    brachio_agent::locate(kind)
         .ok_or_else(|| format!("{} is not installed or not on PATH", kind.program()))
 }
 

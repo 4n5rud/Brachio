@@ -161,14 +161,21 @@ pub fn detect_all() -> Vec<Installed> {
 /// Finds `kind` on `PATH` and asks it for its version.
 #[must_use]
 pub fn detect(kind: AgentKind) -> Option<Installed> {
+    let mut installed = locate(kind)?;
+    installed.version = read_version(&installed.path);
+    Some(installed)
+}
+
+/// Finds the agent executable without starting it or probing its version.
+#[must_use]
+pub fn locate(kind: AgentKind) -> Option<Installed> {
     let path_var = env::var_os("PATH");
     let pathext_var = env::var_os("PATHEXT");
     let path = find_on_path(kind.program(), path_var.as_deref(), pathext_var.as_deref())?;
-    let version = read_version(&path);
     Some(Installed {
         kind,
         path,
-        version,
+        version: None,
     })
 }
 
