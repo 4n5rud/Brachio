@@ -67,16 +67,8 @@ impl RuntimeTerminals {
         let Some(client) = self.client().await? else {
             return Ok(false);
         };
-        match client
-            .call(Action::Inspect {
-                key: key.to_owned(),
-            })
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(ClientError::Refused(_)) => Ok(false),
-            Err(error) => Err(error.into()),
-        }
+        let (_, existing) = locate(&client, key).await?;
+        Ok(existing.is_some())
     }
 
     /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
