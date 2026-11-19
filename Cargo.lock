@@ -418,6 +418,7 @@ dependencies = [
  "clap",
  "interprocess",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]
