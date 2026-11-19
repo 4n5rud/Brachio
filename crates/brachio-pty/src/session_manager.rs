@@ -23,6 +23,15 @@ use crate::terminal_reply::input_for_reply;
 #[serde(transparent)]
 pub struct SessionId(u64);
 
+impl SessionId {
+    /// A session id chosen by the caller, for terminals that live outside this manager and need
+    /// handles that cannot collide with its own.
+    #[must_use]
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+}
+
 impl fmt::Display for SessionId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}", self.0)
