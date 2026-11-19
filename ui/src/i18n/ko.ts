@@ -196,6 +196,8 @@ export const ko: Messages = {
   "newTask.prompt": "에이전트에게 무엇을 맡길까요?",
   "newTask.name": "작업 이름",
   "newTask.base": "기준 브랜치",
+  "newTask.parent": "상위 작업",
+  "newTask.noParent": "상위 작업 없음",
   "newTask.agent": "에이전트",
   "newTask.cancel": "취소",
   "newTask.create": "작업 만들기",

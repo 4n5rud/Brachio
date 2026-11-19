@@ -263,5 +263,6 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&folder)?;
     let connection = brachio_store::open(&folder.join("brachio.db"))?;
     app.manage(workspace::Database(Mutex::new(connection)));
+    app.manage(workspace::TaskWorktreeLocks::default());
     Ok(())
 }

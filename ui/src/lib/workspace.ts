@@ -16,6 +16,7 @@ export interface RepoRecord {
 export interface TaskRecord {
   id: string;
   repoId: string;
+  parentTaskId?: string | null;
   title: string;
   branch: string;
   worktreePath: string;
@@ -28,6 +29,7 @@ export interface TaskRecord {
 
 export interface CreateTaskRequest {
   repoId: string;
+  parentTaskId?: string | null;
   title: string;
   agent: CoreAgent;
   /** `null` branches from the repository's default branch. */
