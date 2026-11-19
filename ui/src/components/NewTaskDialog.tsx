@@ -1,7 +1,7 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { t } from "../i18n";
-import { AGENT_NAME, type AgentKind } from "../lib/tasks";
+import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { titleFromPrompt } from "../lib/workspace";
 import { Icon } from "./Icon";
@@ -13,6 +13,7 @@ export interface NewTaskInput {
   agent: AgentKind;
   /** Empty means the repository's default branch. */
   base: string;
+  parentTaskId?: string;
 }
 
 const AGENTS: readonly AgentKind[] = ["claude", "codex"];
@@ -20,6 +21,7 @@ const AGENTS: readonly AgentKind[] = ["claude", "codex"];
 /** "New task" dialog: prompt, name, agent and base branch. */
 export function NewTaskDialog(props: {
   defaultBranch: string;
+  parents?: readonly TaskRow[];
   onCreate: (input: NewTaskInput) => Promise<void>;
   onClose: () => void;
 }) {
@@ -27,6 +29,7 @@ export function NewTaskDialog(props: {
   const [title, setTitle] = createSignal("");
   const [agent, setAgent] = createSignal<AgentKind>("claude");
   const [base, setBase] = createSignal("");
+  const [parentTaskId, setParentTaskId] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [confirmingClose, setConfirmingClose] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -57,7 +60,8 @@ export function NewTaskDialog(props: {
     setBusy(true);
     setError(null);
     try {
-      await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(), base: base().trim() });
+      await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(),
+        base: base().trim(), parentTaskId: parentTaskId() || undefined });
     } catch (failure) {
       setError(String(failure));
       setBusy(false);
@@ -106,11 +110,20 @@ export function NewTaskDialog(props: {
               <input
                 class="input input-mono"
                 value={base()}
-                placeholder={props.defaultBranch}
+                placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
                 onInput={(event) => setBase(event.currentTarget.value)}
               />
             </label>
           </div>
+          <Show when={props.parents?.length}>
+            <label class="form-field">
+              <span class="form-label">{t("newTask.parent")}</span>
+              <select class="input" value={parentTaskId()} onChange={(event) => setParentTaskId(event.currentTarget.value)}>
+                <option value="">{t("newTask.noParent")}</option>
+                <For each={props.parents}>{(task) => <option value={task.id}>{task.title}</option>}</For>
+              </select>
+            </label>
+          </Show>
           <fieldset class="form-field">
             <legend class="form-label">{t("newTask.agent")}</legend>
             <div class="agent-cards">

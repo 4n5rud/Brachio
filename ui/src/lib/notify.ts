@@ -34,18 +34,22 @@ function allowed(): Promise<boolean> {
 }
 
 /** Shows an OS notification, but only while the window is not in front. */
-export async function notifyIfAway(key: MessageKey, task: { id: string; title: string }, detail: string | null) {
+export async function notifyIfAway(key: MessageKey, task: { id: string; title: string }, detail: string | null,
+  sessionKey?: string) {
   if (document.hasFocus() || !(await allowed())) return;
   sendNotification({
     title: t(key),
     body: detail ? `${task.title}: ${detail}` : task.title,
-    extra: { brachioTaskId: task.id },
+    extra: { brachioTaskId: task.id, brachioSessionKey: sessionKey },
   });
 }
 
-export function listenForTaskNotifications(openTask: (taskId: string) => void) {
+export function listenForTaskNotifications(openTask: (taskId: string, sessionKey?: string) => void) {
   return onAction(({ actionId, notification }) => {
     const taskId = notification?.extra?.brachioTaskId;
-    if (actionId === "tap" && typeof taskId === "string" && taskId) openTask(taskId);
+    if (actionId !== "tap" || typeof taskId !== "string" || !taskId) return;
+    const sessionKey = notification?.extra?.brachioSessionKey;
+    if (typeof sessionKey === "string" && sessionKey.startsWith(`${taskId}:`)) openTask(taskId, sessionKey);
+    else openTask(taskId);
   });
 }
