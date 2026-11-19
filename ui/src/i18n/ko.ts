@@ -40,6 +40,7 @@ export const ko: Messages = {
   "task.shell": "셸",
   "task.addAgent": "추가",
   "task.closeAgent": "에이전트 탭 닫기",
+  "task.openedTasks": "열어 둔 작업",
   "task.closeShell": "셸 닫기",
   "task.archive": "작업 보관",
   "task.archived": "보관한 작업",

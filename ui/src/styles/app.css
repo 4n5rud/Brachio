@@ -498,6 +498,9 @@ kbd {
   display: flex;
   gap: 6px;
 }
+.workspace-task-switch {
+  width: clamp(7rem, 16vw, 13rem);
+}
 .tabs {
   height: var(--size-tabs);
   display: flex;
