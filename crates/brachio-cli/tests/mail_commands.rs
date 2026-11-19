@@ -105,6 +105,7 @@ async fn check_prints_one_line_per_message_and_what_is_left() {
                 id: "m9".into(),
                 thread_id: "m9".into(),
                 from: "task2:agent".into(),
+                to: "task1:agent".into(),
                 from_title: Some("Write docs".into()),
                 kind: "question".into(),
                 priority: "high".into(),
@@ -123,7 +124,7 @@ async fn check_prints_one_line_per_message_and_what_is_left() {
         out.starts_with("m9 [question, high] from Write docs: Which port?"),
         "{out}"
     );
-    assert!(out.contains("dev server"));
+    assert!(out.contains("| dev server"));
     assert!(out.ends_with("2 more unread; run brachio check again"));
     assert!(matches!(
         served.await.expect("app task"),

@@ -196,6 +196,7 @@ fn mail_message(connection: &Connection, message: Message, report_read: bool) ->
         id: message.id,
         thread_id: message.thread_id,
         from: message.from_key,
+        to: message.to_key,
         from_title,
         kind: message.kind,
         priority: message.priority,
