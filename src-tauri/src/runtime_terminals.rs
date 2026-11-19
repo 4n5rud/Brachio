@@ -347,7 +347,7 @@ fn deliver(
 mod handle_tests {
     use brachio_pty::SessionId;
 
-    use super::{spawn, Client, RuntimeTerminals, HOSTED_HANDLE_BASE};
+    use super::{RuntimeTerminals, HOSTED_HANDLE_BASE};
 
     #[test]
     fn hosted_terminals_get_distinct_handles_that_cannot_equal_an_in_app_session_id() {
@@ -364,7 +364,11 @@ mod handle_tests {
         let terminals = RuntimeTerminals::default();
         let register = |key: &str| {
             terminals
-                .register_attachment(key.into(), Client::new("runtime"), spawn(async {}))
+                .register_attachment(
+                    key.into(),
+                    super::Client::new("runtime"),
+                    super::spawn(async {}),
+                )
                 .expect("register attachment")
         };
         let previous = register("same:agent");
