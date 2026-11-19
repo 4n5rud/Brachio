@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/brachio-core",
+    "crates/brachio-process",
     "crates/brachio-pty",
     "crates/brachio-runtime",
     "crates/brachio-git",
@@ -16,6 +17,7 @@ members = [
 # `cargo test` at the root only covers the platform-independent crates.
 default-members = [
     "crates/brachio-core",
+    "crates/brachio-process",
     "crates/brachio-pty",
     "crates/brachio-runtime",
     "crates/brachio-git",
@@ -35,6 +37,7 @@ repository = "https://github.com/4n5rud/Brachio"
 
 [workspace.dependencies]
 brachio-core = { path = "crates/brachio-core" }
+brachio-process = { path = "crates/brachio-process" }
 brachio-pty = { path = "crates/brachio-pty" }
 brachio-git = { path = "crates/brachio-git" }
 brachio-agent = { path = "crates/brachio-agent" }

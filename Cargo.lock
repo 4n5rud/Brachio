@@ -388,6 +388,7 @@ dependencies = [
 name = "brachio-agent"
 version = "0.0.1"
 dependencies = [
+ "brachio-process",
  "serde",
  "serde_json",
  "tempfile",
@@ -444,6 +445,7 @@ dependencies = [
 name = "brachio-git"
 version = "0.0.1"
 dependencies = [
+ "brachio-process",
  "serde",
  "serde_json",
  "tempfile",
@@ -454,6 +456,10 @@ dependencies = [
 
 [[package]]
 name = "brachio-mcp"
+version = "0.0.1"
+
+[[package]]
+name = "brachio-process"
 version = "0.0.1"
 
 [[package]]
