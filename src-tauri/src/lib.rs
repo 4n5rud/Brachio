@@ -322,6 +322,11 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let folder = app.path().app_data_dir()?;
     fs::create_dir_all(&folder)?;
     let connection = brachio_store::open(&folder.join("brachio.db"))?;
+    const READ_MAIL_KEPT_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+    let cutoff = pr_status::now_ms() - READ_MAIL_KEPT_MS;
+    if let Err(error) = brachio_store::expire_read_messages(&connection, cutoff) {
+        tracing::warn!(%error, "could not remove old read messages");
+    }
     app.manage(workspace::Database(Mutex::new(connection)));
     app.manage(workspace::TaskWorktreeLocks::default());
     Ok(())
