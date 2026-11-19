@@ -101,7 +101,10 @@ export const en = {
   "terminal.exited": "Process exited",
   "terminal.reopen": "Reopen session",
   "terminal.reopening": "Reopening session",
-  "terminal.restored": "Last screen restored, restarting",
+  "terminal.restored": "Last screen recovered",
+  "terminal.liveAttached": "Reattached to the running terminal",
+  "terminal.conversationResuming": "Starting the saved conversation",
+  "terminal.newConversation": "Starting a new conversation",
   "terminal.resumeFailed": "Nothing to resume, starting a new conversation",
   "terminal.startFailed": "Could not start the terminal",
 
