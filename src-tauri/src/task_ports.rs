@@ -29,9 +29,9 @@ pub fn port_for_terminal(
         return Ok(None);
     };
     if !matches!(pane, "agent" | "shell")
-        && !pane
+        && pane
             .strip_prefix("agent-")
-            .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+            .is_none_or(|id| uuid::Uuid::parse_str(id).is_err())
     {
         return Ok(None);
     }
