@@ -7,6 +7,7 @@ mod hook_socket;
 mod pr_status;
 mod runtime_client;
 mod runtime_terminals;
+mod task_ports;
 mod task_tabs;
 mod terminal;
 mod update_release;
@@ -109,13 +110,59 @@ async fn open_local_port(port: std::num::NonZeroU16, secure: bool) -> Result<(),
     .map_err(|error| error.to_string())?
 }
 
+/// Logs to a file next to the app data, because the release build has no console to print to.
+/// `RUST_LOG` overrides the default `info` level.
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let file = log_file_path().and_then(|path| {
+        fs::create_dir_all(path.parent()?).ok()?;
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+    });
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    let _ = match file {
+        Some(file) => builder
+            .with_ansi(false)
+            .with_writer(Mutex::new(file))
+            .try_init(),
+        None => builder.try_init(),
+    };
+}
+
+fn log_file_path() -> Option<std::path::PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")?.into()
+    } else if cfg!(target_os = "macos") {
+        std::path::PathBuf::from(std::env::var_os("HOME")?).join("Library/Logs")
+    } else {
+        std::env::var_os("XDG_STATE_HOME").map_or_else(
+            || {
+                std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join(".local/state")
+            },
+            std::path::PathBuf::from,
+        )
+    };
+    Some(base.join("Brachio").join("brachio.log"))
+}
+
 /// Builds and runs the Tauri app.
 ///
 /// # Panics
 /// Panics if the Tauri runtime fails to start, which leaves nothing to show.
 pub fn run() {
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    init_logging();
     tauri::Builder::default()
+        // A second launch would open the same database and start agents the first knows nothing of.
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _arguments, _cwd| {
+                show_main_window(app);
+            },
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
@@ -152,6 +199,7 @@ pub fn run() {
             workspace::task_list,
             workspace::task_create,
             workspace::task_archive,
+            workspace::task_retry_setup_copy,
             workspace::task_list_archived,
             workspace::task_restore,
             workspace::task_delete_preview,
@@ -163,6 +211,7 @@ pub fn run() {
             pr_status::task_pr_status,
             external_link::open_external_link,
             workspace::task_merge_preview,
+            task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,
             open_local_port,
@@ -271,5 +320,6 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&folder)?;
     let connection = brachio_store::open(&folder.join("brachio.db"))?;
     app.manage(workspace::Database(Mutex::new(connection)));
+    app.manage(workspace::TaskWorktreeLocks::default());
     Ok(())
 }

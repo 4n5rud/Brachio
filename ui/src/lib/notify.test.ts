@@ -40,5 +40,11 @@ it("opens only the task attached to a notification tap", () => {
   callback({ actionId: "dismiss", notification, inputValue: null });
   callback({ actionId: "tap", notification: null, inputValue: null });
   callback({ actionId: "tap", notification, inputValue: null });
-  expect(open.mock.calls).toEqual([["task-1"]]);
+  callback({ actionId: "tap", inputValue: null, notification: {
+    ...notification, extra: { brachioTaskId: "task-1", brachioSessionKey: "task-1:agent-secondary" },
+  } });
+  callback({ actionId: "tap", inputValue: null, notification: {
+    ...notification, extra: { brachioTaskId: "task-1", brachioSessionKey: "task-2:agent" },
+  } });
+  expect(open.mock.calls).toEqual([["task-1"], ["task-1", "task-1:agent-secondary"], ["task-1"]]);
 });

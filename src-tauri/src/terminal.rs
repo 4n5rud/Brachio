@@ -3,7 +3,7 @@
 //! raw bytes, so the web view gets an `ArrayBuffer` with no JSON encoding.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use brachio_agent::{AgentKind, Installed, PromptDelivery, ResolvedCommand};
@@ -15,6 +15,7 @@ use tauri::State;
 
 use crate::hook_setup::HookSetup;
 use crate::runtime_terminals::{Launch, RuntimeTerminals};
+use crate::{task_ports, workspace::Database};
 
 /// App state that owns every terminal.
 pub struct Terminals(pub Arc<SessionManager>);
@@ -52,8 +53,10 @@ pub struct Opened {
     pub id: SessionId,
     /// Whether the UI still has to type the first prompt in.
     pub prompt_delivery: PromptDelivery,
-    /// Whether the agent continued an earlier conversation.
+    /// Whether setup input and first prompts should be suppressed.
     pub resumed: bool,
+    /// Whether the runtime already owned this live process.
+    pub attached: bool,
 }
 
 /// Sent as JSON on the channel. Output frames are raw bytes instead.
@@ -93,6 +96,7 @@ pub async fn agents_detect() -> Vec<Installed> {
 pub async fn terminal_open(
     terminals: State<'_, Terminals>,
     hosted: State<'_, RuntimeTerminals>,
+    database: State<'_, Database>,
     hook: State<'_, HookSetup>,
     request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
@@ -103,6 +107,13 @@ pub async fn terminal_open(
     };
     // Claude Code can ask the app instead of the terminal when a hook is available.
     let mut environment = terminal_env();
+    if let Some(key) = request.key.as_deref() {
+        match task_ports::port_for_terminal(&database, key, &request.cwd) {
+            Ok(Some(port)) => environment.push(("BRACHIO_PORT".to_owned(), port.to_string())),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "could not assign a development port"),
+        }
+    }
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
         let extra = hook.environment(key);
         if !extra.is_empty() {
@@ -132,6 +143,7 @@ pub async fn terminal_open(
                     prompt_delivery
                 },
                 resumed: resumed || attached,
+                attached,
             });
         }
     }
@@ -149,6 +161,7 @@ pub async fn terminal_open(
         id,
         prompt_delivery,
         resumed,
+        attached: false,
     })
 }
 
@@ -207,7 +220,7 @@ fn agent_command(
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let installed = installed(kind)?;
     let earlier = if request.resume {
-        earlier_conversation(kind, request.session_id.as_deref(), &request.cwd)
+        earlier_conversation(kind, request.session_id.as_deref())
     } else {
         None
     };
@@ -223,12 +236,12 @@ fn agent_command(
     Ok((command, delivery, false))
 }
 
-/// The conversation a task left behind. Claude Code's id was pinned when the
-/// task was created; Codex's is found from its own records for the worktree.
-fn earlier_conversation(kind: AgentKind, session_id: Option<&str>, cwd: &Path) -> Option<String> {
+/// Resume only an identity known to belong to this tab.
+fn earlier_conversation(kind: AgentKind, session_id: Option<&str>) -> Option<String> {
     match kind {
         AgentKind::ClaudeCode => session_id.map(str::to_owned),
-        AgentKind::Codex => brachio_agent::latest_codex_session(cwd),
+        // The Codex tab UUID identifies the PTY, not a Codex conversation.
+        AgentKind::Codex => None,
     }
 }
 
