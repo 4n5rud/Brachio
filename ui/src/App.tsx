@@ -335,6 +335,7 @@ export function App() {
       repoId: current.id,
       parentTaskId: input.parentTaskId ?? null,
       title: input.title,
+      prompt: input.prompt,
       agent: CORE_AGENT[input.agent],
       base: input.base === "" ? null : input.base,
     });
@@ -591,6 +592,7 @@ export function App() {
               onStatus={onStatus}
               statusForKey={(id, key) => live().get(id)?.get(key)?.status}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
+              onDraftOriginal={(text) => draftComment(task().id, text)}
               setupFailure={setupFailures().get(task().id)}
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
