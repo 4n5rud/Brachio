@@ -694,6 +694,18 @@ kbd {
   border-inline-start: 3px solid var(--color-status-blocked);
   padding-inline-start: var(--space-1);
 }
+.pr-chip {
+  padding-inline: var(--space-1);
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+.pr-chip-error { color: var(--color-status-error); }
+.pr-chip-blocked { color: var(--color-status-blocked); }
+.pr-chip-working { color: var(--color-status-working); }
+.pr-chip-ready { color: var(--color-status-ready); }
+.pr-chip-neutral { color: var(--color-status-neutral); }
+.pr-chip-stale { border-style: dashed; }
 .pr-failed-checks {
   margin: 0;
   padding-inline-start: 1.5em;

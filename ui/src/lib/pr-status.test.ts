@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextRefreshDelay, shortSha, type PrStatusReport, type PullRequestSnapshot } from "./pr-status";
+import { chipOf, nextRefreshDelay, shortSha, type PrStatusReport, type PullRequestSnapshot } from "./pr-status";
 
 const snapshot = (overrides: Partial<PullRequestSnapshot> = {}): PullRequestSnapshot => ({
   repository: "o/r",
@@ -52,5 +52,31 @@ describe("pull request status refresh schedule", () => {
 
   it("shows seven characters of a commit", () => {
     expect(shortSha("68395383847f768023545324589198088c4971e4")).toBe("6839538");
+  });
+});
+
+describe("pull request chip in the task list", () => {
+  const withChecks = (overall: PullRequestSnapshot["checks"]["overall"]) =>
+    report({ snapshot: snapshot({ checks: { overall, passing: 0, failing: 0, pending: 0, skipped: 0 } }) });
+
+  it("picks the most pressing fact: conflicts, then failed checks, then requested changes", () => {
+    expect(chipOf(report({ snapshot: snapshot({ conflict: "conflicting", checks: { overall: "failure", passing: 0, failing: 1, pending: 0, skipped: 0 } }) }))?.key).toBe("prChip.conflict");
+    expect(chipOf(withChecks("failure"))?.key).toBe("prChip.failed");
+    expect(chipOf(report({ snapshot: snapshot({ review: "changes_requested" }) }))?.key).toBe("prChip.changes");
+    expect(chipOf(withChecks("pending"))?.key).toBe("prChip.running");
+    expect(chipOf(withChecks("success"))?.key).toBe("prChip.passed");
+    expect(chipOf(withChecks("none"))?.key).toBe("prChip.open");
+  });
+
+  it("shows a finished pull request by its end state whatever its old checks said", () => {
+    expect(chipOf(report({ snapshot: snapshot({ state: "merged", conflict: "conflicting" }) }))?.key).toBe("prChip.merged");
+    expect(chipOf(report({ snapshot: snapshot({ state: "closed" }) }))?.key).toBe("prChip.closed");
+  });
+
+  it("shows nothing without a pull request, and marks an old answer as stale", () => {
+    expect(chipOf(undefined)).toBeNull();
+    expect(chipOf(report({ snapshot: null, noPullRequest: true }))).toBeNull();
+    expect(chipOf(report({ error: "offline" }))?.stale).toBe(true);
+    expect(chipOf(report())?.stale).toBe(false);
   });
 });
