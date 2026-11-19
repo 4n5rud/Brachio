@@ -236,6 +236,8 @@ export const en = {
   "newTask.prompt": "What should the agent do?",
   "newTask.name": "Task name",
   "newTask.base": "Base",
+  "newTask.parent": "Parent task",
+  "newTask.noParent": "No parent",
   "newTask.agent": "Agent",
   "newTask.cancel": "Cancel",
   "newTask.create": "Create task",

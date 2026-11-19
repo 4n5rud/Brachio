@@ -315,6 +315,7 @@ export function App() {
     if (!current) return;
     const record = await createTask({
       repoId: current.id,
+      parentTaskId: input.parentTaskId ?? null,
       title: input.title,
       agent: CORE_AGENT[input.agent],
       base: input.base === "" ? null : input.base,
@@ -592,6 +593,7 @@ export function App() {
         {(current) => (
           <NewTaskDialog
             defaultBranch={current().defaultBranch}
+            parents={repoRows()}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
           />
