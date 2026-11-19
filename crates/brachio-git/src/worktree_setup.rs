@@ -108,7 +108,7 @@ pub fn copy_setup_files(
     worktree: &Path,
     config: &SetupConfig,
 ) -> Result<Vec<String>, SetupError> {
-    copy_files(repo_root, worktree, config, false)
+    copy_files(repo_root, worktree, config)
 }
 
 /// Retries setup file copy while preserving files already in the worktree.
@@ -120,14 +120,13 @@ pub fn retry_setup_files(
     worktree: &Path,
     config: &SetupConfig,
 ) -> Result<Vec<String>, SetupError> {
-    copy_files(repo_root, worktree, config, true)
+    copy_files(repo_root, worktree, config)
 }
 
 fn copy_files(
     repo_root: &Path,
     worktree: &Path,
     config: &SetupConfig,
-    preserve_files: bool,
 ) -> Result<Vec<String>, SetupError> {
     let root = fs::canonicalize(repo_root).map_err(|source| SetupError::Io {
         path: repo_root.to_path_buf(),
@@ -175,43 +174,34 @@ fn copy_files(
                 }
             }
         }
-        if preserve_files || !target.exists() {
-            let mut input = fs::File::open(&resolved).map_err(io_error(&resolved))?;
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut output = match options.open(&target) {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let info = fs::symlink_metadata(&target).map_err(io_error(&target))?;
-                    if info.is_file() && !info.file_type().is_symlink() {
-                        continue;
-                    }
-                    return Err(SetupError::UnsafePath(entry.clone()));
-                }
-                Err(error) => return Err(io_error(&target)(error)),
-            };
-            if let Err(error) = std::io::copy(&mut input, &mut output) {
-                drop(output);
-                let _ = fs::remove_file(&target);
-                return Err(io_error(&target)(error));
-            }
-            let permissions = input.metadata().map_err(io_error(&resolved))?.permissions();
-            output
-                .set_permissions(permissions)
-                .map_err(io_error(&target))?;
-        } else {
-            if let Ok(info) = fs::symlink_metadata(&target) {
-                if !info.is_file() || info.file_type().is_symlink() {
-                    return Err(SetupError::UnsafePath(entry.clone()));
-                }
-            }
-            fs::copy(&resolved, &target).map_err(io_error(&target))?;
+        let mut input = fs::File::open(&resolved).map_err(io_error(&resolved))?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+        let mut output = match options.open(&target) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let info = fs::symlink_metadata(&target).map_err(io_error(&target))?;
+                if info.is_file() && !info.file_type().is_symlink() {
+                    continue;
+                }
+                return Err(SetupError::UnsafePath(entry.clone()));
+            }
+            Err(error) => return Err(io_error(&target)(error)),
+        };
+        if let Err(error) = std::io::copy(&mut input, &mut output) {
+            drop(output);
+            let _ = fs::remove_file(&target);
+            return Err(io_error(&target)(error));
+        }
+        let permissions = input.metadata().map_err(io_error(&resolved))?.permissions();
+        output
+            .set_permissions(permissions)
+            .map_err(io_error(&target))?;
         copied.push(entry.clone());
     }
     Ok(copied)
@@ -237,6 +227,26 @@ mod tests {
             read_setup(repo.path()).expect("read"),
             SetupConfig::default()
         );
+    }
+
+    #[test]
+    fn initial_setup_preserves_existing_files_and_copies_missing_ones() {
+        let repo = tempfile::tempdir().expect("repo");
+        let worktree = tempfile::tempdir().expect("worktree");
+        fs::write(repo.path().join(".env"), "SOURCE").expect("source");
+        fs::write(repo.path().join(".env.extra"), "EXTRA").expect("extra");
+        fs::write(worktree.path().join(".env"), "USER").expect("existing");
+        let config = SetupConfig {
+            copy: vec![".env".into(), ".env.extra".into()],
+            run: Vec::new(),
+        };
+        let copied = copy_setup_files(repo.path(), worktree.path(), &config).expect("setup");
+        assert_eq!(copied, [".env.extra"]);
+        assert_eq!(fs::read_to_string(worktree.path().join(".env")).expect("read"), "USER");
+        assert_eq!(fs::read_to_string(worktree.path().join(".env.extra")).expect("read"), "EXTRA");
+        assert!(copy_setup_files(repo.path(), worktree.path(), &config)
+            .expect("idempotent setup")
+            .is_empty());
     }
 
     #[test]
