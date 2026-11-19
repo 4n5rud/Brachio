@@ -114,6 +114,8 @@ export const ko: Messages = {
   "terminal.conversationResuming": "저장된 대화를 이어서 여는 중",
   "terminal.newConversation": "새 대화 시작",
   "terminal.resumeFailed": "이어갈 대화가 없어서 새로 시작해요",
+  "terminal.promptNotSent": "터미널이 안전한 붙여넣기를 지원할 때까지 첫 프롬프트를 보내지 않았습니다.",
+  "terminal.inputFailed": "터미널 입력을 보내지 못했습니다.",
   "terminal.startFailed": "터미널을 시작하지 못했어요",
 
   "inspector.changes": "변경",
@@ -242,6 +244,7 @@ export const ko: Messages = {
   "empty.repo.add": "저장소 추가",
 
   "newTask.title": "새 작업",
+  "newTask.discardDraft": "새 작업에 입력한 내용을 버릴까요?",
   "newTask.prompt": "에이전트에게 무엇을 맡길까요?",
   "newTask.name": "작업 이름",
   "newTask.base": "기준 브랜치",

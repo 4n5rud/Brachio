@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
 import { openTerminal, type AgentKind, type TerminalHandle } from "../lib/terminal";
+import { bracketedPaste } from "../lib/terminal-paste";
 
 /** What to run. Without it the pane stays an empty terminal. */
 export interface TerminalSession {
@@ -232,27 +233,51 @@ export function TerminalPane(props: {
         return false;
       }
       // Send printable text as a paste, without a key that submits the prompt.
-      const draft = Array.from(text, (character) => {
-        const code = character.charCodeAt(0);
-        return code < 32 || (code >= 127 && code <= 159) ? " " : character;
-      }).join("");
-      await handle.write(`\x1b[200~${draft}\x1b[201~`);
+      await handle.write(bracketedPaste(text));
       term.focus();
       return true;
     });
 
     function writeOutput(bytes: Uint8Array) {
-      term.write(bytes);
+      term.write(bytes, schedulePrompt);
+    }
+
+    function schedulePrompt() {
       const prompt = typeInPrompt;
       if (prompt === null) return;
       typeInPrompt = null;
       const destination = handle;
-      promptTimer = setTimeout(() => {
-        if (destination && destination === handle && !exited) void destination.write(`${prompt}\r`);
+      promptTimer = setTimeout(async () => {
+        if (!destination || destination !== handle || exited || disposed) return;
+        if (session?.agent && (!term.modes.bracketedPasteMode || blocked)) {
+          term.writeln(`\r\n[${t("terminal.promptNotSent")}]`);
+          return;
+        }
+        try {
+          if (session?.agent) {
+            await destination.write(bracketedPaste(prompt, true) + "\r");
+          } else {
+            await destination.write(`${prompt}\r`);
+          }
+        } catch (failure) {
+          if (destination === handle && !exited && !disposed) {
+            term.writeln(`\r\n[${t("terminal.inputFailed")} ${String(failure)}]`);
+          }
+        }
       }, TYPE_IN_DELAY_MS);
     }
 
-    const input = term.onData((data) => void handle?.write(data));
+    let lastWriteFailure = "";
+    const input = term.onData((data) => {
+      const destination = handle;
+      if (!destination || exited) return;
+      void destination.write(data).then(() => { lastWriteFailure = ""; }).catch((failure: unknown) => {
+        const message = String(failure);
+        if (destination !== handle || exited || disposed || message === lastWriteFailure) return;
+        lastWriteFailure = message;
+        term.writeln(`\r\n[${t("terminal.inputFailed")} ${message}]`);
+      });
+    });
     const resized = term.onResize(({ rows, cols }) => void handle?.resize(rows, cols));
     createEffect(() => {
       if (props.active === false) {
