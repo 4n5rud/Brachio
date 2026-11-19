@@ -12,7 +12,7 @@ import { MailboxInbox } from "./MailboxInbox";
 import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
-import { summarize, type ApprovalQuestion } from "../lib/approvals";
+import type { ApprovalQuestion } from "../lib/approvals";
 import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
   saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
@@ -395,7 +395,7 @@ export function TaskView(props: {
         </Show>
         <Show when={props.onAnswer && approval()}>
           {(question) => (
-            <ApprovalBar command={summarize(question())}
+            <ApprovalBar review={question().review}
               onAllow={() => props.onAnswer?.(question().id, true)}
               onDeny={() => props.onAnswer?.(question().id, false)} />
           )}
@@ -406,18 +406,15 @@ export function TaskView(props: {
 }
 
 /** Answers a permission hook from inside the app without covering the terminal. */
-function ApprovalBar(props: { command: string; onAllow?: () => void; onDeny?: () => void }) {
+function ApprovalBar(props: { review: string; onAllow?: () => void; onDeny?: () => void }) {
   return (
     <div class="approval" role="region" aria-label={t("approval.title")}>
       <StatusGlyph tone="blocked" />
       <strong>{t("approval.title")}</strong>
-      <div class="approval-command">
-        <code>{props.command}</code>
-        <span>{t("approval.inWorktree")}</span>
-      </div>
+      <pre class="approval-review" tabindex="0" aria-label={t("approval.details")}><code>{props.review}</code></pre>
       <div class="approval-actions">
-        <button class="button button-primary button-sm" type="button" disabled={!props.onAllow}
-          onClick={() => props.onAllow?.()}>
+        <button class="button button-primary button-sm" type="button" disabled={!props.review || !props.onAllow}
+          onClick={() => { if (props.review) props.onAllow?.(); }}>
           {t("approval.allowOnce")}
         </button>
         <button class="button button-ghost button-sm" type="button" disabled={!props.onDeny}
