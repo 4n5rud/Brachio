@@ -38,9 +38,11 @@ pub struct Launch {
     pub cols: u16,
 }
 
-/// A terminal this app is attached to.
+/// A terminal this app is attached to, and the runtime that hosts it: after an update that may be
+/// an older one than the app would start now.
 struct Attached {
     key: String,
+    client: Client,
     pump: JoinHandle<()>,
 }
 
@@ -66,14 +68,10 @@ impl RuntimeTerminals {
         channel: Channel<InvokeResponseBody>,
         agent: bool,
     ) -> Result<Option<(SessionId, bool)>> {
-        let Some(client) = self.client().await? else {
+        let Some(current) = self.client().await? else {
             return Ok(None);
         };
-        let existing = match client.call(Action::Inspect { key: key.clone() }).await {
-            Ok(reply) => Some(reply),
-            Err(ClientError::Refused(_)) => None,
-            Err(error) => bail!("{error}"),
-        };
+        let (client, existing) = locate(&current, &key).await?;
         let attached = existing.is_some();
         if !attached {
             show_last_screen(&client, &key, &channel).await;
@@ -101,7 +99,7 @@ impl RuntimeTerminals {
             .attached
             .lock()
             .map_err(|_| anyhow!("terminal list lock poisoned"))?
-            .insert(id, Attached { key, pump });
+            .insert(id, Attached { key, client, pump });
         if let Some(previous) = previous {
             previous.pump.abort();
         }
@@ -151,8 +149,9 @@ impl RuntimeTerminals {
     }
 
     async fn target(&self, id: SessionId) -> Option<(Client, String)> {
-        let key = self.attached.lock().ok()?.get(&id)?.key.clone();
-        Some((self.client().await.ok()??, key))
+        let attached = self.attached.lock().ok()?;
+        let found = attached.get(&id)?;
+        Some((found.client.clone(), found.key.clone()))
     }
 
     fn drop_attachment(&self, id: SessionId) {
@@ -165,6 +164,28 @@ impl RuntimeTerminals {
             attached.pump.abort();
         }
     }
+}
+
+/// Finds the runtime that already hosts `key`: the current one, else an older one that is still
+/// running. Only "no such terminal" counts as absent; any other failure stops the open, because
+/// starting a second program for the same key would be worse than not opening one.
+async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>)> {
+    let inspect = || Action::Inspect {
+        key: key.to_owned(),
+    };
+    match current.call(inspect()).await {
+        Ok(reply) => return Ok((current.clone(), Some(reply))),
+        Err(ClientError::Refused(_)) => {}
+        Err(error) => bail!("{error}"),
+    }
+    for old in runtime_client::older_clients().await {
+        match old.call(inspect()).await {
+            Ok(reply) => return Ok((old, Some(reply))),
+            Err(ClientError::Refused(_)) => {}
+            Err(error) => bail!("{error}"),
+        }
+    }
+    Ok((current.clone(), None))
 }
 
 fn launch_action(key: &str, launch: Launch) -> Action {

@@ -228,7 +228,7 @@ pub fn run() {
 /// Starts listening for permission questions from agents' hooks and prepares the hook that
 /// Claude Code sessions get. If the socket cannot be taken, agents keep asking in the terminal.
 fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
-    let endpoint = format!("{}-hooks", runtime_client::endpoint());
+    let endpoint = runtime_client::hooks_endpoint();
     let hooks_folder = app.path().app_data_dir()?.join("hooks");
     app.manage(hook_setup::HookSetup::prepare(
         &hooks_folder,
