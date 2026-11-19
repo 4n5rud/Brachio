@@ -233,7 +233,22 @@ fn stable_copy(source: &Path) -> Result<PathBuf> {
         fs::rename(&scratch, &copy)?;
     }
     remove_older_copies(&folder, &name);
+    copy_conpty_files(source, &folder);
     Ok(copy)
+}
+
+/// The runtime loads the newer ConPTY from beside its executable, so the copy needs the files
+/// too. A file in use or a failed copy only means the system ConPTY is used.
+fn copy_conpty_files(source: &Path, folder: &Path) {
+    let Some(conpty) = source.parent().map(|parent| parent.join("conpty")) else {
+        return;
+    };
+    for name in ["conpty.dll", "OpenConsole.exe"] {
+        let target = folder.join(name);
+        if conpty.join(name).is_file() && !target.exists() {
+            let _ = fs::copy(conpty.join(name), target);
+        }
+    }
 }
 
 /// Copies still in use cannot be removed on Windows; they go on a later start.
