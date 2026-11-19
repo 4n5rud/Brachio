@@ -51,6 +51,7 @@ export const ko: Messages = {
   "task.noArchived": "보관한 작업이 없습니다.",
   "task.delete": "삭제",
   "task.deleteBody": "작업 폴더(worktree)와 브랜치 {branch}, 작업 기록을 영구히 지워요.",
+  "task.deleteIgnored": "git이 무시하는 항목도 {count}개 있어요 ({names} 등). 커밋된 적이 없어서 지우면 되돌릴 수 없어요.",
   "task.deleteLoss": "커밋하지 않은 파일 {files}개와, 이 브랜치에만 있는 커밋 {commits}개를 잃어요.",
   "task.restore": "복원",
   "task.archiveBody": "작업을 목록에서 숨기고 터미널을 닫습니다. Git 브랜치와 작업 폴더는 디스크에 남습니다.",

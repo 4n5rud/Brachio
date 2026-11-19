@@ -45,13 +45,21 @@ pub fn remove_worktree(git: &Git, path: &Path, branch: &str) -> Result<(), GitEr
 }
 
 /// Work that deleting a task would destroy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsavedWork {
     /// Files with uncommitted changes, including untracked ones.
     pub uncommitted_files: u32,
     /// Commits only the task branch holds: no remote branch and no other local branch has them.
     pub unpushed_commits: u32,
+    /// Files and folders git ignores, such as `.env.local`, notes and build output. They were
+    /// never committed, so nothing else holds them.
+    pub ignored_entries: u32,
+    /// Some of their names, top level only.
+    pub ignored_examples: Vec<String>,
 }
+
+/// How many ignored names are returned as examples.
+const IGNORED_EXAMPLES: usize = 5;
 
 /// Counts what deleting the task would lose, without changing anything. A worktree folder that is
 /// already gone has no uncommitted files.
@@ -59,11 +67,21 @@ pub struct UnsavedWork {
 /// # Errors
 /// Fails when git cannot read the repository.
 pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork, GitError> {
-    let uncommitted_files = if path.is_dir() {
-        let status = Git::new(path).run_text(&["status", "--porcelain", "-z"])?;
-        count(status.split_terminator('\0').count())
+    let (uncommitted_files, ignored) = if path.is_dir() {
+        let worktree = Git::new(path);
+        let status = worktree.run_text(&["status", "--porcelain", "-z"])?;
+        let ignored = worktree.run_text(&[
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        ])?;
+        let names: Vec<String> = ignored.split_terminator('\0').map(str::to_owned).collect();
+        (count(status.split_terminator('\0').count()), names)
     } else {
-        0
+        (0, Vec::new())
     };
     let reference = format!("refs/heads/{branch}");
     // Commits another branch or a remote also holds survive the deletion, so they are not counted.
@@ -80,6 +98,8 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
     Ok(UnsavedWork {
         uncommitted_files,
         unpushed_commits: unpushed.parse().unwrap_or(0),
+        ignored_entries: count(ignored.len()),
+        ignored_examples: ignored.into_iter().take(IGNORED_EXAMPLES).collect(),
     })
 }
 

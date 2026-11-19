@@ -143,7 +143,9 @@ fn deleting_a_task_reports_and_then_discards_unsaved_work() {
         work,
         brachio_git::UnsavedWork {
             uncommitted_files: 1,
-            unpushed_commits: 1
+            unpushed_commits: 1,
+            ignored_entries: 0,
+            ignored_examples: Vec::new(),
         }
     );
 
@@ -275,4 +277,28 @@ fn push_goes_to_the_only_remote_even_when_it_is_not_called_origin() {
         brachio_git::push_remote(&git, "main").expect("configured remote wins"),
         "mirror"
     );
+}
+
+#[test]
+fn deleting_a_task_counts_ignored_files_that_no_commit_holds() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    fs::write(repo.path().join(".gitignore"), ".env.local\nbuild/\n").expect("write ignore");
+    run(&git, &["add", ".gitignore"]);
+    run(&git, &["commit", "-q", "-m", "ignore local files"]);
+    let trees = temp_dir();
+    let tree = trees.path().join("t");
+    add(&git, "brachio/t-1", &tree);
+
+    let clean = brachio_git::unsaved_work(&git, &tree, "brachio/t-1").expect("preview");
+    assert_eq!(clean.ignored_entries, 0);
+
+    fs::write(tree.join(".env.local"), "SECRET=1\n").expect("write env");
+    fs::create_dir(tree.join("build")).expect("make build");
+    fs::write(tree.join("build").join("out.bin"), "x").expect("write output");
+    let work = brachio_git::unsaved_work(&git, &tree, "brachio/t-1").expect("preview");
+    assert_eq!(work.uncommitted_files, 0, "ignored files are not changes");
+    assert_eq!(work.ignored_entries, 2);
+    assert!(work.ignored_examples.contains(&".env.local".to_owned()));
+    assert!(work.ignored_examples.contains(&"build/".to_owned()));
 }

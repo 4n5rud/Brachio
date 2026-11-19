@@ -443,6 +443,8 @@ fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String>
 pub struct TaskLoss {
     uncommitted_files: u32,
     unpushed_commits: u32,
+    ignored_entries: u32,
+    ignored_examples: Vec<String>,
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -476,6 +478,8 @@ pub async fn task_delete_preview(
     Ok(TaskLoss {
         uncommitted_files: work.uncommitted_files,
         unpushed_commits: work.unpushed_commits,
+        ignored_entries: work.ignored_entries,
+        ignored_examples: work.ignored_examples,
     })
 }
 
