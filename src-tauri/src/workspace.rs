@@ -1,8 +1,9 @@
 //! IPC commands for repositories and tasks: add a repository, create a task
 //! with its own worktree and branch, and list what is stored.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
@@ -23,12 +24,37 @@ impl Database {
     }
 }
 
+#[derive(Default)]
+pub struct TaskWorktreeLocks(Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>);
+
+impl TaskWorktreeLocks {
+    async fn acquire(&self, repo_id: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+        let lock = {
+            let mut locks = self
+                .0
+                .lock()
+                .map_err(|_| "worktree lock poisoned".to_owned())?;
+            locks.retain(|_, lock| lock.strong_count() != 0);
+            if let Some(lock) = locks.get(repo_id).and_then(Weak::upgrade) {
+                lock
+            } else {
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                locks.insert(repo_id.to_owned(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        Ok(lock.lock_owned().await)
+    }
+}
+
 /// A new task from the "New task" dialog.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskRequest {
     /// Repository to branch from.
     pub repo_id: String,
+    /// Existing parent task in this repository, if requested.
+    pub parent_task_id: Option<String>,
     /// Task title. The branch name is derived from it.
     pub title: String,
     /// Agent to run in the task.
@@ -89,6 +115,8 @@ pub struct CreatedTask {
     /// Commands from the repository's `brachio.toml` that the user is asked to run in the new
     /// worktree. Nothing runs without the user's say-so.
     setup_commands: Vec<String>,
+    /// The file copy error that can be retried separately.
+    setup_copy_error: Option<String>,
 }
 
 /// Creates a worktree on a fresh branch and stores the task. Files named in the repository's
@@ -98,9 +126,24 @@ pub struct CreatedTask {
 #[tauri::command]
 pub async fn task_create(
     database: State<'_, Database>,
+    worktrees: State<'_, TaskWorktreeLocks>,
     request: CreateTaskRequest,
 ) -> Result<CreatedTask, String> {
-    let repo = RepoRecord::get(&*database.lock()?, &request.repo_id).map_err(to_text)?;
+    let _guard = worktrees.acquire(&request.repo_id).await?;
+    let (repo, parent_branch) = {
+        let connection = database.lock()?;
+        let repo = RepoRecord::get(&connection, &request.repo_id).map_err(to_text)?;
+        let parent_branch = if let Some(parent_id) = request.parent_task_id.as_deref() {
+            let parent = TaskRecord::get(&connection, parent_id).map_err(to_text)?;
+            if parent.repo_id != repo.id || parent.archived_at_ms.is_some() {
+                return Err("Choose an open parent task from this repository.".to_owned());
+            }
+            Some(parent.branch)
+        } else {
+            None
+        };
+        (repo, parent_branch)
+    };
     // Read first, so a broken file stops the task before anything is created.
     let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
     let id = new_id();
@@ -112,6 +155,7 @@ pub async fn task_create(
         base: request
             .base
             .clone()
+            .or(parent_branch)
             .unwrap_or_else(|| repo.default_branch.clone()),
     };
     let repo_path = repo.path.clone();
@@ -129,6 +173,7 @@ pub async fn task_create(
     let task = NewTask {
         id: &id,
         repo_id: &repo.id,
+        parent_task_id: request.parent_task_id.as_deref(),
         title: request.title.trim(),
         branch: &branch,
         worktree_path: &path,
@@ -160,15 +205,39 @@ pub async fn task_create(
             });
         }
     };
-    match brachio_git::copy_setup_files(&repo.path, &path, &setup) {
-        Ok(copied) if !copied.is_empty() => tracing::info!(?copied, "copied setup files"),
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "could not copy setup files"),
-    }
+    let setup_copy_error = brachio_git::copy_setup_files(&repo.path, &path, &setup)
+        .err()
+        .map(to_text);
     Ok(CreatedTask {
         task,
         setup_commands: setup.run,
+        setup_copy_error,
     })
+}
+
+/// Retries only missing setup files, preserving any files already present.
+#[tauri::command]
+pub async fn task_retry_setup_copy(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
+    let (repo, task) = {
+        let connection = database.lock()?;
+        let task = TaskRecord::get(&connection, &id).map_err(to_text)?;
+        if task.archived_at_ms.is_some() {
+            return Err("Restore the task before retrying setup.".to_owned());
+        }
+        let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
+        (repo, task)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
+        brachio_git::retry_setup_files(&repo.path, &task.worktree_path, &setup)
+            .map(|_| ())
+            .map_err(to_text)
+    })
+    .await
+    .map_err(to_text)?
 }
 
 /// Hides a task from the list. The worktree and branch stay on disk.
@@ -380,6 +449,9 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
     if task.archived_at_ms.is_none() {
         return Err("Archive the task before deleting it.".to_owned());
     }
+    if TaskRecord::has_children(&connection, id).map_err(to_text)? {
+        return Err("Delete the child tasks before deleting their parent.".to_owned());
+    }
     let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
     Ok((task, repo))
 }
@@ -406,7 +478,15 @@ pub async fn task_delete_preview(
 /// Deletes an archived task for good: its worktree folder, its branch and its record. The caller
 /// has shown `task_delete_preview` to the user.
 #[tauri::command]
-pub async fn task_delete(database: State<'_, Database>, id: String) -> Result<(), String> {
+pub async fn task_delete(
+    database: State<'_, Database>,
+    worktrees: State<'_, TaskWorktreeLocks>,
+    id: String,
+) -> Result<(), String> {
+    let repo_id = TaskRecord::get(&*database.lock()?, &id)
+        .map_err(to_text)?
+        .repo_id;
+    let _guard = worktrees.acquire(&repo_id).await?;
     let (task, repo) = archived_task(&database, &id)?;
     tauri::async_runtime::spawn_blocking(move || {
         brachio_git::discard_worktree(&Git::new(&repo.path), &task.worktree_path, &task.branch)

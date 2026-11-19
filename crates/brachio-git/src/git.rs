@@ -33,6 +33,12 @@ pub enum GitError {
         /// Repositories directly inside that folder, which the user may have meant.
         suggestions: Vec<PathBuf>,
     },
+    /// The repository has a remote but names no default branch, and has no `main` or `master`.
+    #[error("Could not tell which branch new tasks should start from in {}. Run `git remote set-head origin --auto` in it, then add it again.", .path.display())]
+    NoDefaultBranch {
+        /// The repository folder.
+        path: PathBuf,
+    },
 }
 
 fn did_you_mean(suggestions: &[PathBuf]) -> String {

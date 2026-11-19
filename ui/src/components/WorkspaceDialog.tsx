@@ -18,6 +18,7 @@ const COMMAND_LABEL: Record<CommandId, () => string> = {
 
 export interface TaskActivity {
   taskId: string;
+  sessionKey?: string;
   title: string;
   key: MessageKey;
   detail: string | null;
@@ -46,7 +47,7 @@ export function WorkspaceDialog(props: {
     onCheck: () => void;
     onDownload: () => void;
   };
-  onOpen: (id: string) => void;
+  onOpen: (id: string, sessionKey?: string) => void;
   /** Files of the selected task, offered when the query is two characters or more. */
   files?: readonly string[];
   onInsertFile?: (path: string) => void;
@@ -77,8 +78,8 @@ export function WorkspaceDialog(props: {
   let dialog!: HTMLDialogElement;
   onMount(() => dialog.showModal());
 
-  const choose = (id: string) => {
-    props.onOpen(id);
+  const choose = (id: string, sessionKey?: string) => {
+    props.onOpen(id, sessionKey);
     dialog.close();
   };
   const activate = (entry: QuickEntry) => {
@@ -139,7 +140,7 @@ export function WorkspaceDialog(props: {
                 <For each={props.activity}>{(item) => (
                   <li>
                     <button class="quick-open-result activity-result" type="button"
-                      disabled={!props.activeTaskIds.has(item.taskId)} onClick={() => choose(item.taskId)}>
+                      disabled={!props.activeTaskIds.has(item.taskId)} onClick={() => choose(item.taskId, item.sessionKey)}>
                       <strong>{item.title}</strong>
                       <time dateTime={new Date(item.at).toISOString()}>{formatAge(item.at, props.now)}</time>
                       <span>{t(item.key)}</span>

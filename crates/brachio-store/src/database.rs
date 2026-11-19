@@ -25,6 +25,14 @@ pub enum StoreError {
         /// The id that was not found.
         id: String,
     },
+    /// A newer Brachio changed the database in a way this version does not understand.
+    #[error("this database was written by a newer Brachio (schema {found}, this one knows {known}); update Brachio")]
+    NewerSchema {
+        /// Schema version stored in the file.
+        found: usize,
+        /// Newest schema version this build can handle.
+        known: usize,
+    },
 }
 
 /// Opens (or creates) the database and applies pending migrations.
@@ -53,6 +61,12 @@ fn prepare(mut connection: Connection) -> Result<Connection, StoreError> {
 
 fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
     let current = user_version(connection)?;
+    if current > MIGRATIONS.len() {
+        return Err(StoreError::NewerSchema {
+            found: current,
+            known: MIGRATIONS.len(),
+        });
+    }
     for (index, sql) in MIGRATIONS.iter().enumerate().skip(current) {
         let transaction = connection.transaction()?;
         transaction.execute_batch(sql)?;
@@ -87,6 +101,16 @@ mod tests {
             )
             .expect("count tables");
         assert_eq!(tables, 1);
+    }
+
+    #[test]
+    fn a_database_from_a_newer_brachio_is_refused() {
+        let mut connection = open_in_memory().expect("open database");
+        connection
+            .pragma_update(None, "user_version", MIGRATIONS.len() + 1)
+            .expect("pretend a newer schema");
+        let error = migrate(&mut connection).expect_err("must not run on a newer schema");
+        assert!(matches!(error, StoreError::NewerSchema { .. }), "{error}");
     }
 
     #[test]
