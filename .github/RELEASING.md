@@ -27,6 +27,10 @@ One version, in two files that must match: `[workspace.package] version` in `Car
 
 GitHub writes them from the pull requests merged since the previous release (for a stable release, since the previous stable one). Each entry is the pull request title with its author, and first-time contributors are listed separately. That is why pull request titles are written for users, and why the title prefix matters: `labels.yml` turns `feat:`, `fix:`, `perf:`, `docs:` and `ci:`/`chore:`/`refactor:` into the labels that [`release.yml`](./release.yml) groups into New, Fixes, Performance, Documentation and Maintenance. Add the label `skip-release-notes` to leave a pull request out.
 
+## When the terminal runtime changed
+
+`brachio-runtime` keeps agents alive across app restarts, so after an update an old runtime may still be running with the user's agents in it. If a release contains a fix that lives in the runtime, raise `GENERATION` in `src-tauri/src/runtime_client.rs`. The updated app then starts a new runtime beside the old one, which is told to take no new terminals and ends when its last agent does; agents in it stay reachable, and every new terminal uses the new runtime. Without raising it the old runtime keeps serving, fixes and all, until the user stops their agents.
+
 ## What a release does not do yet
 
 - The installers are not signed. Windows shows SmartScreen and macOS asks the user to allow the app. Say so in the draft until signing is set up.

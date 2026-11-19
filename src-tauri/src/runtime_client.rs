@@ -38,7 +38,58 @@ pub fn endpoint() -> String {
     if let Ok(name) = env::var(ENDPOINT_VARIABLE) {
         return name;
     }
-    endpoint_for(&current_user(), &home_folder())
+    generation_endpoint(&current_user(), &home_folder(), GENERATION)
+}
+
+/// Raised when a change to the runtime has to reach users who update while an older runtime still
+/// hosts their agents. Each generation has an endpoint of its own, so the new runtime starts
+/// beside the old one, which keeps serving the agents it has until they end.
+pub const GENERATION: u32 = 2;
+
+/// The endpoint of one generation. The first generation has no suffix, which is the name earlier
+/// versions used.
+fn generation_endpoint(user: &str, home: &str, generation: u32) -> String {
+    let base = endpoint_for(user, home);
+    if generation <= 1 {
+        base
+    } else {
+        format!("{base}-g{generation}")
+    }
+}
+
+/// The socket agents reach the app on for approvals and messages. It does not change with the
+/// generation: an agent keeps the name it was started with for as long as it lives, and an agent
+/// in an older runtime must still reach the app.
+pub fn hooks_endpoint() -> String {
+    let base = env::var(ENDPOINT_VARIABLE)
+        .unwrap_or_else(|_| generation_endpoint(&current_user(), &home_folder(), 1));
+    format!("{base}-hooks")
+}
+
+/// Endpoints of older generations, newest first, then the name used before generations.
+fn older_endpoints() -> Vec<String> {
+    if env::var(ENDPOINT_VARIABLE).is_ok() {
+        return Vec::new();
+    }
+    let (user, home) = (current_user(), home_folder());
+    let mut names: Vec<String> = (1..GENERATION)
+        .rev()
+        .map(|generation| generation_endpoint(&user, &home, generation))
+        .collect();
+    names.extend(legacy_endpoint());
+    names
+}
+
+/// Clients of the older runtimes that are still running.
+pub async fn older_clients() -> Vec<Client> {
+    let mut running = Vec::new();
+    for name in older_endpoints() {
+        let client = Client::new(&name);
+        if client.call(Action::Hello).await.is_ok() {
+            running.push(client);
+        }
+    }
+    running
 }
 
 fn current_user() -> String {
@@ -96,12 +147,12 @@ fn legacy_endpoint() -> Option<String> {
 /// # Errors
 /// Fails when no runtime answers and none could be started.
 pub async fn connect() -> Result<Client> {
-    if let Some(legacy) = legacy_endpoint() {
-        let old = Client::new(&legacy);
-        if old.call(Action::Hello).await.is_ok() {
-            return Ok(old);
-        }
-    }
+    let client = connect_current().await?;
+    retire_older().await;
+    Ok(client)
+}
+
+async fn connect_current() -> Result<Client> {
     let name = endpoint();
     let client = Client::new(&name);
     match client.call(Action::Hello).await {
@@ -117,6 +168,15 @@ pub async fn connect() -> Result<Client> {
         tokio::time::sleep(STARTUP_STEP).await;
     }
     bail!("the terminal runtime did not start in time")
+}
+
+/// Tells older runtimes to take no new terminals and to end once their agents have. Only done
+/// after the current runtime answered, so a failed start never leaves nothing to open terminals
+/// in. A runtime too old to know the request just ignores it.
+async fn retire_older() {
+    for old in older_clients().await {
+        let _ = old.call(Action::Drain).await;
+    }
 }
 
 fn start(endpoint: &str) -> Result<()> {
@@ -237,6 +297,17 @@ mod endpoint_tests {
             endpoint_for("averyveryverylongusername1", "/home/a"),
             endpoint_for("averyveryverylongusername2", "/home/b")
         );
+    }
+
+    #[test]
+    fn each_generation_has_its_own_endpoint_and_the_first_keeps_the_old_name() {
+        use super::generation_endpoint;
+        let first = generation_endpoint("me", "/home/me", 1);
+        assert_eq!(first, endpoint_for("me", "/home/me"));
+        let second = generation_endpoint("me", "/home/me", 2);
+        assert_ne!(first, second);
+        assert!(second.starts_with(&first) && second.ends_with("-g2"));
+        assert_ne!(second, generation_endpoint("me", "/home/me", 3));
     }
 
     #[test]
