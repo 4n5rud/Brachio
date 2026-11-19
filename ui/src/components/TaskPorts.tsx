@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
 
 interface LocalPort {
@@ -28,6 +28,13 @@ export function TaskPorts(props: { taskId: string }) {
   const [input, setInput] = createSignal("");
   const [secure, setSecure] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [assignment, { refetch: retryAssignment }] = createResource(async () => {
+    try {
+      return { port: await invoke<number>("task_assign_port", { id: props.taskId }) };
+    } catch (failure) {
+      return { error: String(failure) };
+    }
+  });
 
   const update = (next: LocalPort[]) => {
     setPorts(next);
@@ -57,6 +64,20 @@ export function TaskPorts(props: { taskId: string }) {
   return (
     <details class="inspector-section">
       <summary>{t("ports.title")}</summary>
+      <Show when={assignment()?.port}>{(port) => (
+        <div>
+          <p><code>BRACHIO_PORT={port()}</code> · {t("ports.assigned")}</p>
+          <button class="button button-sm" type="button"
+            onClick={() => void openPort({ port: port(), secure: false })}>http://127.0.0.1:{port()}</button>
+        </div>
+      )}</Show>
+      <Show when={assignment()?.error}>{(message) => (
+        <div>
+          <p role="status">{message()}</p>
+          <button class="button button-sm" type="button" disabled={assignment.loading}
+            onClick={() => void retryAssignment()}>{t("ports.retryAssignment")}</button>
+        </div>
+      )}</Show>
       <ul>
         <For each={ports()}>{(entry) => (
           <li>
