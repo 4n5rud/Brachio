@@ -10,8 +10,8 @@ mod runtime_terminals;
 mod task_ports;
 mod task_tabs;
 mod terminal;
-mod terminal_status;
 mod terminal_authorization;
+mod terminal_status;
 mod update_release;
 mod workspace;
 
