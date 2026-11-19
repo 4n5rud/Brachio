@@ -149,6 +149,7 @@ export const ko: Messages = {
   "diff.newLine": "변경 후",
   "diff.insert": "에이전트 입력란에 넣기",
   "diff.notReady": "에이전트 입력란을 사용할 수 없습니다. 터미널 상태를 확인하세요.",
+  "diff.totalsUnavailable": "변경 줄 수를 확인할 수 없습니다. 변경 사항을 열거나 새로고침해 추적 파일의 diff를 확인하세요.",
   "draft.title": "터미널 초안 확인",
   "draft.target": "선택한 탭: {task}의 {agent}",
   "draft.review": "선택한 탭에 작성 중인 입력이 있는지 먼저 확인하세요. 초안을 붙여넣고 전송은 직접 합니다. 다른 탭에 넣으려면 미리보기를 닫고 해당 탭을 먼저 선택하세요.",

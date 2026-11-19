@@ -147,6 +147,7 @@ export const en = {
   "diff.newLine": "after",
   "diff.insert": "Insert in agent prompt",
   "diff.notReady": "The agent prompt is unavailable. Check the terminal.",
+  "diff.totalsUnavailable": "Line totals unavailable. Open or refresh Changes to read the tracked diff.",
   "draft.title": "Review terminal draft",
   "draft.target": "Selected tab: {agent} in {task}",
   "draft.review": "Check the existing input in this tab. This pastes the draft without submitting it. To use a different tab, close this preview and select that tab first.",
