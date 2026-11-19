@@ -242,8 +242,14 @@ mod tests {
         };
         let copied = copy_setup_files(repo.path(), worktree.path(), &config).expect("setup");
         assert_eq!(copied, [".env.extra"]);
-        assert_eq!(fs::read_to_string(worktree.path().join(".env")).expect("read"), "USER");
-        assert_eq!(fs::read_to_string(worktree.path().join(".env.extra")).expect("read"), "EXTRA");
+        assert_eq!(
+            fs::read_to_string(worktree.path().join(".env")).expect("read"),
+            "USER"
+        );
+        assert_eq!(
+            fs::read_to_string(worktree.path().join(".env.extra")).expect("read"),
+            "EXTRA"
+        );
         assert!(copy_setup_files(repo.path(), worktree.path(), &config)
             .expect("idempotent setup")
             .is_empty());
