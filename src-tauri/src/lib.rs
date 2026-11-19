@@ -6,6 +6,7 @@ mod hook_setup;
 mod hook_socket;
 mod mailbox;
 mod pr_status;
+mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
 mod task_ports;
@@ -171,6 +172,7 @@ pub fn run() {
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(resource_usage::ResourceMonitor::default())
         .setup(|app| {
             open_database(app)?;
             start_approvals(app)?;
@@ -181,6 +183,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_version,
+            resource_usage::resource_usage,
             tray_update_tasks,
             terminal::agents_detect,
             update_release::open_update_release,
