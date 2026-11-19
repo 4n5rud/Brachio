@@ -68,7 +68,7 @@ impl RuntimeTerminals {
         let Some(client) = self.client().await? else {
             return Ok(false);
         };
-        let (_, existing) = locate(&client, key).await?;
+        let (_, existing) = self.locate_with_restart(&client, key).await?;
         Ok(existing.is_some())
     }
 
