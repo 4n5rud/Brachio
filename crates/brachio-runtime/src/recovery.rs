@@ -35,12 +35,24 @@ impl Runtime {
     /// Write the screen of every shell that changed since the last write.
     pub(crate) fn persist(&self) {
         let Some(journal) = &self.journal else { return };
-        let records: Vec<SessionRecord> = match lock(&self.sessions) {
-            Ok(sessions) => sessions
+        // Only a session that changed since its last save has its screen formatted, and the
+        // sessions lock is not held while writing to disk.
+        let records: Vec<SessionRecord> = {
+            let Ok(sessions) = lock(&self.sessions) else {
+                return;
+            };
+            let Ok(saved) = lock(&self.saved) else {
+                return;
+            };
+            sessions
                 .iter()
+                .filter(|(key, session)| {
+                    session
+                        .mark()
+                        .is_ok_and(|mark| saved.get(key.as_str()) != Some(&mark))
+                })
                 .filter_map(|(key, session)| session.record(key, &self.instance).ok())
-                .collect(),
-            Err(_) => return,
+                .collect()
         };
         let Ok(mut saved) = lock(&self.saved) else {
             return;
