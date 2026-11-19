@@ -5,8 +5,8 @@ use brachio_runtime::mailbox::{
     MailMessage, MailRequest, MailResponse, Peer, SendMail, DEFAULT_BATCH, MAX_BATCH,
 };
 use brachio_store::{
-    peek_unread, recent_messages, send_message, take_unread, unread_counts, Message, NewMessage,
-    TaskRecord,
+    peek_unread, recent_messages, reply_recipient, send_message, take_unread, unread_counts,
+    Message, NewMessage, TaskRecord,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -49,7 +49,18 @@ fn agent_owner(connection: &Connection, key: &str) -> Result<TaskRecord, String>
 
 fn send(connection: &Connection, mail: &SendMail, now_ms: i64, new_id: &str) -> Outcome {
     agent_owner(connection, &mail.from)?;
-    let to = resolve_target(connection, &mail.to)?;
+    let to = match mail.reply_to.as_deref() {
+        Some(parent) => {
+            let recipient = reply_recipient(connection, parent, &mail.from)
+                .map_err(|error| error.to_string())?;
+            agent_owner(connection, &recipient)?;
+            if !mail.to.trim().is_empty() && resolve_target(connection, &mail.to)? != recipient {
+                return Err("A reply must go to the other participant in the thread.".to_owned());
+            }
+            recipient
+        }
+        None => resolve_target(connection, &mail.to)?,
+    };
     if to == mail.from {
         return Err("A message cannot be sent to the terminal that sends it.".to_owned());
     }
@@ -81,7 +92,7 @@ fn send(connection: &Connection, mail: &SendMail, now_ms: i64, new_id: &str) -> 
         MailResponse::Sent {
             id: stored.id,
             thread_id: stored.thread_id,
-            to,
+            to: stored.to_key,
             duplicate,
         },
         !duplicate,
@@ -377,6 +388,32 @@ mod tests {
             );
             assert!(!changed);
         }
+    }
+
+    #[test]
+    fn inferred_reply_is_delivered_to_the_other_participant_in_the_same_thread() {
+        let mut connection = database();
+        let (_, changed) = handle(
+            &mut connection,
+            mail("aaaa1111:agent", "bbbb2222:agent", "Question"),
+            1,
+            "m1",
+        );
+        assert!(changed);
+        let MailRequest::Send(mut reply) = mail("bbbb2222:agent", "", "Answer") else {
+            panic!("expected a send request");
+        };
+        reply.reply_to = Some("m1".into());
+        let (response, changed) =
+            handle(&mut connection, MailRequest::Send(reply.clone()), 2, "m2");
+        assert!(changed);
+        assert!(matches!(response, MailResponse::Sent { thread_id, to, .. }
+            if thread_id == "m1" && to == "aaaa1111:agent"));
+
+        reply.reply_to = Some("unknown".into());
+        let (response, changed) = handle(&mut connection, MailRequest::Send(reply), 3, "m3");
+        assert!(!changed);
+        assert!(matches!(response, MailResponse::Error { .. }));
     }
 
     #[test]

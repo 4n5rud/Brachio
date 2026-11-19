@@ -10,10 +10,12 @@ Send when you finish something others depend on, are blocked, or need a decision
 
     brachio peers                      # open tasks you can message
     brachio send --to "<title or key>" --type question --subject "<one line>" --body "<short>"
+    brachio ask --to "<title or key>" --subject "<question>"
+    brachio reply "<message id>" --subject "<one-line answer>"
 
 - `--type`: status, question, handoff, escalation, merge_ready, decision_gate, worker_done.
 - Keep the body short. Put long text in a file and send its path in the body.
-- Answer a message with `--reply-to <message id>`.
+- `ask` queues a question and returns. `reply` reaches the other participant in the same thread.
 
 Read your mail when told "Brachio message: run brachio check", and when you are about to start
 or finish a step:

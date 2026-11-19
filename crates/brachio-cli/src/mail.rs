@@ -18,6 +18,36 @@ pub struct SendArgs {
     /// Who gets it: a key from `brachio peers`, a task title, or the start of a task id.
     #[arg(long)]
     to: String,
+    /// status, dispatch, worker_done, merge_ready, escalation, handoff, decision_gate, question
+    /// or heartbeat.
+    #[arg(long = "type", default_value = "status")]
+    kind: String,
+    /// The message id this answers.
+    #[arg(long)]
+    reply_to: Option<String>,
+    #[command(flatten)]
+    message: MessageArgs,
+}
+
+#[derive(Args)]
+pub struct AskArgs {
+    /// The task title or terminal key to ask.
+    #[arg(long)]
+    to: String,
+    #[command(flatten)]
+    message: MessageArgs,
+}
+
+#[derive(Args)]
+pub struct ReplyArgs {
+    /// Message ID to answer.
+    message_id: String,
+    #[command(flatten)]
+    message: MessageArgs,
+}
+
+#[derive(Args)]
+struct MessageArgs {
     /// One line saying what this is about.
     #[arg(long)]
     subject: String,
@@ -25,16 +55,9 @@ pub struct SendArgs {
     /// send its path.
     #[arg(long, default_value = "")]
     body: String,
-    /// status, dispatch, worker_done, merge_ready, escalation, handoff, decision_gate, question
-    /// or heartbeat.
-    #[arg(long = "type", default_value = "status")]
-    kind: String,
     /// low, normal or high.
     #[arg(long)]
     priority: Option<String>,
-    /// The message id this answers.
-    #[arg(long)]
-    reply_to: Option<String>,
     /// Sending the same id again does not send a second message.
     #[arg(long)]
     request_id: Option<String>,
@@ -93,6 +116,28 @@ fn call(endpoint: &str, request: &MailRequest) -> Result<MailResponse> {
 }
 
 pub fn send(args: SendArgs) -> Result<()> {
+    send_message(args.to, args.kind, args.reply_to, args.message)
+}
+
+pub fn ask(args: AskArgs) -> Result<()> {
+    send_message(args.to, "question".to_owned(), None, args.message)
+}
+
+pub fn reply(args: ReplyArgs) -> Result<()> {
+    send_message(
+        String::new(),
+        "status".to_owned(),
+        Some(args.message_id),
+        args.message,
+    )
+}
+
+fn send_message(
+    to: String,
+    kind: String,
+    reply_to: Option<String>,
+    args: MessageArgs,
+) -> Result<()> {
     let (endpoint, from) = endpoint_and_key()?;
     let body = if args.body == "-" {
         let mut text = String::new();
@@ -103,13 +148,13 @@ pub fn send(args: SendArgs) -> Result<()> {
     };
     let request = MailRequest::Send(SendMail {
         from,
-        to: args.to,
-        kind: args.kind,
+        to,
+        kind,
         priority: args.priority,
         subject: args.subject,
         body,
         payload: args.payload,
-        reply_to: args.reply_to,
+        reply_to,
         request_id: args.request_id,
     });
     let MailResponse::Sent {

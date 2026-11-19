@@ -33,6 +33,10 @@ enum Command {
     Mcp,
     /// Send a message to another task's agent.
     Send(mail::SendArgs),
+    /// Send a question and return immediately.
+    Ask(mail::AskArgs),
+    /// Answer an existing message in its thread.
+    Reply(mail::ReplyArgs),
     /// Read the messages other agents sent to this one.
     Check(mail::CheckArgs),
     /// List recent messages to and from this agent, read or not.
@@ -70,6 +74,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Send(args) => mail::send(args),
+        Command::Ask(args) => mail::ask(args),
+        Command::Reply(args) => mail::reply(args),
         Command::Check(args) => mail::check(&args),
         Command::Inbox(args) => mail::inbox(&args),
         Command::Peers => mail::peers(),
