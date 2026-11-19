@@ -233,6 +233,7 @@ mod tests {
             path: Path::new("/src/brachio"),
             default_branch: "main",
             added_at_ms: 0,
+            is_git: true,
         };
         RepoRecord::insert(&connection, &repo).expect("insert repo");
         connection

@@ -369,6 +369,11 @@ export function App() {
     switchRepo(added.id);
   };
 
+  const addFolderRepo = async (path: string) => {
+    const added = await addRepo(path);
+    setRepos((list) => (list.some((item) => item.id === added.id) ? list : [...list, added]));
+  };
+
   // A repository can ask for commands to run, so the user agrees once per exact list.
   const approveSetup = async (repoId: string, commands: readonly string[]) => {
     const entry = [repoId, ...commands].join("\n");
@@ -455,8 +460,9 @@ export function App() {
 
   // Shows what would be lost, and deletes the worktree and branch only after the user agrees.
   const deleteArchived = async (task: TaskRow) => {
+    const folderProject = repos().find((item) => item.id === task.repoId)?.isGit === false;
     const loss = await previewTaskDeletion(task.id);
-    const body = [
+    const gitBody = [
       t("task.deleteBody").replace("{branch}", task.branch),
       t("task.deleteLoss")
         .replace("{files}", String(loss.uncommittedFiles))
@@ -469,6 +475,10 @@ export function App() {
           ]
         : []),
     ].join("\n\n");
+    // A folder is the user's own: only the task's entry goes, never the folder.
+    const body = folderProject
+      ? t("task.deleteFolderBody").replace("{path}", task.worktreePath ?? "")
+      : gitBody;
     const agreed = await confirm(body, {
       title: `${t("task.delete")} · ${task.title}`,
       okLabel: t("task.delete"),
@@ -633,6 +643,7 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
+          onAddFolderRepo={inTauri ? addFolderRepo : undefined}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
           now={now()}
@@ -676,7 +687,14 @@ export function App() {
           )}
         </Show>
         <Show when={selected()} fallback={noTask()}>
-          {(task) => <Inspector task={task()} onDraft={draftComment} onDiffTotals={recordDiffTotals} />}
+          {(task) => (
+            <Inspector
+              task={task()}
+              isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
+              onDraft={draftComment}
+              onDiffTotals={recordDiffTotals}
+            />
+          )}
         </Show>
       </main>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
@@ -700,6 +718,7 @@ export function App() {
         {(current) => (
           <NewTaskDialog
             defaultBranch={current().defaultBranch}
+            isGit={current().isGit}
             parents={repoRows()}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
