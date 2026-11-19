@@ -38,6 +38,9 @@ pub enum SetupError {
     /// A `copy` entry points outside the repository.
     #[error("{0}: copy entries must be plain paths inside the repository")]
     UnsafePath(String),
+    /// A `run` entry is empty or holds a control character.
+    #[error("{0:?}: run entries must be one line of printable text")]
+    UnsafeCommand(String),
 }
 
 /// What to do for every new worktree of a repository.
@@ -80,6 +83,16 @@ pub fn read_setup(repo_root: &Path) -> Result<SetupConfig, SetupError> {
         .find(|entry| !is_plain_relative(entry))
     {
         return Err(SetupError::UnsafePath(entry.clone()));
+    }
+    // A command is typed into the user's shell after one confirmation. A line break would run a
+    // second command, and an escape sequence can make the confirmation show something else.
+    if let Some(command) = config
+        .setup
+        .run
+        .iter()
+        .find(|command| command.trim().is_empty() || command.chars().any(char::is_control))
+    {
+        return Err(SetupError::UnsafeCommand(command.clone()));
     }
     Ok(config.setup)
 }
@@ -243,6 +256,28 @@ mod tests {
             fs::read_to_string(worktree.path().join(".env")).expect("read user file"),
             "EDITED"
         );
+    }
+
+    #[test]
+    fn a_run_command_with_a_line_break_or_escape_sequence_is_refused() {
+        for bad in [
+            r"pnpm install\nrm -rf x",
+            r"echo \u001b[2Jhidden",
+            r"echo a\rb",
+            " ",
+        ] {
+            let folder = tempfile::tempdir().expect("temp dir");
+            std::fs::write(
+                folder.path().join(super::CONFIG_FILE),
+                format!("[setup]\nrun = [\"{bad}\"]\n"),
+            )
+            .expect("write config");
+            let error = read_setup(folder.path()).expect_err(bad);
+            assert!(
+                matches!(error, SetupError::UnsafeCommand(_)),
+                "{bad}: {error}"
+            );
+        }
     }
 
     #[test]
