@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -38,6 +39,11 @@ pub struct Launch {
     pub cols: u16,
 }
 
+/// Handles of runtime-hosted terminals start here, far above the small numbers the in-app terminal
+/// manager hands out. Each runtime numbers its sessions from 1 on its own, and an old runtime
+/// can run beside the current one, so a runtime's own session id cannot name a terminal here.
+const HOSTED_HANDLE_BASE: u64 = 1 << 40;
+
 /// A terminal this app is attached to, and the runtime that hosts it: after an update that may be
 /// an older one than the app would start now.
 struct Attached {
@@ -52,6 +58,7 @@ struct Attached {
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
     attached: Mutex<HashMap<SessionId, Attached>>,
+    handles: AtomicU64,
 }
 
 impl RuntimeTerminals {
@@ -80,7 +87,7 @@ impl RuntimeTerminals {
             Some(reply) => reply,
             None => client.call(launch_action(&key, launch)).await?,
         };
-        let ResponseResult::Success { session, .. } = reply.result else {
+        let ResponseResult::Success { .. } = reply.result else {
             bail!("the terminal runtime sent an unexpected reply");
         };
         let (first, following) = if attached {
@@ -94,7 +101,7 @@ impl RuntimeTerminals {
                 .await?
         };
         let pump = spawn(pump(first, following, channel, agent));
-        let id = session.session_id;
+        let id = self.new_handle();
         let previous = self
             .attached
             .lock()
@@ -146,6 +153,11 @@ impl RuntimeTerminals {
         }
         let client = self.client.get_or_try_init(runtime_client::connect).await?;
         Ok(Some(client.clone()))
+    }
+
+    /// A handle for a newly attached terminal, unique in this app whichever runtime hosts it.
+    fn new_handle(&self) -> SessionId {
+        SessionId::from_raw(HOSTED_HANDLE_BASE + self.handles.fetch_add(1, Ordering::Relaxed))
     }
 
     async fn target(&self, id: SessionId) -> Option<(Client, String)> {
@@ -313,4 +325,21 @@ fn deliver(
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod handle_tests {
+    use brachio_pty::SessionId;
+
+    use super::{RuntimeTerminals, HOSTED_HANDLE_BASE};
+
+    #[test]
+    fn hosted_terminals_get_distinct_handles_that_cannot_equal_an_in_app_session_id() {
+        let terminals = RuntimeTerminals::default();
+        let first = terminals.new_handle();
+        let second = terminals.new_handle();
+        assert_ne!(first, second, "two runtimes can both have a session 1");
+        assert!(first > SessionId::from_raw(HOSTED_HANDLE_BASE - 1));
+        assert!(first > SessionId::from_raw(1_000_000));
+    }
 }
