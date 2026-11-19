@@ -59,11 +59,22 @@ export function App() {
       .catch((error) => console.warn("Could not update tray tasks", error));
   });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
-  // Live state per task, as its agent last reported it in this run.
-  const [live, setLive] = createSignal<ReadonlyMap<string, LiveStatus>>(new Map());
+  const [live, setLive] = createSignal<ReadonlyMap<string, ReadonlyMap<string, LiveStatus>>>(new Map());
+  const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
+  const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const [requestedTab, setRequestedTab] = createSignal<{ key: string }>();
+  const activeAgentKey = (taskId: string, key: string) =>
+    key === `${taskId}:agent` || key === secondaryKeys().get(taskId);
   const rows = createMemo(() =>
     tasks().map((task) => {
-      const report = live().get(task.id);
+      const pending = questions().find((question) =>
+        taskIdOf(question.key) === task.id && activeAgentKey(task.id, question.key));
+      const statuses = live().get(task.id);
+      const reports = [...(statuses?.values() ?? [])];
+      const report = reports.find((row) => row.status.state === "blocked")
+        ?? reports.find((row) => row.status.state === "working")
+        ?? statuses?.get(`${task.id}:agent`) ?? reports[0];
+      if (pending) return { ...task, status: { state: "blocked", reason: "permission" } as const };
       if (!report) return task;
       return { ...task, status: report.status, note: report.message ?? undefined, updatedAt: report.at };
     }),
@@ -193,8 +204,9 @@ export function App() {
   const createdThisRun = new Set<string>();
   const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
   // Questions that agents' hooks have asked and the user has not answered.
-  const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
   const answer = async (id: number, allow: boolean) => {
+    const pending = questions().find((question) => question.id === id);
+    if (!pending || !activeAgentKey(taskIdOf(pending.key), pending.key)) return;
     setQuestions((open) => open.filter((question) => question.id !== id));
     try {
       await answerApproval(id, allow);
@@ -223,18 +235,31 @@ export function App() {
 
   const report = (failure: unknown) => setError(String(failure));
 
-  const onStatus = (taskId: string, status: AgentState, message: string | null) => {
-    const previous = live().get(taskId)?.status ?? { state: "unknown" };
-    const at = Date.now();
-    setLive((map) => new Map(map).set(taskId, { status, message, at }));
-    const key = notificationKey(previous, status);
-    const task = findTask(taskId);
-    if (!key || !task) return;
+  const recordActivity = (task: TaskRow, sessionKey: string, key: TaskActivity["key"], detail: string | null, at: number) => {
     setActivity((items) => [
-      { taskId, title: task.title, key, detail: message, at },
+      { taskId: task.id, sessionKey, title: task.title, key, detail, at },
       ...items.slice(0, ACTIVITY_LIMIT - 1),
     ]);
-    if (notifications()) notifyIfAway(key, task, message).catch(report);
+    if (notifications()) notifyIfAway(key, task, detail, sessionKey).catch(report);
+  };
+
+  const onStatus = (taskId: string, sessionKey: string, status: AgentState, message: string | null) => {
+    const task = findTask(taskId);
+    if (!task || !activeAgentKey(taskId, sessionKey)) return;
+    const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
+    const at = Date.now();
+    setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    const key = notificationKey(previous, status);
+    if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
+    recordActivity(task, sessionKey, key, message, at);
+  };
+  const closeSecondarySession = (taskId: string, key: string) => {
+    setQuestions((items) => items.filter((question) => question.key !== key));
+    setLive((current) => {
+      const statuses = new Map(current.get(taskId));
+      statuses.delete(key);
+      return new Map(current).set(taskId, statuses);
+    });
   };
 
   const load = async () => {
@@ -318,6 +343,7 @@ export function App() {
       batch(() => {
         setTasks((items) => items.filter((item) => item.id !== task.id));
         setArchived((items) => [task, ...items]);
+        setQuestions((items) => items.filter((question) => taskIdOf(question.key) !== task.id));
         setLive((statuses) => {
           const next = new Map(statuses);
           next.delete(task.id);
@@ -390,9 +416,9 @@ export function App() {
         disposed = true;
         void trayListener.then((unlisten) => unlisten(), () => {});
       });
-      const listener = listenForTaskNotifications((id) => {
+      const listener = listenForTaskNotifications((id, sessionKey) => {
         if (!findTask(id)) return;
-        open(id);
+        open(id, sessionKey);
         const appWindow = getCurrentWindow();
         appWindow.unminimize().then(() => appWindow.setFocus()).catch(report);
       });
@@ -405,7 +431,16 @@ export function App() {
       onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
       void watchApprovals(
-        (question) => setQuestions((open) => [...open, question]),
+        (question) => {
+          const id = taskIdOf(question.key);
+          const task = findTask(id);
+          if (!task || !activeAgentKey(id, question.key)) return;
+          const status = live().get(id)?.get(question.key)?.status;
+          if (status?.state !== "blocked" || status.reason !== "permission") {
+            recordActivity(task, question.key, "notify.permission", null, Date.now());
+          }
+          setQuestions((open) => [...open, question]);
+        },
         (id) => setQuestions((open) => open.filter((question) => question.id !== id)),
       )
         .then((stop) => onCleanup(stop))
@@ -436,11 +471,12 @@ export function App() {
     if (inTauri && repos().length > 0) saveOpenWorkspaceTasks(workspaceTaskIds());
   });
 
-  const open = (id: string) => {
+  const open = (id: string, sessionKey?: string) => {
     const taskRepoId = findTask(id)?.repoId;
     if (taskRepoId && repo()?.id !== taskRepoId) switchRepo(taskRepoId);
     setSelectedId(id);
     setView("tasks");
+    setRequestedTab(sessionKey ? { key: sessionKey } : undefined);
   };
 
   const noTask = () => (
@@ -515,12 +551,17 @@ export function App() {
               onOpenTask={open}
               findTask={findTask}
               takePrompt={takePrompt}
-              question={questions().find((question) => taskIdOf(question.key) === task().id)}
+              questions={questions().filter((question) =>
+                taskIdOf(question.key) === task().id && activeAgentKey(task().id, question.key))}
+              requestedTab={requestedTab()}
+              onSecondaryKeys={setSecondaryKeys}
+              onSecondaryClosed={closeSecondarySession}
               onAnswer={(id, allow) => void answer(id, allow)}
               hasSetupInput={hasSetupInput}
               takeSetupInput={takeSetupInput}
               shouldResume={shouldResume}
               onStatus={onStatus}
+              statusForKey={(id, key) => live().get(id)?.get(key)?.status}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
               registerDraftWriter={registerDraftWriter}
             />

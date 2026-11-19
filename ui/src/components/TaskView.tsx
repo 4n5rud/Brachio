@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
@@ -29,10 +29,14 @@ export function TaskView(props: {
   workspaceTasks: readonly TaskRow[];
   onOpenTask: (id: string) => void;
   findTask: (id: string) => TaskRow | undefined;
-  onStatus?: (taskId: string, status: AgentState, message: string | null) => void;
+  onStatus?: (taskId: string, key: string, status: AgentState, message: string | null) => void;
+  statusForKey?: (taskId: string, key: string) => AgentState | undefined;
   takePrompt?: (taskId: string) => string | undefined;
   /** A permission question this task's agent is waiting on, and how to answer it. */
-  question?: ApprovalQuestion;
+  questions?: readonly ApprovalQuestion[];
+  requestedTab?: { key: string };
+  onSecondaryKeys?: (keys: ReadonlyMap<string, string>) => void;
+  onSecondaryClosed?: (taskId: string, key: string) => void;
   onAnswer?: (id: number, allow: boolean) => void;
   /** Setup commands waiting to be typed into the task's shell, which opens beside the agent. */
   hasSetupInput?: (taskId: string) => boolean;
@@ -70,6 +74,14 @@ export function TaskView(props: {
   };
   const secondaryWriters = new Map<string, (text: string) => Promise<boolean>>();
   const secondaryKind = (task: TaskRow) => task.agent === "claude" ? "codex" : "claude";
+  const extraKey = (id: string, sessionId: string) => `${id}:agent-${sessionId}`;
+  const currentExtraKey = (id: string) => {
+    const session = secondary().get(id);
+    return session ? extraKey(id, session) : undefined;
+  };
+  createEffect(() => {
+    props.onSecondaryKeys?.(new Map([...secondary()].map(([id, sessionId]) => [id, extraKey(id, sessionId)])));
+  });
   const selectAgent = (id: string, extra: boolean) => {
     setSelectedSecondary((current) => {
       const next = new Map(current);
@@ -83,6 +95,7 @@ export function TaskView(props: {
   };
   const changeSecondary = async (id: string, sessionId?: string) => {
     if (!tabsReady() || tabsSaving()) return;
+    const previous = currentExtraKey(id);
     setTabsSaving(true);
     setTabError("");
     try {
@@ -95,6 +108,7 @@ export function TaskView(props: {
         return next;
       });
       saveSecondaryAgents(secondary());
+      if (previous) props.onSecondaryClosed?.(id, previous);
       selectAgent(id, sessionId !== undefined);
     } catch (failure) {
       setTabError(String(failure));
@@ -111,6 +125,26 @@ export function TaskView(props: {
     if (props.task.worktreePath) {
       setShells((current) => new Map(current).set(props.task.id, next));
     }
+  };
+  const selectKey = (key: string) => {
+    const id = props.task.id;
+    if (key === terminalKey(id, "agent")) selectAgent(id, false);
+    else if (key === currentExtraKey(id)) selectAgent(id, true);
+  };
+  createEffect(on([() => props.requestedTab, tabsReady], ([request, ready]) => {
+    if (request && ready) selectKey(request.key);
+  }));
+  const approval = () => {
+    if (layout() === "shell") return undefined;
+    const id = props.task.id;
+    const key = isSecondarySelected(id) ? currentExtraKey(id) : terminalKey(id, "agent");
+    return props.questions?.find((question) => question.key === key);
+  };
+  const otherApproval = () => props.questions?.find((question) => question.key !== approval()?.key);
+  const tabTone = (key: string | undefined) => {
+    if (!key) return statusTone({ state: "unknown" });
+    if (props.questions?.some((question) => question.key === key)) return "blocked";
+    return statusTone(props.statusForKey?.(props.task.id, key) ?? { state: "unknown" });
   };
   createEffect(() => {
     const id = props.task.id;
@@ -180,13 +214,16 @@ export function TaskView(props: {
       <div class="tabs" role="tablist">
         <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
-          <StatusGlyph tone={statusTone(props.task.status)} />
+          <StatusGlyph tone={tabTone(terminalKey(props.task.id, "agent"))} />
           {AGENT_NAME[props.task.agent]}
         </button>
         <Show when={secondary().has(props.task.id)}>
           <button class="tab" role="tab" type="button"
             aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
-            onClick={() => selectAgent(props.task.id, true)}>{AGENT_NAME[secondaryKind(props.task)]}</button>
+            onClick={() => selectAgent(props.task.id, true)}>
+            <StatusGlyph tone={tabTone(currentExtraKey(props.task.id))} />
+            {AGENT_NAME[secondaryKind(props.task)]}
+          </button>
         </Show>
         <Show when={shells().has(props.task.id)} fallback={
           <Show when={props.task.worktreePath}>
@@ -246,7 +283,7 @@ export function TaskView(props: {
                         session={sessionFor(id)}
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
-                        onStatus={(status, message) => props.onStatus?.(id, status, message)}
+                        onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
                         registerDraftWriter={(writer) => props.registerDraftWriter(id, (text) =>
                           extraSelected() ? secondaryWriters.get(id)?.(text) ?? Promise.resolve(false) : writer(text))}
                       />
@@ -259,9 +296,10 @@ export function TaskView(props: {
                           <div class="terminal-cell" hidden={!extraSelected()}>
                             <TerminalPane
                               session={{ agent: CORE_AGENT[secondaryKind(task)], cwd: task.worktreePath,
-                                key: `${id}:agent-${sessionId}`, sessionId, resume: restoredAgents.get(id) === sessionId }}
+                                key: extraKey(id, sessionId), sessionId, resume: restoredAgents.get(id) === sessionId }}
                               active={selected() && mode() !== "shell" && extraSelected()}
                               theme={props.theme}
+                              onStatus={(status, message) => props.onStatus?.(id, extraKey(id, sessionId), status, message)}
                               registerDraftWriter={(writer) => {
                                 secondaryWriters.set(id, writer);
                                 return () => {
@@ -287,7 +325,11 @@ export function TaskView(props: {
             }}
           </For>
         </div>
-        <Show when={props.question} fallback={
+        <Show when={otherApproval()}>
+          {(pending) => <button class="button button-sm" type="button"
+            onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</button>}
+        </Show>
+        <Show when={approval()} fallback={
           <Show when={props.task.pendingCommand}>{(command) => <ApprovalBar command={command()} />}</Show>
         }>
           {(question) => (
