@@ -185,6 +185,9 @@ impl TaskRecord {
     }
 
     /// Returns whether another task still references this task as a parent.
+    ///
+    /// # Errors
+    /// Fails if SQLite cannot query the task records.
     pub fn has_children(connection: &Connection, id: &str) -> Result<bool, StoreError> {
         Ok(connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM tasks WHERE parent_task_id = ?1)",
