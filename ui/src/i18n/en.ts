@@ -51,6 +51,7 @@ export const en = {
   "task.more": "More",
 
   "approval.title": "Run this command?",
+  "approval.openTab": "Open the tab awaiting approval",
   "approval.inWorktree": "runs inside the worktree",
   "approval.allowOnce": "Allow once",
   "approval.allowAlways": "Always allow in this task",
