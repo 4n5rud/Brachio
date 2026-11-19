@@ -6,6 +6,8 @@ import { AGENT_NAME } from "../lib/tasks";
 import { statusTone, type AgentState } from "../lib/status";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
+import { MailboxBadge } from "./MailboxBadge";
+import { MailboxInbox } from "./MailboxInbox";
 import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
@@ -55,9 +57,13 @@ export function TaskView(props: {
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
   registerDraftTarget: (taskId: string, target: () => DraftTarget | undefined) => () => void;
+  unreadForTab?: (key: string | undefined) => number;
+  mailboxRevision: number;
+  onMailboxReminder?: (tabKey: string) => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [promptFeedback, setPromptFeedback] = createSignal<{ taskId: string; message: string }>();
+  const [inboxTab, setInboxTab] = createSignal<string>();
   const restoredAgents = new Map<string, string>();
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [tabsReady, setTabsReady] = createSignal(false);
@@ -145,12 +151,12 @@ export function TaskView(props: {
   createEffect(on([() => props.requestedTab, tabsReady], ([request, ready]) => {
     if (request && ready) selectKey(request.key);
   }));
-  const approval = () => {
+  const activeAgentTab = () => {
     if (layout() === "shell") return undefined;
     const id = props.task.id;
-    const key = isSecondarySelected(id) ? currentExtraKey(id) : terminalKey(id, "agent");
-    return props.questions?.find((question) => question.key === key);
+    return isSecondarySelected(id) ? currentExtraKey(id) : terminalKey(id, "agent");
   };
+  const approval = () => props.questions?.find((question) => question.key === activeAgentTab());
   const otherApproval = () => props.questions?.find((question) => question.key !== approval()?.key);
   const tabTone = (key: string | undefined) => {
     if (!key) return statusTone({ state: "unknown" });
@@ -216,6 +222,7 @@ export function TaskView(props: {
           onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={tabTone(terminalKey(props.task.id, "agent"))} />
           {AGENT_NAME[props.task.agent]}
+          <MailboxBadge count={props.unreadForTab?.(terminalKey(props.task.id, "agent")) ?? 0} />
         </button>
         <Show when={secondary().has(props.task.id)}>
           <button class="tab" role="tab" type="button"
@@ -223,6 +230,7 @@ export function TaskView(props: {
             onClick={() => selectAgent(props.task.id, true)}>
             <StatusGlyph tone={tabTone(currentExtraKey(props.task.id))} />
             {AGENT_NAME[secondaryKind(props.task)]}
+            <MailboxBadge count={props.unreadForTab?.(currentExtraKey(props.task.id)) ?? 0} />
           </button>
         </Show>
         <Show when={shells().has(props.task.id)} fallback={
@@ -241,6 +249,15 @@ export function TaskView(props: {
           {layout() === "shell" ? t("task.shell") :
             AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
           <div class="pane-actions">
+            <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
+              {(key) => <button class="button button-sm" type="button"
+                aria-expanded={inboxTab() === key()}
+                onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())}>{t("mailbox.inbox")}</button>}
+            </Show>
+            <Show when={(props.unreadForTab?.(activeAgentTab()) ?? 0) > 0 && activeAgentTab()}>
+              {(key) => <button class="button button-sm" type="button"
+                onClick={() => props.onMailboxReminder?.(key())}>{t("mailbox.reminder")}</button>}
+            </Show>
             <Show when={props.task.worktreePath && !secondary().has(props.task.id)}>
               <button class="button button-sm" type="button" disabled={!tabsReady() || tabsSaving()}
                 onClick={() => void changeSecondary(props.task.id, crypto.randomUUID())}>
@@ -296,6 +313,10 @@ export function TaskView(props: {
                 onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</button>
             </div>
           )}
+        </Show>
+        <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
+          {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
+            onClose={() => setInboxTab(undefined)} />}
         </Show>
         <div class="pane-body">
           <For each={props.openIds}>

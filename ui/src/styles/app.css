@@ -361,6 +361,11 @@ kbd {
   overflow-y: auto;
   padding-bottom: var(--space-3);
 }
+.mailbox-inbox {
+  max-height: min(35vh, 240px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
 .project-heading {
   display: flex;
   align-items: center;
