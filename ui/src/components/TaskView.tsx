@@ -234,6 +234,15 @@ export function TaskView(props: {
           </div>
         </div>
         <Show when={tabError()}>{(message) => <p role="alert">{message()}</p>}</Show>
+        <Show when={props.setupFailure}>
+          {(message) => (
+            <div class="terminal-recovery" role="alert">
+              <span>{t("setup.copyFailed")} {message()}</span>
+              <button class="button button-sm" type="button" disabled={props.retryingSetup}
+                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</button>
+            </div>
+          )}
+        </Show>
         <div class="pane-body">
           <For each={props.openIds}>
             {(id) => {
@@ -290,15 +299,6 @@ export function TaskView(props: {
             }}
           </For>
         </div>
-        <Show when={props.setupFailure}>
-          {(message) => (
-            <div class="terminal-recovery" role="alert">
-              <span>{t("setup.copyFailed")} {message()}</span>
-              <button class="button button-sm" type="button" disabled={props.retryingSetup}
-                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</button>
-            </div>
-          )}
-        </Show>
         <Show when={props.question} fallback={
           <Show when={props.task.pendingCommand}>{(command) => <ApprovalBar command={command()} />}</Show>
         }>
