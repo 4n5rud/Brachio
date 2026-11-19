@@ -15,6 +15,7 @@ use tauri::State;
 
 use crate::hook_setup::HookSetup;
 use crate::runtime_terminals::{Launch, RuntimeTerminals};
+use crate::{task_ports, workspace::Database};
 
 /// App state that owns every terminal.
 pub struct Terminals(pub Arc<SessionManager>);
@@ -95,6 +96,7 @@ pub async fn agents_detect() -> Vec<Installed> {
 pub async fn terminal_open(
     terminals: State<'_, Terminals>,
     hosted: State<'_, RuntimeTerminals>,
+    database: State<'_, Database>,
     hook: State<'_, HookSetup>,
     request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
@@ -105,6 +107,13 @@ pub async fn terminal_open(
     };
     // Claude Code can ask the app instead of the terminal when a hook is available.
     let mut environment = terminal_env();
+    if let Some(key) = request.key.as_deref() {
+        match task_ports::port_for_terminal(&database, key, &request.cwd) {
+            Ok(Some(port)) => environment.push(("BRACHIO_PORT".to_owned(), port.to_string())),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "could not assign a development port"),
+        }
+    }
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
         let extra = hook.environment(key);
         if !extra.is_empty() {

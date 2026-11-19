@@ -189,6 +189,8 @@ export const ko: Messages = {
   "settings.dark": "다크",
   "settings.language": "언어",
   "ports.title": "로컬 포트",
+  "ports.assigned": "새로 여는 작업 터미널에 전달됩니다",
+  "ports.retryAssignment": "포트 배정 재시도",
   "ports.number": "포트 번호",
   "ports.add": "포트 추가",
   "ports.remove": "삭제",

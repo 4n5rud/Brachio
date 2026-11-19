@@ -7,6 +7,7 @@ mod hook_socket;
 mod pr_status;
 mod runtime_client;
 mod runtime_terminals;
+mod task_ports;
 mod task_tabs;
 mod terminal;
 mod update_release;
@@ -210,6 +211,7 @@ pub fn run() {
             pr_status::task_pr_status,
             external_link::open_external_link,
             workspace::task_merge_preview,
+            task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,
             open_local_port,

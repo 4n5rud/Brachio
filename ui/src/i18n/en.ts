@@ -187,6 +187,8 @@ export const en = {
   "settings.dark": "Dark",
   "settings.language": "Language",
   "ports.title": "Local ports",
+  "ports.assigned": "Assigned to new task terminals",
+  "ports.retryAssignment": "Retry port assignment",
   "ports.number": "Port number",
   "ports.add": "Add port",
   "ports.remove": "Remove",
