@@ -1,13 +1,12 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import {
-  loadPrStatus,
-  nextRefreshDelay,
   openExternalLink,
   shortSha,
   type PrStatusReport,
   type PullRequestSnapshot,
 } from "../lib/pr-status";
+import { prFailure, prRefreshing, prReport, refreshPrStatus } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
 
 const REVIEW_LABEL = {
@@ -34,42 +33,17 @@ const STATE_LABEL = { open: "prStatus.open", merged: "prStatus.merged", closed: 
 
 /** Where the task's pull request stands: checks, review, conflicts. Read only. */
 export function PullRequestStatus(props: { taskId: string }) {
-  const [report, setReport] = createSignal<PrStatusReport>();
-  const [failure, setFailure] = createSignal("");
-  const [busy, setBusy] = createSignal(false);
+  // The answer is shared with the task list, which keeps it fresh in the background.
+  const report = () => prReport(props.taskId);
+  const failure = () => prFailure(props.taskId) ?? "";
+  const busy = () => prRefreshing(props.taskId);
   const [now, setNow] = createSignal(Date.now());
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let disposed = false;
-
-  const refresh = async (force: boolean) => {
-    if (busy()) return;
-    setBusy(true);
-    clearTimeout(timer);
-    try {
-      const next = await loadPrStatus(props.taskId, force);
-      if (disposed) return;
-      setReport(next);
-      setFailure("");
-      const delay = nextRefreshDelay(next);
-      if (delay !== null) timer = setTimeout(() => void refresh(false), delay);
-    } catch (error) {
-      if (disposed) return;
-      setFailure(String(error));
-      timer = setTimeout(() => void refresh(false), 60_000);
-    } finally {
-      setNow(Date.now());
-      setBusy(false);
-    }
-  };
+  const refresh = (force: boolean) => refreshPrStatus(props.taskId, force).then(() => setNow(Date.now()));
 
   onMount(() => {
     void refresh(false);
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
-  });
-  onCleanup(() => {
-    disposed = true;
-    clearTimeout(timer);
   });
 
   const age = (at: number) => formatAge(at, now());
