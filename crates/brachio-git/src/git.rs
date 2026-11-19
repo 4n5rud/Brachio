@@ -78,6 +78,14 @@ impl Git {
     /// # Errors
     /// Fails only when git cannot be started.
     pub fn output(&self, args: &[&str]) -> Result<Output, GitError> {
+        let mut command = self.command(args);
+        Ok(brachio_process::output_within(
+            &mut command,
+            GIT_TIME_LIMIT,
+        )?)
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new("git");
         command.arg("-C").arg(&self.repo);
         if cfg!(windows) {
@@ -88,10 +96,36 @@ impl Git {
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")
             .args(args);
-        Ok(brachio_process::output_within(
-            &mut command,
-            GIT_TIME_LIMIT,
-        )?)
+        command
+    }
+
+    /// Runs git and keeps at most `max_bytes` of its output, stopping git once that is exceeded.
+    /// Returns the text and whether it was cut. A cut can land inside a line.
+    ///
+    /// # Errors
+    /// Fails when git cannot be started, or exits with a failure before the cap is reached.
+    pub fn run_text_capped(
+        &self,
+        args: &[&str],
+        max_bytes: usize,
+    ) -> Result<(String, bool), GitError> {
+        let mut command = self.command(args);
+        let capped = brachio_process::output_capped(&mut command, GIT_TIME_LIMIT, max_bytes)?;
+        let output = capped.output;
+        if !capped.truncated && !output.status.success() {
+            return Err(GitError::Failed {
+                args: args.join(" "),
+                status: output.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            });
+        }
+        let mut bytes = output.stdout;
+        bytes.truncate(max_bytes);
+        // A cut can split a multi-byte character, which becomes one replacement mark.
+        Ok((
+            String::from_utf8_lossy(&bytes).into_owned(),
+            capped.truncated,
+        ))
     }
 
     /// Runs git and fails on a non-zero exit. Returns trimmed stdout.
