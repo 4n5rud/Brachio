@@ -38,11 +38,13 @@ export function TaskView(props: {
   hasSetupInput?: (taskId: string) => boolean;
   takeSetupInput?: (taskId: string) => string | undefined;
   onArchive?: () => void;
+  onDraftOriginal?: (text: string) => Promise<boolean>;
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
+  const [promptFeedback, setPromptFeedback] = createSignal<{ taskId: string; message: string }>();
   const restoredAgents = new Map<string, string>();
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [tabsReady, setTabsReady] = createSignal(false);
@@ -230,6 +232,26 @@ export function TaskView(props: {
             </Show>
           </div>
         </div>
+        <Show when={props.task.prompt}>
+          {(prompt) => (
+            <details class="terminal-recovery">
+              <summary>{t("task.originalPrompt")}</summary>
+              <pre class="inspector-patch">{prompt()}</pre>
+              <button class="button button-sm" type="button" onClick={async () => {
+                const taskId = props.task.id;
+                try {
+                  const drafted = await props.onDraftOriginal?.(prompt());
+                  setPromptFeedback({ taskId, message: t(drafted ? "task.promptDrafted" : "diff.notReady") });
+                } catch (error) {
+                  setPromptFeedback({ taskId, message: String(error) });
+                }
+              }}>{t("task.draftOriginalPrompt")}</button>
+              <Show when={promptFeedback()?.taskId === props.task.id}>
+                <span role="status">{promptFeedback()?.message}</span>
+              </Show>
+            </details>
+          )}
+        </Show>
         <Show when={tabError()}>{(message) => <p role="alert">{message()}</p>}</Show>
         <div class="pane-body">
           <For each={props.openIds}>

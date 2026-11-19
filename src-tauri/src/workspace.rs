@@ -31,6 +31,9 @@ pub struct CreateTaskRequest {
     pub repo_id: String,
     /// Task title. The branch name is derived from it.
     pub title: String,
+    /// User's original task prompt.
+    #[serde(default)]
+    pub prompt: String,
     /// Agent to run in the task.
     pub agent: AgentKind,
     /// Commit-ish to branch from. Defaults to the repository's default branch.
@@ -130,6 +133,7 @@ pub async fn task_create(
         id: &id,
         repo_id: &repo.id,
         title: request.title.trim(),
+        prompt: &request.prompt,
         branch: &branch,
         worktree_path: &path,
         agent_kind: Some(agent_name(request.agent)),

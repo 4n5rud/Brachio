@@ -291,6 +291,7 @@ export function App() {
     const record = await createTask({
       repoId: current.id,
       title: input.title,
+      prompt: input.prompt,
       agent: CORE_AGENT[input.agent],
       base: input.base === "" ? null : input.base,
     });
@@ -522,6 +523,7 @@ export function App() {
               shouldResume={shouldResume}
               onStatus={onStatus}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
+              onDraftOriginal={(text) => draftComment(task().id, text)}
               registerDraftWriter={registerDraftWriter}
             />
           )}

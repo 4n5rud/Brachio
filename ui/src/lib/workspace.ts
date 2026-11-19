@@ -17,6 +17,7 @@ export interface TaskRecord {
   id: string;
   repoId: string;
   title: string;
+  prompt?: string;
   branch: string;
   worktreePath: string;
   agentKind: CoreAgent | null;
@@ -29,6 +30,7 @@ export interface TaskRecord {
 export interface CreateTaskRequest {
   repoId: string;
   title: string;
+  prompt?: string;
   agent: CoreAgent;
   /** `null` branches from the repository's default branch. */
   base: string | null;
@@ -93,6 +95,7 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     id: record.id,
     repoId: record.repoId,
     title: record.title,
+    prompt: record.prompt || undefined,
     agent: UI_AGENT[record.agentKind ?? "claude_code"],
     branch: record.branch,
     status: { state: "unknown" },
