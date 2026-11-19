@@ -2,7 +2,7 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread;
 
 use anyhow::{anyhow, Context, Result};
@@ -25,6 +25,10 @@ pub struct SpawnSpec {
     pub cols: u16,
 }
 
+/// How many writes may wait for a child that is not reading its input. Typing and pastes are far
+/// fewer; a child that stays deaf past this is not going to read what is queued anyway.
+const QUEUED_WRITES: usize = 512;
+
 /// One running PTY. Reading happens on a dedicated thread owned by the
 /// caller (see `take_reader`), because PTY reads block.
 pub struct PtySession {
@@ -32,7 +36,7 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     /// Input waits here for the writer thread. A child that does not read its input blocks
     /// that thread only, never a caller, the session lock or the output reader.
-    input: Sender<Vec<u8>>,
+    input: SyncSender<Vec<u8>>,
 }
 
 impl PtySession {
@@ -61,7 +65,7 @@ impl PtySession {
             .spawn_command(command)
             .context("spawn program in pty")?;
         let writer = pair.master.take_writer().context("take pty writer")?;
-        let (input, queued) = mpsc::channel();
+        let (input, queued) = mpsc::sync_channel(QUEUED_WRITES);
         thread::Builder::new()
             .name("pty-write".to_owned())
             .spawn(move || write_queued(writer, &queued))
@@ -85,11 +89,15 @@ impl PtySession {
     /// order it was queued, whenever the child reads it.
     ///
     /// # Errors
-    /// Fails when the PTY is closed.
+    /// Fails when the PTY is closed, or when so much input is already waiting that the child is
+    /// evidently not reading it.
     pub fn write_input(&self, bytes: &[u8]) -> Result<()> {
         self.input
-            .send(bytes.to_vec())
-            .map_err(|_| anyhow!("pty input is closed"))
+            .try_send(bytes.to_vec())
+            .map_err(|error| match error {
+                TrySendError::Full(_) => anyhow!("the program is not reading its input"),
+                TrySendError::Disconnected(_) => anyhow!("pty input is closed"),
+            })
     }
 
     /// Changes the terminal size the child sees.

@@ -354,6 +354,18 @@ mod stalled_child_tests {
             "calls waited on a child that does not read: {:?}",
             started.elapsed()
         );
+        // A child that never reads must not make the queue grow without end.
+        let mut refused = false;
+        for _ in 0..2_000 {
+            if manager.write(id, b"x").is_err() {
+                refused = true;
+                break;
+            }
+        }
+        assert!(
+            refused,
+            "input kept being accepted for a child that does not read"
+        );
         manager.kill(id).expect("kill");
     }
 }
