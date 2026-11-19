@@ -116,6 +116,7 @@ export const ko: Messages = {
   "terminal.newConversation": "새 대화 시작",
   "terminal.resumeFailed": "이어갈 대화가 없어서 새로 시작해요",
   "terminal.promptNotSent": "터미널이 안전한 붙여넣기를 지원할 때까지 첫 프롬프트를 보내지 않았습니다.",
+  "terminal.promptDeferredAfterInput": "사용자 입력이 시작되어 첫 프롬프트를 보내지 않았습니다. 원래 작업 프롬프트에서 다시 꺼낼 수 있습니다.",
   "terminal.inputFailed": "터미널 입력을 보내지 못했습니다.",
   "terminal.startFailed": "터미널을 시작하지 못했어요",
 
