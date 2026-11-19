@@ -8,6 +8,7 @@ mod naming;
 mod port_pool;
 mod pull_request;
 mod pull_request_status;
+mod push_target;
 mod repo_info;
 mod worktree;
 mod worktree_setup;
@@ -22,6 +23,7 @@ pub use pull_request_status::{
     backoff_seconds, fetch_pull_request, local_head, repository_of, ChecksOverall, ChecksSummary,
     Conflict, FailedCheck, PullRequestSnapshot, PullRequestState, ReviewState, StatusError,
 };
+pub use push_target::push_remote;
 pub use repo_info::{inspect_repo, RepoInfo};
 pub use worktree::{
     add_worktree, discard_worktree, remove_worktree, unsaved_work, worktree_path, AddWorktree,

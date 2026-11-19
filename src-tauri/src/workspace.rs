@@ -671,7 +671,7 @@ pub enum TaskGitAction {
         /// User-entered commit message.
         message: String,
     },
-    /// Push the task branch to origin.
+    /// Push the task branch to its push remote, setting it as the upstream.
     Push,
     /// Open a pull request for the pushed task branch with the GitHub CLI.
     CreatePr {
@@ -717,7 +717,9 @@ pub async fn task_git_action(
             }
             TaskGitAction::Push => {
                 let refspec = format!("{branch_ref}:{branch_ref}");
-                git.run(&["push", "--", "origin", &refspec])
+                brachio_git::push_remote(&git, &task.branch).and_then(|remote| {
+                    git.run(&["push", "--set-upstream", "--", &remote, &refspec])
+                })
             }
             TaskGitAction::CreatePr { .. } => unreachable!("handled before the match"),
         }
