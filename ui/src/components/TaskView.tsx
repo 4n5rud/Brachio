@@ -58,6 +58,7 @@ export function TaskView(props: {
   shouldResume?: (taskId: string) => boolean;
   registerDraftTarget: (taskId: string, target: () => DraftTarget | undefined) => () => void;
   unreadForTab?: (key: string | undefined) => number;
+  mailboxRevision: number;
   onMailboxReminder?: (tabKey: string) => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
@@ -314,7 +315,7 @@ export function TaskView(props: {
           )}
         </Show>
         <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
-          {(key) => <MailboxInbox tabKey={key} unread={props.unreadForTab?.(key) ?? 0}
+          {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
             onClose={() => setInboxTab(undefined)} />}
         </Show>
         <div class="pane-body">

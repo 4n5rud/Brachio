@@ -2,9 +2,9 @@ import { For, Show, createResource } from "solid-js";
 import { t } from "../i18n";
 import { readMailbox } from "../lib/mailbox";
 
-export function MailboxInbox(props: { tabKey: string; unread: number; onClose: () => void }) {
+export function MailboxInbox(props: { tabKey: string; revision: number; onClose: () => void }) {
   const [result, { refetch }] = createResource(
-    () => [props.tabKey, props.unread] as const,
+    () => [props.tabKey, props.revision] as const,
     async ([key]) => {
       try {
         return { messages: await readMailbox(key) };

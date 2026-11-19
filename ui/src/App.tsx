@@ -64,8 +64,11 @@ export function App() {
   const [live, setLive] = createSignal<ReadonlyMap<string, ReadonlyMap<string, LiveStatus>>>(new Map());
   const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
   const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, string>>(new Map());
-  const [unreadByTab, setUnreadByTab] = createSignal<ReadonlyMap<string, number>>(new Map());
-  const unreadForTab = (key: string | undefined) => key ? unreadByTab().get(key) ?? 0 : 0;
+  const [mailbox, setMailbox] = createSignal<{ unread: ReadonlyMap<string, number>; revision: number }>({
+    unread: new Map(),
+    revision: 0,
+  });
+  const unreadForTab = (key: string | undefined) => key ? mailbox().unread.get(key) ?? 0 : 0;
   const unreadForTask = (id: string) => unreadForTab(`${id}:agent`) + unreadForTab(secondaryKeys().get(id));
   const [requestedTab, setRequestedTab] = createSignal<{ key: string }>();
   const activeAgentKey = (taskId: string, key: string) =>
@@ -469,7 +472,9 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
-      onCleanup(watchMailbox(setUnreadByTab));
+      onCleanup(watchMailbox((unread) => {
+        setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
+      }));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
@@ -638,6 +643,7 @@ export function App() {
               onRetrySetup={() => void retrySetup(task().id)}
               registerDraftTarget={registerDraftTarget}
               unreadForTab={inTauri ? unreadForTab : undefined}
+              mailboxRevision={mailbox().revision}
               onMailboxReminder={(key) => {
                 void draftComment(task().id, MAILBOX_REMINDER, key)
                   .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
