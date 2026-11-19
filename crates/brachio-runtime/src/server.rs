@@ -32,7 +32,7 @@ pub(crate) async fn serve(pipe: &str, state_dir: Option<PathBuf>) -> Result<()> 
     // The journal is read only after this process owns the endpoint, so every record in it
     // belongs to a runtime that is gone.
     let journal = state_dir
-        .map_or_else(journal::default_directory, Ok)
+        .map_or_else(|| journal::default_directory(pipe), Ok)
         .and_then(|directory| Journal::open(&directory));
     let journal = match journal {
         Ok(journal) => Some(journal),
