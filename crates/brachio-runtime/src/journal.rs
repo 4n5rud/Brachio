@@ -103,16 +103,53 @@ fn file_stem(key: &str) -> String {
         .collect()
 }
 
-/// Where a runtime keeps its journal unless told otherwise.
-pub(crate) fn default_directory() -> io::Result<PathBuf> {
-    brachio_runtime::paths::state_directory()
+/// Where a runtime keeps its journal unless told otherwise: a folder of its own, named after its
+/// endpoint. A runtime reads every record in its journal as belonging to a runtime that is gone,
+/// so two runtimes alive at once, an old one and the one started after an update, must never
+/// share a folder.
+pub(crate) fn default_directory(endpoint: &str) -> io::Result<PathBuf> {
+    Ok(directory_for(
+        &brachio_runtime::paths::state_directory()?,
+        endpoint,
+    ))
+}
+
+fn directory_for(state: &Path, endpoint: &str) -> PathBuf {
+    let safe: String = endpoint
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    state.join("journals").join(safe)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{file_stem, Journal, SessionRecord};
+    use super::{directory_for, file_stem, Journal, SessionRecord};
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn runtimes_with_different_endpoints_never_share_a_journal_folder() {
+        let state = PathBuf::from("state");
+        assert_ne!(
+            directory_for(&state, "brachio-a-1"),
+            directory_for(&state, "brachio-a-2")
+        );
+        assert_eq!(
+            directory_for(&state, "brachio-a-1"),
+            directory_for(&state, "brachio-a-1")
+        );
+        assert_eq!(
+            directory_for(&state, "x/../y"),
+            PathBuf::from("state").join("journals").join("x____y")
+        );
+    }
 
     fn record(key: &str, output_bytes: u64) -> SessionRecord {
         SessionRecord {

@@ -142,8 +142,18 @@ fn helper_beside_app() -> Result<Option<PathBuf>> {
 /// so the path is written with forward slashes and quoted.
 fn settings_json(helper: &Path) -> String {
     let helper = helper.to_string_lossy().replace('\\', "/");
+    let mail = serde_json::json!([{
+        "matcher": "*",
+        "hooks": [{
+            "type": "command",
+            "command": format!("\"{helper}\" hook mail"),
+            "timeout": 10
+        }]
+    }]);
     serde_json::json!({
         "hooks": {
+            "PostToolUse": mail,
+            "UserPromptSubmit": mail,
             "PermissionRequest": [{
                 "matcher": "*",
                 "hooks": [{
@@ -196,5 +206,11 @@ mod tests {
             "\"C:/Program Files/Brachio/brachio.exe\" hook permission-request"
         );
         assert_eq!(hook["hooks"][0]["timeout"], 310);
+        for event in ["PostToolUse", "UserPromptSubmit"] {
+            assert_eq!(
+                settings["hooks"][event][0]["hooks"][0]["command"],
+                "\"C:/Program Files/Brachio/brachio.exe\" hook mail"
+            );
+        }
     }
 }

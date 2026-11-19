@@ -2,11 +2,13 @@ import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { statusTone } from "../lib/status";
 import { AGENT_NAME, shortBranch, type TaskRow } from "../lib/tasks";
+import { AgentIcon } from "./AgentIcon";
 import { chipOf } from "../lib/pr-status";
 import { prReport, watchPrStatuses } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
+import { MailboxBadge } from "./MailboxBadge";
 import { StatusGlyph } from "./StatusGlyph";
 
 const COLLAPSED_KEY = "brachio.collapsedProjects";
@@ -30,6 +32,7 @@ export function TaskList(props: {
   onAddRepo?: () => void;
   needsYou: number;
   now: number;
+  unreadForTask?: (taskId: string) => number;
 }) {
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const groupIds = createMemo(() => [...projects().keys(), ""]);
@@ -64,7 +67,10 @@ export function TaskList(props: {
     <aside class="sidebar">
       <div class="sidebar-head">
         <h2>{t("sidebar.projects")}</h2>
-        <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
+        {/* Only shown when something needs the user, so a bare 0 is not mistaken for a project count. */}
+        <Show when={props.needsYou > 0}>
+          <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
+        </Show>
         <Show when={props.onAddRepo}>
           <button class="button button-primary button-sm" type="button" onClick={() => props.onAddRepo?.()}>
             <Icon name="plus" />{t("sidebar.addProject")}
@@ -98,6 +104,7 @@ export function TaskList(props: {
                         task={task}
                         selected={task.id === props.selectedId}
                         now={props.now}
+                        unread={props.unreadForTask?.(task.id) ?? 0}
                         onSelect={() => props.onSelect(task.id)}
                       />
                     )}
@@ -112,7 +119,7 @@ export function TaskList(props: {
   );
 }
 
-function TaskItem(props: { task: TaskRow; selected: boolean; now: number; onSelect: () => void }) {
+function TaskItem(props: { task: TaskRow; selected: boolean; now: number; unread: number; onSelect: () => void }) {
   const tone = () => statusTone(props.task.status);
   return (
     <button
@@ -126,9 +133,10 @@ function TaskItem(props: { task: TaskRow; selected: boolean; now: number; onSele
       <span class="task-title">{props.task.title}</span>
       <span class="task-age">{formatAge(props.task.updatedAt, props.now)}</span>
       <span class="task-meta">
-        <span class="agent-chip">{AGENT_NAME[props.task.agent]}</span>
+        <span class="agent-chip"><AgentIcon agent={props.task.agent} />{AGENT_NAME[props.task.agent]}</span>
         <span class="task-branch">{shortBranch(props.task.branch)}</span>
         <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+        <MailboxBadge count={props.unread} />
         <Show when={chipOf(prReport(props.task.id))}>
           {(chip) => (
             <span class={`pr-chip pr-chip-${chip().tone}`} classList={{ "pr-chip-stale": chip().stale }}

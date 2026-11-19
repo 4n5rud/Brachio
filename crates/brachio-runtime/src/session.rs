@@ -46,6 +46,12 @@ impl Session {
         })
     }
 
+    /// What decides whether the saved record is out of date, without formatting the screen.
+    pub(crate) fn mark(&self) -> Result<(u64, bool)> {
+        let state = lock(&self.output)?;
+        Ok((state.history.end(), state.exited))
+    }
+
     pub(crate) fn record(&self, key: &str, instance: &str) -> Result<SessionRecord> {
         let state = lock(&self.output)?;
         let frame = state.screen.frame();

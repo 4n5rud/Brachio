@@ -1,8 +1,9 @@
-import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createResource, createSignal, on } from "solid-js";
 import { t } from "../i18n";
 import { TaskPorts } from "./TaskPorts";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
+import { diffTotals, type DiffTotals } from "../lib/diff";
 import { DiffStat } from "./DiffStat";
 import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
@@ -17,6 +18,7 @@ type Pane = "changes" | "files" | "qa" | "activity";
 export function Inspector(props: {
   task: TaskRow;
   onDraft: (taskId: string, text: string) => Promise<boolean>;
+  onDiffTotals: (taskId: string, totals: DiffTotals | undefined) => void;
 }) {
   const [pane, setPane] = createSignal<Pane>("changes");
   const [changes, { refetch }] = createResource(
@@ -30,6 +32,11 @@ export function Inspector(props: {
     },
   );
   const currentChanges = () => changes()?.id === props.task.id ? changes() : undefined;
+  createEffect(on(currentChanges, (result) => {
+    if (!result) return;
+    const data = result.data;
+    props.onDiffTotals(result.id, data && !data.truncated ? diffTotals(data.patch) : undefined);
+  }));
   const tab = (id: Pane, label: string) => (
     <button type="button" aria-pressed={pane() === id} onClick={() => setPane(id)}>
       {label}
@@ -58,9 +65,8 @@ export function Inspector(props: {
           <section class="inspector-section inspector-changes">
             <h3>
               {t("inspector.changedFiles")}
-              <Show when={props.task.worktreePath} fallback={
-                <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
-              }>
+              <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+              <Show when={props.task.worktreePath}>
                 <button type="button" disabled={changes.loading} onClick={() => void refetch()}>
                   {t("inspector.refresh")}
                 </button>

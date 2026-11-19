@@ -53,6 +53,9 @@ export const restoreTask = (id: string) => invoke<TaskRecord>("task_restore", { 
 export interface TaskLoss {
   uncommittedFiles: number;
   unpushedCommits: number;
+  /** Files git ignores, never committed, such as `.env.local`. */
+  ignoredEntries: number;
+  ignoredExamples: string[];
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
 export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });
@@ -91,7 +94,7 @@ const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "
 
 /**
  * Shapes a stored task for the list. Live status and diff counts are not
- * tracked yet, so every task starts as "checking" with no changes.
+ * loaded yet, so the row starts without line totals.
  */
 export function toTaskRow(record: TaskRecord): TaskRow {
   return {
@@ -102,8 +105,6 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     agent: UI_AGENT[record.agentKind ?? "claude_code"],
     branch: record.branch,
     status: { state: "unknown" },
-    additions: 0,
-    deletions: 0,
     updatedAt: record.createdAtMs,
     worktreePath: record.worktreePath,
     agentSessionId: record.agentSessionId ?? undefined,

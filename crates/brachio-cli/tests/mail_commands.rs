@@ -105,6 +105,7 @@ async fn check_prints_one_line_per_message_and_what_is_left() {
                 id: "m9".into(),
                 thread_id: "m9".into(),
                 from: "task2:agent".into(),
+                to: "task1:agent".into(),
                 from_title: Some("Write docs".into()),
                 kind: "question".into(),
                 priority: "high".into(),
@@ -123,12 +124,68 @@ async fn check_prints_one_line_per_message_and_what_is_left() {
         out.starts_with("m9 [question, high] from Write docs: Which port?"),
         "{out}"
     );
-    assert!(out.contains("dev server"));
+    assert!(out.contains("| dev server"));
     assert!(out.ends_with("2 more unread; run brachio check again"));
     assert!(matches!(
         served.await.expect("app task"),
         MailRequest::Check { peek: false, .. }
     ));
+}
+
+async fn mail_hook(endpoint: &str, state: &std::path::Path, event: &str) -> String {
+    use tokio::io::AsyncWriteExt as _;
+    let mut child = Command::new(BRACHIO)
+        .args(["hook", "mail"])
+        .env("BRACHIO_HOOK_ENDPOINT", endpoint)
+        .env("BRACHIO_TERMINAL_KEY", "task1:agent")
+        .env("BRACHIO_MAIL_STATE_DIR", state)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("start brachio");
+    let mut stdin = child.stdin.take().expect("stdin");
+    stdin
+        .write_all(format!(r#"{{"hook_event_name":"{event}"}}"#).as_bytes())
+        .await
+        .expect("send event");
+    drop(stdin);
+    let output = child.wait_with_output().await.expect("finish");
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+#[tokio::test]
+async fn the_mail_hook_speaks_once_per_new_message_and_otherwise_stays_silent() {
+    let state = tempfile::tempdir().expect("state dir");
+    let waiting = |unread_left| MailResponse::Messages {
+        messages: Vec::new(),
+        unread_left,
+    };
+
+    let endpoint = name();
+    let served = app(&endpoint, waiting(2));
+    let first = mail_hook(&endpoint, state.path(), "PostToolUse").await;
+    served.await.expect("app task");
+    assert!(first.contains("\"PostToolUse\""), "{first}");
+    assert!(first.contains("2 unread messages"), "{first}");
+
+    let endpoint = name();
+    let served = app(&endpoint, waiting(2));
+    assert_eq!(mail_hook(&endpoint, state.path(), "PostToolUse").await, "");
+    served.await.expect("app task");
+
+    let endpoint = name();
+    let served = app(&endpoint, waiting(3));
+    let more = mail_hook(&endpoint, state.path(), "UserPromptSubmit").await;
+    served.await.expect("app task");
+    assert!(more.contains("3 unread messages"), "{more}");
+
+    assert_eq!(
+        mail_hook(&name(), state.path(), "PostToolUse").await,
+        "",
+        "no app, no output"
+    );
 }
 
 #[tokio::test]

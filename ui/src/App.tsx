@@ -18,10 +18,12 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
+import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import type { CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
+import type { DiffTotals } from "./lib/diff";
 import { pasteText } from "./lib/terminal-paste";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
@@ -60,14 +62,35 @@ export function App() {
       .catch((error) => console.warn("Could not update tray tasks", error));
   });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
+  const [diffByTask, setDiffByTask] = createSignal<ReadonlyMap<string, DiffTotals>>(new Map());
+  const recordDiffTotals = (id: string, totals: DiffTotals | undefined) => {
+    setDiffByTask((current) => {
+      const previous = current.get(id);
+      if (previous?.additions === totals?.additions && previous?.deletions === totals?.deletions) {
+        return current;
+      }
+      const next = new Map(current);
+      if (totals) next.set(id, totals);
+      else next.delete(id);
+      return next;
+    });
+  };
   const [live, setLive] = createSignal<ReadonlyMap<string, ReadonlyMap<string, LiveStatus>>>(new Map());
   const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
   const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const [mailbox, setMailbox] = createSignal<{ unread: ReadonlyMap<string, number>; revision: number }>({
+    unread: new Map(),
+    revision: 0,
+  });
+  const unreadForTab = (key: string | undefined) => key ? mailbox().unread.get(key) ?? 0 : 0;
+  const unreadForTask = (id: string) => unreadForTab(`${id}:agent`) + unreadForTab(secondaryKeys().get(id));
   const [requestedTab, setRequestedTab] = createSignal<{ key: string }>();
   const activeAgentKey = (taskId: string, key: string) =>
     key === `${taskId}:agent` || key === secondaryKeys().get(taskId);
   const rows = createMemo(() =>
-    tasks().map((task) => {
+    tasks().map((stored) => {
+      const totals = diffByTask().get(stored.id);
+      const task = totals ? { ...stored, ...totals } : stored;
       const pending = questions().find((question) =>
         taskIdOf(question.key) === task.id && activeAgentKey(task.id, question.key));
       const statuses = live().get(task.id);
@@ -253,7 +276,7 @@ export function App() {
     firstPrompts.delete(taskId);
     return prompt;
   };
-  const draftComment = async (id: string, text: string) => {
+  const draftComment = async (id: string, text: string, reminderFor?: string) => {
     const task = selected();
     const getTarget = draftTargets.get(id);
     const target = getTarget?.();
@@ -263,6 +286,7 @@ export function App() {
       const current = getTarget();
       return selected()?.id === id && draftTargets.get(id) === getTarget
         && current?.key === target.key && current.prepare === target.prepare
+        && (!reminderFor || target.key === reminderFor && unreadForTab(reminderFor) > 0)
         && activeAgentKey(id, target.key)
         && !questions().some((question) => question.key === target.key);
     };
@@ -437,6 +461,13 @@ export function App() {
       t("task.deleteLoss")
         .replace("{files}", String(loss.uncommittedFiles))
         .replace("{commits}", String(loss.unpushedCommits)),
+      ...(loss.ignoredEntries > 0
+        ? [
+            t("task.deleteIgnored")
+              .replace("{count}", String(loss.ignoredEntries))
+              .replace("{names}", loss.ignoredExamples.join(", ")),
+          ]
+        : []),
     ].join("\n\n");
     const agreed = await confirm(body, {
       title: `${t("task.delete")} · ${task.title}`,
@@ -464,6 +495,9 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
+      onCleanup(watchMailbox((unread) => {
+        setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
+      }));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
@@ -600,6 +634,7 @@ export function App() {
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
           needsYou={needsYou()}
+          unreadForTask={unreadForTask}
           now={now()}
         />
         <Show when={displayedTask()}>
@@ -630,11 +665,18 @@ export function App() {
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
               registerDraftTarget={registerDraftTarget}
+              unreadForTab={inTauri ? unreadForTab : undefined}
+              mailboxRevision={mailbox().revision}
+              onMailboxReminder={(key) => {
+                void draftComment(task().id, MAILBOX_REMINDER, key)
+                  .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
+                  .catch(report);
+              }}
             />
           )}
         </Show>
         <Show when={selected()} fallback={noTask()}>
-          {(task) => <Inspector task={task()} onDraft={draftComment} />}
+          {(task) => <Inspector task={task()} onDraft={draftComment} onDiffTotals={recordDiffTotals} />}
         </Show>
       </main>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />

@@ -2,6 +2,7 @@ import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
+import { AgentIcon } from "./AgentIcon";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { titleFromPrompt } from "../lib/workspace";
 import { Icon } from "./Icon";
@@ -136,7 +137,7 @@ export function NewTaskDialog(props: {
                       checked={agent() === kind}
                       onChange={() => setAgent(kind)}
                     />
-                    <b>{AGENT_NAME[kind]}</b>
+                    <b><AgentIcon agent={kind} />{AGENT_NAME[kind]}</b>
                   </label>
                 )}
               </For>

@@ -115,6 +115,13 @@ kbd {
 .diffstat-del {
   color: var(--color-del);
 }
+.agent-icon {
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.35em;
+  vertical-align: -0.15em;
+  flex: none;
+}
 .agent-chip {
   font: 600 11px/16px var(--font-sans);
   padding: 0 5px;
@@ -283,6 +290,36 @@ kbd {
 .search kbd {
   margin-left: auto;
 }
+:root[data-platform="windows"] .titlebar {
+  padding-right: 0;
+}
+.window-buttons {
+  display: flex;
+  align-self: stretch;
+  margin-left: var(--space-2);
+}
+.window-buttons button {
+  width: 46px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-2);
+}
+.window-buttons button:hover {
+  background: var(--color-hover);
+}
+.window-buttons .window-close:hover {
+  background: var(--color-status-error);
+  color: #fff;
+}
+.window-buttons svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1;
+}
 .titlebar-end {
   margin-left: auto;
   display: flex;
@@ -360,6 +397,11 @@ kbd {
 .task-groups {
   overflow-y: auto;
   padding-bottom: var(--space-3);
+}
+.mailbox-inbox {
+  max-height: min(35vh, 240px);
+  overflow: auto;
+  overflow-wrap: anywhere;
 }
 .project-heading {
   display: flex;

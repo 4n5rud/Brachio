@@ -1,9 +1,34 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t } from "../i18n";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
 import { QUICK_OPEN_KEYS } from "../lib/shortcut";
 
 export type View = "tasks" | "board";
+
+// On Windows the window has no frame of its own (see tauri.windows.conf.json), so this bar is the
+// only title bar and carries the window buttons. macOS keeps its overlaid traffic lights.
+const OWN_WINDOW_BUTTONS = document.documentElement.dataset.platform === "windows";
+
+function WindowButtons() {
+  const window = () => getCurrentWindow();
+  return (
+    <div class="window-buttons">
+      <button type="button" aria-label={t("window.minimize")} title={t("window.minimize")}
+        onClick={() => void window().minimize()}>
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" /></svg>
+      </button>
+      <button type="button" aria-label={t("window.maximize")} title={t("window.maximize")}
+        onClick={() => void window().toggleMaximize()}>
+        <svg viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
+      </button>
+      <button type="button" class="window-close" aria-label={t("window.close")} title={t("window.close")}
+        onClick={() => void window().close()}>
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" /></svg>
+      </button>
+    </div>
+  );
+}
 
 /**
  * App title bar. The whole bar is a drag region; on macOS the native traffic
@@ -46,6 +71,7 @@ export function TitleBar(props: {
         <button class="icon-button" type="button" aria-label={t("titlebar.settings")} onClick={props.onSettings}>
           <Icon name="sliders" />
         </button>
+        {OWN_WINDOW_BUTTONS && <WindowButtons />}
       </div>
     </header>
   );

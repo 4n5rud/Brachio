@@ -9,6 +9,22 @@ export interface DiffRow {
   location?: DiffLocation;
 }
 
+export interface DiffTotals {
+  additions: number;
+  deletions: number;
+}
+
+/** Counts text changes in complete patch hunks, excluding headers and context. */
+export function diffTotals(patch: string): DiffTotals {
+  let additions = 0;
+  let deletions = 0;
+  for (const { text, location } of diffRows(patch)) {
+    if (location?.side === "old") deletions++;
+    if (location?.side === "new" && text.startsWith("+")) additions++;
+  }
+  return { additions, deletions };
+}
+
 export type SplitDiffRow = { shared: DiffRow } | { old?: DiffRow; next?: DiffRow };
 
 export function splitDiffRows(rows: readonly DiffRow[]): SplitDiffRow[] {

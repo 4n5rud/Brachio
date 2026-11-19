@@ -16,8 +16,8 @@ export interface TaskRow {
   agent: AgentKind;
   branch: string;
   status: AgentState;
-  additions: number;
-  deletions: number;
+  additions?: number;
+  deletions?: number;
   /** UTC milliseconds of the last status change. */
   updatedAt: number;
   /** One line under the title: what the agent is waiting on, or a result. */

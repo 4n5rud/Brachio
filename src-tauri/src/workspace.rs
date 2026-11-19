@@ -443,6 +443,8 @@ fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String>
 pub struct TaskLoss {
     uncommitted_files: u32,
     unpushed_commits: u32,
+    ignored_entries: u32,
+    ignored_examples: Vec<String>,
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -476,6 +478,8 @@ pub async fn task_delete_preview(
     Ok(TaskLoss {
         uncommitted_files: work.uncommitted_files,
         unpushed_commits: work.unpushed_commits,
+        ignored_entries: work.ignored_entries,
+        ignored_examples: work.ignored_examples,
     })
 }
 
@@ -498,7 +502,10 @@ pub async fn task_delete(
     .await
     .map_err(to_text)?
     .map_err(to_text)?;
-    TaskRecord::delete(&*database.lock()?, &id).map_err(to_text)
+    let connection = database.lock()?;
+    // Its messages go with it, so a later task cannot be sent mail meant for this one.
+    brachio_store::forget_task_messages(&connection, &id).map_err(to_text)?;
+    TaskRecord::delete(&connection, &id).map_err(to_text)
 }
 
 /// Changes in a task worktree relative to its base.
@@ -625,7 +632,7 @@ pub struct TaskMergePreview {
     conflicts: Vec<String>,
 }
 
-/// Checks how the task's committed HEAD would merge into the local default branch.
+/// Checks how the task's committed HEAD would merge into the default branch, as the remote has it.
 #[tauri::command]
 pub async fn task_merge_preview(
     database: State<'_, Database>,
@@ -638,9 +645,9 @@ pub async fn task_merge_preview(
         (task.worktree_path, repo.default_branch)
     };
     tauri::async_runtime::spawn_blocking(move || {
-        let base_ref = format!("refs/heads/{base_branch}");
-        let report =
-            predict_conflict(&Git::new(&worktree_path), &base_ref, "HEAD").map_err(to_text)?;
+        let git = Git::new(&worktree_path);
+        let base_ref = brachio_git::merge_target_ref(&git, &base_branch);
+        let report = predict_conflict(&git, &base_ref, "HEAD").map_err(to_text)?;
         Ok(TaskMergePreview {
             base_branch,
             conflicts: report.conflicted_files,
