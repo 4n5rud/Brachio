@@ -28,10 +28,11 @@ export const ko: Messages = {
   "activity.empty": "이번 세션의 활동이 아직 없습니다.",
   "titlebar.settings": "설정",
 
-  "sidebar.title": "작업",
+  "sidebar.projects": "프로젝트",
+  "sidebar.addProject": "프로젝트 추가",
+  "sidebar.folderWorkspaces": "폴더 작업 공간",
+  "sidebar.noProjectTasks": "열린 작업 없음",
   "sidebar.newTask": "새 작업",
-  "sidebar.empty.title": "아직 작업이 없어요",
-  "sidebar.empty.body": "작업을 만들면 전용 worktree에서 에이전트가 시작돼요.",
 
   "task.reviewChanges": "변경 검토",
   "task.createPr": "PR 만들기",
