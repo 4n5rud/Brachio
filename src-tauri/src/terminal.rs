@@ -15,7 +15,7 @@ use tauri::State;
 
 use crate::hook_setup::HookSetup;
 use crate::runtime_terminals::{Launch, RuntimeTerminals};
-use crate::{task_ports, workspace::Database};
+use crate::{task_ports, terminal_authorization, workspace::Database};
 
 /// App state that owns every terminal.
 pub struct Terminals(pub Arc<SessionManager>);
@@ -98,9 +98,28 @@ pub async fn terminal_open(
     hosted: State<'_, RuntimeTerminals>,
     database: State<'_, Database>,
     hook: State<'_, HookSetup>,
-    request: OpenRequest,
+    mut request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
 ) -> CommandResult<Opened> {
+    let key = request
+        .key
+        .as_deref()
+        .ok_or_else(|| "A registered task terminal is required.".to_owned())?;
+    let owner = terminal_authorization::resolve(&*database.lock()?, key)?;
+    let worktree = owner
+        .task
+        .worktree_path
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let requested = request
+        .cwd
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if requested != worktree || request.agent != owner.agent {
+        return Err("Terminal request does not match the registered task tab.".to_owned());
+    }
+    request.cwd = owner.task.worktree_path;
+    request.session_id = owner.conversation;
     let (mut command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => agent_command(kind, &request)?,
         None => (shell_command(), PromptDelivery::None, false),
