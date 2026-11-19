@@ -34,7 +34,7 @@ GitHub writes them from the pull requests merged since the previous release (for
 ## What a release does not do yet
 
 - The installers are not signed. Windows shows SmartScreen and macOS asks the user to allow the app. Say so in the draft until signing is set up.
-- The release build bundles `brachio-runtime` and the `brachio` helper next to the app (`tauri.release.conf.json` lists them as `externalBin`, and `scripts/stage-sidecars.mjs` builds them before the bundle). Before a release, check on each platform that both files sit beside the installed app, and that closing the window leaves a shell running. The macOS runtime is not tested yet.
+- The release build bundles `brachio-runtime` and the `brachio` helper next to the app (`tauri.release.conf.json` lists them as `externalBin`, and `scripts/stage-sidecars.mjs` builds them before the bundle). On Windows the bundle also carries the newer ConPTY (`conpty.dll` and `OpenConsole.exe` from Microsoft's NuGet package, pinned by hash in `scripts/stage-sidecars.mjs` and listed in `tauri.release.windows.conf.json`), because the ConPTY built into Windows answers terminal queries itself and agents then never report their status. Before a release, check on each platform that both files sit beside the installed app, and that closing the window leaves a shell running. The macOS runtime is not tested yet.
 - The macOS build is for Apple silicon only.
 - There is no automatic update.
 
