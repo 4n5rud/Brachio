@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const POLL_EVERY: Duration = Duration::from_millis(10);
+/// How much standard error is kept. A program that prints more still runs on; the rest is read
+/// and dropped, so it cannot fill the pipe and stall or fill memory.
+const KEPT_STDERR: usize = 1024 * 1024;
 
 /// Runs `command` and collects its output, stopping it after `limit`.
 ///
@@ -60,7 +63,7 @@ pub fn output_capped(
     let stderr = child
         .stderr
         .take()
-        .map(|pipe| drain(pipe, usize::MAX, None));
+        .map(|pipe| drain_keeping(pipe, KEPT_STDERR));
     let deadline = Instant::now() + limit;
     let status = loop {
         if over.load(Ordering::Acquire) {
@@ -110,6 +113,23 @@ fn drain(
                     over.store(true, Ordering::Release);
                 }
                 break;
+            }
+        }
+        bytes
+    })
+}
+
+fn drain_keeping(mut pipe: impl Read + Send + 'static, keep: usize) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let mut chunk = [0u8; 16 * 1024];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    let room = keep.saturating_sub(bytes.len()).min(read);
+                    bytes.extend_from_slice(&chunk[..room]);
+                }
             }
         }
         bytes
@@ -173,6 +193,18 @@ mod tests {
         assert!(capped.truncated);
         assert!(capped.output.stdout.len() <= 1_001 + 16 * 1024);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_command_that_floods_standard_error_finishes_and_only_a_start_of_it_is_kept() {
+        let script = if cfg!(windows) {
+            "for /L %i in (1,1,150000) do @echo flooding standard error line %i 1>&2"
+        } else {
+            "i=0; while [ $i -lt 150000 ]; do echo flooding standard error line $i >&2; i=$((i+1)); done"
+        };
+        let output = output_within(&mut shell(script), Duration::from_secs(60)).expect("finishes");
+        assert!(output.status.success());
+        assert_eq!(output.stderr.len(), KEPT_STDERR);
     }
 
     #[test]
