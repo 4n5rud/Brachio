@@ -7,6 +7,7 @@ import { DiffStat } from "./DiffStat";
 import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";
+import { PullRequestStatus } from "./PullRequestStatus";
 import { TaskMergePreview } from "./TaskMergePreview";
 import { TaskFiles } from "./TaskFiles";
 
@@ -67,6 +68,9 @@ export function Inspector(props: {
             </h3>
             <Show when={props.task.worktreePath}>
               <p class="muted">{t("inspector.diffBase")}</p>
+              <Show when={props.task.worktreePath && props.task.id} keyed>
+                {(id) => <PullRequestStatus taskId={id} />}
+              </Show>
               <Show when={props.task.worktreePath && props.task.id} keyed>
                 {(id) => <TaskMergePreview taskId={id} />}
               </Show>

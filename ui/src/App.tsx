@@ -24,6 +24,7 @@ import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
+import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask,
   toTaskRow, type RepoRecord } from "./lib/workspace";
@@ -176,10 +177,21 @@ export function App() {
   });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
+  const [workspaceTaskIds, setWorkspaceTaskIds] = createSignal<readonly string[]>([]);
+  const workspaceTasks = createMemo(() => {
+    const byId = new Map(tasks().map((task) => [task.id, task]));
+    return workspaceTaskIds().flatMap((id) => {
+      const task = byId.get(id);
+      return task ? [task] : [];
+    });
+  });
   const displayedTask = createMemo(() => selected() ?? rows().find((task) => openIds().includes(task.id)));
   createEffect(() => {
     const id = selectedId();
     if (id !== undefined && !openIds().includes(id)) setOpenIds((ids) => [...ids, id]);
+    if (id !== undefined && !workspaceTaskIds().includes(id)) {
+      setWorkspaceTaskIds((ids) => [...ids, id]);
+    }
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
   const needsYou = createMemo(() => repoRows().filter((task) => taskGroup(task.status) === "needs").length);
@@ -254,10 +266,14 @@ export function App() {
     const [storedRepos, storedTasks, storedArchives] = await Promise.all([
       listRepos(), listTasks(), listArchivedTasks(),
     ]);
-    setRepos(storedRepos);
-    setTasks(storedTasks.map(toTaskRow));
-    setArchived(storedArchives.map(toTaskRow));
-    restoreSelection();
+    const restoredTasks = loadOpenWorkspaceTasks(new Set(storedTasks.map((task) => task.id)));
+    batch(() => {
+      setRepos(storedRepos);
+      setTasks(storedTasks.map(toTaskRow));
+      setArchived(storedArchives.map(toTaskRow));
+      setWorkspaceTaskIds(restoredTasks);
+      restoreSelection();
+    });
   };
 
   const restoreSelection = () => {
@@ -334,6 +350,7 @@ export function App() {
           return next;
         });
         setOpenIds((ids) => ids.filter((id) => id !== task.id));
+        setWorkspaceTaskIds((ids) => ids.filter((id) => id !== task.id));
         if (selectedId() === task.id) setSelectedId(repoRows()[0]?.id);
       });
       firstPrompts.delete(task.id);
@@ -450,6 +467,9 @@ export function App() {
     window.addEventListener("keydown", onKey, true);
     onCleanup(() => window.removeEventListener("keydown", onKey, true));
   });
+  createEffect(() => {
+    if (inTauri && repos().length > 0) saveOpenWorkspaceTasks(workspaceTaskIds());
+  });
 
   const open = (id: string, sessionKey?: string) => {
     const taskRepoId = findTask(id)?.repoId;
@@ -527,6 +547,8 @@ export function App() {
               visible={view() === "tasks" && !!selected()}
               theme={theme()}
               openIds={openIds()}
+              workspaceTasks={workspaceTasks()}
+              onOpenTask={open}
               findTask={findTask}
               takePrompt={takePrompt}
               questions={questions().filter((question) =>
