@@ -10,7 +10,7 @@ export const en = {
   "status.error": "Error",
   "status.exited": "Exited",
   "status.crashed": "Crashed",
-  "status.unknown": "Checking",
+  "status.unknown": "No status yet",
 
   "group.needs": "Needs you",
   "group.working": "Working",

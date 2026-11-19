@@ -12,7 +12,7 @@ export const ko: Messages = {
   "status.error": "오류",
   "status.exited": "종료",
   "status.crashed": "비정상 종료",
-  "status.unknown": "확인 중",
+  "status.unknown": "상태 정보 없음",
 
   "group.needs": "확인이 필요해요",
   "group.working": "작업 중",
