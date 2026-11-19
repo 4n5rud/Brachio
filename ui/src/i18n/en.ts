@@ -114,6 +114,7 @@ export const en = {
   "terminal.newConversation": "Starting a new conversation",
   "terminal.resumeFailed": "Nothing to resume, starting a new conversation",
   "terminal.promptNotSent": "The terminal was not ready for a safe paste. The initial prompt was not sent.",
+  "terminal.promptDeferredAfterInput": "Initial prompt skipped because you started typing. You can retrieve it from Original task prompt.",
   "terminal.inputFailed": "Could not send terminal input.",
   "terminal.startFailed": "Could not start the terminal",
 

@@ -129,6 +129,7 @@ export function TerminalPane(props: {
     let blocked = false;
     let working = false;
     let inputRevision = 0;
+    let editedBeforePrompt = false;
     let disposed = false;
     let generation = 0;
     let promptTimer: ReturnType<typeof setTimeout> | undefined;
@@ -139,6 +140,7 @@ export function TerminalPane(props: {
       setContinuity(undefined);
       blocked = false;
       working = false;
+      editedBeforePrompt = false;
       if (!session) return;
       const launch = ++generation;
       const earlyOutput: Uint8Array[] = [];
@@ -242,6 +244,7 @@ export function TerminalPane(props: {
       return async () => {
         if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
         inputRevision += 1;
+        editedBeforePrompt = true;
         await destination.write(bracketedPaste(text, true));
         if (destination === handle && props.active) term.focus();
         return true;
@@ -259,6 +262,10 @@ export function TerminalPane(props: {
       const destination = handle;
       promptTimer = setTimeout(async () => {
         if (!destination || destination !== handle || exited || disposed) return;
+        if (session?.agent && editedBeforePrompt) {
+          term.writeln(`\r\n[${t("terminal.promptDeferredAfterInput")}]`);
+          return;
+        }
         if (session?.agent && (!term.modes.bracketedPasteMode || blocked)) {
           term.writeln(`\r\n[${t("terminal.promptNotSent")}]`);
           return;
@@ -277,6 +284,11 @@ export function TerminalPane(props: {
       }, TYPE_IN_DELAY_MS);
     }
 
+    const noteUserInput = () => { editedBeforePrompt = true; };
+    // onData also receives replies to terminal queries. Track user gestures separately.
+    const keys = term.onKey(noteUserInput);
+    host.addEventListener("paste", noteUserInput, true);
+    host.addEventListener("compositionstart", noteUserInput, true);
     let lastWriteFailure = "";
     const input = term.onData((data) => {
       inputRevision += 1;
@@ -308,6 +320,9 @@ export function TerminalPane(props: {
       disposed = true;
       clearTimeout(promptTimer);
       unregister?.();
+      host.removeEventListener("paste", noteUserInput, true);
+      host.removeEventListener("compositionstart", noteUserInput, true);
+      keys.dispose();
       observer.disconnect();
       input.dispose();
       resized.dispose();
