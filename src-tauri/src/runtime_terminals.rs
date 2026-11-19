@@ -13,7 +13,7 @@ use brachio_runtime::client::{Client, ClientError, Following};
 use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
 use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 
 use crate::runtime_client;
 use crate::terminal::{send, send_message, ChannelMessage};
@@ -57,6 +57,7 @@ struct Attached {
 #[derive(Default)]
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
+    restart: AsyncMutex<()>,
     attached: Mutex<HashMap<SessionId, Attached>>,
     handles: AtomicU64,
 }
@@ -87,7 +88,7 @@ impl RuntimeTerminals {
         let Some(current) = self.client().await? else {
             return Ok(None);
         };
-        let (client, existing) = locate(&current, &key).await?;
+        let (client, existing) = self.locate_with_restart(&current, &key).await?;
         let attached = existing.is_some();
         if !attached {
             show_last_screen(&client, &key, &channel).await;
@@ -164,6 +165,23 @@ impl RuntimeTerminals {
         Ok(Some(client.clone()))
     }
 
+    async fn locate_with_restart(
+        &self,
+        current: &Client,
+        key: &str,
+    ) -> Result<(Client, Option<Reply>)> {
+        match locate(current, key).await {
+            Err(ClientError::NotRunning) => {
+                // The connector rechecks the endpoint under this lock so concurrent reopens
+                // share one start. Only a confirmed missing endpoint is safe to restart.
+                let _restart = self.restart.lock().await;
+                let current = runtime_client::connect().await?;
+                Ok(locate(&current, key).await?)
+            }
+            result => Ok(result?),
+        }
+    }
+
     /// A handle for a newly attached terminal, unique in this app whichever runtime hosts it.
     fn new_handle(&self) -> SessionId {
         SessionId::from_raw(HOSTED_HANDLE_BASE + self.handles.fetch_add(1, Ordering::Relaxed))
@@ -190,20 +208,20 @@ impl RuntimeTerminals {
 /// Finds the runtime that already hosts `key`: the current one, else an older one that is still
 /// running. Only "no such terminal" counts as absent; any other failure stops the open, because
 /// starting a second program for the same key would be worse than not opening one.
-async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>)> {
+async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>), ClientError> {
     let inspect = || Action::Inspect {
         key: key.to_owned(),
     };
     match current.call(inspect()).await {
         Ok(reply) => return Ok((current.clone(), Some(reply))),
         Err(ClientError::Refused(_)) => {}
-        Err(error) => bail!("{error}"),
+        Err(error) => return Err(error),
     }
     for old in runtime_client::older_clients().await {
         match old.call(inspect()).await {
             Ok(reply) => return Ok((old, Some(reply))),
-            Err(ClientError::Refused(_)) => {}
-            Err(error) => bail!("{error}"),
+            Err(ClientError::Refused(_) | ClientError::NotRunning) => {}
+            Err(error) => return Err(error),
         }
     }
     Ok((current.clone(), None))
@@ -340,7 +358,16 @@ fn deliver(
 mod handle_tests {
     use brachio_pty::SessionId;
 
-    use super::{RuntimeTerminals, HOSTED_HANDLE_BASE};
+    use super::{locate, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE};
+
+    #[tokio::test]
+    async fn a_missing_current_runtime_is_distinct_from_a_missing_terminal() {
+        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        assert!(matches!(
+            locate(&client, "test:agent").await,
+            Err(ClientError::NotRunning)
+        ));
+    }
 
     #[test]
     fn hosted_terminals_get_distinct_handles_that_cannot_equal_an_in_app_session_id() {
