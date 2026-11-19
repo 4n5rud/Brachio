@@ -629,7 +629,7 @@ pub struct TaskMergePreview {
     conflicts: Vec<String>,
 }
 
-/// Checks how the task's committed HEAD would merge into the local default branch.
+/// Checks how the task's committed HEAD would merge into the default branch, as the remote has it.
 #[tauri::command]
 pub async fn task_merge_preview(
     database: State<'_, Database>,
@@ -642,9 +642,9 @@ pub async fn task_merge_preview(
         (task.worktree_path, repo.default_branch)
     };
     tauri::async_runtime::spawn_blocking(move || {
-        let base_ref = format!("refs/heads/{base_branch}");
-        let report =
-            predict_conflict(&Git::new(&worktree_path), &base_ref, "HEAD").map_err(to_text)?;
+        let git = Git::new(&worktree_path);
+        let base_ref = brachio_git::merge_target_ref(&git, &base_branch);
+        let report = predict_conflict(&git, &base_ref, "HEAD").map_err(to_text)?;
         Ok(TaskMergePreview {
             base_branch,
             conflicts: report.conflicted_files,

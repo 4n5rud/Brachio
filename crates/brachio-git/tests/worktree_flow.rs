@@ -302,3 +302,27 @@ fn deleting_a_task_counts_ignored_files_that_no_commit_holds() {
     assert!(work.ignored_examples.contains(&".env.local".to_owned()));
     assert!(work.ignored_examples.contains(&"build/".to_owned()));
 }
+
+#[test]
+fn the_merge_target_is_the_remote_copy_of_the_default_branch_when_the_local_one_is_behind() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    assert_eq!(
+        brachio_git::merge_target_ref(&git, "main"),
+        "refs/heads/main",
+        "without a remote the local branch is used"
+    );
+
+    let remote = temp_dir();
+    run(&Git::new(remote.path()), &["init", "-q", "--bare"]);
+    run(
+        &git,
+        &["remote", "add", "origin", &remote.path().to_string_lossy()],
+    );
+    run(&git, &["push", "-q", "origin", "main"]);
+    run(&git, &["fetch", "-q", "origin"]);
+    assert_eq!(
+        brachio_git::merge_target_ref(&git, "main"),
+        "refs/remotes/origin/main"
+    );
+}
