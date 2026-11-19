@@ -7,6 +7,7 @@ mod git;
 mod naming;
 mod port_pool;
 mod pull_request;
+mod pull_request_status;
 mod repo_info;
 mod worktree;
 mod worktree_setup;
@@ -17,6 +18,10 @@ pub use git::{Git, GitError};
 pub use naming::{branch_name, slugify};
 pub use port_pool::{PortBlock, PortPool};
 pub use pull_request::{create_pull_request, PullRequest, PullRequestError};
+pub use pull_request_status::{
+    backoff_seconds, fetch_pull_request, local_head, repository_of, ChecksOverall, ChecksSummary,
+    Conflict, FailedCheck, PullRequestSnapshot, PullRequestState, ReviewState, StatusError,
+};
 pub use repo_info::{inspect_repo, RepoInfo};
 pub use worktree::{
     add_worktree, discard_worktree, remove_worktree, unsaved_work, worktree_path, AddWorktree,
