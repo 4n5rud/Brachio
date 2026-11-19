@@ -2,8 +2,10 @@
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
 /// What to run inside a new PTY.
@@ -28,7 +30,9 @@ pub struct SpawnSpec {
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
+    /// Input waits here for the writer thread. A child that does not read its input blocks
+    /// that thread only, never a caller, the session lock or the output reader.
+    input: Sender<Vec<u8>>,
 }
 
 impl PtySession {
@@ -57,10 +61,15 @@ impl PtySession {
             .spawn_command(command)
             .context("spawn program in pty")?;
         let writer = pair.master.take_writer().context("take pty writer")?;
+        let (input, queued) = mpsc::channel();
+        thread::Builder::new()
+            .name("pty-write".to_owned())
+            .spawn(move || write_queued(writer, &queued))
+            .context("start pty writer")?;
         Ok(Self {
             master: pair.master,
             child,
-            writer,
+            input,
         })
     }
 
@@ -72,12 +81,15 @@ impl PtySession {
         self.master.try_clone_reader().context("clone pty reader")
     }
 
-    /// Sends keyboard input to the child.
+    /// Queues keyboard input for the child and returns at once. Input reaches the child in the
+    /// order it was queued, whenever the child reads it.
     ///
     /// # Errors
     /// Fails when the PTY is closed.
-    pub fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
-        self.writer.write_all(bytes).context("write pty input")
+    pub fn write_input(&self, bytes: &[u8]) -> Result<()> {
+        self.input
+            .send(bytes.to_vec())
+            .map_err(|_| anyhow!("pty input is closed"))
     }
 
     /// Changes the terminal size the child sees.
@@ -103,6 +115,15 @@ impl PtySession {
     /// Fails when the child cannot be signalled.
     pub fn kill(&mut self) -> Result<()> {
         self.child.kill().context("kill child")
+    }
+}
+
+/// Writes queued input until the PTY refuses it or every sender is gone.
+fn write_queued(mut writer: Box<dyn Write + Send>, queued: &Receiver<Vec<u8>>) {
+    for bytes in queued {
+        if writer.write_all(&bytes).is_err() {
+            return;
+        }
     }
 }
 
