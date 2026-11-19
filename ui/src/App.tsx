@@ -82,6 +82,7 @@ export function App() {
   const [view, setView] = createSignal<View>("tasks");
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
   const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived" | "activity">();
   const [activity, setActivity] = createSignal<readonly TaskActivity[]>([]);
@@ -99,7 +100,7 @@ export function App() {
   const runCommand = (id: CommandId) => {
     if (id === "newTask") {
       setWorkspacePanel(undefined);
-      if (canCreate()) setDialogOpen(true);
+      openNewTask();
     } else {
       setWorkspacePanel(id);
     }
@@ -169,8 +170,14 @@ export function App() {
 
   const [repoId, setRepoId] = createSignal(localStorage.getItem("brachio.repo") ?? "");
   const repo = createMemo(() => repos().find((item) => item.id === repoId()) ?? repos()[0]);
+  const dialogRepo = createMemo(() => repos().find((item) => item.id === dialogRepoId()));
+  const openNewTask = (id = repo()?.id) => {
+    if (!inTauri || !id) return;
+    setDialogRepoId(id);
+    setDialogOpen(true);
+  };
   const repoRows = createMemo(() => inTauri ? rows().filter((task) => task.repoId === repo()?.id) : rows());
-  const selected = createMemo(() => repoRows().find((task) => task.id === selectedId()));
+  const selected = createMemo(() => rows().find((task) => task.id === selectedId()));
   createEffect(() => {
     const task = selected();
     if (task?.repoId) localStorage.setItem(`brachio.task.${task.repoId}`, task.id);
@@ -194,7 +201,7 @@ export function App() {
     }
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
-  const needsYou = createMemo(() => repoRows().filter((task) => taskGroup(task.status) === "needs").length);
+  const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
 
   // First prompts of tasks created in this run. Each is handed to the
   // task's terminal once, then dropped.
@@ -329,7 +336,7 @@ export function App() {
   };
 
   const create = async (input: NewTaskInput) => {
-    const current = repo();
+    const current = dialogRepo();
     if (!current) return;
     const record = await createTask({
       repoId: current.id,
@@ -349,8 +356,7 @@ export function App() {
       setupInputs.set(record.id, record.setupCommands.join("\r"));
     }
     setTasks((list) => [toTaskRow(record), ...list]);
-    setSelectedId(record.id);
-    setView("tasks");
+    open(record.id);
     setDialogOpen(false);
   };
 
@@ -489,7 +495,7 @@ export function App() {
       if (isNewTaskShortcut(event) && canCreate()) {
         event.preventDefault();
         event.stopPropagation();
-        setDialogOpen(true);
+        openNewTask();
       }
     };
     // Capture phase: the terminal swallows key events it handles.
@@ -502,10 +508,14 @@ export function App() {
 
   const open = (id: string, sessionKey?: string) => {
     const taskRepoId = findTask(id)?.repoId;
-    if (taskRepoId && repo()?.id !== taskRepoId) switchRepo(taskRepoId);
-    setSelectedId(id);
-    setView("tasks");
-    setRequestedTab(sessionKey ? { key: sessionKey } : undefined);
+    batch(() => {
+      if (taskRepoId && repos().some((item) => item.id === taskRepoId) && repo()?.id !== taskRepoId) {
+        switchRepo(taskRepoId);
+      }
+      setSelectedId(id);
+      setView("tasks");
+      setRequestedTab(sessionKey ? { key: sessionKey } : undefined);
+    });
   };
 
   const noTask = () => (
@@ -520,11 +530,7 @@ export function App() {
   return (
     <div class="app-shell">
       <TitleBar
-        repo={inTauri ? (repo()?.name ?? "Brachio") : "lumen-web"}
-        repoId={repo()?.id}
-        repos={inTauri && repos().length ? repos() : undefined}
-        onRepo={switchRepo}
-        onAddRepo={() => void chooseRepo().catch(report)}
+        repo={repo()?.name ?? "Brachio"}
         view={view()}
         onView={setView}
         needsYou={needsYou()}
@@ -563,10 +569,13 @@ export function App() {
       </Show>
       <main class="layout" classList={{ "layout-no-inspector": !selected(), "view-hidden": view() !== "tasks" }}>
         <TaskList
-          tasks={repoRows()}
+          tasks={rows()}
+          repos={repos()}
           selectedId={selectedId()}
-          onSelect={setSelectedId}
-          onNewTask={canCreate() ? () => setDialogOpen(true) : undefined}
+          onSelect={open}
+          onNewTask={inTauri ? openNewTask : undefined}
+          onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
+          needsYou={needsYou()}
           now={now()}
         />
         <Show when={displayedTask()}>
@@ -621,7 +630,7 @@ export function App() {
           onCommand={runCommand}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
       </Show>
-      <Show when={dialogOpen() && repo()}>
+      <Show when={dialogOpen() && dialogRepo()}>
         {(current) => (
           <NewTaskDialog
             defaultBranch={current().defaultBranch}

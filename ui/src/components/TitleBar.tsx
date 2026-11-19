@@ -1,4 +1,3 @@
-import { For, Show } from "solid-js";
 import { t } from "../i18n";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
@@ -12,10 +11,6 @@ export type View = "tasks" | "board";
  */
 export function TitleBar(props: {
   repo: string;
-  repoId?: string;
-  repos?: readonly { id: string; name: string }[];
-  onRepo: (id: string) => void;
-  onAddRepo: () => void;
   view: View;
   onView: (view: View) => void;
   needsYou: number;
@@ -26,19 +21,7 @@ export function TitleBar(props: {
   return (
     <header class="titlebar" data-tauri-drag-region>
       <BrandMark />
-      <Show when={props.repos} fallback={<span class="repo-switch">{props.repo}</span>}>
-        <select class="repo-switch" aria-label={t("repo.switch")} value={props.repoId ?? ""}
-          onChange={(event) => {
-            const select = event.currentTarget;
-            if (select.value === "") {
-              select.value = props.repoId ?? "";
-              props.onAddRepo();
-            } else props.onRepo(select.value);
-          }}>
-          <For each={props.repos}>{(repo) => <option value={repo.id}>{repo.name}</option>}</For>
-          <option value="">{t("repo.add")}</option>
-        </select>
-      </Show>
+      <span class="active-project" title={props.repo}>{props.repo}</span>
       <button class="search" type="button" onClick={props.onQuickOpen}>
         <Icon name="search" />
         <span>{t("titlebar.search")}</span>

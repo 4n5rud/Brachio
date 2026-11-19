@@ -26,10 +26,11 @@ export const en = {
   "activity.empty": "No activity in this session yet.",
   "titlebar.settings": "Settings",
 
-  "sidebar.title": "Tasks",
+  "sidebar.projects": "Projects",
+  "sidebar.addProject": "Add project",
+  "sidebar.folderWorkspaces": "Folder workspaces",
+  "sidebar.noProjectTasks": "No open tasks",
   "sidebar.newTask": "New task",
-  "sidebar.empty.title": "No tasks yet",
-  "sidebar.empty.body": "Create a task to start an agent in its own worktree.",
 
   "task.reviewChanges": "Review changes",
   "task.createPr": "Create PR",
