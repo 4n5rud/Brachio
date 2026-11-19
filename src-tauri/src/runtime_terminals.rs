@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use brachio_core::status::AgentState;
-use brachio_pty::SessionId;
 use brachio_runtime::client::{Client, ClientError, Following};
 use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
 use tauri::async_runtime::{spawn, JoinHandle};
@@ -46,12 +45,12 @@ struct Attached {
     pump: JoinHandle<()>,
 }
 
-/// App state for runtime-hosted terminals. Whether the runtime is used is decided once, so
-/// terminals of the two kinds never share the session id space.
+/// App state for runtime-hosted terminals. An attachment ID belongs to the app,
+/// because different runtime generations can issue the same process-local ID.
 #[derive(Default)]
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
-    attached: Mutex<HashMap<SessionId, Attached>>,
+    attached: Mutex<HashMap<String, Attached>>,
 }
 
 impl RuntimeTerminals {
@@ -67,7 +66,7 @@ impl RuntimeTerminals {
         launch: Launch,
         channel: Channel<InvokeResponseBody>,
         agent: bool,
-    ) -> Result<Option<(SessionId, bool)>> {
+    ) -> Result<Option<(String, bool)>> {
         let Some(current) = self.client().await? else {
             return Ok(None);
         };
@@ -80,7 +79,7 @@ impl RuntimeTerminals {
             Some(reply) => reply,
             None => client.call(launch_action(&key, launch)).await?,
         };
-        let ResponseResult::Success { session, .. } = reply.result else {
+        let ResponseResult::Success { .. } = reply.result else {
             bail!("the terminal runtime sent an unexpected reply");
         };
         let (first, following) = if attached {
@@ -94,48 +93,53 @@ impl RuntimeTerminals {
                 .await?
         };
         let pump = spawn(pump(first, following, channel, agent));
-        let id = session.session_id;
-        let previous = self
-            .attached
-            .lock()
-            .map_err(|_| anyhow!("terminal list lock poisoned"))?
-            .insert(id, Attached { key, client, pump });
-        if let Some(previous) = previous {
-            previous.pump.abort();
-        }
+        let id = self.register_attachment(key, client, pump)?;
         Ok(Some((id, attached)))
     }
 
-    /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
-    pub async fn write(&self, id: SessionId, data: String) -> Option<Result<()>> {
-        let (client, key) = self.target(id).await?;
-        Some(
-            client
-                .call(Action::Write { key, text: data })
-                .await
-                .map(|_| ())
-                .map_err(Into::into),
-        )
+    fn register_attachment(
+        &self,
+        key: String,
+        client: Client,
+        pump: JoinHandle<()>,
+    ) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut attached = self
+            .attached
+            .lock()
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
+        attached.retain(|_, entry| {
+            if entry.key != key {
+                return true;
+            }
+            entry.pump.abort();
+            false
+        });
+        attached.insert(id.clone(), Attached { key, client, pump });
+        Ok(id)
     }
 
-    /// Resizes an attached terminal. `None` when `id` is not runtime-hosted.
-    pub async fn resize(&self, id: SessionId, rows: u16, cols: u16) -> Option<Result<()>> {
-        let (client, key) = self.target(id).await?;
-        Some(
-            client
-                .call(Action::Resize { key, rows, cols })
-                .await
-                .map(|_| ())
-                .map_err(Into::into),
-        )
+    /// Sends input to the attached terminal identified by the app.
+    pub async fn write(&self, id: &str, data: String) -> Result<()> {
+        let (client, key) = self.target(id)?;
+        client.call(Action::Write { key, text: data }).await?;
+        Ok(())
     }
 
-    /// Ends the program on purpose. `None` when `id` is not runtime-hosted.
-    pub async fn stop(&self, id: SessionId) -> Option<Result<()>> {
-        let (client, key) = self.target(id).await?;
+    /// Resizes an attached terminal.
+    pub async fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<()> {
+        let (client, key) = self.target(id)?;
+        client.call(Action::Resize { key, rows, cols }).await?;
+        Ok(())
+    }
+
+    /// Ends the program on purpose.
+    pub async fn stop(&self, id: &str) -> Result<()> {
+        let (client, key) = self.target(id)?;
         let stopped = client.call(Action::Stop { key }).await;
         self.drop_attachment(id);
-        Some(stopped.map(|_| ()).map_err(Into::into))
+        stopped?;
+        Ok(())
     }
 
     /// The runtime client, connecting on first use. `None` when the runtime is not used. A failed
@@ -148,18 +152,19 @@ impl RuntimeTerminals {
         Ok(Some(client.clone()))
     }
 
-    async fn target(&self, id: SessionId) -> Option<(Client, String)> {
-        let attached = self.attached.lock().ok()?;
-        let found = attached.get(&id)?;
-        Some((found.client.clone(), found.key.clone()))
-    }
-
-    fn drop_attachment(&self, id: SessionId) {
-        let removed = self
+    fn target(&self, id: &str) -> Result<(Client, String)> {
+        let attached = self
             .attached
             .lock()
-            .ok()
-            .and_then(|mut map| map.remove(&id));
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
+        let found = attached
+            .get(id)
+            .ok_or_else(|| anyhow!("terminal attachment is no longer active"))?;
+        Ok((found.client.clone(), found.key.clone()))
+    }
+
+    fn drop_attachment(&self, id: &str) {
+        let removed = self.attached.lock().ok().and_then(|mut map| map.remove(id));
         if let Some(attached) = removed {
             attached.pump.abort();
         }
@@ -313,4 +318,37 @@ fn deliver(
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn attachment_handles_keep_runtime_routes_distinct_and_expire_on_reattach() {
+        let terminals = RuntimeTerminals::default();
+        let register = |key: &str, endpoint: &str| {
+            terminals
+                .register_attachment(key.into(), Client::new(endpoint), spawn(async {}))
+                .expect("register attachment")
+        };
+
+        let old = register("first:agent", "runtime-old");
+        let current = register("second:agent", "runtime-current");
+        assert_ne!(old, current);
+        assert_eq!(terminals.target(&old).expect("old route").1, "first:agent");
+        assert_eq!(
+            terminals.target(&current).expect("new route").1,
+            "second:agent"
+        );
+
+        let reopened = register("first:agent", "runtime-current");
+        assert_ne!(reopened, old);
+        assert!(terminals.target(&old).is_err());
+        assert_eq!(
+            terminals.target(&reopened).expect("replacement route").1,
+            "first:agent"
+        );
+        assert!(terminals.target(&current).is_ok());
+    }
 }
