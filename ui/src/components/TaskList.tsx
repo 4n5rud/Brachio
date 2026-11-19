@@ -67,7 +67,10 @@ export function TaskList(props: {
     <aside class="sidebar">
       <div class="sidebar-head">
         <h2>{t("sidebar.projects")}</h2>
-        <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
+        {/* Only shown when something needs the user, so a bare 0 is not mistaken for a project count. */}
+        <Show when={props.needsYou > 0}>
+          <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
+        </Show>
         <Show when={props.onAddRepo}>
           <button class="button button-primary button-sm" type="button" onClick={() => props.onAddRepo?.()}>
             <Icon name="plus" />{t("sidebar.addProject")}
