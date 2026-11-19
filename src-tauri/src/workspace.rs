@@ -112,6 +112,52 @@ fn add_project(database: &Database, path: &Path) -> Result<RepoRecord, String> {
     RepoRecord::insert(&connection, &repo).map_err(to_text)
 }
 
+/// A git repository found inside a folder project.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderRepo {
+    path: PathBuf,
+    name: String,
+    /// The repository is already a project of its own.
+    added: bool,
+}
+
+/// The git repositories inside a folder project, so they can be added as projects of their own.
+#[tauri::command]
+pub async fn folder_source_repos(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<Vec<FolderRepo>, String> {
+    let (folder, known) = {
+        let connection = database.lock()?;
+        let repo = RepoRecord::get(&connection, &id).map_err(to_text)?;
+        if repo.is_git {
+            return Ok(Vec::new());
+        }
+        let known: Vec<PathBuf> = RepoRecord::list(&connection)
+            .map_err(to_text)?
+            .into_iter()
+            .map(|project| project.path)
+            .collect();
+        (repo.path, known)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        brachio_git::find_repositories(&folder)
+            .into_iter()
+            .map(|path| {
+                let path = brachio_pty::without_verbatim_prefix(&path);
+                FolderRepo {
+                    name: folder_name(&path),
+                    added: known.contains(&path),
+                    path,
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(to_text)
+}
+
 /// Whether the task belongs to a plain folder project, where no git feature applies.
 fn is_folder_task(database: &Database, task: &TaskRecord) -> Result<bool, String> {
     let connection = database.lock()?;

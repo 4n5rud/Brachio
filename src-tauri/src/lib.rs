@@ -197,6 +197,7 @@ pub fn run() {
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,
+            workspace::folder_source_repos,
             agent_accounts::agent_auth_status,
             agent_accounts::codex_auth_action,
             agent_accounts::codex_usage,
