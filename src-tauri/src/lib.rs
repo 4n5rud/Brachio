@@ -5,6 +5,7 @@ mod hook_setup;
 mod hook_socket;
 mod runtime_client;
 mod runtime_terminals;
+mod task_tabs;
 mod terminal;
 mod update_release;
 mod workspace;
@@ -134,6 +135,8 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            task_tabs::task_secondary_tabs,
+            task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
             hook_socket::approval_answer,
             workspace::repo_list,
