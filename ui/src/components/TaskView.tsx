@@ -393,11 +393,11 @@ export function TaskView(props: {
           {(pending) => <button class="button button-sm" type="button"
             onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</button>}
         </Show>
-        <Show when={props.onAnswer && approval()}>
-          {(question) => (
-            <ApprovalBar review={question().review}
-              onAllow={() => props.onAnswer?.(question().id, true)}
-              onDeny={() => props.onAnswer?.(question().id, false)} />
+        <Show when={props.onAnswer && approval()?.id} keyed>
+          {(id) => (
+            <ApprovalBar review={approval()?.review ?? ""}
+              onAllow={() => props.onAnswer?.(id, true)}
+              onDeny={() => props.onAnswer?.(id, false)} />
           )}
         </Show>
       </div>
