@@ -16,6 +16,7 @@ use tokio::sync::OnceCell;
 
 use crate::runtime_client;
 use crate::terminal::{send, send_message, ChannelMessage};
+use crate::terminal_status::TerminalStatus;
 
 /// How often a frame that is not yet at a replay boundary is retried.
 const FRAME_ATTEMPTS: u32 = 5;
@@ -63,6 +64,7 @@ impl RuntimeTerminals {
         key: String,
         launch: Launch,
         channel: Channel<InvokeResponseBody>,
+        agent: bool,
     ) -> Result<Option<(SessionId, bool)>> {
         let Some(client) = self.client().await? else {
             return Ok(None);
@@ -93,7 +95,7 @@ impl RuntimeTerminals {
                 })
                 .await?
         };
-        let pump = spawn(pump(first, following, channel));
+        let pump = spawn(pump(first, following, channel, agent));
         let id = session.session_id;
         let previous = self
             .attached
@@ -216,14 +218,22 @@ async fn open_frame(client: &Client, key: &str) -> Result<(Reply, Following), Cl
 }
 
 /// Forward everything the runtime reports to the web view until the program ends.
-async fn pump(first: Reply, mut following: Following, channel: Channel<InvokeResponseBody>) {
+async fn pump(
+    first: Reply,
+    mut following: Following,
+    channel: Channel<InvokeResponseBody>,
+    agent: bool,
+) {
     let mut last_status = None;
+    let status = agent.then(|| TerminalStatus::new(channel.clone()));
+    let mut live = false;
     let mut next = Some(first);
     loop {
         if let Some(reply) = next.take() {
-            if deliver(reply, &mut last_status, &channel) {
+            if deliver(reply, &mut last_status, &channel, status.as_ref(), live) {
                 return;
             }
+            live = true;
         }
         match following.next().await {
             Ok(Some(reply)) => next = Some(reply),
@@ -240,6 +250,8 @@ fn deliver(
     reply: Reply,
     last_status: &mut Option<StatusInfo>,
     channel: &Channel<InvokeResponseBody>,
+    status: Option<&TerminalStatus>,
+    live: bool,
 ) -> bool {
     let (session, bytes, drained) = match reply.result {
         ResponseResult::Snapshot { session, screen } => (session, screen.ansi.into_bytes(), true),
@@ -253,16 +265,21 @@ fn deliver(
         _ => return false,
     };
     if !bytes.is_empty() {
+        if let Some(status) = status.filter(|_| live) {
+            status.activity();
+        }
         send(channel, InvokeResponseBody::Raw(bytes));
     }
     if session.status != *last_status {
-        let (status, message) = session
+        let (state, message) = session
             .status
             .clone()
             .map_or((AgentState::Unknown, None), |status| {
                 (status.state, status.message)
             });
-        send_message(channel, &ChannelMessage::Status { status, message });
+        if let Some(status) = status {
+            status.osc(state, message);
+        }
         *last_status = session.status.clone();
     }
     if session.exited && drained {

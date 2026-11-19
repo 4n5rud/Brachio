@@ -15,6 +15,7 @@ use tauri::State;
 
 use crate::hook_setup::HookSetup;
 use crate::runtime_terminals::{Launch, RuntimeTerminals};
+use crate::terminal_status::TerminalStatus;
 use crate::{task_ports, terminal_authorization, workspace::Database};
 
 /// App state that owns every terminal.
@@ -152,7 +153,9 @@ pub async fn terminal_open(
             rows: request.rows.max(1),
             cols: request.cols.max(1),
         };
-        let opened = hosted.open(key, launch, on_event.clone()).await;
+        let opened = hosted
+            .open(key, launch, on_event.clone(), request.agent.is_some())
+            .await;
         if let Some((id, attached)) = opened.map_err(|error| to_message(&error))? {
             return Ok(Opened {
                 id,
@@ -174,7 +177,9 @@ pub async fn terminal_open(
         rows: request.rows.max(1),
         cols: request.cols.max(1),
     };
-    let spawned = terminals.0.spawn(&spec, sink_for(on_event));
+    let spawned = terminals
+        .0
+        .spawn(&spec, sink_for(on_event, request.agent.is_some()));
     let id = spawned.map_err(|error| to_message(&error))?;
     Ok(Opened {
         id,
@@ -276,18 +281,24 @@ fn shell_command() -> ResolvedCommand {
     }
 }
 
-fn sink_for(channel: Channel<InvokeResponseBody>) -> EventSink {
+fn sink_for(channel: Channel<InvokeResponseBody>, agent: bool) -> EventSink {
+    let status = agent.then(|| TerminalStatus::new(channel.clone()));
     Arc::new(move |event| {
         let message = match event {
             PtyEvent::Output(bytes) => {
+                if let Some(status) = &status {
+                    status.activity();
+                }
                 send(&channel, InvokeResponseBody::Raw(bytes));
                 return;
             }
             PtyEvent::Exit(exit_code) => ChannelMessage::Exit { exit_code },
-            PtyEvent::Status(report) => ChannelMessage::Status {
-                status: report.state,
-                message: report.message,
-            },
+            PtyEvent::Status(report) => {
+                if let Some(status) = &status {
+                    status.osc(report.state, report.message);
+                }
+                return;
+            }
         };
         if let Ok(json) = serde_json::to_string(&message) {
             send(&channel, InvokeResponseBody::Json(json));
