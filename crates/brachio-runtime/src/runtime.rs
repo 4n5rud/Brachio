@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::journal::{Journal, SessionRecord};
 use crate::launcher::{parse_env, shell_command};
 use crate::screen::{COLS, ROWS};
-use crate::session::{get, lock, Session};
+use crate::session::{get, lock, ScreenMark, Session};
 
 pub(crate) struct Runtime {
     pub(crate) instance: String,
@@ -26,8 +26,8 @@ pub(crate) struct Runtime {
     pub(crate) lost: Mutex<HashMap<String, SessionRecord>>,
     /// Keys the user stopped on purpose; their records are deleted, not kept.
     pub(crate) stopped: Mutex<HashSet<String>>,
-    /// What the journal already holds for each key: output length and exit state.
-    pub(crate) saved: Mutex<HashMap<String, (u64, bool)>>,
+    /// Which screen revision the journal already holds for each key.
+    pub(crate) saved: Mutex<HashMap<String, ScreenMark>>,
 }
 
 impl Runtime {

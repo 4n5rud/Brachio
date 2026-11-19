@@ -28,6 +28,13 @@ pub(crate) struct Session {
     pub(crate) updates: watch::Receiver<()>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScreenMark {
+    output_bytes: u64,
+    resize_revision: u64,
+    exited: bool,
+}
+
 impl Session {
     pub(crate) fn describe(&self, after: Option<u64>) -> Result<ResponseResult> {
         let state = lock(&self.output)?;
@@ -47,12 +54,12 @@ impl Session {
     }
 
     /// What decides whether the saved record is out of date, without formatting the screen.
-    pub(crate) fn mark(&self) -> Result<(u64, bool)> {
+    pub(crate) fn mark(&self) -> Result<ScreenMark> {
         let state = lock(&self.output)?;
-        Ok((state.history.end(), state.exited))
+        Ok(state.mark())
     }
 
-    pub(crate) fn record(&self, key: &str, instance: &str) -> Result<SessionRecord> {
+    pub(crate) fn record(&self, key: &str, instance: &str) -> Result<(SessionRecord, ScreenMark)> {
         let state = lock(&self.output)?;
         let frame = state.screen.frame();
         let saved_at_ms = SystemTime::now()
@@ -60,7 +67,7 @@ impl Session {
             .map_or(0, |elapsed| {
                 u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
             });
-        Ok(SessionRecord {
+        let record = SessionRecord {
             key: key.to_owned(),
             cwd: self.cwd.clone(),
             instance: instance.to_owned(),
@@ -74,7 +81,8 @@ impl Session {
             exited: state.exited,
             exit_code: state.exit_code,
             saved_at_ms,
-        })
+        };
+        Ok((record, state.mark()))
     }
 
     pub(crate) fn snapshot(&self) -> Result<ResponseResult> {
@@ -120,6 +128,14 @@ pub(crate) struct StartupOutput {
 }
 
 impl StartupOutput {
+    fn mark(&self) -> ScreenMark {
+        ScreenMark {
+            output_bytes: self.history.end(),
+            resize_revision: self.screen.resize_revision(),
+            exited: self.exited,
+        }
+    }
+
     pub(crate) fn record(&mut self, bytes: &[u8]) -> Option<SessionId> {
         self.history.push(bytes);
         self.screen.process(bytes);
@@ -180,4 +196,30 @@ pub(crate) fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
     value
         .lock()
         .map_err(|_| anyhow!("runtime state lock poisoned"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU16;
+
+    use super::StartupOutput;
+    use crate::screen::{COLS, ROWS};
+
+    #[test]
+    fn resize_without_output_invalidates_the_journal_even_at_the_original_size() {
+        let mut state = StartupOutput::default();
+        let saved = state.mark();
+        state.screen.resize(ROWS, COLS);
+        assert_eq!(state.mark(), saved);
+
+        let narrow = NonZeroU16::new(40).expect("nonzero width");
+        state.screen.resize(ROWS, narrow);
+        let resized = state.mark();
+        assert_ne!(resized, saved);
+        assert_eq!(resized.output_bytes, saved.output_bytes);
+
+        state.screen.resize(ROWS, COLS);
+        assert_ne!(state.mark(), resized);
+        assert_ne!(state.mark(), saved);
+    }
 }
