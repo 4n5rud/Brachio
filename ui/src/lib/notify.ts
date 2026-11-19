@@ -27,9 +27,12 @@ let permission: Promise<boolean> | null = null;
 
 /** Asks for permission once per run; later calls reuse the answer. */
 function allowed(): Promise<boolean> {
-  permission ??= isPermissionGranted().then(
-    async (granted) => granted || (await requestPermission()) === "granted",
-  );
+  permission ??= isPermissionGranted()
+    .then(async (granted) => granted || (await requestPermission()) === "granted")
+    .catch((error: unknown) => {
+      permission = null;
+      throw error;
+    });
   return permission;
 }
 

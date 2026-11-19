@@ -157,6 +157,7 @@ export function TerminalPane(props: {
           return;
         }
         if (message.type === "status") {
+          if (exited) return;
           blocked = message.status.state === "blocked";
           props.onStatus?.(message.status, message.message);
           return;

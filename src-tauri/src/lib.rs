@@ -9,6 +9,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod task_tabs;
 mod terminal;
+mod terminal_status;
 mod update_release;
 mod workspace;
 
