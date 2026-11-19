@@ -76,10 +76,27 @@ impl SessionManager {
         let id = SessionId(self.last_id.fetch_add(1, Ordering::Relaxed) + 1);
         let shared = Arc::new(Mutex::new(session));
         self.table()?.insert(id, Arc::clone(&shared));
+        if let Err(error) = self.start_threads(id, &shared, reader, sink) {
+            // Without its threads nobody would ever notice the child ending, so it must not stay.
+            self.forget(id);
+            if let Ok(mut session) = lock_session(&shared) {
+                let _ = session.kill();
+            }
+            return Err(error);
+        }
+        Ok(id)
+    }
 
+    fn start_threads(
+        self: &Arc<Self>,
+        id: SessionId,
+        shared: &SharedSession,
+        reader: Box<dyn Read + Send>,
+        sink: EventSink,
+    ) -> Result<()> {
         let (chunk_sender, chunk_receiver) = mpsc::channel();
         let status = StatusWatch {
-            session: Arc::downgrade(&shared),
+            session: Arc::downgrade(shared),
             sink: Arc::clone(&sink),
             scanner: OscScanner::new(),
         };
@@ -90,6 +107,7 @@ impl SessionManager {
 
         let manager = Arc::clone(self);
         let batch_config = self.batch_config;
+        let shared = Arc::clone(shared);
         let forget = Box::new(move || manager.forget(id));
         thread::Builder::new()
             .name(format!("pty-flush-{id}"))
@@ -100,7 +118,7 @@ impl SessionManager {
                 sink(PtyEvent::Exit(exit_watch.finish()));
             })
             .context("start pty flusher")?;
-        Ok(id)
+        Ok(())
     }
 
     /// Sends keyboard input to a session.
@@ -193,7 +211,7 @@ impl StatusWatch {
         scanner.feed(bytes, |body| match ProgramStatusMessage::parse(body) {
             Some(ProgramStatusMessage::Query) => {
                 if let Some(session) = session.upgrade() {
-                    if let Ok(mut session) = lock_session(&session) {
+                    if let Ok(session) = lock_session(&session) {
                         // A failed write means the PTY is closing; the exit event follows.
                         let _ = session.write_input(QUERY_REPLY);
                     }
@@ -248,11 +266,95 @@ fn flush_until_done(
             sink(PtyEvent::Output(frame));
         }
     }
+    drain_remaining(chunks, &mut batcher, &now_ms, sink);
+}
+
+/// Sends everything still queued, including the frames `push` completes on the way.
+fn drain_remaining(
+    chunks: &Receiver<Vec<u8>>,
+    batcher: &mut OutputBatcher,
+    now_ms: &dyn Fn() -> u64,
+    sink: &EventSink,
+) {
     while let Ok(chunk) = chunks.try_recv() {
-        batcher.push(&chunk, 0);
+        if let Some(frame) = batcher.push(&chunk, now_ms()) {
+            sink(PtyEvent::Output(frame));
+        }
     }
     if let Some(frame) = batcher.tick(u64::MAX) {
         sink(PtyEvent::Output(frame));
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+
+    use super::drain_remaining;
+    use crate::{BatchConfig, OutputBatcher, PtyEvent};
+
+    #[test]
+    fn every_queued_byte_is_sent_in_order_even_when_frames_complete_while_draining() {
+        let (sender, receiver) = mpsc::channel();
+        let mut expected = Vec::new();
+        for index in 0..300u32 {
+            let chunk: Vec<u8> = (0..1_000)
+                .map(|offset| ((index + offset) % 251) as u8)
+                .collect();
+            expected.extend_from_slice(&chunk);
+            sender.send(chunk).expect("queue chunk");
+        }
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let sink_received = Arc::clone(&received);
+        let sink: crate::EventSink = Arc::new(move |event| {
+            if let PtyEvent::Output(bytes) = event {
+                sink_received.lock().expect("lock").extend(bytes);
+            }
+        });
+        let mut batcher = OutputBatcher::new(BatchConfig::default());
+        drain_remaining(&receiver, &mut batcher, &|| 0, &sink);
+        assert_eq!(*received.lock().expect("lock"), expected);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod stalled_child_tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use crate::{SessionManager, SpawnSpec};
+
+    #[test]
+    fn a_child_that_never_reads_cannot_stall_writes_or_other_calls_on_its_session() {
+        let manager = Arc::new(SessionManager::default());
+        let spec = SpawnSpec {
+            program: "/bin/sleep".to_owned(),
+            args: vec!["30".to_owned()],
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        };
+        let id = manager
+            .spawn(&spec, Arc::new(|_| {}))
+            .expect("start a child that ignores its input");
+
+        // A megabyte is far more than a PTY accepts from a child that is not reading.
+        let started = Instant::now();
+        manager
+            .write(id, &vec![b'x'; 1 << 20])
+            .expect("queue input");
+        manager
+            .resize(id, 30, 100)
+            .expect("resize while input is pending");
+        assert!(manager.process_id(id).expect("process id").is_some());
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "calls waited on a child that does not read: {:?}",
+            started.elapsed()
+        );
+        manager.kill(id).expect("kill");
     }
 }
 
