@@ -45,7 +45,7 @@ Not every number favors Brachio. On Linux with WebKitGTK, the idle app used abou
 
 ## Independent terminal runtime (experimental)
 
-Set `BRACHIO_TERMINAL_RUNTIME=1` to start terminals in `brachio-runtime`, a separate process, instead of inside the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable must sit next to the app, or be named by `BRACHIO_RUNTIME_EXECUTABLE`; the installer does not include it yet. It is tested on Windows and Linux, not on macOS.
+Terminals run in `brachio-runtime`, a separate process, whenever its executable is found next to the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. Set `BRACHIO_TERMINAL_RUNTIME=0` to keep terminals inside the app instead. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable sits next to the app (release installers include it), or is named by `BRACHIO_RUNTIME_EXECUTABLE`. It is tested on Windows and Linux, not on macOS.
 
 ## Preparing new worktrees (`brachio.toml`)
 
