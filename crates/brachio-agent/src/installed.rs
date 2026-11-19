@@ -5,6 +5,10 @@ use std::env;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+
+/// An agent CLI that cannot print its version in this time is not worth waiting for.
+const VERSION_TIME_LIMIT: Duration = Duration::from_secs(5);
 
 use serde::Serialize;
 
@@ -193,10 +197,11 @@ fn is_executable(path: &Path) -> bool {
 
 fn read_version(path: &Path) -> Option<String> {
     let command = ResolvedCommand::new(path, &["--version".to_owned()]);
-    let output = Command::new(&command.program)
-        .args(&command.args)
-        .output()
-        .ok()?;
+    let output = brachio_process::output_within(
+        Command::new(&command.program).args(&command.args),
+        VERSION_TIME_LIMIT,
+    )
+    .ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let first_line = stdout.lines().next()?.trim();
     (!first_line.is_empty()).then(|| first_line.to_owned())

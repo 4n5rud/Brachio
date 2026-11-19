@@ -7,6 +7,9 @@
 use std::io;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+const GH_TIME_LIMIT: Duration = Duration::from_secs(60);
 
 use serde::{Deserialize, Serialize};
 
@@ -364,10 +367,10 @@ pub fn backoff_seconds(failures: u32, rate_limited: bool) -> u64 {
 }
 
 fn run_gh(worktree: &Path, args: &[&str]) -> Result<String, StatusError> {
-    let output = Command::new("gh")
-        .current_dir(worktree)
-        .args(args)
-        .output()?;
+    let output = brachio_process::output_within(
+        Command::new("gh").current_dir(worktree).args(args),
+        GH_TIME_LIMIT,
+    )?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         let rate_limited = message.to_lowercase().contains("rate limit");

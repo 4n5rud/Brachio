@@ -3,6 +3,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::Duration;
+
+/// Long enough for a push or a commit hook, short enough that a stuck git is noticed.
+const GIT_TIME_LIMIT: Duration = Duration::from_secs(300);
 
 /// Why a git command failed.
 #[derive(Debug, thiserror::Error)]
@@ -73,7 +77,15 @@ impl Git {
         if cfg!(windows) {
             command.args(["-c", "core.longpaths=true"]);
         }
-        Ok(command.args(args).output()?)
+        // A credential prompt nobody can see would otherwise hold this thread forever.
+        command
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GCM_INTERACTIVE", "never")
+            .args(args);
+        Ok(brachio_process::output_within(
+            &mut command,
+            GIT_TIME_LIMIT,
+        )?)
     }
 
     /// Runs git and fails on a non-zero exit. Returns trimmed stdout.

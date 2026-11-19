@@ -82,8 +82,10 @@ fn to_message(error: &anyhow::Error) -> String {
 
 /// Lists the agent CLIs found on `PATH`.
 #[tauri::command]
-pub fn agents_detect() -> Vec<Installed> {
-    brachio_agent::detect_all()
+pub async fn agents_detect() -> Vec<Installed> {
+    tokio::task::spawn_blocking(brachio_agent::detect_all)
+        .await
+        .unwrap_or_default()
 }
 
 /// Opens a terminal and streams its events to `on_event`.

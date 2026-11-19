@@ -3,6 +3,9 @@
 use std::io;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+const GH_TIME_LIMIT: Duration = Duration::from_secs(60);
 
 /// Why a pull request could not be opened.
 #[derive(Debug, thiserror::Error)]
@@ -38,10 +41,12 @@ pub fn create_pull_request(
     worktree: &Path,
     request: &PullRequest<'_>,
 ) -> Result<String, PullRequestError> {
-    let output = Command::new("gh")
-        .current_dir(worktree)
-        .args(arguments(request))
-        .output()?;
+    let output = brachio_process::output_within(
+        Command::new("gh")
+            .current_dir(worktree)
+            .args(arguments(request)),
+        GH_TIME_LIMIT,
+    )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(PullRequestError::Failed(stderr));
