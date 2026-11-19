@@ -59,6 +59,8 @@ export const en = {
   "setup.title": "Run setup commands?",
   "setup.body": "This repository's brachio.toml asks to run these commands in each new worktree. They will be typed into the shell next to the agent.",
   "setup.run": "Run",
+  "setup.copyFailed": "Setup file copy failed.",
+  "setup.retryCopy": "Retry copying files",
   "terminal.detached": "Lost the connection to the terminal runtime",
   "terminal.exited": "Process exited",
   "terminal.reopen": "Reopen session",

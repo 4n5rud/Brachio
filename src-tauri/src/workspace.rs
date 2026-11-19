@@ -89,6 +89,8 @@ pub struct CreatedTask {
     /// Commands from the repository's `brachio.toml` that the user is asked to run in the new
     /// worktree. Nothing runs without the user's say-so.
     setup_commands: Vec<String>,
+    /// The file copy error that can be retried separately.
+    setup_copy_error: Option<String>,
 }
 
 /// Creates a worktree on a fresh branch and stores the task. Files named in the repository's
@@ -137,15 +139,39 @@ pub async fn task_create(
         created_at_ms: now_ms(),
     };
     let task = TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)?;
-    match brachio_git::copy_setup_files(&repo.path, &path, &setup) {
-        Ok(copied) if !copied.is_empty() => tracing::info!(?copied, "copied setup files"),
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "could not copy setup files"),
-    }
+    let setup_copy_error = brachio_git::copy_setup_files(&repo.path, &path, &setup)
+        .err()
+        .map(to_text);
     Ok(CreatedTask {
         task,
         setup_commands: setup.run,
+        setup_copy_error,
     })
+}
+
+/// Retries only missing setup files, preserving any files already present.
+#[tauri::command]
+pub async fn task_retry_setup_copy(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
+    let (repo, task) = {
+        let connection = database.lock()?;
+        let task = TaskRecord::get(&connection, &id).map_err(to_text)?;
+        if task.archived_at_ms.is_some() {
+            return Err("Restore the task before retrying setup.".to_owned());
+        }
+        let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
+        (repo, task)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
+        brachio_git::retry_setup_files(&repo.path, &task.worktree_path, &setup)
+            .map(|_| ())
+            .map_err(to_text)
+    })
+    .await
+    .map_err(to_text)?
 }
 
 /// Hides a task from the list. The worktree and branch stay on disk.

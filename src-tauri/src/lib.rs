@@ -146,6 +146,7 @@ pub fn run() {
             workspace::task_list,
             workspace::task_create,
             workspace::task_archive,
+            workspace::task_retry_setup_copy,
             workspace::task_list_archived,
             workspace::task_restore,
             workspace::task_delete_preview,

@@ -35,6 +35,9 @@ export function TaskView(props: {
   hasSetupInput?: (taskId: string) => boolean;
   takeSetupInput?: (taskId: string) => string | undefined;
   onArchive?: () => void;
+  setupFailure?: string;
+  retryingSetup?: boolean;
+  onRetrySetup?: () => void;
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
   registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
@@ -239,6 +242,15 @@ export function TaskView(props: {
             }}
           </For>
         </div>
+        <Show when={props.setupFailure}>
+          {(message) => (
+            <div class="terminal-recovery" role="alert">
+              <span>{t("setup.copyFailed")} {message()}</span>
+              <button class="button button-sm" type="button" disabled={props.retryingSetup}
+                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</button>
+            </div>
+          )}
+        </Show>
         <Show when={props.question} fallback={
           <Show when={props.task.pendingCommand}>{(command) => <ApprovalBar command={command()} />}</Show>
         }>

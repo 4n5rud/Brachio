@@ -61,6 +61,8 @@ export const ko: Messages = {
   "setup.title": "설정 명령을 실행할까요?",
   "setup.body": "이 저장소의 brachio.toml이 새 worktree마다 아래 명령을 실행하라고 해요. 에이전트 옆 셸에 입력돼요.",
   "setup.run": "실행",
+  "setup.copyFailed": "셋업 파일 복사 실패.",
+  "setup.retryCopy": "파일 복사 재시도",
   "terminal.detached": "터미널 런타임과 연결이 끊어졌어요",
   "terminal.exited": "프로세스가 끝났어요",
   "terminal.reopen": "세션 다시 열기",
