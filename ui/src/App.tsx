@@ -18,6 +18,7 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
+import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import type { CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
 import type { AgentState } from "./lib/status";
@@ -63,6 +64,9 @@ export function App() {
   const [live, setLive] = createSignal<ReadonlyMap<string, ReadonlyMap<string, LiveStatus>>>(new Map());
   const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
   const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const [unreadByTab, setUnreadByTab] = createSignal<ReadonlyMap<string, number>>(new Map());
+  const unreadForTab = (key: string | undefined) => key ? unreadByTab().get(key) ?? 0 : 0;
+  const unreadForTask = (id: string) => unreadForTab(`${id}:agent`) + unreadForTab(secondaryKeys().get(id));
   const [requestedTab, setRequestedTab] = createSignal<{ key: string }>();
   const activeAgentKey = (taskId: string, key: string) =>
     key === `${taskId}:agent` || key === secondaryKeys().get(taskId);
@@ -253,7 +257,7 @@ export function App() {
     firstPrompts.delete(taskId);
     return prompt;
   };
-  const draftComment = async (id: string, text: string) => {
+  const draftComment = async (id: string, text: string, reminderFor?: string) => {
     const task = selected();
     const getTarget = draftTargets.get(id);
     const target = getTarget?.();
@@ -263,6 +267,7 @@ export function App() {
       const current = getTarget();
       return selected()?.id === id && draftTargets.get(id) === getTarget
         && current?.key === target.key && current.prepare === target.prepare
+        && (!reminderFor || target.key === reminderFor && unreadForTab(reminderFor) > 0)
         && activeAgentKey(id, target.key)
         && !questions().some((question) => question.key === target.key);
     };
@@ -464,6 +469,7 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
+      onCleanup(watchMailbox(setUnreadByTab));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
@@ -600,6 +606,7 @@ export function App() {
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
           needsYou={needsYou()}
+          unreadForTask={unreadForTask}
           now={now()}
         />
         <Show when={displayedTask()}>
@@ -630,6 +637,12 @@ export function App() {
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
               registerDraftTarget={registerDraftTarget}
+              unreadForTab={unreadForTab}
+              onMailboxReminder={(key) => {
+                void draftComment(task().id, MAILBOX_REMINDER, key)
+                  .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
+                  .catch(report);
+              }}
             />
           )}
         </Show>

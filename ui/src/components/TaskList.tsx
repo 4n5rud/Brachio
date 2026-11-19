@@ -7,6 +7,7 @@ import { prReport, watchPrStatuses } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
+import { MailboxBadge } from "./MailboxBadge";
 import { StatusGlyph } from "./StatusGlyph";
 
 const COLLAPSED_KEY = "brachio.collapsedProjects";
@@ -30,6 +31,7 @@ export function TaskList(props: {
   onAddRepo?: () => void;
   needsYou: number;
   now: number;
+  unreadForTask?: (taskId: string) => number;
 }) {
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const groupIds = createMemo(() => [...projects().keys(), ""]);
@@ -98,6 +100,7 @@ export function TaskList(props: {
                         task={task}
                         selected={task.id === props.selectedId}
                         now={props.now}
+                        unread={props.unreadForTask?.(task.id) ?? 0}
                         onSelect={() => props.onSelect(task.id)}
                       />
                     )}
@@ -112,7 +115,7 @@ export function TaskList(props: {
   );
 }
 
-function TaskItem(props: { task: TaskRow; selected: boolean; now: number; onSelect: () => void }) {
+function TaskItem(props: { task: TaskRow; selected: boolean; now: number; unread: number; onSelect: () => void }) {
   const tone = () => statusTone(props.task.status);
   return (
     <button
@@ -129,6 +132,7 @@ function TaskItem(props: { task: TaskRow; selected: boolean; now: number; onSele
         <span class="agent-chip">{AGENT_NAME[props.task.agent]}</span>
         <span class="task-branch">{shortBranch(props.task.branch)}</span>
         <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+        <MailboxBadge count={props.unread} />
         <Show when={chipOf(prReport(props.task.id))}>
           {(chip) => (
             <span class={`pr-chip pr-chip-${chip().tone}`} classList={{ "pr-chip-stale": chip().stale }}
