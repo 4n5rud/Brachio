@@ -3,6 +3,7 @@
 //! placeholders for later.
 
 mod mail;
+mod mail_hook;
 
 use std::io::Read;
 use std::time::Duration;
@@ -50,10 +51,17 @@ enum Hook {
     /// Let the user answer a permission question in the app. Prints the agent's answer, or
     /// nothing when the app does not answer, so the agent asks in the terminal as usual.
     PermissionRequest,
+    /// Tell the agent, once per new message, that mail is waiting. Prints nothing otherwise.
+    Mail,
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::Hook { hook: Hook::Mail } => {
+            // Like the permission hook, it must never block the agent.
+            mail_hook::run();
+            Ok(())
+        }
         Command::Hook {
             hook: Hook::PermissionRequest,
         } => {
