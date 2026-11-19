@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
+import { AgentIcon } from "./AgentIcon";
 import { statusTone, type AgentState } from "../lib/status";
 import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
@@ -221,6 +222,7 @@ export function TaskView(props: {
         <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={tabTone(terminalKey(props.task.id, "agent"))} />
+          <AgentIcon agent={props.task.agent} />
           {AGENT_NAME[props.task.agent]}
           <MailboxBadge count={props.unreadForTab?.(terminalKey(props.task.id, "agent")) ?? 0} />
         </button>

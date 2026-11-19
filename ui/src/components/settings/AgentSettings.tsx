@@ -3,7 +3,10 @@ import { t } from "../../i18n";
 import { detectAgents } from "../../lib/terminal";
 import { AgentAccountControls } from "./AgentAccountControls";
 
+import { AgentIcon } from "../AgentIcon";
+
 const AGENT_NAMES = { claude_code: "Claude Code", codex: "Codex" } as const;
+const ICON_OF = { claude_code: "claude", codex: "codex" } as const;
 
 /** The local agent programs and their account controls. */
 export function AgentSettings() {
@@ -17,7 +20,7 @@ export function AgentSettings() {
           <ul class="quick-open-results">
             <For each={agents()}>{(agent) => (
               <li class="archive-row form-field">
-                <span>{AGENT_NAMES[agent.kind]}{agent.version ? ` ${agent.version}` : ""}</span>
+                <span><AgentIcon agent={ICON_OF[agent.kind]} />{AGENT_NAMES[agent.kind]}{agent.version ? ` ${agent.version}` : ""}</span>
                 <span class="muted">{agent.path}</span>
                 <AgentAccountControls kind={agent.kind} />
               </li>
