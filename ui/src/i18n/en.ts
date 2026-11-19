@@ -24,6 +24,9 @@ export const en = {
   "activity.title": "Activity",
   "tray.openTasks": "Open tasks",
   "activity.empty": "No activity in this session yet.",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize or restore",
+  "window.close": "Close",
   "titlebar.settings": "Settings",
 
   "sidebar.projects": "Projects",

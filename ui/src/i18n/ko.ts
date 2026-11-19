@@ -26,6 +26,9 @@ export const ko: Messages = {
   "activity.title": "활동",
   "tray.openTasks": "열린 작업",
   "activity.empty": "이번 세션의 활동이 아직 없습니다.",
+  "window.minimize": "최소화",
+  "window.maximize": "최대화 또는 복원",
+  "window.close": "닫기",
   "titlebar.settings": "설정",
 
   "sidebar.projects": "프로젝트",
