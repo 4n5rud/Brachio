@@ -26,13 +26,8 @@ pub fn latest_codex_session(cwd: &Path) -> Option<String> {
 #[must_use]
 pub fn latest_session_in(sessions: &Path, cwd: &Path) -> Option<String> {
     let wanted = normalize(cwd);
-    newest_rollouts(sessions)
-        .into_iter()
-        .take(MAX_FILES_CHECKED)
-        .find_map(|file| {
-            let meta = read_meta(&file)?;
-            (normalize(Path::new(&meta.cwd)) == wanted).then_some(meta.id)
-        })
+    let mut budget = MAX_FILES_CHECKED;
+    find_newest(sessions, 0, &wanted, &mut budget)
 }
 
 #[derive(Deserialize)]
@@ -58,27 +53,35 @@ fn codex_home() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".codex"))
 }
 
-/// Rollout files, newest first. Names start with the start time, and the
-/// folders are dated, so sorting by path sorts by time.
-fn newest_rollouts(sessions: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    collect_rollouts(sessions, 0, &mut files);
-    files.sort_unstable_by(|left, right| right.cmp(left));
-    files
-}
-
-fn collect_rollouts(folder: &Path, depth: usize, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(folder) else {
-        return;
-    };
-    for entry in entries.flatten() {
+/// Walks the dated folders newest first and stops at the first conversation in `wanted`, so only
+/// the newest days are listed however much history there is. Names start with the start time and
+/// the folders are dated, so sorting names sorts by time. `budget` counts the files still allowed
+/// to be opened.
+fn find_newest(folder: &Path, depth: usize, wanted: &str, budget: &mut usize) -> Option<String> {
+    let mut entries: Vec<_> = fs::read_dir(folder).ok()?.flatten().collect();
+    entries.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.file_name()));
+    for entry in entries {
+        if *budget == 0 {
+            return None;
+        }
         let path = entry.path();
-        if depth < 3 && path.is_dir() {
-            collect_rollouts(&path, depth + 1, files);
+        let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if is_folder {
+            if depth < 3 {
+                if let Some(id) = find_newest(&path, depth + 1, wanted, budget) {
+                    return Some(id);
+                }
+            }
         } else if is_rollout(&path) {
-            files.push(path);
+            *budget -= 1;
+            if let Some(meta) = read_meta(&path) {
+                if normalize(Path::new(&meta.cwd)) == wanted {
+                    return Some(meta.id);
+                }
+            }
         }
     }
+    None
 }
 
 fn is_rollout(path: &Path) -> bool {
