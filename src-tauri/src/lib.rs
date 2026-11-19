@@ -4,6 +4,7 @@ mod agent_accounts;
 mod external_link;
 mod hook_setup;
 mod hook_socket;
+mod issue_report;
 mod mailbox;
 mod pr_status;
 mod runtime_client;
@@ -216,6 +217,7 @@ pub fn run() {
             workspace::task_changes,
             pr_status::task_pr_status,
             external_link::open_external_link,
+            issue_report::open_issue_draft,
             workspace::task_merge_preview,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
