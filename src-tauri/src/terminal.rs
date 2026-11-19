@@ -120,10 +120,6 @@ pub async fn terminal_open(
     }
     request.cwd = owner.task.worktree_path;
     request.session_id = owner.conversation;
-    let (mut command, prompt_delivery, resumed) = match request.agent {
-        Some(kind) => agent_command(kind, &request)?,
-        None => (shell_command(), PromptDelivery::None, false),
-    };
     // Claude Code can ask the app instead of the terminal when a hook is available.
     let mut environment = terminal_env();
     if let Some(key) = request.key.as_deref() {
@@ -133,13 +129,19 @@ pub async fn terminal_open(
             Err(error) => tracing::warn!(%error, "could not assign a development port"),
         }
     }
+    let mut options = Vec::new();
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
         let extra = hook.environment(key);
         if !extra.is_empty() {
-            command.args.splice(0..0, hook.claude_arguments());
+            options = hook.claude_arguments();
             environment.extend(extra);
         }
     }
+    let (command, prompt_delivery, resumed) = match request.agent {
+        Some(kind) => agent_command(kind, &request, options)?,
+        None => (shell_command(), PromptDelivery::None, false),
+    };
+    environment.extend(command.env);
     if let Some(key) = request.key.clone() {
         let launch = Launch {
             cwd: request.cwd.clone(),
@@ -236,6 +238,7 @@ pub async fn terminal_close(
 fn agent_command(
     kind: AgentKind,
     request: &OpenRequest,
+    mut options: Vec<String>,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let installed = installed(kind)?;
     let earlier = if request.resume {
@@ -244,14 +247,21 @@ fn agent_command(
         None
     };
     if let Some(conversation) = earlier {
-        let command = installed.resolve(&kind.resume(&conversation));
+        let mut launch = kind.resume(&conversation);
+        options.append(&mut launch.args);
+        launch.args = options;
+        let command = installed
+            .resolve(&launch)
+            .map_err(|error| error.to_string())?;
         return Ok((command, PromptDelivery::None, true));
     }
     let session_id = request
         .session_id
         .as_deref()
         .filter(|_| kind.accepts_session_id());
-    let (command, delivery) = installed.resolve_interactive(request.prompt.as_deref(), session_id);
+    let (command, delivery) = installed
+        .resolve_interactive(request.prompt.as_deref(), session_id, options)
+        .map_err(|error| error.to_string())?;
     Ok((command, delivery, false))
 }
 
@@ -273,6 +283,7 @@ fn shell_command() -> ResolvedCommand {
     ResolvedCommand {
         program: default_shell(),
         args: Vec::new(),
+        env: Vec::new(),
     }
 }
 

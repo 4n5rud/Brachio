@@ -3,12 +3,14 @@
 
 use std::env;
 use std::ffi::OsStr;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 /// An agent CLI that cannot print its version in this time is not worth waiting for.
 const VERSION_TIME_LIMIT: Duration = Duration::from_secs(5);
+const BATCH_COMMAND: &str = "BRACHIO_AGENT_BATCH_COMMAND";
 
 use serde::Serialize;
 
@@ -32,12 +34,16 @@ pub struct ResolvedCommand {
     pub program: PathBuf,
     /// Arguments, one element per argument.
     pub args: Vec<String>,
+    /// Child-only environment overrides.
+    pub env: Vec<(String, String)>,
 }
 
 impl Installed {
     /// `launch` resolved against this install, ready for a PTY.
-    #[must_use]
-    pub fn resolve(&self, launch: &Launch) -> ResolvedCommand {
+    ///
+    /// # Errors
+    /// Fails when an argument cannot be passed safely through a batch shim.
+    pub fn resolve(&self, launch: &Launch) -> io::Result<ResolvedCommand> {
         ResolvedCommand::new(&self.path, &launch.args)
     }
 
@@ -46,12 +52,15 @@ impl Installed {
     /// agent then starts without it and the caller should type it in.
     ///
     /// `session_id` names the new conversation, for agents that accept one.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Fails when a batch shim cannot safely receive the options.
     pub fn resolve_interactive(
         &self,
         prompt: Option<&str>,
         session_id: Option<&str>,
-    ) -> (ResolvedCommand, PromptDelivery) {
+        mut options: Vec<String>,
+    ) -> io::Result<(ResolvedCommand, PromptDelivery)> {
         let prompt = prompt.filter(|text| !text.trim().is_empty());
         let (mut launch, delivery) = match prompt {
             None => (self.kind.interactive(), PromptDelivery::None),
@@ -64,12 +73,11 @@ impl Installed {
             ),
         };
         if let Some(id) = session_id {
-            // Options go before the prompt, which is positional.
-            let mut args = self.kind.session_id_args(id);
-            args.append(&mut launch.args);
-            launch.args = args;
+            options.extend(self.kind.session_id_args(id));
         }
-        (self.resolve(&launch), delivery)
+        options.append(&mut launch.args);
+        launch.args = options;
+        Ok((self.resolve(&launch)?, delivery))
     }
 }
 
@@ -87,35 +95,60 @@ pub enum PromptDelivery {
 
 /// True when `cmd.exe` passes `text` through unchanged inside double quotes.
 fn is_safe_for_cmd(text: &str) -> bool {
-    const SPECIAL: &[char] = &['"', '%', '^', '&', '|', '<', '>', '!', '\n', '\r'];
-    !text.contains(SPECIAL)
+    const SPECIAL: &[char] = &['"', '%', '^', '&', '|', '<', '>', '!'];
+    !text.contains(SPECIAL) && !text.chars().any(char::is_control)
 }
 
 impl ResolvedCommand {
     /// Builds the command that starts `path` with `args`.
     ///
-    /// Windows batch files (`.cmd`, `.bat`) cannot be started directly, so
-    /// they go through `cmd.exe`. `cmd.exe` re-parses the arguments, so only
-    /// fixed flags may go this way. Prompts and other free text need the
-    /// agent's real entry point instead.
-    #[must_use]
-    pub fn new(path: &Path, args: &[String]) -> Self {
+    /// Windows batch files go through `cmd.exe`.
+    ///
+    /// # Errors
+    /// Fails if the path or arguments cannot be represented safely for CMD.
+    pub fn new(path: &Path, args: &[String]) -> io::Result<Self> {
         if !is_batch_file(path) {
-            return Self {
+            return Ok(Self {
                 program: path.to_path_buf(),
                 args: args.to_vec(),
-            };
+                env: Vec::new(),
+            });
         }
-        let mut cmd_args = vec![
-            "/d".to_owned(),
-            "/c".to_owned(),
-            path.to_string_lossy().into_owned(),
-        ];
-        cmd_args.extend_from_slice(args);
-        Self {
+        let path = path
+            .to_str()
+            .filter(|path| !path.contains('"') && !path.chars().any(char::is_control))
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "Unsupported agent batch path")
+            })?;
+        if args.iter().any(|arg| !is_safe_for_cmd(arg)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unsupported agent batch argument",
+            ));
+        }
+        // CMD expands this token after processing /c; both process launchers can
+        // pass the token verbatim without CRT-style escaping of the inner quotes.
+        let mut line = format!("\"{path}\"");
+        for arg in args {
+            line.push_str(" \"");
+            line.push_str(arg);
+            // Batch shims generally forward %* to a native program. Preserve
+            // trailing backslashes when that program parses its quoted argv.
+            for _ in arg.bytes().rev().take_while(|byte| *byte == b'\\') {
+                line.push('\\');
+            }
+            line.push('"');
+        }
+        Ok(Self {
             program: PathBuf::from("cmd.exe"),
-            args: cmd_args,
-        }
+            args: vec![
+                "/d".into(),
+                "/v:off".into(),
+                "/c".into(),
+                format!("%{BATCH_COMMAND}%"),
+            ],
+            env: vec![(BATCH_COMMAND.to_owned(), line)],
+        })
     }
 }
 
@@ -196,9 +229,11 @@ fn is_executable(path: &Path) -> bool {
 }
 
 fn read_version(path: &Path) -> Option<String> {
-    let command = ResolvedCommand::new(path, &["--version".to_owned()]);
+    let command = ResolvedCommand::new(path, &["--version".to_owned()]).ok()?;
     let output = brachio_process::output_within(
-        Command::new(&command.program).args(&command.args),
+        Command::new(&command.program)
+            .args(&command.args)
+            .envs(command.env),
         VERSION_TIME_LIMIT,
     )
     .ok()?;
@@ -212,7 +247,8 @@ mod windows_tests {
     use std::ffi::OsStr;
     use std::fs;
 
-    use super::find_on_path;
+    use super::{find_on_path, read_version, Installed, PromptDelivery};
+    use crate::AgentKind;
 
     #[test]
     fn npm_shell_shim_does_not_shadow_the_windows_launcher() {
@@ -228,6 +264,45 @@ mod windows_tests {
         );
 
         assert_eq!(found, Some(launcher));
+    }
+
+    #[test]
+    fn runs_a_spaced_batch_shim_and_preserves_its_arguments() {
+        let root = tempfile::tempdir().expect("create temporary directory");
+        let bin = root.path().join("npm bin (test)");
+        fs::create_dir(&bin).expect("create shim directory");
+        let path = bin.join("claude.cmd");
+        fs::write(&path, "@echo off\r\necho %~1\r\n").expect("write version fixture");
+        assert_eq!(read_version(&path).as_deref(), Some("--version"));
+        fs::write(
+            &path,
+            "@echo off\r\necho [%~1][%~2][%~3][%~4][%~5][%~6]\r\n",
+        )
+        .expect("write argument fixture");
+        let installed = Installed {
+            kind: AgentKind::ClaudeCode,
+            path,
+            version: None,
+        };
+        let (command, delivery) = installed
+            .resolve_interactive(
+                Some("- summarize this"),
+                Some("session"),
+                vec![
+                    "--settings".to_owned(),
+                    "C:\\test data\\settings.json".to_owned(),
+                ],
+            )
+            .expect("resolve batch command");
+        let output = std::process::Command::new(command.program)
+            .args(command.args)
+            .envs(command.env)
+            .output()
+            .expect("run batch command");
+        assert!(output.status.success());
+        assert_eq!(delivery, PromptDelivery::Argument);
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(),
+            "[--settings][C:\\test data\\settings.json][--session-id][session][--][- summarize this]");
     }
 }
 
@@ -274,12 +349,16 @@ mod tests {
             version: None,
         };
 
-        let (_, plain) = installed.resolve_interactive(Some("add a test"), None);
-        let (command, risky) = installed.resolve_interactive(Some("fix it & push"), None);
+        let (_, plain) = installed
+            .resolve_interactive(Some("add a test"), None, vec![])
+            .expect("resolve");
+        let (command, risky) = installed
+            .resolve_interactive(Some("fix it & push"), None, vec![])
+            .expect("resolve");
 
         assert_eq!(plain, PromptDelivery::Argument);
         assert_eq!(risky, PromptDelivery::TypeIn);
-        assert_eq!(command.args, vec!["/d", "/c", "C:/npm/claude.cmd"]);
+        assert_eq!(command.env[0].1, "\"C:/npm/claude.cmd\"");
     }
 
     #[test]
@@ -290,21 +369,24 @@ mod tests {
             version: None,
         };
 
-        let (command, _) = installed.resolve_interactive(Some("add a test"), Some("abc"));
+        let (command, _) = installed
+            .resolve_interactive(Some("add a test"), Some("abc"), vec![])
+            .expect("resolve");
 
         assert_eq!(command.args, vec!["--session-id", "abc", "add a test"]);
     }
 
     #[test]
     fn batch_files_run_through_cmd() {
-        let batch = ResolvedCommand::new(Path::new("C:/npm/claude.cmd"), &["--version".to_owned()]);
+        let batch = ResolvedCommand::new(Path::new("C:/npm/claude.cmd"), &["--version".to_owned()])
+            .expect("resolve");
         assert_eq!(batch.program, PathBuf::from("cmd.exe"));
         assert_eq!(
             batch.args,
-            vec!["/d", "/c", "C:/npm/claude.cmd", "--version"]
+            vec!["/d", "/v:off", "/c", "%BRACHIO_AGENT_BATCH_COMMAND%"]
         );
 
-        let direct = ResolvedCommand::new(Path::new("/usr/bin/codex"), &[]);
+        let direct = ResolvedCommand::new(Path::new("/usr/bin/codex"), &[]).expect("resolve");
         assert_eq!(direct.program, PathBuf::from("/usr/bin/codex"));
         assert!(direct.args.is_empty(), "no arguments were given");
     }

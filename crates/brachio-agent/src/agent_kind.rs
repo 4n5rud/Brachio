@@ -46,9 +46,14 @@ impl AgentKind {
     /// Interactive TUI that starts working on `prompt` right away.
     #[must_use]
     pub fn interactive_with_prompt(self, prompt: &str) -> Launch {
+        let mut args = Vec::new();
+        if prompt.starts_with('-') {
+            args.push("--".to_owned());
+        }
+        args.push(prompt.to_owned());
         Launch {
             program: self.program(),
-            args: vec![prompt.to_owned()],
+            args,
         }
     }
 
@@ -99,6 +104,16 @@ impl AgentKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leading_dash_remains_part_of_the_positional_prompt() {
+        for kind in AgentKind::ALL {
+            assert_eq!(
+                kind.interactive_with_prompt("- summarize this").args,
+                ["--", "- summarize this"]
+            );
+        }
+    }
 
     #[test]
     fn prompt_is_one_argument_not_shell_text() {
