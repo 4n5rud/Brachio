@@ -1,8 +1,8 @@
 //! Remembers each task's last known pull request status and decides when to ask GitHub again.
 //! Read only: nothing here changes a pull request.
 //!
-//! The first version keeps the answers in memory. After a restart the first lookup fills them in
-//! again; saving them across restarts needs a table in the store and is left for a later change.
+//! The latest answer of each task is also saved in the store, so after a restart, or while GitHub
+//! cannot be reached, the last known status is still shown, marked as out of date.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -12,7 +12,7 @@ use brachio_git::{
     backoff_seconds, fetch_pull_request, local_head, repository_of, PullRequestSnapshot,
     PullRequestState, StatusError,
 };
-use brachio_store::TaskRecord;
+use brachio_store::{load_pr_status, save_pr_status, TaskRecord};
 use serde::Serialize;
 use tauri::State;
 
@@ -120,6 +120,24 @@ impl Tracker {
         }
     }
 
+    /// Starts a task from an answer saved earlier. Does nothing when the task already has one.
+    pub fn restore(&mut self, task: &str, snapshot: PullRequestSnapshot, checked_at_ms: i64) {
+        self.entries
+            .entry(task.to_owned())
+            .or_insert_with(|| Entry {
+                answered: true,
+                snapshot: Some(snapshot),
+                checked_at_ms: Some(checked_at_ms),
+                ..Entry::default()
+            });
+    }
+
+    /// Whether anything is known about the task in this run.
+    #[must_use]
+    pub fn knows(&self, task: &str) -> bool {
+        self.entries.contains_key(task)
+    }
+
     /// What is known about a task right now.
     #[must_use]
     pub fn report(&self, task: &str, now_ms: i64) -> PrStatusReport {
@@ -159,6 +177,33 @@ fn now_ms() -> i64 {
     i64::try_from(since_epoch.as_millis()).unwrap_or(i64::MAX)
 }
 
+/// Loads the answer saved before the last restart, once per task and run.
+fn restore_saved(database: &Database, statuses: &PrStatuses, id: &str) -> Result<(), String> {
+    if statuses.tracker()?.knows(id) {
+        return Ok(());
+    }
+    let saved = load_pr_status(&*database.lock()?, id).map_err(|error| error.to_string())?;
+    if let Some((json, checked_at_ms)) = saved {
+        // An unreadable saved answer is dropped; the next lookup replaces it.
+        if let Ok(snapshot) = serde_json::from_str(&json) {
+            statuses.tracker()?.restore(id, snapshot, checked_at_ms);
+        }
+    }
+    Ok(())
+}
+
+fn save_snapshot(database: &Database, id: &str, snapshot: &PullRequestSnapshot, at: i64) {
+    let Ok(json) = serde_json::to_string(snapshot) else {
+        return;
+    };
+    let saved = database.lock().and_then(|connection| {
+        save_pr_status(&connection, id, &json, at).map_err(|error| error.to_string())
+    });
+    if let Err(error) = saved {
+        tracing::warn!(%error, "could not save the pull request status");
+    }
+}
+
 /// Reads where the task's pull request stands. `force` is the user pressing Refresh.
 #[tauri::command]
 pub async fn task_pr_status(
@@ -168,6 +213,7 @@ pub async fn task_pr_status(
     force: bool,
 ) -> Result<PrStatusReport, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(|error| error.to_string())?;
+    restore_saved(&database, &statuses, &id)?;
     let decision = statuses.tracker()?.begin(&id, now_ms(), force);
     if decision == Decision::Fetch {
         let worktree = task.worktree_path.clone();
@@ -178,7 +224,11 @@ pub async fn task_pr_status(
         })
         .await
         .map_err(|error| error.to_string())?;
-        statuses.tracker()?.finish(&id, now_ms(), outcome);
+        let at = now_ms();
+        if let Ok(Some(snapshot)) = &outcome {
+            save_snapshot(&database, &id, snapshot, at);
+        }
+        statuses.tracker()?.finish(&id, at, outcome);
     }
     let mut report = statuses.tracker()?.report(&id, now_ms());
     report.local_head = local_head(&task.worktree_path).ok();
@@ -253,6 +303,21 @@ mod tests {
         assert_eq!(report.checked_at_ms, Some(1_000));
         assert_eq!(report.error.as_deref(), Some("could not resolve host"));
         assert_eq!(report.retry_in_seconds, Some(29));
+    }
+
+    #[test]
+    fn a_saved_answer_is_shown_when_the_first_lookup_after_a_restart_fails() {
+        let mut tracker = Tracker::default();
+        assert!(!tracker.knows("t"));
+        tracker.restore("t", snapshot(PullRequestState::Open, "ccc"), 5_000);
+        assert!(tracker.knows("t"));
+        assert_eq!(tracker.begin("t", 100_000, false), Decision::Fetch);
+        tracker.finish("t", 100_000, Err(offline()));
+
+        let report = tracker.report("t", 100_000);
+        assert_eq!(report.snapshot.expect("restored").head_sha, "ccc");
+        assert_eq!(report.checked_at_ms, Some(5_000));
+        assert!(report.error.is_some());
     }
 
     #[test]
