@@ -556,28 +556,17 @@ pub async fn task_changes(
             }
         }
         let untracked = git_paths(&git, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-        let conflicts = git_paths(
-            &git,
-            &[
-                "diff",
-                "--cached",
-                "--diff-filter=U",
-                "--name-only",
-                "-z",
-                "--",
-            ],
-        )?;
-        let staged = git_paths(
-            &git,
-            &[
+        let index = git
+            .run_text(&[
                 "diff",
                 "--cached",
                 "--no-renames",
-                "--name-only",
+                "--name-status",
                 "-z",
                 "--",
-            ],
-        )?;
+            ])
+            .map_err(to_text)?;
+        let (staged, conflicts) = index_paths(&index)?;
         Ok(TaskChanges {
             patch,
             untracked,
@@ -588,6 +577,36 @@ pub async fn task_changes(
     })
     .await
     .map_err(to_text)?
+}
+
+fn index_paths(output: &str) -> Result<(Vec<String>, Vec<String>), String> {
+    let mut staged = Vec::new();
+    let mut conflicts = Vec::new();
+    let mut entries = output.split_terminator('\0');
+    while let Some(status) = entries.next() {
+        let path = entries
+            .next()
+            .ok_or("Git returned an incomplete index diff.")?;
+        if status == "U" {
+            conflicts.push(path.to_owned());
+        }
+        staged.push(path.to_owned());
+    }
+    Ok((staged, conflicts))
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::index_paths;
+
+    #[test]
+    fn index_diff_lists_conflicts_with_the_staged_paths() {
+        let (staged, conflicts) =
+            index_paths("A\0New file.txt\0U\0conflict.txt\0D\0old.txt\0").expect("index diff");
+        assert_eq!(staged, ["New file.txt", "conflict.txt", "old.txt"]);
+        assert_eq!(conflicts, ["conflict.txt"]);
+        assert!(index_paths("U\0").is_err());
+    }
 }
 
 fn git_paths(git: &Git, args: &[&str]) -> Result<Vec<String>, String> {
@@ -737,7 +756,7 @@ pub async fn task_pr_feedback(
 ) -> Result<serde_json::Value, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let output = std::process::Command::new("gh")
+        let output = github_command()
             .current_dir(&task.worktree_path)
             .args([
                 "pr",
@@ -767,6 +786,18 @@ pub async fn task_pr_feedback(
     .map_err(to_text)?
 }
 
+fn github_command() -> std::process::Command {
+    let mut command = std::process::Command::new("gh");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.stdin(std::process::Stdio::null());
+    command
+}
+
 fn read_inline_reviews(
     worktree: &Path,
     feedback: &serde_json::Value,
@@ -781,7 +812,7 @@ fn read_inline_reviews(
         return Err("Could not identify the repository for inline reviews.".to_owned());
     };
     let endpoint = format!("repos/{owner}/{repo}/pulls/{number}/comments");
-    let output = std::process::Command::new("gh")
+    let output = github_command()
         .current_dir(worktree)
         .args([
             "api",

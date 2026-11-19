@@ -62,7 +62,7 @@ impl StatusError {
 }
 
 /// Where a pull request is in its life.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PullRequestState {
     /// Still open: the only kind that is refreshed.
@@ -74,7 +74,7 @@ pub enum PullRequestState {
 }
 
 /// What the checks of one commit add up to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChecksOverall {
     /// At least one check failed.
@@ -88,7 +88,7 @@ pub enum ChecksOverall {
 }
 
 /// The reviewers' verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewState {
     /// Approved.
@@ -102,7 +102,7 @@ pub enum ReviewState {
 }
 
 /// Whether the pull request can be merged without resolving conflicts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Conflict {
     /// It merges cleanly.
@@ -114,7 +114,7 @@ pub enum Conflict {
 }
 
 /// The totals of a commit's checks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChecksSummary {
     /// The combined verdict.
@@ -130,7 +130,7 @@ pub struct ChecksSummary {
 }
 
 /// A failed check with the address of its original log.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailedCheck {
     /// The check's name.
     pub name: String,
@@ -139,7 +139,7 @@ pub struct FailedCheck {
 }
 
 /// A pull request as GitHub described it at one moment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestSnapshot {
     /// `owner/name`.

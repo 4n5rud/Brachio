@@ -416,6 +416,69 @@ mod windows_tests {
         let _ = manager.kill(id);
         panic!("ConPTY child did not report exit");
     }
+
+    #[test]
+    fn a_shell_starts_in_a_folder_given_in_the_verbatim_form_canonicalize_returns() {
+        let folder = std::env::temp_dir()
+            .canonicalize()
+            .expect("canonical temp dir");
+        assert!(folder.to_string_lossy().starts_with(r"\\?\"));
+        let plain = folder
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_lowercase();
+
+        let manager = Arc::new(SessionManager::default());
+        let (sender, receiver) = mpsc::channel();
+        let spec = SpawnSpec {
+            program: "cmd.exe".to_owned(),
+            args: ["/d", "/c", "cd"].into_iter().map(str::to_owned).collect(),
+            cwd: folder,
+            env: Vec::new(),
+            rows: 24,
+            cols: 200,
+        };
+        let id = manager
+            .spawn(
+                &spec,
+                Arc::new(move |event| {
+                    let _ = sender.send(event);
+                }),
+            )
+            .expect("start ConPTY child");
+        let end = Instant::now() + Duration::from_secs(10);
+        let mut output = Vec::new();
+        let mut cursor_report_sent = false;
+        while let Some(remaining) = end.checked_duration_since(Instant::now()) {
+            match receiver.recv_timeout(remaining) {
+                Ok(PtyEvent::Output(bytes)) => {
+                    output.extend(bytes);
+                    if !cursor_report_sent && output.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                        manager
+                            .write(id, b"\x1b[1;1R")
+                            .expect("answer cursor request");
+                        cursor_report_sent = true;
+                    }
+                }
+                Ok(PtyEvent::Exit(_)) => {
+                    let text = String::from_utf8_lossy(&output).to_lowercase();
+                    assert!(
+                        !text.contains(r"\\?\"),
+                        "cmd complained about the verbatim path: {text:?}"
+                    );
+                    assert!(
+                        text.contains(&plain),
+                        "cmd did not start in {plain}: {text:?}"
+                    );
+                    return;
+                }
+                Ok(PtyEvent::Status(_)) => {}
+                Err(_) => break,
+            }
+        }
+        let _ = manager.kill(id);
+        panic!("ConPTY child did not report exit");
+    }
 }
 
 #[cfg(all(test, unix))]

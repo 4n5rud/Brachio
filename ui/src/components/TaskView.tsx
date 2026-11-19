@@ -12,7 +12,13 @@ import { CORE_AGENT } from "../lib/terminal";
 import { summarize, type ApprovalQuestion } from "../lib/approvals";
 import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
   saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
-import { TerminalPane, type TerminalSession } from "./TerminalPane";
+import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
+
+export interface DraftTarget {
+  key: string;
+  agent: string;
+  prepare: PrepareDraft;
+}
 
 /**
  * Main area for one task: header, tabs, the agent terminal, approval bar.
@@ -48,7 +54,7 @@ export function TaskView(props: {
   onRetrySetup?: () => void;
   /** Whether the task's agent should continue its last conversation. */
   shouldResume?: (taskId: string) => boolean;
-  registerDraftWriter: (taskId: string, writer: (text: string) => Promise<boolean>) => () => void;
+  registerDraftTarget: (taskId: string, target: () => DraftTarget | undefined) => () => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [promptFeedback, setPromptFeedback] = createSignal<{ taskId: string; message: string }>();
@@ -77,7 +83,7 @@ export function TaskView(props: {
     const session = secondary().get(id);
     return session !== undefined && selectedSecondary().get(id) === session;
   };
-  const secondaryWriters = new Map<string, (text: string) => Promise<boolean>>();
+  const secondaryWriters = new Map<string, PrepareDraft>();
   const secondaryKind = (task: TaskRow) => task.agent === "claude" ? "codex" : "claude";
   const extraKey = (id: string, sessionId: string) => `${id}:agent-${sessionId}`;
   const currentExtraKey = (id: string) => {
@@ -308,8 +314,18 @@ export function TaskView(props: {
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
-                        registerDraftWriter={(writer) => props.registerDraftWriter(id, (text) =>
-                          extraSelected() ? secondaryWriters.get(id)?.(text) ?? Promise.resolve(false) : writer(text))}
+                        registerDraftWriter={(prepare) => props.registerDraftTarget(id, () => {
+                          const task = props.findTask(id);
+                          if (!task || !selected() || mode() === "shell") return undefined;
+                          if (!extraSelected()) {
+                            return { key: terminalKey(id, "agent"), agent: AGENT_NAME[task.agent], prepare };
+                          }
+                          const key = currentExtraKey(id);
+                          const extra = key && secondaryWriters.get(key);
+                          return key && extra
+                            ? { key, agent: AGENT_NAME[secondaryKind(task)], prepare: extra }
+                            : undefined;
+                        })}
                       />
                     </div>
                     <Show when={secondary().get(id)} keyed>
@@ -324,10 +340,11 @@ export function TaskView(props: {
                               active={selected() && mode() !== "shell" && extraSelected()}
                               theme={props.theme}
                               onStatus={(status, message) => props.onStatus?.(id, extraKey(id, sessionId), status, message)}
-                              registerDraftWriter={(writer) => {
-                                secondaryWriters.set(id, writer);
+                              registerDraftWriter={(prepare) => {
+                                const key = extraKey(id, sessionId);
+                                secondaryWriters.set(key, prepare);
                                 return () => {
-                                  if (secondaryWriters.get(id) === writer) secondaryWriters.delete(id);
+                                  if (secondaryWriters.get(key) === prepare) secondaryWriters.delete(key);
                                 };
                               }}
                             />
