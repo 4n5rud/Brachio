@@ -89,6 +89,9 @@ pub struct MailMessage {
     pub thread_id: String,
     /// Sender's terminal key.
     pub from: String,
+    /// Receiver's terminal key.
+    #[serde(default)]
+    pub to: String,
     /// Sender's task title, when the task is known.
     #[serde(default)]
     pub from_title: Option<String>,
