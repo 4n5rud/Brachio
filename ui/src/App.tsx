@@ -461,6 +461,13 @@ export function App() {
       t("task.deleteLoss")
         .replace("{files}", String(loss.uncommittedFiles))
         .replace("{commits}", String(loss.unpushedCommits)),
+      ...(loss.ignoredEntries > 0
+        ? [
+            t("task.deleteIgnored")
+              .replace("{count}", String(loss.ignoredEntries))
+              .replace("{names}", loss.ignoredExamples.join(", ")),
+          ]
+        : []),
     ].join("\n\n");
     const agreed = await confirm(body, {
       title: `${t("task.delete")} · ${task.title}`,

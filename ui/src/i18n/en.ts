@@ -50,6 +50,7 @@ export const en = {
   "task.restore": "Restore",
   "task.delete": "Delete",
   "task.deleteBody": "This permanently deletes the worktree folder, the branch {branch} and the task.",
+  "task.deleteIgnored": "Git also ignores {count} item(s) here, such as {names}. They were never committed, so deleting loses them for good.",
   "task.deleteLoss": "You will lose {files} uncommitted file(s) and {commits} commit(s) that exist only on this branch.",
   "task.archiveBody": "This hides the task and closes its terminals. The Git branch and worktree stay on disk.",
   "task.split": "Split",
