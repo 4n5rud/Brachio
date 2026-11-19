@@ -56,6 +56,8 @@ export function TerminalPane(props: {
 }) {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
+  const [restoredFrame, setRestoredFrame] = createSignal(false);
+  const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation">();
   let reopen: () => void;
   onMount(() => {
     const term = new Terminal({
@@ -129,6 +131,7 @@ export function TerminalPane(props: {
     let typeInPrompt: string | null = null;
     let initialInputPending = session?.initialInput ?? null;
     const start = (resume: boolean, initialPrompt: string | null) => {
+      setContinuity(undefined);
       blocked = false;
       if (!session) return;
       const launch = ++generation;
@@ -163,9 +166,7 @@ export function TerminalPane(props: {
           return;
         }
         if (message.type === "restored") {
-          const notice = new TextEncoder().encode(`\r\n[${t("terminal.restored")}]\r\n`);
-          if (handle) term.write(notice);
-          else earlyOutput.push(notice);
+          setRestoredFrame(true);
           return;
         }
         if (message.type === "detached") {
@@ -178,9 +179,11 @@ export function TerminalPane(props: {
           return;
         }
         for (const bytes of earlyOutput.splice(0)) term.write(bytes);
-        if (resume && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
+        if (resume && session.agent === "claude_code" && !handle?.attached
+          && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
           term.writeln(`\r\n[${t("terminal.resumeFailed")}]\r\n`);
           start(false, initialPrompt);
+          setContinuity("terminal.newConversation");
           return;
         }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
@@ -196,7 +199,8 @@ export function TerminalPane(props: {
             return;
           }
           handle = opened;
-          if (resume && !opened.resumed) term.writeln(`[${t("terminal.resumeFailed")}]\r\n`);
+          if (opened.attached) setContinuity("terminal.liveAttached");
+          else if (resume) setContinuity(opened.resumed ? "terminal.conversationResuming" : "terminal.newConversation");
           // The size may have changed while the session was starting.
           void opened.resize(term.rows, term.cols).catch(() => {});
           if (opened.promptDelivery === "type_in") typeInPrompt = initialPrompt;
@@ -278,6 +282,12 @@ export function TerminalPane(props: {
   });
   return (
     <div class="terminal-content">
+      <Show when={restoredFrame() || continuity()}>
+        <div class="terminal-recovery" role="status">
+          <Show when={restoredFrame()}><span>{t("terminal.restored")}</span></Show>
+          <Show when={continuity()}>{(message) => <span>{t(message())}</span>}</Show>
+        </div>
+      </Show>
       <div ref={host} class="terminal-host" data-agent-terminal={props.session?.agent ? "" : undefined} />
       <Show when={canReopen()}>
         <div class="terminal-recovery">

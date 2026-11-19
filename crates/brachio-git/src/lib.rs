@@ -27,4 +27,6 @@ pub use worktree::{
     add_worktree, discard_worktree, remove_worktree, unsaved_work, worktree_path, AddWorktree,
     UnsavedWork,
 };
-pub use worktree_setup::{copy_setup_files, read_setup, SetupConfig, SetupError, CONFIG_FILE};
+pub use worktree_setup::{
+    copy_setup_files, read_setup, retry_setup_files, SetupConfig, SetupError, CONFIG_FILE,
+};
