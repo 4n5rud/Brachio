@@ -16,7 +16,11 @@ pub struct HookSetup {
     endpoint: String,
     settings: Option<PathBuf>,
     helper_folder: Option<PathBuf>,
+    /// A plugin folder that teaches Claude Code the `brachio-send` skill, added per session.
+    plugin: Option<PathBuf>,
 }
+
+const SEND_SKILL: &str = include_str!("../skills/brachio-send/SKILL.md");
 
 impl HookSetup {
     /// Writes the settings file under `folder` when the helper is installed. A failure only
@@ -33,10 +37,16 @@ impl HookSetup {
             .ok()
             .flatten()
             .and_then(|helper| helper.parent().map(Path::to_path_buf));
+        let plugin = helper_folder.as_ref().and_then(|_| {
+            write_plugin(folder)
+                .map_err(|error| tracing::info!(%error, "the brachio-send skill is off"))
+                .ok()
+        });
         Self {
             endpoint,
             settings,
             helper_folder,
+            plugin,
         }
     }
 
@@ -62,9 +72,17 @@ impl HookSetup {
 
     /// Arguments that add the hook to a Claude Code session.
     pub fn claude_arguments(&self) -> Vec<String> {
-        self.settings.as_ref().map_or_else(Vec::new, |path| {
-            vec!["--settings".to_owned(), path.to_string_lossy().into_owned()]
-        })
+        let mut arguments = Vec::new();
+        if let Some(path) = &self.settings {
+            arguments.extend(["--settings".to_owned(), path.to_string_lossy().into_owned()]);
+        }
+        if let Some(path) = &self.plugin {
+            arguments.extend([
+                "--plugin-dir".to_owned(),
+                path.to_string_lossy().into_owned(),
+            ]);
+        }
+        arguments
     }
 
     /// Environment that tells the hook where to ask and which terminal it belongs to.
@@ -77,6 +95,25 @@ impl HookSetup {
             (KEY_VARIABLE.to_owned(), key.to_owned()),
         ]
     }
+}
+
+/// Writes the plugin that carries the `brachio-send` skill and returns its folder.
+fn write_plugin(folder: &Path) -> Result<PathBuf> {
+    let plugin = folder.join("plugin");
+    let skill = plugin.join("skills").join("brachio-send");
+    fs::create_dir_all(&skill).with_context(|| format!("create {}", skill.display()))?;
+    fs::create_dir_all(plugin.join(".claude-plugin"))?;
+    fs::write(
+        plugin.join(".claude-plugin").join("plugin.json"),
+        serde_json::json!({
+            "name": "brachio",
+            "version": env!("CARGO_PKG_VERSION"),
+            "description": "Lets agents in Brachio tasks message each other."
+        })
+        .to_string(),
+    )?;
+    fs::write(skill.join("SKILL.md"), SEND_SKILL)?;
+    Ok(plugin)
 }
 
 fn write_settings(folder: &Path) -> Result<Option<PathBuf>> {
@@ -123,8 +160,28 @@ fn settings_json(helper: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::settings_json;
+    use super::{settings_json, write_plugin, SEND_SKILL};
     use std::path::Path;
+
+    #[test]
+    fn the_send_skill_is_a_short_plugin_skill_with_a_name_and_a_one_line_description() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let plugin = write_plugin(folder.path()).expect("write plugin");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(plugin.join(".claude-plugin/plugin.json")).expect("manifest"),
+        )
+        .expect("json");
+        assert_eq!(manifest["name"], "brachio");
+        let skill =
+            std::fs::read_to_string(plugin.join("skills/brachio-send/SKILL.md")).expect("skill");
+        assert_eq!(skill, SEND_SKILL);
+        assert!(skill.starts_with("---\nname: brachio-send\ndescription: "));
+        assert!(
+            skill.lines().count() <= 40,
+            "{} lines",
+            skill.lines().count()
+        );
+    }
 
     #[test]
     fn the_hook_command_quotes_the_helper_and_uses_forward_slashes() {
