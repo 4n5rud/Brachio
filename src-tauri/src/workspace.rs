@@ -502,7 +502,10 @@ pub async fn task_delete(
     .await
     .map_err(to_text)?
     .map_err(to_text)?;
-    TaskRecord::delete(&*database.lock()?, &id).map_err(to_text)
+    let connection = database.lock()?;
+    // Its messages go with it, so a later task cannot be sent mail meant for this one.
+    brachio_store::forget_task_messages(&connection, &id).map_err(to_text)?;
+    TaskRecord::delete(&connection, &id).map_err(to_text)
 }
 
 /// Changes in a task worktree relative to its base.
