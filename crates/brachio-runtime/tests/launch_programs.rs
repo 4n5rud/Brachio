@@ -4,7 +4,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use brachio_runtime::client::Client;
-use brachio_runtime::wire::{Action, ResponseResult};
+use brachio_runtime::wire::{Action, Reply, ResponseResult};
 use uuid::Uuid;
 
 const RUNTIME: &str = env!("CARGO_BIN_EXE_brachio-runtime");
@@ -75,7 +75,7 @@ async fn a_launched_program_receives_its_arguments_and_environment() {
     };
     client.call(action).await.expect("launch");
 
-    let (_, mut following) = client
+    let (first, mut following) = client
         .follow(Action::Follow {
             key: "agent".to_owned(),
             after: 0,
@@ -83,20 +83,23 @@ async fn a_launched_program_receives_its_arguments_and_environment() {
         .await
         .expect("follow");
     let mut seen = Vec::new();
-    loop {
+    let absorb = |seen: &mut Vec<u8>, reply: Reply| {
+        let ResponseResult::Success { session, output } = reply.result else {
+            return false;
+        };
+        if let Some(page) = output {
+            seen.extend(page.bytes);
+        }
+        session.exited
+    };
+    let mut exited = absorb(&mut seen, first);
+    while !exited {
         let reply = tokio::time::timeout(Duration::from_secs(8), following.next())
             .await
             .expect("output arrived in time")
             .expect("follow reply");
         let Some(reply) = reply else { break };
-        if let ResponseResult::Success { session, output } = reply.result {
-            if let Some(page) = output {
-                seen.extend(page.bytes);
-            }
-            if session.exited {
-                break;
-            }
-        }
+        exited = absorb(&mut seen, reply);
     }
     assert!(String::from_utf8_lossy(&seen).contains("launched-ok"));
 }
@@ -155,7 +158,7 @@ async fn status_reports_from_the_program_reach_followers() {
         .await
         .expect("launch");
 
-    let (_, mut following) = client
+    let (first, mut following) = client
         .follow(Action::Follow {
             key: "agent".to_owned(),
             after: 0,
@@ -163,12 +166,7 @@ async fn status_reports_from_the_program_reach_followers() {
         .await
         .expect("follow");
     let mut states = Vec::new();
-    while !states.contains(&"idle") {
-        let reply = tokio::time::timeout(Duration::from_secs(8), following.next())
-            .await
-            .expect("status arrived in time")
-            .expect("follow reply")
-            .expect("connection open");
+    let absorb = |states: &mut Vec<&'static str>, reply: Reply| {
         if let ResponseResult::Success { session, .. } = reply.result {
             let state = session
                 .status
@@ -176,10 +174,19 @@ async fn status_reports_from_the_program_reach_followers() {
                 .and_then(|value| value["state"].as_str().map(str::to_owned));
             match state.as_deref() {
                 Some("working") if !states.contains(&"working") => states.push("working"),
-                Some("idle") => states.push("idle"),
+                Some("idle") if !states.contains(&"idle") => states.push("idle"),
                 _ => {}
             }
         }
+    };
+    absorb(&mut states, first);
+    while !states.contains(&"idle") {
+        let reply = tokio::time::timeout(Duration::from_secs(8), following.next())
+            .await
+            .expect("status arrived in time")
+            .expect("follow reply")
+            .expect("connection open");
+        absorb(&mut states, reply);
     }
     assert_eq!(states, ["working", "idle"]);
 }

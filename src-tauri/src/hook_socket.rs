@@ -489,10 +489,11 @@ mod tests {
     }
 
     type Store = Arc<Mutex<rusqlite::Connection>>;
+    type AnswerGate = Mutex<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>;
 
-    /// A socket over a real store holding two unread messages. The first answer is slow, so a
+    /// A socket over a real store holding two unread messages. The first answer waits on `gate`, so a
     /// client can leave before it is written.
-    fn mailbox_over_store(name: &str) -> Store {
+    fn mailbox_over_store(name: &str, gate: AnswerGate) -> Store {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         use brachio_runtime::mailbox::{MailMessage, MailRequest, MailResponse};
@@ -535,7 +536,9 @@ mod tests {
                     brachio_store::peek_next_batch(&connection, &key, 10).expect("peek")
                 };
                 if slow.swap(false, Ordering::SeqCst) {
-                    std::thread::sleep(Duration::from_millis(400));
+                    let (entered, release) = &*gate.lock().expect("gate");
+                    let _ = entered.send(());
+                    let _ = release.recv_timeout(Duration::from_secs(30));
                 }
                 MailResponse::Messages {
                     messages: messages
@@ -585,14 +588,25 @@ mod tests {
             use brachio_runtime::wire::{write_message, MAX_MESSAGE};
 
             let name = format!("ack-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-            let store = mailbox_over_store(&name);
+            let (entered, entered_receiver) = std::sync::mpsc::channel();
+            let (release, release_receiver) = std::sync::mpsc::channel::<()>();
+            let store = mailbox_over_store(&name, Mutex::new((entered, release_receiver)));
 
             let mut stream = transport::connect(&name).await.expect("connect");
             write_message(&mut stream, &check_request(), MAX_MESSAGE)
                 .await
                 .expect("send");
+            tokio::task::spawn_blocking(move || {
+                entered_receiver.recv_timeout(Duration::from_secs(30))
+            })
+            .await
+            .expect("join")
+            .expect("the server never began answering");
             drop(stream);
-            tokio::time::sleep(Duration::from_millis(900)).await;
+            release.send(()).expect("release the answer");
+            // The close is already complete, so the answer has nowhere to go; this only waits out
+            // the server finishing the failed write.
+            tokio::time::sleep(Duration::from_millis(500)).await;
             assert_eq!(unread_ids(&store), ["m1", "m2"]);
 
             let answer = brachio_runtime::mailbox::call(&name, &check_request())
