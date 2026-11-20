@@ -141,8 +141,13 @@ impl Runtime {
             Action::Stop { key } => {
                 let session = get(sessions, &key)?;
                 lock(&self.stopped)?.insert(key.clone());
-                self.forget(&key)?;
-                self.manager.kill(session.id)?;
+                if let Err(error) = self
+                    .forget(&key)
+                    .and_then(|()| self.manager.kill(session.id))
+                {
+                    lock(&self.stopped)?.remove(&key);
+                    return Err(error);
+                }
                 session.describe(None)
             }
             Action::Follow { .. } | Action::FollowFrame { .. } => {
