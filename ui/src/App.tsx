@@ -575,7 +575,7 @@ export function App() {
       dropListener.catch(report);
       onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
-      void watchApprovals(
+      const stopApprovals = watchApprovals(
         (question) => {
           const id = taskIdOf(question.key);
           const task = findTask(id);
@@ -587,9 +587,9 @@ export function App() {
           setQuestions((open) => [...open, question]);
         },
         (id) => setQuestions((open) => open.filter((question) => question.id !== id)),
-      )
-        .then((stop) => onCleanup(stop))
-        .catch(report);
+        report,
+      );
+      onCleanup(stopApprovals);
     }
     // Keeps "2m ago" labels current.
     const clock = setInterval(() => setNow(Date.now()), 30_000);
