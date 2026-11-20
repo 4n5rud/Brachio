@@ -193,6 +193,16 @@ impl RuntimeTerminals {
         Some(stopped.map(|_| ()).map_err(Into::into))
     }
 
+    /// Stops watching a terminal while its program keeps running in the runtime; opening the same
+    /// key again reattaches. The shared client stays open. `None` when `id` is not runtime-hosted.
+    pub fn detach(&self, id: SessionId) -> Option<Result<()>> {
+        let hosted = self.attached.lock().ok()?.contains_key(&id);
+        hosted.then(|| {
+            self.drop_attachment(id);
+            Ok(())
+        })
+    }
+
     /// The runtime client, connecting on first use. `None` when the runtime is not used. A failed
     /// connection is not remembered, so the next open tries again.
     async fn client(&self) -> Result<Option<Client>> {
@@ -403,7 +413,50 @@ fn deliver(
 mod handle_tests {
     use brachio_pty::SessionId;
 
-    use super::{locate, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE};
+    use super::{
+        locate, spawn, Attached, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE,
+    };
+
+    fn attach_to_dead_runtime(terminals: &RuntimeTerminals) -> SessionId {
+        let id = terminals.new_handle();
+        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let pump = spawn(std::future::pending::<()>());
+        terminals.attached.lock().expect("lock").insert(
+            id,
+            Attached {
+                key: "test:agent".to_owned(),
+                client,
+                pump,
+            },
+        );
+        id
+    }
+
+    #[tokio::test]
+    async fn detach_drops_the_attachment_without_telling_the_runtime_to_stop() {
+        let terminals = RuntimeTerminals::default();
+        let id = attach_to_dead_runtime(&terminals);
+        // A stop would call the unreachable runtime and fail; a detach must not call it at all.
+        assert!(terminals.detach(id).expect("hosted").is_ok());
+        assert!(terminals.attached.lock().expect("lock").is_empty());
+        assert!(terminals.detach(id).is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_calls_the_runtime_unlike_detach() {
+        let terminals = RuntimeTerminals::default();
+        let id = attach_to_dead_runtime(&terminals);
+        assert!(terminals.stop(id).await.expect("hosted").is_err());
+        assert!(terminals.attached.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn detaching_an_unknown_handle_is_not_hosted() {
+        let terminals = RuntimeTerminals::default();
+        assert!(terminals
+            .detach(SessionId::from_raw(HOSTED_HANDLE_BASE + 99))
+            .is_none());
+    }
 
     #[tokio::test]
     async fn a_missing_current_runtime_is_distinct_from_a_missing_terminal() {
