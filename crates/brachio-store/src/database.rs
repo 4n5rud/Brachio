@@ -14,6 +14,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_repo_is_git.sql"),
     include_str!("../migrations/0008_retired_secondary_tabs.sql"),
     include_str!("../migrations/0009_worker_report_generation.sql"),
+    include_str!("../migrations/0010_task_orchestration.sql"),
 ];
 
 /// Why a storage call failed.
@@ -127,6 +128,39 @@ mod tests {
             .expect("pretend a newer schema");
         let error = migrate(&mut connection).expect_err("must not run on a newer schema");
         assert!(matches!(error, StoreError::NewerSchema { .. }), "{error}");
+    }
+
+    #[test]
+    fn orchestration_tables_arrive_on_a_database_at_the_previous_version() {
+        let mut connection = Connection::open_in_memory().expect("open");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        let previous = MIGRATIONS.len() - 1;
+        for sql in &MIGRATIONS[..previous] {
+            connection.execute_batch(sql).expect("old migration");
+        }
+        connection
+            .pragma_update(
+                None,
+                "user_version",
+                i64::try_from(previous).unwrap_or(i64::MAX),
+            )
+            .expect("set old version");
+        connection
+            .execute_batch(
+                "INSERT INTO repos (id, path, default_branch) VALUES ('r', '/x', 'main');
+                 INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+                 VALUES ('t', 'r', 'T', 'p', 'b', '/w', 'new', 0);",
+            )
+            .expect("insert an existing task");
+        migrate(&mut connection).expect("upgrade");
+        connection
+            .execute(
+                "INSERT INTO task_orchestration (task_id, state, updated_at_ms) VALUES ('t', 'queued', 0)",
+                [],
+            )
+            .expect("existing task accepts orchestration state");
     }
 
     #[test]

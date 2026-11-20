@@ -3,6 +3,7 @@
 mod child_report;
 mod database;
 mod message_record;
+mod orchestration_record;
 mod pr_status_record;
 mod repo_record;
 mod task_record;
@@ -15,6 +16,10 @@ pub use message_record::{
     recent_messages, reply_recipient, send_message, take_unread, unread_counts, Message,
     NewMessage, KINDS, MAX_BODY_BYTES, MAX_PAYLOAD_BYTES, MAX_SUBJECT_CHARS,
     MAX_UNREAD_FROM_ONE_SENDER,
+};
+pub use orchestration_record::{
+    add_dependency, apply_transition, load_graph, record_handoff, review_handoff, Handoff,
+    HandoffReview, HandoffSource, NewHandoff, OrchestrationError,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
 pub use repo_record::{NewRepo, RepoRecord};
