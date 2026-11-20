@@ -137,6 +137,28 @@ impl Git {
         Ok((bytes, capped.truncated))
     }
 
+    /// Runs git and passes its stdout to `on_chunk` as it arrives, so a huge answer is never
+    /// held in memory.
+    ///
+    /// # Errors
+    /// Fails when git cannot be started, runs too long, or exits with a failure status.
+    pub fn stream_stdout(
+        &self,
+        args: &[&str],
+        on_chunk: impl FnMut(&[u8]),
+    ) -> Result<(), GitError> {
+        let mut command = self.command(args);
+        let streamed = brachio_process::stream_stdout(&mut command, GIT_TIME_LIMIT, on_chunk)?;
+        if !streamed.status.success() {
+            return Err(GitError::Failed {
+                args: args.join(" "),
+                status: streamed.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&streamed.stderr).trim().to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     /// Runs git and fails on a non-zero exit. Returns trimmed stdout.
     ///
     /// # Errors
