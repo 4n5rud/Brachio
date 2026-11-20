@@ -8,7 +8,9 @@ export type View = "tasks" | "board";
 
 // On Windows the window has no frame of its own (see tauri.windows.conf.json), so this bar is the
 // only title bar and carries the window buttons. macOS keeps its overlaid traffic lights.
-const OWN_WINDOW_BUTTONS = document.documentElement.dataset.platform === "windows";
+// Read when the bar is drawn, not when this file loads: `main.tsx` sets the platform after its
+// imports have run, so a constant here would always see no platform.
+const ownWindowButtons = () => document.documentElement.dataset.platform === "windows";
 
 function WindowButtons() {
   const window = () => getCurrentWindow();
@@ -71,7 +73,7 @@ export function TitleBar(props: {
         <button class="icon-button" type="button" aria-label={t("titlebar.settings")} onClick={props.onSettings}>
           <Icon name="sliders" />
         </button>
-        {OWN_WINDOW_BUTTONS && <WindowButtons />}
+        {ownWindowButtons() && <WindowButtons />}
       </div>
     </header>
   );
