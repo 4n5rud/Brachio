@@ -641,6 +641,45 @@ p {
   accent-color: var(--color-focus);
   margin: 0;
 }
+.agent-card {
+  flex-wrap: wrap;
+}
+.agent-card-note {
+  flex-basis: 100%;
+  font: var(--text-meta);
+  color: var(--color-text-3);
+}
+.agent-card-off {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.modal-sub {
+  margin-left: var(--space-2);
+  font: var(--text-label);
+  color: var(--color-text-3);
+}
+.create-failed {
+  display: grid;
+  gap: var(--space-2);
+}
+.create-failed strong {
+  font: var(--text-label);
+  color: var(--color-status-error);
+}
+.create-failed p {
+  margin: 0;
+}
+.create-log {
+  margin: 0;
+  padding: var(--space-2) 10px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  font: var(--text-meta);
+  color: var(--color-status-error);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .agent-card-on {
   border-color: var(--color-focus);
   box-shadow: 0 0 0 1px var(--color-focus) inset;

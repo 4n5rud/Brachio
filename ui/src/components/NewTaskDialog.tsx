@@ -1,10 +1,11 @@
 import { Button } from "./ui/Button";
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { confirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { Input, Select, TextArea } from "./ui/Input";
 import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
+import { CORE_AGENT, detectAgents } from "../lib/terminal";
 import { AgentIcon } from "./AgentIcon";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { titleFromPrompt } from "../lib/workspace";
@@ -21,8 +22,11 @@ export interface NewTaskInput {
 
 const AGENTS: readonly AgentKind[] = ["claude", "codex"];
 
+const BAD_BASE = /invalid reference|not a valid (object name|commit)|unknown revision/i;
+
 /** "New task" dialog: prompt, name, agent and base branch. */
 export function NewTaskDialog(props: {
+  repoName: string;
   defaultBranch: string;
   /** A plain folder has no branch to base a task on and no parent task. */
   isGit: boolean;
@@ -38,6 +42,25 @@ export function NewTaskDialog(props: {
   const [busy, setBusy] = createSignal(false);
   const [confirmingClose, setConfirmingClose] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [installed] = createResource(async () => {
+    try {
+      return await detectAgents();
+    } catch {
+      return undefined;
+    }
+  });
+  const agentInfo = (kind: AgentKind) => {
+    const found = installed();
+    if (!found) return { missing: false, version: null };
+    const entry = found.find((item) => item.kind === CORE_AGENT[kind]);
+    return { missing: !entry, version: entry?.version ?? null };
+  };
+  const baseError = () => {
+    const message = error();
+    return message !== null && base().trim() !== "" && BAD_BASE.test(message)
+      ? t("newTask.baseMissing").replace("{name}", () => base().trim()) : undefined;
+  };
+  const createError = () => (baseError() ? null : error());
 
   const finalTitle = () => title().trim() || titleFromPrompt(prompt());
   const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "";
@@ -51,6 +74,8 @@ export function NewTaskDialog(props: {
     try {
       const discard = await confirmDialog({
         title: t("newTask.discardDraft"),
+        body: t("newTask.discardBody"),
+        cancelLabel: t("newTask.keepEditing"),
         confirmLabel: t("confirm.discard"),
         tone: "danger",
       });
@@ -86,7 +111,7 @@ export function NewTaskDialog(props: {
 
   return (
     <Dialog
-      title={t("newTask.title")}
+      title={<>{t("newTask.title")}<span class="modal-sub">{props.repoName}</span></>}
       onClose={() => void requestClose()}
       closeOnScrim
       escHint
@@ -98,7 +123,7 @@ export function NewTaskDialog(props: {
           </Button>
           <Button variant="primary" icon="plus" kbd={SUBMIT_KEYS} disabled={!canCreate()}
             loading={busy()} loadingLabel={t("newTask.creating")} onClick={() => void submit()}>
-            {t("newTask.create")}
+            {createError() ? t("newTask.retry") : t("newTask.create")}
           </Button>
         </>
       }
@@ -111,7 +136,8 @@ export function NewTaskDialog(props: {
         <Show when={props.isGit}>
           <Input mono label={t("newTask.base")} value={base()}
             placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
-            onInput={(event) => setBase(event.currentTarget.value)} />
+            error={baseError()}
+            onInput={(event) => { setBase(event.currentTarget.value); setError(null); }} />
         </Show>
       </div>
       <Show when={props.isGit && props.parents?.length}>
@@ -126,20 +152,35 @@ export function NewTaskDialog(props: {
         <div class="agent-cards">
           <For each={AGENTS}>
             {(kind) => (
-              <label class="agent-card" classList={{ "agent-card-on": agent() === kind }}>
+              <label class="agent-card" classList={{ "agent-card-on": agent() === kind, "agent-card-off": agentInfo(kind).missing }}>
                 <input
                   type="radio"
                   name="agent"
                   checked={agent() === kind}
+                  disabled={agentInfo(kind).missing}
                   onChange={() => setAgent(kind)}
                 />
                 <b><AgentIcon agent={kind} />{AGENT_NAME[kind]}</b>
+                <Show when={agentInfo(kind).missing || agentInfo(kind).version}>
+                  <span class="agent-card-note">
+                    {agentInfo(kind).missing
+                      ? t("newTask.agentMissing").replace("{name}", () => kind) : agentInfo(kind).version}
+                  </span>
+                </Show>
               </label>
             )}
           </For>
         </div>
       </fieldset>
-      <Show when={error()}>{(message) => <p class="form-error">{message()}</p>}</Show>
+      <Show when={createError()}>
+        {(message) => (
+          <div class="create-failed" role="alert">
+            <strong>{t("newTask.createFailed")}</strong>
+            <pre class="create-log">{message()}</pre>
+            <p class="form-hint">{t("newTask.createFailedNote")}</p>
+          </div>
+        )}
+      </Show>
     </Dialog>
   );
 }

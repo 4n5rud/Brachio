@@ -15,6 +15,11 @@ export function ApprovalBar(props: {
   agent?: string;
   /** The question; defaults to the tool request one. */
   title?: string;
+  /** Plain sentence above the request, for questions the agent did not ask. */
+  body?: string;
+  allowLabel?: string;
+  denyLabel?: string;
+  hint?: string;
   /** The answer is on its way: buttons stay off and Allow shows the working arc. */
   sending?: boolean;
   onAllow?: () => void;
@@ -50,11 +55,12 @@ export function ApprovalBar(props: {
         <strong>{title()}</strong>
         <Show when={props.agent}><span class="muted">{props.agent}</span></Show>
       </div>
+      <Show when={props.body}>{(body) => <p class="approval2-body">{body()}</p>}</Show>
       <pre class="approval2-review" tabindex="0" aria-label={t("approval.details")}><code>{props.review}</code></pre>
       <div class="approval2-actions">
         <Button variant="primary" size="sm" kbd="↵" disabled={!canAllow()} loading={props.sending}
           onClick={allow}>
-          {t("approval.allowOnce")}
+          {props.allowLabel ?? t("approval.allowOnce")}
         </Button>
         <Show when={props.onAllowAlways}>
           <Button size="sm" disabled={!!props.sending} onClick={() => props.onAllowAlways?.()}>
@@ -62,9 +68,9 @@ export function ApprovalBar(props: {
           </Button>
         </Show>
         <Button variant="ghost" size="sm" kbd="Esc" disabled={!canDeny()} onClick={deny}>
-          {t("approval.deny")}
+          {props.denyLabel ?? t("approval.deny")}
         </Button>
-        <span class="approval-hint">{t("approval.hint")}</span>
+        <span class="approval-hint">{props.hint ?? t("approval.hint")}</span>
       </div>
     </div>
   );

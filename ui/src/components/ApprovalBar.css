@@ -20,6 +20,11 @@
   margin-left: auto;
   font-size: var(--text-xs);
 }
+.approval2-body {
+  margin: 0;
+  font: var(--text-label);
+  color: var(--color-text-2);
+}
 .approval2-review {
   margin: 0;
   padding: var(--space-2) 10px;

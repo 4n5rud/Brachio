@@ -57,6 +57,8 @@ export function TaskView(props: {
   takeSetupInput?: (taskId: string) => string | undefined;
   onArchive?: () => void;
   onDraftOriginal?: (text: string) => Promise<boolean>;
+  /** Commands from brachio.toml waiting for the user's yes or no. */
+  setupRequest?: { commands: readonly string[]; answer: (run: boolean) => void };
   setupFailure?: string;
   retryingSetup?: boolean;
   onRetrySetup?: () => void;
@@ -321,11 +323,11 @@ export function TaskView(props: {
         <Show when={tabError()}>{(message) => <p role="alert">{message()}</p>}</Show>
         <Show when={props.setupFailure}>
           {(message) => (
-            <div class="terminal-recovery" role="alert">
-              <span>{t("setup.copyFailed")} {message()}</span>
-              <Button size="sm" disabled={props.retryingSetup}
-                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</Button>
-            </div>
+            <Notice tone="error" lead={t("setup.copyFailed")}
+              actions={<Button size="sm" variant="primary" disabled={props.retryingSetup}
+                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</Button>}>
+              {message()} {t("setup.copyFailedNote")}
+            </Notice>
           )}
         </Show>
         <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
@@ -412,6 +414,14 @@ export function TaskView(props: {
               onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}>
               {t("group.needs")}
             </Notice>
+          )}
+        </Show>
+        <Show when={props.setupRequest}>
+          {(request) => (
+            <ApprovalBar title={t("setup.title")} agent="brachio.toml" body={t("setup.body")}
+              review={request().commands.join("\n")} allowLabel={t("setup.run")} denyLabel={t("setup.deny")}
+              hint={t("setup.hint")}
+              onAllow={() => request().answer(true)} onDeny={() => request().answer(false)} />
           )}
         </Show>
         <Show when={props.onAnswer && approval()?.id} keyed>
