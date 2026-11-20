@@ -88,12 +88,28 @@ async fn an_approval_in_the_app_becomes_the_agents_allow_answer() {
     let asked = server.await.expect("app task");
     assert_eq!(status, 0);
     assert_eq!(asked.key, "task1:agent");
-    assert_eq!(asked.tool_input["command"], "pnpm add zod");
+    assert_eq!(
+        asked.review().as_deref(),
+        Some("\"Bash\"\n{\"command\":\"pnpm add zod\"}")
+    );
     let answer: serde_json::Value = serde_json::from_str(&output).expect("json answer");
     assert_eq!(
         answer["hookSpecificOutput"]["decision"]["behavior"],
         "allow"
     );
+}
+
+#[tokio::test]
+async fn an_oversized_request_falls_back_even_when_the_app_would_allow_it() {
+    let name = endpoint();
+    let server = app(&name, Reply::Say(Decision::Allow));
+    let content = "x".repeat(3_000);
+    let input = format!(
+        r#"{{"session_id":"s","tool_name":"Write","tool_input":{{"file_path":"example","content":"{content}"}}}}"#
+    );
+    let (output, status) = hook(Some(&name), &input, "10").await;
+    assert_eq!((output.as_str(), status), ("", 0));
+    server.abort();
 }
 
 #[tokio::test]
