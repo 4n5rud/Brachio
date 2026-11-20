@@ -185,6 +185,10 @@ impl Runtime {
                 match action {
                     Action::Lost => self.list_lost(),
                     Action::Recover { key } => self.recover(&key),
+                    Action::ForgetTask { prefix } => {
+                        self.forget_lost_with_prefix(&prefix)?;
+                        Ok(self.hello())
+                    }
                     Action::Forget { key } => {
                         self.forget(&key)?;
                         Ok(self.hello())

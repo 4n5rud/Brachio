@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use brachio_runtime::protocol;
+use brachio_runtime::wire::{Action, Request};
+
 use super::*;
 
 fn record(key: &str) -> SessionRecord {
@@ -52,4 +55,35 @@ fn forgetting_a_task_prefix_drops_only_its_saved_screens_from_memory_and_disk() 
     disk_keys.sort_unstable();
     assert_eq!(disk_keys, ["t10:agent", "t2:agent"]);
     let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn the_forget_task_action_drops_the_task_screens_and_needs_protocol_seven() {
+    let runtime = Runtime::new(None);
+    for key in ["t1:agent", "t2:agent"] {
+        lock(&runtime.lost)
+            .expect("lost")
+            .insert(key.to_owned(), record(key));
+    }
+    let action = || Action::ForgetTask {
+        prefix: "t1:".to_owned(),
+    };
+    assert_eq!(action().since().0, 7);
+
+    runtime
+        .execute(Request {
+            version: protocol::CURRENT,
+            action: action(),
+        })
+        .expect("forget task");
+    let kept: Vec<String> = lock(&runtime.lost).expect("lost").keys().cloned().collect();
+    assert_eq!(kept, ["t2:agent"]);
+    assert!(runtime
+        .execute(Request {
+            version: protocol::CURRENT,
+            action: Action::ForgetTask {
+                prefix: String::new()
+            },
+        })
+        .is_err());
 }

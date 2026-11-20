@@ -50,7 +50,7 @@ pub fn endpoint() -> String {
 /// Raised when a change to the runtime has to reach users who update while an older runtime still
 /// hosts their agents. Each generation has an endpoint of its own, so the new runtime starts
 /// beside the old one, which keeps serving the agents it has until they end.
-pub const GENERATION: u32 = 4;
+pub const GENERATION: u32 = 5;
 
 /// The endpoint of one generation. The first generation has no suffix, which is the name earlier
 /// versions used.

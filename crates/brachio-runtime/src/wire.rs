@@ -134,6 +134,11 @@ pub enum Action {
         /// Name the caller chose for the shell.
         key: String,
     },
+    /// Drop the saved screens of every gone shell whose key starts with the prefix.
+    ForgetTask {
+        /// Key prefix, such as `<task id>:`; it must not be empty.
+        prefix: String,
+    },
     /// Take no new terminals and exit once the last one ends.
     Drain,
     /// Resize the shell and the frame that snapshots describe.
@@ -177,6 +182,7 @@ impl Action {
             Self::Ensure { .. }
                 | Self::Launch { .. }
                 | Self::Forget { .. }
+                | Self::ForgetTask { .. }
                 | Self::Drain
                 | Self::Resize { .. }
                 | Self::Write { .. }
@@ -205,6 +211,7 @@ impl Action {
             Action::Launch { .. } => (4, "launch"),
             Action::StopGuarded { .. } => (5, "guarded stop"),
             Action::LaunchOnce { .. } => (6, "idempotent launch"),
+            Action::ForgetTask { .. } => (7, "forget task"),
             _ => (1, "this action"),
         }
     }
