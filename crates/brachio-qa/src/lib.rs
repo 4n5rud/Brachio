@@ -1,7 +1,7 @@
-//! QA loop logic. Running Playwright and CDP streaming arrive in M3; the
-//! rules that decide whether to send a failure back to an agent live here
-//! now because they are pure.
+//! Executes explicitly approved project checks and limits automated QA feedback.
 
 mod feedback_gate;
+mod runner;
 
 pub use feedback_gate::{failure_signature, FeedbackDecision, FeedbackGate};
+pub use runner::{run_approved, QaApproval, QaCommand, QaExit, QaNotRun, QaOutput, VerifiedQaRun};

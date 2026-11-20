@@ -469,6 +469,12 @@ dependencies = [
 [[package]]
 name = "brachio-qa"
 version = "0.0.1"
+dependencies = [
+ "brachio-git",
+ "brachio-process",
+ "tempfile",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "brachio-runtime"
