@@ -1,3 +1,4 @@
+import { Toggle } from "./ui/Toggle";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
@@ -174,17 +175,13 @@ export function TaskOrchestration(props: { leadTaskId: string }) {
       <Show when={current()}>
         {(data) => (
           <>
-          <label class="orchestration-scheduler">
-            <input type="checkbox" checked={data().schedulerEnabled}
-              onChange={(event) => {
-                const enabled = event.currentTarget.checked;
-                setScheduler(props.leadTaskId, enabled).then(() => refetch(), (error) => {
-                  setSchedulerError(String(error));
-                  void refetch();
-                });
-              }} />
-            {t("orchestration.scheduler")}
-          </label>
+          <Toggle checked={data().schedulerEnabled} label={t("orchestration.scheduler")}
+            onChange={(enabled) => {
+              setScheduler(props.leadTaskId, enabled).then(() => refetch(), (error) => {
+                setSchedulerError(String(error));
+                void refetch();
+              });
+            }} />
           <p class="muted">{t("orchestration.schedulerNote")} ({data().maxRunning})</p>
           <Show when={schedulerError()}>{(text) => <p role="alert">{text()}</p>}</Show>
           <Show when={data().children.length > 0} fallback={<p class="muted">{t("orchestration.empty")}</p>}>

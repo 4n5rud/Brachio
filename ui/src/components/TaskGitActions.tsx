@@ -1,3 +1,4 @@
+import { Input, TextArea } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
@@ -87,11 +88,8 @@ export function TaskGitActions(props: {
         }}>
           <Button size="sm" disabled={busy() || requesting()}
             onClick={() => void askAgent("commit")}>{t("git.askCommit")}</Button>
-          <label>
-            {t("git.message")}
-            <textarea rows={2} disabled={busy()} value={message()}
-              onInput={(event) => setMessage(event.currentTarget.value)} />
-          </label>
+          <TextArea label={t("git.message")} rows={2} disabled={busy()} value={message()}
+            onInput={(event) => setMessage(event.currentTarget.value)} />
           <Button size="sm" type="submit" disabled={busy() || !message().trim()}>
             {t("git.commit")}
           </Button>
@@ -105,16 +103,10 @@ export function TaskGitActions(props: {
       }}>
         <Button size="sm" disabled={busy() || requesting()}
           onClick={() => void askAgent("pr")}>{t("git.askPr")}</Button>
-        <label>
-          {t("git.prTitle")}
-          <input type="text" disabled={busy()} value={prTitle()}
-            onInput={(event) => setPrTitle(event.currentTarget.value)} />
-        </label>
-        <label>
-          {t("git.prBody")}
-          <textarea rows={3} disabled={busy()} value={prBody()}
-            onInput={(event) => setPrBody(event.currentTarget.value)} />
-        </label>
+        <Input label={t("git.prTitle")} type="text" disabled={busy()} value={prTitle()}
+          onInput={(event) => setPrTitle(event.currentTarget.value)} />
+        <TextArea label={t("git.prBody")} rows={3} disabled={busy()} value={prBody()}
+          onInput={(event) => setPrBody(event.currentTarget.value)} />
         <Button size="sm" type="submit" disabled={busy() || !prTitle().trim()}>
           {t("git.createPr")}
         </Button>
