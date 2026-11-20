@@ -6,7 +6,7 @@
 English · <a href="docs/readme/README.ko.md">한국어</a> · <a href="docs/readme/README.ja.md">日本語</a> · <a href="docs/readme/README.zh-CN.md">简体中文</a> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.pt.md">Português</a> · <a href="docs/readme/README.tr.md">Türkçe</a> · <a href="docs/readme/README.ru.md">Русский</a>
 </p>
 
-> **Pre-alpha** · Brachio is under development and has not been released. Windows is the primary development platform. macOS support is not yet verified.
+> **Pre-alpha** · Brachio is under development.
 
 Brachio brings Claude Code and Codex sessions into one workspace. Organize tasks by project, review changes, and keep terminals running in a separate local runtime.
 
