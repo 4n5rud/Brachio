@@ -119,6 +119,7 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     updatedAt: record.createdAtMs,
     worktreePath: record.worktreePath,
     agentSessionId: record.agentSessionId ?? undefined,
+    parentTaskId: record.parentTaskId ?? undefined,
   };
 }
 
