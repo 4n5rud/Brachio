@@ -1,8 +1,34 @@
+import { invoke } from "@tauri-apps/api/core";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import { Icon } from "./Icon";
 
-/** Bottom bar. Resource numbers come from the core once M2 wires them. */
+const REFRESH_MS = 3000;
+const inTauri = "__TAURI_INTERNALS__" in window;
+
+interface ResourceUsage {
+  memoryBytes: number;
+  cpuPercent: number;
+}
+
+export function formatMemory(bytes: number): string {
+  const megabytes = bytes / (1024 * 1024);
+  return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : `${Math.round(megabytes)} MB`;
+}
+
+/** Bottom bar. Memory and CPU cover the app and every process it started. */
 export function StatusBar(props: { sessions: number }) {
+  const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
+
+  onMount(() => {
+    if (!inTauri) return;
+    const refresh = () =>
+      void invoke<ResourceUsage>("resource_usage").then(setUsage, () => setUsage(null));
+    refresh();
+    const timer = window.setInterval(refresh, REFRESH_MS);
+    onCleanup(() => window.clearInterval(timer));
+  });
+
   return (
     <footer class="statusbar">
       <span>
@@ -15,9 +41,9 @@ export function StatusBar(props: { sessions: number }) {
       </span>
       <span class="statusbar-end">
         <Icon name="memory" class="icon-sm" />
-        {t("statusbar.memory")} <b>–</b>
+        {t("statusbar.memory")} <b>{usage() ? formatMemory(usage()!.memoryBytes) : "–"}</b>
         <Icon name="cpu" class="icon-sm" />
-        {t("statusbar.cpu")} <b>–</b>
+        {t("statusbar.cpu")} <b>{usage() ? `${Math.round(usage()!.cpuPercent)}%` : "–"}</b>
       </span>
     </footer>
   );

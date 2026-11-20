@@ -12,7 +12,7 @@ use brachio_git::{
     backoff_seconds, fetch_pull_request, local_head, repository_of, PullRequestSnapshot,
     PullRequestState, StatusError,
 };
-use brachio_store::{forget_pr_status, load_pr_status, save_pr_status, TaskRecord};
+use brachio_store::{forget_pr_status, load_pr_status, save_pr_status, RepoRecord, TaskRecord};
 use serde::Serialize;
 use tauri::State;
 
@@ -222,6 +222,16 @@ pub async fn task_pr_status(
     force: bool,
 ) -> Result<PrStatusReport, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(|error| error.to_string())?;
+    let is_git = RepoRecord::get(&*database.lock()?, &task.repo_id)
+        .map_err(|error| error.to_string())?
+        .is_git;
+    if !is_git {
+        // A plain folder has no branch, so there is no pull request to look for.
+        return Ok(PrStatusReport {
+            no_pull_request: true,
+            ..PrStatusReport::default()
+        });
+    }
     restore_saved(&database, &statuses, &id)?;
     let decision = statuses.tracker()?.begin(&id, now_ms(), force);
     if decision == Decision::Fetch {

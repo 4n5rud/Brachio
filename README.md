@@ -12,13 +12,18 @@ Brachio runs several Claude Code and Codex sessions side by side, each in its ow
 
 ## What it does
 
-- Gives each task its own git worktree and branch, so agents do not step on each other.
+- Gives each task its own git worktree and branch, so agents do not step on each other. Several projects show together in the sidebar.
+- Adds a plain folder as a project too: tasks run in the folder with no branch or worktree, and git repositories inside the folder are listed and can be added as projects.
 - Shows on one board whether each agent is working, waiting for approval or an answer, or done, and notifies you when it needs you.
 - Continues an agent's conversation after the app restarts.
 - Shows each task's changes, lets you comment on lines and send the comments to the agent, and stages, commits, and pushes.
-- Keeps terminals running when the window closes, if you turn on the independent runtime (see below).
+- Shows each task's pull request status as a chip in the task list and a panel in the Inspector, and remembers it across restarts.
+- Asks you in the app to approve Claude Code's permission requests.
+- Lets agent sessions send each other messages (see below).
+- Keeps terminals running when the window closes, through the independent runtime (see below).
+- Shows the Claude Code and Codex marks beside agent names, and uses one title bar on Windows.
 
-Not built yet: a lead agent that splits a task among workers, creating pull requests from the app, and an in-app approval bar for agents.
+Not built yet: a lead agent that splits a task among workers. Codex has no in-app status or approval hooks yet, so approvals and hook-based status cover Claude Code only.
 
 Brachio supports macOS and Windows. It runs entirely on your machine with no server, and agents run under your own accounts.
 
@@ -43,9 +48,13 @@ Where the savings come from:
 
 Not every number favors Brachio. On Linux with WebKitGTK, the idle app used about 340 MB (PSS) against 292 MB for the same UI in Electron 43. Linux is not a target platform, and macOS and Windows still need their own measurements.
 
+## Messages between agent sessions
+
+Agents in different tasks can talk through the `brachio` helper: `brachio peers` lists the sessions you can reach, `brachio send` sends one a message, `brachio check` reads new messages and marks them read, and `brachio inbox` lists recent messages, read or not. Claude Code sessions are taught this through a `brachio-send` skill and are told about waiting mail by a hook; the hook costs nothing when there is none. Unread messages show in the app, and a deleted task's messages are removed with it.
+
 ## Independent terminal runtime (experimental)
 
-Terminals run in `brachio-runtime`, a separate process, whenever its executable is found next to the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. Set `BRACHIO_TERMINAL_RUNTIME=0` to keep terminals inside the app instead. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable sits next to the app (release installers include it), or is named by `BRACHIO_RUNTIME_EXECUTABLE`. It is tested on Windows and Linux, not on macOS.
+Terminals run in `brachio-runtime`, a separate process, whenever its executable is found next to the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. Set `BRACHIO_TERMINAL_RUNTIME=0` to keep terminals inside the app instead. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable sits next to the app (release installers include it), or is named by `BRACHIO_RUNTIME_EXECUTABLE`. After an app update, a new runtime starts beside the old one; the old one keeps its agents until they end. It is tested on Windows and Linux, not on macOS.
 
 ## Preparing new worktrees (`brachio.toml`)
 

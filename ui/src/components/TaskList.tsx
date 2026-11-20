@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { statusTone } from "../lib/status";
 import { AGENT_NAME, shortBranch, type TaskRow } from "../lib/tasks";
 import { AgentIcon } from "./AgentIcon";
+import { FolderRepos } from "./FolderRepos";
 import { chipOf } from "../lib/pr-status";
 import { prReport, watchPrStatuses } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
@@ -25,10 +26,12 @@ function loadCollapsedProjects(): Set<string> {
 /** Sidebar task list across all registered projects. */
 export function TaskList(props: {
   tasks: readonly TaskRow[];
-  repos: readonly { id: string; name: string }[];
+  repos: readonly { id: string; name: string; isGit?: boolean }[];
   selectedId: string | undefined;
   onSelect: (id: string) => void;
   onNewTask?: (repoId: string) => void;
+  /** Adds a git repository found inside a folder project as a project of its own. */
+  onAddFolderRepo?: (path: string) => Promise<void>;
   onAddRepo?: () => void;
   needsYou: number;
   now: number;
@@ -36,6 +39,7 @@ export function TaskList(props: {
 }) {
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const groupIds = createMemo(() => [...projects().keys(), ""]);
+  const folderProjects = createMemo(() => new Set(props.repos.filter((repo) => repo.isGit === false).map((repo) => repo.id)));
   const tasksByGroup = createMemo(() => {
     const groups = new Map(props.repos.map((repo) => [repo.id, [] as TaskRow[]]));
     const folders: TaskRow[] = [];
@@ -109,6 +113,9 @@ export function TaskList(props: {
                       />
                     )}
                   </For>
+                  <Show when={folderProjects().has(id) && props.onAddFolderRepo}>
+                    <FolderRepos projectId={id} onAdd={(path) => props.onAddFolderRepo?.(path) ?? Promise.resolve()} />
+                  </Show>
                 </Show>
               </section>
             );

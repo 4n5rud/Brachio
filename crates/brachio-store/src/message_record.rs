@@ -13,6 +13,8 @@ pub const MAX_BODY_BYTES: usize = 8 * 1024;
 pub const MAX_SUBJECT_CHARS: usize = 200;
 /// Longest payload, in bytes. A payload only carries references such as file paths.
 pub const MAX_PAYLOAD_BYTES: usize = 2 * 1024;
+/// Unread messages one sender may have waiting at one receiver.
+pub const MAX_UNREAD_FROM_ONE_SENDER: usize = 50;
 /// How much one `take_unread` hands out, so the answer always fits the socket and is not lost
 /// after the messages were marked read. At least one message is always returned.
 const BATCH_BYTES: usize = 32 * 1024;
@@ -187,6 +189,17 @@ pub fn send_message(
             return Ok((earlier, true));
         }
     }
+    let waiting: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM messages WHERE from_key = ?1 AND to_key = ?2 AND read_at_ms IS NULL",
+        params![message.from_key, message.to_key],
+        |row| row.get(0),
+    )?;
+    if usize::try_from(waiting).unwrap_or(usize::MAX) >= MAX_UNREAD_FROM_ONE_SENDER {
+        return Err(StoreError::Invalid(format!(
+            "{} already has {MAX_UNREAD_FROM_ONE_SENDER} unread messages from you; wait until they are read",
+            message.to_key
+        )));
+    }
     let thread_id: String = match message.reply_to {
         // Only a message the sender sent or received can be answered.
         Some(parent) => connection
@@ -319,6 +332,21 @@ pub fn unread_counts(connection: &Connection) -> Result<Vec<(String, u32)>, Stor
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Deletes messages that were read before `read_before_ms`, and returns how many. Unread mail
+/// is never removed.
+///
+/// # Errors
+/// Fails when the database cannot be written.
+pub fn expire_read_messages(
+    connection: &Connection,
+    read_before_ms: i64,
+) -> Result<usize, StoreError> {
+    Ok(connection.execute(
+        "DELETE FROM messages WHERE read_at_ms IS NOT NULL AND read_at_ms < ?1",
+        [read_before_ms],
+    )?)
+}
+
 /// Removes the mail to a task's terminals, and what it sent once that was read. Unread mail it
 /// sent to others stays, because they have not seen it yet.
 ///
@@ -400,6 +428,50 @@ mod tests {
         assert!(duplicate);
         assert_eq!(second.id, stored.id);
         assert_eq!(unread_counts(&connection).expect("counts")[0].1, 1);
+    }
+
+    #[test]
+    fn one_sender_may_leave_fifty_unread_messages_at_one_receiver() {
+        let mut connection = open_in_memory().expect("open");
+        let mut first = message("first", "b:agent", 1);
+        first.request_id = Some("r0");
+        send_message(&connection, &first).expect("send");
+        for index in 1..MAX_UNREAD_FROM_ONE_SENDER {
+            let id = format!("m{index}");
+            send_message(&connection, &message(&id, "b:agent", 1)).expect("send");
+        }
+        assert!(send_message(&connection, &message("late", "b:agent", 2)).is_err());
+        let mut other = message("other", "b:agent", 2);
+        other.from_key = "c:agent";
+        send_message(&connection, &other).expect("another sender is not limited");
+
+        let (earlier, duplicate) = send_message(&connection, &first).expect("repeat at cap");
+        assert!(duplicate, "a repeated request id wins over the cap");
+        assert_eq!(earlier.id, "first");
+
+        take_unread(&mut connection, "b:agent", 1, 5).expect("read one");
+        send_message(&connection, &message("again", "b:agent", 3)).expect("room after a read");
+    }
+
+    #[test]
+    fn only_read_messages_older_than_the_cutoff_expire() {
+        let mut connection = open_in_memory().expect("open");
+        for (id, to) in [
+            ("old", "b:agent"),
+            ("new", "c:agent"),
+            ("unread", "d:agent"),
+        ] {
+            send_message(&connection, &message(id, to, 1)).expect("send");
+        }
+        take_unread(&mut connection, "b:agent", 10, 100).expect("read");
+        take_unread(&mut connection, "c:agent", 10, 300).expect("read");
+        assert_eq!(expire_read_messages(&connection, 200).expect("expire"), 1);
+        let left: Vec<_> = ["b:agent", "c:agent", "d:agent"]
+            .into_iter()
+            .flat_map(|key| recent_messages(&connection, key, 10).expect("recent"))
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(left, ["new", "unread"]);
     }
 
     #[test]
