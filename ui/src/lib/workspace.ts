@@ -93,6 +93,8 @@ export const readTaskChanges = (id: string) => invoke<TaskChanges>("task_changes
 export interface TaskMergePreview {
   baseBranch: string;
   conflicts: string[];
+  /** False when no remote copy of the base branch exists and the local branch was used. */
+  remoteTracking: boolean;
 }
 
 export const previewTaskMerge = (id: string) => invoke<TaskMergePreview>("task_merge_preview", { id });

@@ -427,10 +427,11 @@ fn a_rename_is_one_changed_file_and_a_changed_name_changes_the_fingerprint() {
 fn the_merge_target_is_the_remote_copy_of_the_default_branch_when_the_local_one_is_behind() {
     let repo = temp_dir();
     let git = init_repo(repo.path());
-    assert_eq!(
-        brachio_git::merge_target_ref(&git, "main"),
-        "refs/heads/main",
-        "without a remote the local branch is used"
+    let local = brachio_git::merge_target(&git, "main");
+    assert_eq!(local.reference, "refs/heads/main");
+    assert!(
+        !local.remote_tracking,
+        "without a remote the local branch is used and says so"
     );
 
     let remote = temp_dir();
@@ -441,10 +442,9 @@ fn the_merge_target_is_the_remote_copy_of_the_default_branch_when_the_local_one_
     );
     run(&git, &["push", "-q", "origin", "main"]);
     run(&git, &["fetch", "-q", "origin"]);
-    assert_eq!(
-        brachio_git::merge_target_ref(&git, "main"),
-        "refs/remotes/origin/main"
-    );
+    let tracked = brachio_git::merge_target(&git, "main");
+    assert_eq!(tracked.reference, "refs/remotes/origin/main");
+    assert!(tracked.remote_tracking);
 }
 
 #[test]
