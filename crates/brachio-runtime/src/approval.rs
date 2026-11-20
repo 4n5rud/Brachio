@@ -27,6 +27,19 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(300);
 /// Larger requests go to the agent's own permission prompt.
 const MAX_REVIEW_BYTES: usize = 2_000;
 
+fn is_unsafe_display_char(character: char) -> bool {
+    (character.is_control() && character != '\n')
+        || matches!(
+            character,
+            '\u{061c}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{feff}'
+        )
+}
+
 /// One permission question from an agent.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ApprovalRequest {
@@ -48,15 +61,15 @@ impl ApprovalRequest {
     pub fn review(&self) -> Option<String> {
         let name = serde_json::to_string(&self.tool_name).ok()?;
         let input = &self.review_input;
-        // Keep literal control and direction-changing characters out of the approval view.
-        // JSON escapes remain visible as text, and raw JSON preserves every argument exactly.
+        // Refuse control characters (except newline) and bidirectional or invisible formatting
+        // characters, which could reorder or hide text in the approval view; other Unicode is shown.
         if name.len().saturating_add(input.len()) >= MAX_REVIEW_BYTES
             || self.tool_name.is_empty()
             || !input.starts_with('{')
-            || !name
-                .bytes()
-                .chain(input.bytes())
-                .all(|byte| matches!(byte, b' '..=b'~' | b'\n'))
+            || name
+                .chars()
+                .chain(input.chars())
+                .any(is_unsafe_display_char)
         {
             return None;
         }
@@ -187,11 +200,23 @@ mod tests {
     #[test]
     fn missing_input_and_unsafe_display_text_go_to_the_terminal() {
         assert!(request_from_hook_input(r#"{"session_id":"s","tool_name":"Edit"}"#, "k").is_none());
-        let input = format!(
-            r#"{{"session_id":"s","tool_name":"Edit","tool_input":{{"content":"abc{}def"}}}}"#,
-            '\u{202e}',
+        for unsafe_char in ['\u{202e}', '\u{200b}', '\u{0085}'] {
+            let input = format!(
+                r#"{{"session_id":"s","tool_name":"Edit","tool_input":{{"content":"abc{unsafe_char}def"}}}}"#,
+            );
+            assert!(request_from_hook_input(&input, "k").is_none());
+        }
+    }
+
+    #[test]
+    fn korean_text_is_shown_unchanged() {
+        let input =
+            r#"{"session_id":"s","tool_name":"Bash","tool_input":{"command":"echo 안녕하세요"}}"#;
+        let request = request_from_hook_input(input, "k").expect("request");
+        assert_eq!(
+            request.review().expect("review"),
+            "\"Bash\"\n{\"command\":\"echo 안녕하세요\"}"
         );
-        assert!(request_from_hook_input(&input, "k").is_none());
     }
 
     #[test]
