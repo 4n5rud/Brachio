@@ -20,6 +20,9 @@ uuid.workspace = true
 vt100 = "0.18.1"
 vte = "0.15"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
 
