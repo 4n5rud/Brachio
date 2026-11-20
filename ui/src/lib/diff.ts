@@ -146,3 +146,43 @@ function displayPath(path: string, prefix: string): string | null {
   if (name === null) return null;
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
+
+export type DiffFileStatus = "A" | "M" | "D" | "R";
+
+export interface DiffFile {
+  path: string;
+  status: DiffFileStatus;
+  additions: number;
+  deletions: number;
+}
+
+/** One entry per `diff --git` section: the path after the change, how it changed and its line totals. */
+export function diffFiles(patch: string): DiffFile[] {
+  const files: DiffFile[] = [];
+  let current: DiffFile | undefined;
+  let hunkRemaining = false;
+  const lines = patch.split("\n");
+  diffRows(patch).forEach((row, index) => {
+    const text = lines[index] ?? "";
+    if (row.location) {
+      if (!current) return;
+      if (row.location.side === "old") current.deletions++;
+      else if (text.startsWith("+")) current.additions++;
+      return;
+    }
+    if (text.startsWith("diff --git ")) {
+      const names = /^diff --git (?:"?a\/.*?"? )?(".*"|b\/.*)$/.exec(text)?.[1] ?? "";
+      current = { path: displayPath(names, "b/") ?? "", status: "M", additions: 0, deletions: 0 };
+      files.push(current);
+      hunkRemaining = false;
+    } else if (!current || hunkRemaining) {
+      return;
+    } else if (text.startsWith("new file mode")) current.status = "A";
+    else if (text.startsWith("deleted file mode")) current.status = "D";
+    else if (text.startsWith("rename to ")) {
+      current.status = "R";
+      current.path = text.slice("rename to ".length);
+    } else if (text.startsWith("@@")) hunkRemaining = true;
+  });
+  return files;
+}

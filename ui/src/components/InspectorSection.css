@@ -1,0 +1,50 @@
+.insp-sec {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-3) 14px;
+  border-bottom: 1px solid var(--color-line);
+  overflow-wrap: anywhere;
+}
+.insp-sec > * {
+  min-width: 0;
+}
+.insp-sec > .button {
+  justify-self: start;
+}
+.insp-sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font: var(--text-group-label);
+  color: var(--color-text-2);
+}
+.insp-sec-head .end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 400;
+}
+.insp-sec dl {
+  margin: 0;
+}
+.row-gap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.insp-form {
+  display: grid;
+  gap: var(--space-2);
+}
+.insp-sec .link-button {
+  color: var(--color-accent-text);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+}

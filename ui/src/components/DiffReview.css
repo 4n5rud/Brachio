@@ -1,0 +1,86 @@
+.diff-layout {
+  justify-self: start;
+}
+.diff {
+  overflow: auto;
+  max-height: 480px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-term-bg);
+  color: var(--color-text-2);
+  font: var(--text-meta);
+  line-height: 20px;
+}
+.diff-file {
+  position: sticky;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+  color: var(--color-text);
+}
+.diff-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drow {
+  display: grid;
+  grid-template-columns: 40px 16px max-content;
+  white-space: pre;
+}
+.drow.add { background: var(--color-add-bg); }
+.drow.del { background: var(--color-del-bg); }
+.drow.hunk { background: var(--color-panel); color: var(--color-text-3); }
+.drow.note { color: var(--color-text-3); }
+.drow.sel { box-shadow: inset 2px 0 0 var(--color-accent-text); }
+.drow .sg { text-align: center; color: var(--color-text-3); }
+.drow.add .sg { color: var(--color-add); }
+.drow.del .sg { color: var(--color-del); }
+.drow .ln {
+  padding: 0 6px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-3);
+  font: inherit;
+  text-align: right;
+}
+.drow .ln:hover {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+}
+.diff-split .drow {
+  grid-template-columns: 40px 16px minmax(0, 1fr);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.diff-side:nth-child(2) {
+  border-left: 1px solid var(--color-line);
+}
+.comment-box {
+  position: sticky;
+  left: 0;
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel);
+  font-family: var(--font-sans);
+  white-space: normal;
+}
+.comment-box .where {
+  color: var(--color-text-3);
+  font: var(--text-meta);
+}

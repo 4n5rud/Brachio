@@ -61,7 +61,8 @@ export interface PrChip {
     | "prChip.passed"
     | "prChip.open"
     | "prChip.merged"
-    | "prChip.closed";
+    | "prChip.closed"
+    | "prChip.draft";
   number: number;
   tone: ChipTone;
   /** The answer is older than the latest attempt, which failed. */

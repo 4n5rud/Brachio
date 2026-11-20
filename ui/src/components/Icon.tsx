@@ -30,6 +30,7 @@ const PATHS = {
   panelRight: () => <><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M10 3v10" /></>,
   download: () => <><path d="M8 2.5v7M5 6.5l3 3 3-3" /><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" /></>,
   mail: () => <><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4.2 5.5-4.2" /></>,
+  refresh: () => <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13 2.5v2.8h-2.8" /></>,
   bot: () => <><rect x="3" y="5" width="10" height="8" rx="2" /><path d="M8 2.5V5M6 9h.01M10 9h.01" /></>,
 } satisfies Record<string, () => JSX.Element>;
 

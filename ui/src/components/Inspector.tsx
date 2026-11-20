@@ -1,17 +1,20 @@
 import { SegmentedControl, type SegmentOption } from "./ui/SegmentedControl";
-import { Button } from "./ui/Button";
-import { For, Match, Show, Switch, createEffect, createResource, createSignal, on } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { TaskPorts } from "./TaskPorts";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
-import { diffTotals, type DiffTotals } from "../lib/diff";
-import { DiffStat } from "./ui/DiffStat";
-import { DiffReview } from "./DiffReview";
+import { diffFiles, diffTotals, type DiffTotals } from "../lib/diff";
+import { createGitRunner } from "../lib/task-git-runner";
+import { pushToast } from "../lib/toasts";
+import { ChangedFiles } from "./ChangedFiles";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";
 import { PullRequestStatus } from "./PullRequestStatus";
 import { TaskMergePreview } from "./TaskMergePreview";
+import { FileRow } from "./FileRow";
+import { InspectorNote } from "./InspectorNote";
+import { InspectorSection } from "./InspectorSection";
 import { TaskFiles } from "./TaskFiles";
 import { TaskQaRun } from "./TaskQaRun";
 import { TaskOrchestration } from "./TaskOrchestration";
@@ -25,7 +28,11 @@ export function Inspector(props: {
   isGit?: boolean;
   onDraft: (taskId: string, text: string) => Promise<boolean>;
   onDiffTotals: (taskId: string, totals: DiffTotals | undefined) => void;
+  /** True while a diff is open side by side, so the inspector can widen. */
+  onWide?: (wide: boolean) => void;
 }) {
+  const [split, setSplit] = createSignal(false);
+  onCleanup(() => props.onWide?.(false));
   const isGit = () => props.isGit !== false;
   const isLead = () => isGit() && !props.task.parentTaskId && !!props.task.worktreePath;
   createEffect(() => {
@@ -46,6 +53,7 @@ export function Inspector(props: {
     },
   );
   const currentChanges = () => changes()?.id === props.task.id ? changes() : undefined;
+  createEffect(() => props.onWide?.(pane() === "changes" && split() && !!currentChanges()?.data?.patch));
   createEffect(on(currentChanges, (result) => {
     if (!result) return;
     const data = result.data;
@@ -73,66 +81,44 @@ export function Inspector(props: {
           </section>
         </Match>
         <Match when={pane() === "changes"}>
-          <section class="inspector-section inspector-changes">
-            <h3>
-              {t("inspector.changedFiles")}
-              <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
-              <Show when={props.task.worktreePath}>
-                <Button size="sm" disabled={changes.loading} onClick={() => void refetch()}>
-                  {t("inspector.refresh")}
-                </Button>
-              </Show>
-            </h3>
-            <Show when={props.task.worktreePath}>
-              <p class="muted">{t("inspector.diffBase")}</p>
-              <Show when={props.task.worktreePath && props.task.id} keyed>
-                {(id) => <PullRequestStatus taskId={id} />}
-              </Show>
-              <Show when={props.task.worktreePath && props.task.id} keyed>
-                {(id) => <TaskMergePreview taskId={id} />}
-              </Show>
-              <Show when={changes.loading}>
-                <p role="status">{t("inspector.loadingChanges")}</p>
-              </Show>
-              <Show when={currentChanges()?.error}>
-                {(error) => <p role="alert">{error()}</p>}
-              </Show>
-              <Show when={currentChanges()?.data}>
-                {(data) => (
+          <div class="inspector-changes">
+            <Show when={props.task.worktreePath && props.task.id} keyed>
+              {(id) => {
+                const runner = createGitRunner(id, async () => { if (props.task.id === id) await refetch(); });
+                const files = () => diffFiles(currentChanges()?.data?.patch ?? "");
+                return (
                   <>
-                    <Show when={currentChanges()?.id} keyed>
-                      {(id) => <PullRequestFeedback taskId={id} onDraft={(text) => props.onDraft(id, text)} />}
+                    <ChangedFiles additions={props.task.additions} deletions={props.task.deletions}
+                      loading={changes.loading} error={currentChanges()?.error} data={currentChanges()?.data}
+                      files={files()} busy={runner.busy()} split={split()} onSplit={setSplit}
+                      onRefresh={() => void refetch()}
+                      onStage={(path) => void runner.run({ action: "stageFile", path }).then((result) => {
+                        if (result && !result.ok) pushToast({ tone: "error", title: t("error.title"), message: result.failure.output });
+                      })}
+                      onDraft={(text) => props.onDraft(id, text)} />
+                    <Show when={currentChanges()?.data}>
+                      {(data) => (
+                        <>
+                          <Show when={data().conflicts.length > 0}>
+                            <InspectorSection title={t("inspector.conflicts")}>
+                              <For each={data().conflicts}>{(path) => <FileRow mark="C" path={path} />}</For>
+                              <InspectorNote>{t("inspector.conflictsStopped")}</InspectorNote>
+                            </InspectorSection>
+                          </Show>
+                          <TaskGitActions taskId={id} branch={props.task.branch} runner={runner}
+                            files={files()} staged={data().staged} untracked={data().untracked}
+                            conflicts={data().conflicts} onDraft={(text) => props.onDraft(id, text)} />
+                        </>
+                      )}
                     </Show>
-                    <Show when={data().conflicts.length > 0}>
-                      <div class="worktree-conflicts" role="status">
-                        <strong>{t("inspector.conflicts")}</strong>
-                        <ul>
-                          <For each={data().conflicts}>{(path) => <li><code>{path}</code></li>}</For>
-                        </ul>
-                      </div>
-                    </Show>
-                    <Show when={data().patch ? currentChanges() : undefined} keyed>
-                      {(snapshot) => <DiffReview patch={snapshot.data?.patch ?? ""}
-                        onDraft={(text) => props.onDraft(snapshot.id, text)} />}
-                    </Show>
-                    <Show when={data().truncated}>
-                      <p class="muted">{t("inspector.truncated")}</p>
-                    </Show>
-                    <Show when={!data().patch && data().untracked.length === 0 &&
-                      data().staged.length === 0 && data().conflicts.length === 0}>
-                      <p class="muted">{t("inspector.noChanges")}</p>
-                    </Show>
-                    <Show when={currentChanges()?.id} keyed>
-                      {(id) => <TaskGitActions taskId={id} staged={data().staged}
-                        untracked={data().untracked}
-                        onDraft={(text) => props.onDraft(id, text)}
-                        onChanged={async () => { if (props.task.id === id) await refetch(); }} />}
-                    </Show>
+                    <PullRequestStatus taskId={id} />
+                    <PullRequestFeedback taskId={id} onDraft={(text) => props.onDraft(id, text)} />
+                    <TaskMergePreview taskId={id} />
                   </>
-                )}
-              </Show>
+                );
+              }}
             </Show>
-          </section>
+          </div>
         </Match>
         <Match when={pane() === "qa"}>
           <section class="inspector-section">

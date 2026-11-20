@@ -1,0 +1,18 @@
+.kv2 {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) 14px;
+  margin: 0;
+  font: var(--text-caption);
+}
+.kv2 dt {
+  color: var(--color-text-3);
+}
+.kv2 dd {
+  margin: 0;
+  color: var(--color-text-2);
+}
+.kv2 .status {
+  margin-left: 0;
+  font-family: var(--font-sans);
+}
