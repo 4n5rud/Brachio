@@ -27,7 +27,7 @@ pub struct Terminals(pub Arc<SessionManager>, pub SessionKeys);
 pub struct SessionKeys(Mutex<HashMap<SessionId, String>>);
 
 impl SessionKeys {
-    fn record(&self, id: SessionId, key: String) {
+    pub(crate) fn record(&self, id: SessionId, key: String) {
         if let Ok(mut keys) = self.0.lock() {
             keys.insert(id, key);
         }
