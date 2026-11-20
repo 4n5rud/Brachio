@@ -13,7 +13,7 @@ import {
   watchOrchestration,
   type ChildView,
 } from "../lib/orchestration";
-import { StatusGlyph } from "./StatusGlyph";
+import { StatusGlyph } from "./ui/StatusBadge";
 
 const stateLabel: Record<string, MessageKey> = {
   queued: "orchestration.state.queued",

@@ -61,7 +61,7 @@ export function groupTasks(tasks: readonly TaskRow[]): Map<TaskGroup, TaskRow[]>
   return groups;
 }
 
-export const AGENT_NAME: Record<AgentKind, string> = { claude: "Claude", codex: "Codex" };
+export const AGENT_NAME: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex" };
 
 /** Branch without the `brachio/` prefix, for tight rows. */
 export function shortBranch(branch: string): string {

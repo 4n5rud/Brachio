@@ -2,7 +2,7 @@ import { For, Show } from "solid-js";
 import { t } from "../../i18n";
 import { dismissToast, toasts, type ToastInput, type ToastTone } from "../../lib/toasts";
 import type { StatusTone } from "../../lib/status";
-import { StatusGlyph } from "../StatusGlyph";
+import { StatusGlyph } from "./StatusBadge";
 import { Button } from "./Button";
 import { IconButton } from "./IconButton";
 import "./Toast.css";

@@ -1,6 +1,6 @@
 import { Show, splitProps, type JSX } from "solid-js";
 import { Icon, type IconName } from "../Icon";
-import { StatusGlyph } from "../StatusGlyph";
+import { StatusGlyph } from "./StatusBadge";
 import { Kbd } from "./Kbd";
 import "./Button.css";
 

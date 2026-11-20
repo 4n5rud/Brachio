@@ -61,3 +61,37 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+
+.catalog-list {
+  width: 288px;
+  max-width: 100%;
+  padding: 4px 0;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+}
+.catalog-frame {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+.catalog-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-3);
+}
+.catalog-bar-frame {
+  display: grid;
+  height: var(--size-statusbar);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+}
+.catalog-title-frame {
+  display: grid;
+  height: var(--size-titlebar);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}

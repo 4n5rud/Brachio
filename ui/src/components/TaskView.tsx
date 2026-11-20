@@ -8,12 +8,13 @@ import type { TaskRow } from "../lib/tasks";
 import { AGENT_NAME } from "../lib/tasks";
 import { AgentIcon } from "./AgentIcon";
 import { statusTone, type AgentState } from "../lib/status";
-import { DiffStat } from "./DiffStat";
 import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
 import { MailboxInbox } from "./MailboxInbox";
-import { StatusBadge } from "./StatusBadge";
-import { StatusGlyph } from "./StatusGlyph";
+import { ApprovalBar } from "./ApprovalBar";
+import { TaskHeader } from "./TaskHeader";
+import { StatusGlyph } from "./ui/StatusBadge";
+import { Notice } from "./ui/Notice";
 import { CORE_AGENT } from "../lib/terminal";
 import { MAX_MOUNTED_TERMINALS, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
@@ -162,6 +163,11 @@ export function TaskView(props: {
     return isSecondarySelected(id) ? currentExtraKey(id) : terminalKey(id, "agent");
   };
   const approval = () => props.questions?.find((question) => question.key === activeAgentTab());
+  const [sending, setSending] = createSignal<number>();
+  const answer = (id: number, allow: boolean) => {
+    setSending(id);
+    props.onAnswer?.(id, allow);
+  };
   const otherApproval = () => props.questions?.find((question) => question.key !== approval()?.key);
   const tabTone = (key: string | undefined) => {
     if (!key) return statusTone({ state: "unknown" });
@@ -211,19 +217,9 @@ export function TaskView(props: {
   };
   return (
     <section class="task-view" classList={{ "view-hidden": !props.visible }}>
-      <div class="task-header">
-        <div class="task-header-text">
-          <h1>{props.task.title}</h1>
-          <div class="task-header-meta">
-            <span>
-              <Icon name="branch" class="icon-sm" />
-              {props.task.branch}
-            </span>
-            <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
-          </div>
-        </div>
-        <StatusBadge status={props.task.status} />
-        <div class="task-header-actions">
+      <TaskHeader title={props.task.title} status={props.task.status} agent={props.task.agent}
+        branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
+        actions={<>
           <Show when={props.workspaceTasks.length > 1}>
             <Select class="workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
               onChange={(event) => props.onOpenTask(event.currentTarget.value)}>
@@ -236,8 +232,7 @@ export function TaskView(props: {
             <Button size="sm" disabled={!props.onArchive}
               onClick={() => props.onArchive?.()}>{t("task.archive")}</Button>
           </Show>
-        </div>
-      </div>
+        </>} />
       <div class="tabs" role="tablist">
         <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
@@ -412,39 +407,22 @@ export function TaskView(props: {
           </For>
         </div>
         <Show when={otherApproval()}>
-          {(pending) => <Button size="sm"
-            onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}
+          {(pending) => (
+            <Notice tone="blocked" actions={<Button size="sm"
+              onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}>
+              {t("group.needs")}
+            </Notice>
+          )}
         </Show>
         <Show when={props.onAnswer && approval()?.id} keyed>
           {(id) => (
-            <ApprovalBar review={approval()?.review ?? ""}
-              onAllow={() => props.onAnswer?.(id, true)}
-              onDeny={() => props.onAnswer?.(id, false)} />
+            <ApprovalBar review={approval()?.review ?? ""} agent={AGENT_NAME[props.task.agent]}
+              sending={sending() === id}
+              onAllow={() => answer(id, true)}
+              onDeny={() => answer(id, false)} />
           )}
         </Show>
       </div>
     </section>
-  );
-}
-
-/** Answers a permission hook from inside the app without covering the terminal. */
-function ApprovalBar(props: { review: string; onAllow?: () => void; onDeny?: () => void }) {
-  return (
-    <div class="approval" role="region" aria-label={t("approval.title")}>
-      <StatusGlyph tone="blocked" />
-      <strong>{t("approval.title")}</strong>
-      <pre class="approval-review" tabindex="0" aria-label={t("approval.details")}><code>{props.review}</code></pre>
-      <div class="approval-actions">
-        <Button variant="primary" size="sm" disabled={!props.review || !props.onAllow}
-          onClick={() => { if (props.review) props.onAllow?.(); }}>
-          {t("approval.allowOnce")}
-        </Button>
-        <Button variant="ghost" size="sm" disabled={!props.onDeny}
-          onClick={() => props.onDeny?.()}>
-          {t("approval.deny")}
-        </Button>
-      </div>
-      <p class="approval-hint">{t("approval.hint")}</p>
-    </div>
   );
 }

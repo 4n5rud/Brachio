@@ -1,6 +1,6 @@
 import { Show, type JSX } from "solid-js";
 import type { StatusTone } from "../../lib/status";
-import { StatusGlyph } from "../StatusGlyph";
+import { StatusGlyph } from "./StatusBadge";
 import "./Notice.css";
 
 export type NoticeTone = "info" | "progress" | "success" | "blocked" | "error";

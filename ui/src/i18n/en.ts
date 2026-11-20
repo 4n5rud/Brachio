@@ -6,11 +6,9 @@ export const en = {
   "status.blocked.question": "Has a question",
   "status.blocked.auth": "Sign-in needed",
   "status.blocked.other": "Waiting for you",
-  "status.idle": "Ready",
   "status.error": "Error",
-  "status.exited": "Exited",
   "status.crashed": "Crashed",
-  "status.unknown": "No status yet",
+  "status.unknown": "Unknown",
 
   "group.needs": "Needs you",
   "group.working": "Working",
@@ -317,9 +315,10 @@ export const en = {
   "board.title": "Board",
   "board.all": "All",
   "board.open": "Open",
+  "board.reviewRequest": "Review request",
 
-  "statusbar.core": "Core OK",
-  "statusbar.sessions": "Sessions",
+  "statusbar.agentOne": "{count} agent running",
+  "statusbar.agentMany": "{count} agents running",
   "statusbar.memory": "Memory",
   "statusbar.cpu": "CPU",
 

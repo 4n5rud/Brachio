@@ -1,0 +1,14 @@
+.diffstat {
+  display: inline-flex;
+  gap: 5px;
+  font: var(--text-meta);
+}
+.diffstat-add {
+  color: var(--color-add);
+}
+.diffstat-del {
+  color: var(--color-del);
+}
+.diffstat-unknown {
+  color: var(--color-text-3);
+}

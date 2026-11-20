@@ -2,17 +2,11 @@ import { IconButton } from "./ui/IconButton";
 import { Button } from "./ui/Button";
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
-import { statusTone } from "../lib/status";
-import { AGENT_NAME, orderWithChildren, shortBranch, type TaskRow } from "../lib/tasks";
-import { AgentIcon } from "./AgentIcon";
+import { orderWithChildren, type TaskRow } from "../lib/tasks";
 import { FolderRepos } from "./FolderRepos";
-import { chipOf } from "../lib/pr-status";
-import { prReport, watchPrStatuses } from "../lib/pr-status-store";
-import { formatAge } from "../lib/time";
-import { DiffStat } from "./DiffStat";
+import { watchPrStatuses } from "../lib/pr-status-store";
 import { Icon } from "./Icon";
-import { MailboxBadge } from "./MailboxBadge";
-import { StatusGlyph } from "./StatusGlyph";
+import { TaskRowItem } from "./TaskRow";
 
 const COLLAPSED_KEY = "brachio.collapsedProjects";
 
@@ -106,7 +100,7 @@ export function TaskList(props: {
                 <Show when={expanded()}>
                   <For each={tasks()} fallback={<p class="project-empty">{t("sidebar.noProjectTasks")}</p>}>
                     {(task) => (
-                      <TaskItem
+                      <TaskRowItem
                         task={task}
                         child={task.parentTaskId !== undefined && tasks().some((other) => other.id === task.parentTaskId)}
                         selected={task.id === props.selectedId}
@@ -126,40 +120,5 @@ export function TaskList(props: {
         </For>
       </nav>
     </aside>
-  );
-}
-
-function TaskItem(props: { task: TaskRow; child: boolean; selected: boolean; now: number; unread: number; onSelect: () => void }) {
-  const tone = () => statusTone(props.task.status);
-  return (
-    <button
-      class="task-item"
-      classList={{ "task-item-selected": props.selected, "task-item-child": props.child }}
-      type="button"
-      aria-current={props.selected ? "true" : undefined}
-      onClick={() => props.onSelect()}
-    >
-      <StatusGlyph tone={tone()} />
-      <span class="task-title">{props.task.title}</span>
-      <span class="task-age">{formatAge(props.task.updatedAt, props.now)}</span>
-      <span class="task-meta">
-        <span class="agent-chip"><AgentIcon agent={props.task.agent} />{AGENT_NAME[props.task.agent]}</span>
-        <span class="task-branch">{shortBranch(props.task.branch)}</span>
-        <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
-        <MailboxBadge count={props.unread} />
-        <Show when={chipOf(prReport(props.task.id))}>
-          {(chip) => (
-            <span class={`pr-chip pr-chip-${chip().tone}`} classList={{ "pr-chip-stale": chip().stale }}
-              title={chip().stale ? t("prChip.stale") : undefined}>
-              PR #{chip().number} · {t(chip().key)}
-              <Show when={chip().stale}> · {t("prChip.offline")}</Show>
-            </span>
-          )}
-        </Show>
-      </span>
-      <Show when={props.task.note}>
-        <span class={`task-note task-note-${tone()}`}>{props.task.note}</span>
-      </Show>
-    </button>
   );
 }

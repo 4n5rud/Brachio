@@ -1,16 +1,14 @@
-import { Match, Switch } from "solid-js";
-import type { StatusTone } from "../lib/status";
+import { Match, Show, Switch } from "solid-js";
+import { statusDetail, statusLabel, statusTone, type AgentState, type StatusTone } from "../../lib/status";
+import "./StatusBadge.css";
 
-// One shape per tone so status reads without color: spinning arc, diamond,
-// ring, square, check circle, dashed ring. Only "working" moves.
+const toneColor = (tone: StatusTone) => (tone === "done" || tone === "unknown" ? "neutral" : tone);
+
+/** One shape per tone so status reads without color: turning arc, diamond, ring, square, check circle, dashed ring. Only "working" moves. */
 export function StatusGlyph(props: { tone: StatusTone }) {
   const color = () => `var(--color-status-${toneColor(props.tone)})`;
   return (
-    <svg
-      class={props.tone === "working" ? "glyph glyph-spin" : "glyph"}
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-    >
+    <svg class={props.tone === "working" ? "glyph glyph-spin" : "glyph"} viewBox="0 0 12 12" aria-hidden="true">
       <Switch>
         <Match when={props.tone === "working"}>
           <circle cx="6" cy="6" r="4.5" fill="none" stroke={color()} stroke-opacity=".28" stroke-width="1.8" />
@@ -38,7 +36,15 @@ export function StatusGlyph(props: { tone: StatusTone }) {
   );
 }
 
-function toneColor(tone: StatusTone): string {
-  if (tone === "done" || tone === "unknown") return "neutral";
-  return tone;
+/** Glyph and word together. `glyphOnly` is for rows that show the word in the same line. */
+export function StatusBadge(props: { status: AgentState; glyphOnly?: boolean }) {
+  const tone = () => statusTone(props.status);
+  return (
+    <Show when={!props.glyphOnly} fallback={<StatusGlyph tone={tone()} />}>
+      <span class={`status status-${tone()}`} title={statusDetail(props.status)}>
+        <StatusGlyph tone={tone()} />
+        {statusLabel(props.status)}
+      </span>
+    </Show>
+  );
 }

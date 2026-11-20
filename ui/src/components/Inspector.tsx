@@ -6,7 +6,7 @@ import { TaskPorts } from "./TaskPorts";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { diffTotals, type DiffTotals } from "../lib/diff";
-import { DiffStat } from "./DiffStat";
+import { DiffStat } from "./ui/DiffStat";
 import { DiffReview } from "./DiffReview";
 import { TaskGitActions } from "./TaskGitActions";
 import { PullRequestFeedback } from "./PullRequestFeedback";

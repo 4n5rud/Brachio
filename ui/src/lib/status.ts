@@ -36,16 +36,21 @@ export function statusLabel(s: AgentState): string {
     case "working":
       return t("status.working");
     case "blocked":
-      return t(`status.blocked.${s.reason}`);
+      return t("group.needs");
     case "idle":
-      return t("status.idle");
+      return t("group.review");
     case "error":
       return t("status.error");
     case "exited":
-      return s.code === 0 ? t("status.exited") : t("status.crashed");
+      return s.code === 0 ? t("group.done") : t("status.crashed");
     case "unknown":
       return t("status.unknown");
   }
+}
+
+/** Why a blocked task waits; the badge says "Needs you" and this goes in its tooltip. */
+export function statusDetail(s: AgentState): string | undefined {
+  return s.state === "blocked" ? t(`status.blocked.${s.reason}`) : undefined;
 }
 
 const TONE_COLOR: Record<StatusTone, string> = {

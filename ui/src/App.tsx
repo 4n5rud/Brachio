@@ -773,7 +773,7 @@ export function App() {
           )}
         </Show>
       </main>
-      <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <StatusBar sessions={inTauri ? openIds().length : tasks().length} needsYou={needsYou()} />
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}
