@@ -72,6 +72,44 @@ impl RuntimeTerminals {
         Ok(existing.is_some())
     }
 
+    /// Keys of the task's terminals whose program is still running, in the current runtime or an
+    /// older one that is still up. The runtime cannot list sessions, so the task's two fixed
+    /// terminals and its registered second agent tab are asked for by name. A runtime that is not
+    /// running hosts nothing. When the runtime is not used the in-app manager hosts the
+    /// terminals, and it tracks sessions by handle, not key, so none can be matched to a task.
+    ///
+    /// # Errors
+    /// Fails when a runtime cannot be asked, so the caller can refuse rather than guess.
+    pub async fn live_keys_for_task(
+        &self,
+        task_id: &str,
+        second_agent_tab: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let Some(current) = self.client().await? else {
+            return Ok(Vec::new());
+        };
+        let mut clients = vec![current];
+        clients.extend(runtime_client::older_clients().await);
+        let mut live = Vec::new();
+        for key in task_terminal_keys(task_id, second_agent_tab) {
+            for client in &clients {
+                let reply = client.call(Action::Inspect { key: key.clone() }).await;
+                match reply {
+                    Ok(Reply {
+                        result: ResponseResult::Success { session, .. },
+                        ..
+                    }) if !session.exited => {
+                        live.push(key.clone());
+                        break;
+                    }
+                    Ok(_) | Err(ClientError::Refused(_) | ClientError::NotRunning) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        Ok(live)
+    }
+
     /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
     /// is gone but its last screen was kept, that screen is shown first.
     /// Returns `None` when the runtime is not used, so the caller can host it in the app.
@@ -203,6 +241,13 @@ impl RuntimeTerminals {
             attached.pump.abort();
         }
     }
+}
+
+/// The terminal keys a task can have, as the UI and `terminal_authorization` name them.
+fn task_terminal_keys(task_id: &str, second_agent_tab: Option<&str>) -> Vec<String> {
+    let mut keys = vec![format!("{task_id}:agent"), format!("{task_id}:shell")];
+    keys.extend(second_agent_tab.map(|tab| format!("{task_id}:agent-{tab}")));
+    keys
 }
 
 /// Finds the runtime that already hosts `key`: the current one, else an older one that is still
@@ -377,5 +422,19 @@ mod handle_tests {
         assert_ne!(first, second, "two runtimes can both have a session 1");
         assert!(first > SessionId::from_raw(HOSTED_HANDLE_BASE - 1));
         assert!(first > SessionId::from_raw(1_000_000));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::task_terminal_keys;
+
+    #[test]
+    fn a_task_names_its_agent_shell_and_second_agent_terminals() {
+        assert_eq!(
+            task_terminal_keys("t1", Some("abc")),
+            ["t1:agent", "t1:shell", "t1:agent-abc"]
+        );
+        assert_eq!(task_terminal_keys("t1", None), ["t1:agent", "t1:shell"]);
     }
 }
