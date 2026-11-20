@@ -80,16 +80,9 @@ fn older_endpoints() -> Vec<String> {
     names
 }
 
-/// Clients of the older runtimes that are still running.
-pub async fn older_clients() -> Vec<Client> {
-    let mut running = Vec::new();
-    for name in older_endpoints() {
-        let client = Client::new(&name);
-        if client.call(Action::Hello).await.is_ok() {
-            running.push(client);
-        }
-    }
-    running
+/// Candidate endpoints of older runtimes, whether they are running or not.
+pub fn older_clients() -> impl Iterator<Item = Client> {
+    older_endpoints().into_iter().map(|name| Client::new(&name))
 }
 
 fn current_user() -> String {
@@ -174,7 +167,7 @@ async fn connect_current() -> Result<Client> {
 /// after the current runtime answered, so a failed start never leaves nothing to open terminals
 /// in. A runtime too old to know the request just ignores it.
 async fn retire_older() {
-    for old in older_clients().await {
+    for old in older_clients() {
         let _ = old.call(Action::Drain).await;
     }
 }

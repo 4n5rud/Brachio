@@ -225,22 +225,40 @@ impl RuntimeTerminals {
 /// running. Only "no such terminal" counts as absent; any other failure stops the open, because
 /// starting a second program for the same key would be worse than not opening one.
 async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>), ClientError> {
-    let inspect = || Action::Inspect {
-        key: key.to_owned(),
-    };
-    match current.call(inspect()).await {
-        Ok(reply) => return Ok((current.clone(), Some(reply))),
-        Err(ClientError::Refused(_)) => {}
-        Err(error) => return Err(error),
+    if let Some(reply) = inspect_terminal(current, key).await? {
+        return Ok((current.clone(), Some(reply)));
     }
-    for old in runtime_client::older_clients().await {
-        match old.call(inspect()).await {
-            Ok(reply) => return Ok((old, Some(reply))),
-            Err(ClientError::Refused(_) | ClientError::NotRunning) => {}
+    for old in runtime_client::older_clients() {
+        match inspect_terminal(&old, key).await {
+            Ok(Some(reply)) => return Ok((old, Some(reply))),
+            Ok(None) | Err(ClientError::NotRunning) => {}
             Err(error) => return Err(error),
         }
     }
     Ok((current.clone(), None))
+}
+
+async fn inspect_terminal(client: &Client, key: &str) -> Result<Option<Reply>, ClientError> {
+    inspect_result(
+        client
+            .call(Action::Inspect {
+                key: key.to_owned(),
+            })
+            .await,
+        key,
+    )
+}
+
+fn inspect_result(
+    result: Result<Reply, ClientError>,
+    key: &str,
+) -> Result<Option<Reply>, ClientError> {
+    match result {
+        Err(ClientError::Refused(reason)) if reason == format!("no active terminal for {key}") => {
+            Ok(None)
+        }
+        result => result.map(Some),
+    }
 }
 
 fn launch_action(key: &str, launch: Launch) -> Action {
@@ -374,7 +392,31 @@ fn deliver(
 mod handle_tests {
     use brachio_pty::SessionId;
 
-    use super::{locate, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE};
+    use super::{
+        inspect_result, locate, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE,
+    };
+
+    #[test]
+    fn only_a_matching_missing_terminal_refusal_means_the_key_is_absent() {
+        let key = "work:agent";
+        assert!(inspect_result(
+            Err(ClientError::Refused(format!(
+                "no active terminal for {key}"
+            ))),
+            key
+        )
+        .expect("missing terminal")
+        .is_none());
+        for refusal in [
+            "no active terminal for another:agent",
+            "runtime protocol is unsupported",
+        ] {
+            assert!(
+                matches!(inspect_result(Err(ClientError::Refused(refusal.into())), key),
+                Err(ClientError::Refused(reason)) if reason == refusal)
+            );
+        }
+    }
 
     #[tokio::test]
     async fn a_missing_current_runtime_is_distinct_from_a_missing_terminal() {
