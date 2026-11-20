@@ -14,7 +14,7 @@ pub struct ChildReport {
     pub title: String,
     /// Archived children no longer count as pending work.
     pub archived: bool,
-    /// Subject of the child agent's latest `worker_done` message to the lead, if any.
+    /// Subject of the latest `worker_done` sent to the lead in the child's current generation.
     pub reported_subject: Option<String>,
     /// Messages from the child's agent to the lead that the lead has not read.
     pub unread: u32,
@@ -34,6 +34,7 @@ pub fn child_reports(
                 (SELECT m.subject FROM messages m
                   WHERE m.from_key = t.id || ':agent' AND m.to_key = ?1 || ':agent'
                     AND m.kind = 'worker_done'
+                    AND m.worker_report_generation = t.worker_report_generation
                   ORDER BY m.created_at_ms DESC, m.rowid DESC LIMIT 1),
                 (SELECT COUNT(*) FROM messages m
                   WHERE m.from_key = t.id || ':agent' AND m.to_key = ?1 || ':agent'
@@ -56,7 +57,9 @@ pub fn child_reports(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_in_memory, send_message, take_unread, NewMessage};
+    use crate::{
+        open_in_memory, recent_messages, send_message, take_unread, NewMessage, TaskRecord,
+    };
 
     fn database() -> Connection {
         let connection = open_in_memory().expect("open");
@@ -181,5 +184,42 @@ mod tests {
         let reports = child_reports(&connection, "lead").expect("reports");
         assert_eq!(reports[0].reported_subject.as_deref(), Some("done"));
         assert_eq!(reports[0].unread, 0);
+    }
+
+    #[test]
+    fn restoring_a_child_requires_a_fresh_report_without_removing_history() {
+        let connection = database();
+        let report_subject = || {
+            child_reports(&connection, "lead").expect("reports")[0]
+                .reported_subject
+                .clone()
+        };
+        send(
+            &connection,
+            "m1",
+            "c1:agent",
+            "lead:agent",
+            "worker_done",
+            "first report",
+        );
+        assert_eq!(report_subject().as_deref(), Some("first report"));
+
+        TaskRecord::archive(&connection, "c1", 20).expect("archive");
+        TaskRecord::restore(&connection, "c1").expect("restore");
+        assert_eq!(report_subject(), None);
+        let history = recent_messages(&connection, "lead:agent", 10).expect("history");
+        assert_eq!(history[0].subject, "first report");
+
+        send(
+            &connection,
+            "m2",
+            "c1:agent",
+            "lead:agent",
+            "worker_done",
+            "fresh report",
+        );
+        assert_eq!(report_subject().as_deref(), Some("fresh report"));
+        TaskRecord::restore(&connection, "c1").expect("repeat restore");
+        assert_eq!(report_subject().as_deref(), Some("fresh report"));
     }
 }
