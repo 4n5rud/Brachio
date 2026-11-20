@@ -1,9 +1,10 @@
 //! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -58,7 +59,7 @@ struct Attached {
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
     restart: AsyncMutex<()>,
-    attached: Mutex<HashMap<SessionId, Attached>>,
+    attached: Arc<Mutex<HashMap<SessionId, Attached>>>,
     handles: AtomicU64,
 }
 
@@ -148,16 +149,8 @@ impl RuntimeTerminals {
                 })
                 .await?
         };
-        let pump = spawn(pump(first, following, channel, agent));
         let id = self.new_handle();
-        let previous = self
-            .attached
-            .lock()
-            .map_err(|_| anyhow!("terminal list lock poisoned"))?
-            .insert(id, Attached { key, client, pump });
-        if let Some(previous) = previous {
-            previous.pump.abort();
-        }
+        self.register(id, key, client, pump(first, following, channel, agent))?;
         Ok(Some((id, attached)))
     }
 
@@ -228,6 +221,31 @@ impl RuntimeTerminals {
             }
             result => Ok(result?),
         }
+    }
+
+    /// Runs `forward` and records the attachment under `id`; the entry goes away when `forward`
+    /// ends, whether the program exited or the stream broke, without touching the program.
+    fn register(
+        &self,
+        id: SessionId,
+        key: String,
+        client: Client,
+        forward: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
+        let map = Arc::clone(&self.attached);
+        let mut attached = self
+            .attached
+            .lock()
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
+        // Held until the insert so a pump that ends at once cannot remove before it is added.
+        let pump = spawn(async move {
+            forward.await;
+            if let Ok(mut map) = map.lock() {
+                map.remove(&id);
+            }
+        });
+        attached.insert(id, Attached { key, client, pump });
+        Ok(())
     }
 
     /// A handle for a newly attached terminal, unique in this app whichever runtime hosts it.
@@ -448,6 +466,23 @@ mod handle_tests {
         let id = attach_to_dead_runtime(&terminals);
         assert!(terminals.stop(id).await.expect("hosted").is_err());
         assert!(terminals.attached.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_attachment_is_released_when_its_pump_ends() {
+        let terminals = RuntimeTerminals::default();
+        let id = terminals.new_handle();
+        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        terminals
+            .register(id, "test:agent".to_owned(), client, async {})
+            .expect("register");
+        for _ in 0..100 {
+            if terminals.attached.lock().expect("lock").is_empty() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the finished pump left its attachment behind");
     }
 
     #[test]
