@@ -39,3 +39,16 @@ export function rankFiles(files: readonly string[], query: string, limit = MAX_F
   scored.sort((a, b) => a.score - b.score || a.path.length - b.path.length || a.path.localeCompare(b.path));
   return scored.slice(0, limit).map((entry) => entry.path);
 }
+
+/** Loads a file list and applies it unless cancelled first, so a slower earlier request cannot overwrite a newer one. */
+export function loadFilesUnlessCancelled(
+  load: () => Promise<readonly string[]>,
+  apply: (files: readonly string[]) => void,
+): () => void {
+  let cancelled = false;
+  load().then(
+    (files) => { if (!cancelled) apply(files); },
+    () => { if (!cancelled) apply([]); },
+  );
+  return () => { cancelled = true; };
+}

@@ -307,3 +307,80 @@ async fn concurrent_recovery_is_read_only_and_reconnect_does_not_replay_input() 
     drop(second);
     let _ = fs::remove_dir_all(state);
 }
+
+#[tokio::test]
+async fn a_slow_lifecycle_reply_over_the_socket_stays_pending_until_the_outcome() {
+    use brachio_runtime::transport;
+    use brachio_runtime::wire::{
+        read_message, write_message, Request, Response, IO_TIMEOUT, MAX_MESSAGE, MAX_RESPONSE,
+    };
+    use interprocess::local_socket::tokio::prelude::*;
+    use tokio::io::BufReader;
+
+    let name = endpoint();
+    let listener = transport::listen(&name).expect("listen");
+    let client = tokio::spawn(async move {
+        Client::new(&name)
+            .call(Action::Ensure {
+                key: "slow".into(),
+                cwd: std::env::temp_dir(),
+            })
+            .await
+    });
+    let mut socket = BufReader::new(listener.accept().await.expect("accept"));
+    let bytes = read_message(&mut socket, MAX_MESSAGE)
+        .await
+        .expect("read")
+        .expect("request");
+    let request: Request = serde_json::from_slice(&bytes).expect("decode");
+    assert!(matches!(&request.action, Action::Ensure { key, .. } if key == "slow"));
+
+    tokio::time::pause();
+    tokio::task::yield_now().await;
+    tokio::time::advance(IO_TIMEOUT + Duration::from_secs(1)).await;
+    tokio::task::yield_now().await;
+    assert!(!client.is_finished());
+
+    write_message(
+        socket.get_mut(),
+        &Response {
+            version: request.version,
+            instance: "fixture",
+            result: ResponseResult::Error {
+                error: "definitive refusal".into(),
+            },
+        },
+        MAX_RESPONSE,
+    )
+    .await
+    .expect("respond");
+    assert!(
+        matches!(client.await.expect("join"), Err(ClientError::Refused(message)) if message == "definitive refusal")
+    );
+}
+
+#[tokio::test]
+async fn a_disconnect_after_dispatching_stop_leaves_its_outcome_unknown() {
+    use brachio_runtime::transport;
+    use brachio_runtime::wire::{read_message, MAX_MESSAGE};
+    use interprocess::local_socket::tokio::prelude::*;
+    use tokio::io::BufReader;
+
+    let name = endpoint();
+    let listener = transport::listen(&name).expect("listen");
+    let client = tokio::spawn(async move {
+        Client::new(&name)
+            .call(Action::Stop { key: "stop".into() })
+            .await
+    });
+    let mut socket = BufReader::new(listener.accept().await.expect("accept"));
+    assert!(read_message(&mut socket, MAX_MESSAGE)
+        .await
+        .expect("read")
+        .is_some());
+    drop(socket);
+    assert!(matches!(
+        client.await.expect("join"),
+        Err(ClientError::OutcomeUnknown(_))
+    ));
+}
