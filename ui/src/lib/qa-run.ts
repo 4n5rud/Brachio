@@ -14,6 +14,10 @@ export interface QaReport {
   stdout: string;
   stderr: string;
   truncated: boolean;
+  /** Brachio verified this run on the commit a handoff of the task names. */
+  matchesHandoff: boolean;
+  /** The feedback gate would allow another automatic attempt; nothing is retried. */
+  retryAllowed: boolean;
 }
 
 /** Asks the user in the approval bar first. Resolves to null when they decline. */
