@@ -10,8 +10,8 @@ use crate::endpoint::{self, Liveness};
 use crate::protocol;
 use crate::transport;
 use crate::wire::{
-    read_message, write_message, Action, Reply, Request, ResponseResult, IO_TIMEOUT, MAX_MESSAGE,
-    MAX_RESPONSE,
+    await_outcome, read_message, write_message, Action, Reply, Request, ResponseResult, IO_TIMEOUT,
+    MAX_MESSAGE, MAX_RESPONSE,
 };
 
 /// Why a request to the runtime did not produce a reply.
@@ -78,15 +78,22 @@ impl Client {
             (Liveness::Dead, Err(_)) => return Err(ClientError::NotRunning),
             (_, Err(error)) => return Err(ClientError::Unreachable(error)),
         };
+        let changes_state = action.changes_state();
         let request = Request {
             version: protocol::CURRENT,
             action,
         };
         timed(write_message(&mut stream, &request, MAX_MESSAGE)).await?;
         let mut reader = BufReader::new(stream);
-        let reply = read_reply(&mut reader).await?.ok_or_else(|| {
-            ClientError::Connection("runtime closed before responding".to_owned())
-        })?;
+        let reply = read_reply(&mut reader, changes_state)
+            .await?
+            .ok_or_else(|| {
+                ClientError::Connection(if changes_state {
+                    "runtime closed before responding; operation outcome is unknown".to_owned()
+                } else {
+                    "runtime closed before responding".to_owned()
+                })
+            })?;
         Ok((reply, Following { reader }))
     }
 }
@@ -104,8 +111,21 @@ impl Following {
     }
 }
 
-async fn read_reply(reader: &mut BufReader<Stream>) -> Result<Option<Reply>, ClientError> {
-    let message = timed(read_message(reader, MAX_RESPONSE)).await?;
+async fn read_reply(
+    reader: &mut BufReader<Stream>,
+    changes_state: bool,
+) -> Result<Option<Reply>, ClientError> {
+    let message = await_outcome(changes_state, read_message(reader, MAX_RESPONSE))
+        .await
+        .map_err(|error| ClientError::Connection(error.to_string()))?
+        .map_err(|error| {
+            let suffix = if changes_state {
+                "; operation outcome is unknown"
+            } else {
+                ""
+            };
+            ClientError::Connection(format!("{error:#}{suffix}"))
+        })?;
     message.map(|message| decode(&message)).transpose()
 }
 
