@@ -55,8 +55,8 @@ export function splitDiffRows(rows: readonly DiffRow[]): SplitDiffRow[] {
 }
 
 export function diffRows(patch: string): DiffRow[] {
-  let oldPath = "";
-  let newPath = "";
+  let oldPath: string | null = "";
+  let newPath: string | null = "";
   let oldLine = 0;
   let newLine = 0;
   let oldRemaining = 0;
@@ -67,17 +67,20 @@ export function diffRows(patch: string): DiffRow[] {
       const prefix = text[0];
       if (prefix === "-") {
         oldRemaining--;
-        return { text, location: { path: oldPath, line: oldLine++, side: "old" } };
+        const line = oldLine++;
+        return oldPath === null ? { text } : { text, location: { path: oldPath, line, side: "old" } };
       }
       if (prefix === "+") {
         newRemaining--;
-        return { text, location: { path: newPath, line: newLine++, side: "new" } };
+        const line = newLine++;
+        return newPath === null ? { text } : { text, location: { path: newPath, line, side: "new" } };
       }
       if (prefix === " ") {
         oldRemaining--;
         newRemaining--;
         oldLine++;
-        return { text, location: { path: newPath, line: newLine++, side: "new" } };
+        const line = newLine++;
+        return newPath === null ? { text } : { text, location: { path: newPath, line, side: "new" } };
       }
     }
     if (text.startsWith("diff --git ")) {
@@ -100,8 +103,46 @@ export function diffRows(patch: string): DiffRow[] {
   });
 }
 
-function displayPath(path: string, prefix: string): string {
-  const name = path.replace(/\t$/, "");
-  if (name.startsWith(`"${prefix}`)) return `"${name.slice(prefix.length + 1)}`;
+const SIMPLE_ESCAPES: Record<string, number> = {
+  a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '"': 34, "\\": 92,
+};
+
+// Decodes Git's C-style quoted path; null when malformed so callers drop the location.
+function unquoteGitPath(quoted: string): string | null {
+  const bytes: number[] = [];
+  const encoder = new TextEncoder();
+  let i = 1;
+  while (i < quoted.length) {
+    const ch = quoted[i] ?? "";
+    if (ch === '"') {
+      if (quoted.slice(i + 1).replace(/\t$/, "") !== "") return null;
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+      } catch {
+        return null;
+      }
+    }
+    if (ch !== "\\") {
+      bytes.push(...encoder.encode(ch));
+      i += ch.length;
+      continue;
+    }
+    const octal = /^[0-3][0-7]{2}/.exec(quoted.slice(i + 1, i + 4));
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8));
+      i += 4;
+    } else if (SIMPLE_ESCAPES[quoted[i + 1] ?? ""] !== undefined) {
+      bytes.push(SIMPLE_ESCAPES[quoted[i + 1] ?? ""]!);
+      i += 2;
+    } else {
+      return null;
+    }
+  }
+  return null;
+}
+
+function displayPath(path: string, prefix: string): string | null {
+  const name = path.startsWith('"') ? unquoteGitPath(path) : path.replace(/\t$/, "");
+  if (name === null) return null;
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
