@@ -11,6 +11,8 @@ use crate::session::{lock, lost_info, ScreenMark, Session};
 
 #[cfg(test)]
 mod prefix_tests;
+#[cfg(test)]
+mod stop_tests;
 
 impl Journal {
     /// Records left by runtimes that are gone. Unreadable files are reported and set aside.
@@ -47,8 +49,12 @@ impl Runtime {
             let Ok(saved) = lock(&self.saved) else {
                 return;
             };
+            let Ok(stopped) = lock(&self.stopped) else {
+                return;
+            };
             let records: Vec<(SessionRecord, ScreenMark)> = sessions
                 .iter()
+                .filter(|(key, _)| !stopped.contains(key.as_str()))
                 .filter(|(key, session)| {
                     session
                         .mark()

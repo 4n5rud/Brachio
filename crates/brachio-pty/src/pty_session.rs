@@ -2,7 +2,9 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::Arc;
 use std::thread;
 
 use anyhow::{anyhow, Context, Result};
@@ -28,6 +30,58 @@ pub struct SpawnSpec {
 /// How many writes may wait for a child that is not reading its input. Typing and pastes are far
 /// fewer; a child that stays deaf past this is not going to read what is queued anyway.
 const QUEUED_WRITES: usize = 512;
+const MAX_INPUT_WRITE: usize = 64 * 1024;
+/// Includes the frame currently being written to the child.
+const MAX_PENDING_INPUT: usize = 1024 * 1024;
+
+#[derive(Default)]
+struct InputBudget {
+    writes: AtomicUsize,
+    bytes: AtomicUsize,
+}
+
+struct InputReservation {
+    budget: Arc<InputBudget>,
+    bytes: usize,
+}
+
+impl InputBudget {
+    fn reserve(self: &Arc<Self>, bytes: usize) -> Result<InputReservation> {
+        if bytes > MAX_INPUT_WRITE {
+            return Err(anyhow!(
+                "pty input exceeds the {MAX_INPUT_WRITE}-byte write limit"
+            ));
+        }
+        self.writes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                (count < QUEUED_WRITES).then_some(count + 1)
+            })
+            .map_err(|_| anyhow!("the program is not reading its input"))?;
+        let mut reservation = InputReservation {
+            budget: Arc::clone(self),
+            bytes: 0,
+        };
+        self.bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                (count + bytes <= MAX_PENDING_INPUT).then_some(count + bytes)
+            })
+            .map_err(|_| anyhow!("the program is not reading its input"))?;
+        reservation.bytes = bytes;
+        Ok(reservation)
+    }
+}
+
+impl Drop for InputReservation {
+    fn drop(&mut self) {
+        self.budget.bytes.fetch_sub(self.bytes, Ordering::Relaxed);
+        self.budget.writes.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+struct QueuedInput {
+    bytes: Vec<u8>,
+    _reservation: InputReservation,
+}
 
 /// One running PTY. Reading happens on a dedicated thread owned by the
 /// caller (see `take_reader`), because PTY reads block.
@@ -36,7 +90,8 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     /// Input waits here for the writer thread. A child that does not read its input blocks
     /// that thread only, never a caller, the session lock or the output reader.
-    input: SyncSender<Vec<u8>>,
+    input: SyncSender<QueuedInput>,
+    input_budget: Arc<InputBudget>,
 }
 
 impl PtySession {
@@ -74,6 +129,7 @@ impl PtySession {
             master: pair.master,
             child,
             input,
+            input_budget: Arc::default(),
         })
     }
 
@@ -90,10 +146,14 @@ impl PtySession {
     ///
     /// # Errors
     /// Fails when the PTY is closed, or when so much input is already waiting that the child is
-    /// evidently not reading it.
+    /// evidently not reading it, or when the write exceeds the per-frame limit.
     pub fn write_input(&self, bytes: &[u8]) -> Result<()> {
+        let reservation = self.input_budget.reserve(bytes.len())?;
         self.input
-            .try_send(bytes.to_vec())
+            .try_send(QueuedInput {
+                bytes: bytes.to_vec(),
+                _reservation: reservation,
+            })
             .map_err(|error| match error {
                 TrySendError::Full(_) => anyhow!("the program is not reading its input"),
                 TrySendError::Disconnected(_) => anyhow!("pty input is closed"),
@@ -127,9 +187,9 @@ impl PtySession {
 }
 
 /// Writes queued input until the PTY refuses it or every sender is gone.
-fn write_queued(mut writer: Box<dyn Write + Send>, queued: &Receiver<Vec<u8>>) {
-    for bytes in queued {
-        if writer.write_all(&bytes).is_err() {
+fn write_queued(mut writer: Box<dyn Write + Send>, queued: &Receiver<QueuedInput>) {
+    for input in queued {
+        if writer.write_all(&input.bytes).is_err() {
             return;
         }
     }
@@ -219,5 +279,35 @@ mod tests {
             text.contains("hello-brachio"),
             "echo output missing: {text:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn a_stalled_writer_keeps_its_frame_inside_the_budget() {
+        let budget = Arc::<InputBudget>::default();
+        let (sender, receiver) = mpsc::sync_channel(QUEUED_WRITES);
+        let make_frame = || QueuedInput {
+            bytes: vec![0; MAX_INPUT_WRITE],
+            _reservation: budget.reserve(MAX_INPUT_WRITE).expect("reserve frame"),
+        };
+        sender.send(make_frame()).expect("queue first frame");
+        let in_flight = receiver.recv().expect("writer takes first frame");
+        for _ in 1..MAX_PENDING_INPUT / MAX_INPUT_WRITE {
+            sender.send(make_frame()).expect("queue frame");
+        }
+        assert!(budget.reserve(1).is_err());
+        assert!(budget.reserve(MAX_INPUT_WRITE + 1).is_err());
+        assert!(Arc::new(InputBudget::default())
+            .reserve(MAX_INPUT_WRITE)
+            .is_ok());
+        drop(in_flight);
+        sender.send(make_frame()).expect("released budget");
+        drop(receiver);
+        assert_eq!(budget.bytes.load(Ordering::Relaxed), 0);
+        assert_eq!(budget.writes.load(Ordering::Relaxed), 0);
     }
 }
