@@ -1,9 +1,10 @@
 //! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -58,7 +59,7 @@ struct Attached {
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
     restart: AsyncMutex<()>,
-    attached: Mutex<HashMap<SessionId, Attached>>,
+    attached: Arc<Mutex<HashMap<SessionId, Attached>>>,
     handles: AtomicU64,
 }
 
@@ -74,16 +75,16 @@ impl RuntimeTerminals {
 
     /// Keys of the task's terminals whose program is still running, in the current runtime or an
     /// older one that is still up. The runtime cannot list sessions, so the task's two fixed
-    /// terminals and its registered second agent tab are asked for by name. A runtime that is not
+    /// terminals and every second agent tab it has had are asked for by name. A runtime that is not
     /// running hosts nothing. When the runtime is not used the in-app manager hosts the
-    /// terminals, and it tracks sessions by handle, not key, so none can be matched to a task.
+    /// terminals, which `Terminals::live_keys_for_task` answers instead.
     ///
     /// # Errors
     /// Fails when a runtime cannot be asked, so the caller can refuse rather than guess.
     pub async fn live_keys_for_task(
         &self,
         task_id: &str,
-        second_agent_tab: Option<&str>,
+        second_agent_tabs: &[String],
     ) -> Result<Vec<String>> {
         let Some(current) = self.client().await? else {
             return Ok(Vec::new());
@@ -91,7 +92,7 @@ impl RuntimeTerminals {
         let mut clients = vec![current];
         clients.extend(runtime_client::older_clients().await);
         let mut live = Vec::new();
-        for key in task_terminal_keys(task_id, second_agent_tab) {
+        for key in task_terminal_keys(task_id, second_agent_tabs) {
             for client in &clients {
                 let reply = client.call(Action::Inspect { key: key.clone() }).await;
                 match reply {
@@ -148,16 +149,8 @@ impl RuntimeTerminals {
                 })
                 .await?
         };
-        let pump = spawn(pump(first, following, channel, agent));
         let id = self.new_handle();
-        let previous = self
-            .attached
-            .lock()
-            .map_err(|_| anyhow!("terminal list lock poisoned"))?
-            .insert(id, Attached { key, client, pump });
-        if let Some(previous) = previous {
-            previous.pump.abort();
-        }
+        self.register(id, key, client, pump(first, following, channel, agent))?;
         Ok(Some((id, attached)))
     }
 
@@ -230,6 +223,31 @@ impl RuntimeTerminals {
         }
     }
 
+    /// Runs `forward` and records the attachment under `id`; the entry goes away when `forward`
+    /// ends, whether the program exited or the stream broke, without touching the program.
+    fn register(
+        &self,
+        id: SessionId,
+        key: String,
+        client: Client,
+        forward: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
+        let map = Arc::clone(&self.attached);
+        let mut attached = self
+            .attached
+            .lock()
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
+        // Held until the insert so a pump that ends at once cannot remove before it is added.
+        let pump = spawn(async move {
+            forward.await;
+            if let Ok(mut map) = map.lock() {
+                map.remove(&id);
+            }
+        });
+        attached.insert(id, Attached { key, client, pump });
+        Ok(())
+    }
+
     /// A handle for a newly attached terminal, unique in this app whichever runtime hosts it.
     fn new_handle(&self) -> SessionId {
         SessionId::from_raw(HOSTED_HANDLE_BASE + self.handles.fetch_add(1, Ordering::Relaxed))
@@ -254,9 +272,13 @@ impl RuntimeTerminals {
 }
 
 /// The terminal keys a task can have, as the UI and `terminal_authorization` name them.
-fn task_terminal_keys(task_id: &str, second_agent_tab: Option<&str>) -> Vec<String> {
+fn task_terminal_keys(task_id: &str, second_agent_tabs: &[String]) -> Vec<String> {
     let mut keys = vec![format!("{task_id}:agent"), format!("{task_id}:shell")];
-    keys.extend(second_agent_tab.map(|tab| format!("{task_id}:agent-{tab}")));
+    keys.extend(
+        second_agent_tabs
+            .iter()
+            .map(|tab| format!("{task_id}:agent-{tab}")),
+    );
     keys
 }
 
@@ -450,6 +472,23 @@ mod handle_tests {
         assert!(terminals.attached.lock().expect("lock").is_empty());
     }
 
+    #[tokio::test]
+    async fn an_attachment_is_released_when_its_pump_ends() {
+        let terminals = RuntimeTerminals::default();
+        let id = terminals.new_handle();
+        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        terminals
+            .register(id, "test:agent".to_owned(), client, async {})
+            .expect("register");
+        for _ in 0..100 {
+            if terminals.attached.lock().expect("lock").is_empty() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the finished pump left its attachment behind");
+    }
+
     #[test]
     fn detaching_an_unknown_handle_is_not_hosted() {
         let terminals = RuntimeTerminals::default();
@@ -485,9 +524,9 @@ mod tests {
     #[test]
     fn a_task_names_its_agent_shell_and_second_agent_terminals() {
         assert_eq!(
-            task_terminal_keys("t1", Some("abc")),
-            ["t1:agent", "t1:shell", "t1:agent-abc"]
+            task_terminal_keys("t1", &["abc".to_owned(), "old".to_owned()]),
+            ["t1:agent", "t1:shell", "t1:agent-abc", "t1:agent-old"]
         );
-        assert_eq!(task_terminal_keys("t1", None), ["t1:agent", "t1:shell"]);
+        assert_eq!(task_terminal_keys("t1", &[]), ["t1:agent", "t1:shell"]);
     }
 }

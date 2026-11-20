@@ -21,7 +21,7 @@ import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { watchCreatedTasks } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
-import type { CommandId } from "./lib/quick-open";
+import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
@@ -126,7 +126,7 @@ export function App() {
       setQuickFiles([]);
       return;
     }
-    listTaskFiles(task.id).then(setQuickFiles).catch(() => setQuickFiles([]));
+    onCleanup(loadFilesUnlessCancelled(() => listTaskFiles(task.id), setQuickFiles));
   });
   const runCommand = (id: CommandId) => {
     if (id === "newTask") {
@@ -575,7 +575,7 @@ export function App() {
       dropListener.catch(report);
       onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
-      void watchApprovals(
+      const stopApprovals = watchApprovals(
         (question) => {
           const id = taskIdOf(question.key);
           const task = findTask(id);
@@ -587,9 +587,9 @@ export function App() {
           setQuestions((open) => [...open, question]);
         },
         (id) => setQuestions((open) => open.filter((question) => question.id !== id)),
-      )
-        .then((stop) => onCleanup(stop))
-        .catch(report);
+        report,
+      );
+      onCleanup(stopApprovals);
     }
     // Keeps "2m ago" labels current.
     const clock = setInterval(() => setNow(Date.now()), 30_000);
