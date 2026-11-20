@@ -210,6 +210,35 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_scratch_write_does_not_replace_last_saved_record() {
+        let directory = scratch("interrupted");
+        let journal = Journal::open(&directory).expect("open journal");
+        journal.save(&record("task", 7)).expect("save original");
+        fs::write(directory.join("task.json.tmp"), b"{incomplete")
+            .expect("simulate interrupted write");
+
+        let loaded = journal.load().expect("load after interruption");
+        assert_eq!(loaded.records, vec![record("task", 7)]);
+        assert!(loaded.unreadable.is_empty());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn damaged_record_does_not_prevent_a_subsequent_valid_save() {
+        let directory = scratch("repair");
+        let journal = Journal::open(&directory).expect("open journal");
+        fs::write(directory.join("task.json"), b"{broken").expect("corrupt record");
+        let loaded = journal.load().expect("load");
+        assert_eq!(loaded.unreadable.len(), 1);
+        journal.save(&record("task", 12)).expect("save replacement");
+        assert_eq!(
+            journal.load().expect("reload").records,
+            vec![record("task", 12)]
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn removing_is_idempotent_and_keys_cannot_escape_the_directory() {
         let directory = scratch("remove");
         let journal = Journal::open(&directory).expect("open journal");

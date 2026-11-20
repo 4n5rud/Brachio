@@ -79,7 +79,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            extra_args: --config src-tauri/tauri.release.windows.conf.json
+          - os: macos-latest
+            extra_args: ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     permissions:
@@ -102,7 +106,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          args: --config src-tauri/tauri.release.conf.json
+          args: --config src-tauri/tauri.release.conf.json ${{ matrix.extra_args }}
           tagName: ${{ github.ref_name }}
           releaseName: Brachio ${{ needs.prepare.outputs.version }}
           releaseDraft: true
