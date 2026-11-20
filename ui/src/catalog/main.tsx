@@ -23,6 +23,7 @@ import { StatusBadge } from "../components/ui/StatusBadge";
 import { Button } from "../components/ui/Button";
 import { ConfirmHost, confirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
+import { NewTaskDialog } from "../components/NewTaskDialog";
 import { EmptyState } from "../components/ui/EmptyState";
 import { IconButton } from "../components/ui/IconButton";
 import { Input, Select, TextArea } from "../components/ui/Input";
@@ -108,7 +109,7 @@ function Catalog() {
   const [mode, setMode] = createSignal<"tasks" | "board">("tasks");
   const [notify, setNotify] = createSignal(true);
   const [veil, setVeil] = createSignal(false);
-  const [dialog, setDialog] = createSignal<"plain" | "confirm" | undefined>();
+  const [dialog, setDialog] = createSignal<"plain" | "confirm" | "newTask" | undefined>();
   const applyTheme = (value: string) => {
     setTheme(value);
     document.documentElement.dataset.theme = value;
@@ -205,6 +206,13 @@ function Catalog() {
       <Section title="Dialog and ConfirmDialog">
         <Row cap="open">
           <Button onClick={() => setDialog("plain")}>Dialog</Button>
+          <Button onClick={() => setDialog("newTask")}>New task</Button>
+          <Button onClick={() => void confirmDialog({
+            title: t("newTask.discardDraft"),
+            body: t("newTask.discardBody"),
+            cancelLabel: t("newTask.keepEditing"),
+            confirmLabel: t("confirm.discard"),
+          })}>Discard draft</Button>
           <Button variant="danger" onClick={() => void confirmDialog({
             title: "Delete this task for good?",
             body: "The worktree folder and the branch feature/login are removed.",
@@ -222,6 +230,10 @@ function Catalog() {
             tone: "primary",
           })}>Confirm, primary</Button>
         </Row>
+        <Show when={dialog() === "newTask"}>
+          <NewTaskDialog repoName="brachio" defaultBranch="main" isGit onClose={() => setDialog(undefined)}
+            onCreate={() => new Promise<void>(() => {})} />
+        </Show>
         <Show when={dialog() === "plain"}>
           <Dialog title="Dialog" escHint onClose={() => setDialog(undefined)} closeOnScrim
             footer={<Button variant="primary" onClick={() => setDialog(undefined)}>{t("workspace.close")}</Button>}>
@@ -355,6 +367,17 @@ function Catalog() {
         <div class="catalog-stack" style={{ width: "100%" }}>
           <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" onAllow={() => {}} onAllowAlways={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" sending onAllow={() => {}} onDeny={() => {}} /></div>
+          <div class="catalog-frame">
+            <ApprovalBar title={t("setup.title")} agent="brachio.toml" body={t("setup.body")}
+              review={"pnpm install\ncp ../.env.local .env.local"} allowLabel={t("setup.run")}
+              denyLabel={t("setup.deny")} hint={t("setup.hint")} onAllow={() => {}} onDeny={() => {}} />
+          </div>
+          <div class="catalog-frame">
+            <Notice tone="error" lead={t("setup.copyFailed")}
+              actions={<Button size="sm" variant="primary">{t("setup.retryCopy")}</Button>}>
+              .env.local: permission denied. {t("setup.copyFailedNote")}
+            </Notice>
+          </div>
           <div class="catalog-frame"><ApprovalBar review={LONG_REQUEST} agent="Claude Code" onAllow={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame">
             <Notice tone="blocked" actions={<Button size="sm">{t("approval.openTab")}</Button>}>{t("group.needs")}</Notice>

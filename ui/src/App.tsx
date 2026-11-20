@@ -275,6 +275,10 @@ export function App() {
   };
   // Setup commands of tasks created in this run, typed into the task's shell once.
   const setupInputs = new Map<string, string>();
+  const [setupRevision, setSetupRevision] = createSignal(0);
+  // Setup lists waiting for the user's answer, shown as an approval bar in the task.
+  const [setupRequests, setSetupRequests] =
+    createSignal<ReadonlyMap<string, { commands: readonly string[]; answer: (run: boolean) => void }>>(new Map());
   const [setupFailures, setSetupFailures] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [retryingSetup, setRetryingSetup] = createSignal(false);
   const retrySetup = async (id: string) => {
@@ -293,7 +297,10 @@ export function App() {
       setRetryingSetup(false);
     }
   };
-  const hasSetupInput = (taskId: string) => setupInputs.has(taskId);
+  const hasSetupInput = (taskId: string) => {
+    setupRevision();
+    return setupInputs.has(taskId);
+  };
   const takeSetupInput = (taskId: string) => {
     const input = setupInputs.get(taskId);
     setupInputs.delete(taskId);
@@ -443,19 +450,27 @@ export function App() {
   };
 
   // A repository can ask for commands to run, so the user agrees once per exact list.
-  const approveSetup = async (repoId: string, commands: readonly string[]) => {
+  const approveSetup = (taskId: string, repoId: string, commands: readonly string[]) => {
     const entry = [repoId, ...commands].join("\n");
     const approved = loadApprovedSetups();
-    if (approved.includes(entry)) return true;
-    const agreed = await confirmDialog({
-      title: t("setup.title"),
-      body: [t("setup.body"), ...commands].join("\n\n"),
-      confirmLabel: t("setup.run"),
-      cancelLabel: t("workspace.close"),
-      tone: "primary",
+    if (approved.includes(entry)) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      const answer = (run: boolean) => {
+        setSetupRequests((items) => {
+          const next = new Map(items);
+          next.delete(taskId);
+          return next;
+        });
+        if (run) saveApprovedSetups([...approved, entry]);
+        resolve(run);
+      };
+      setSetupRequests((items) => new Map(items).set(taskId, { commands, answer }));
     });
-    if (agreed) saveApprovedSetups([...approved, entry]);
-    return agreed;
+  };
+  const requestSetup = async (taskId: string, repoId: string, commands: readonly string[]) => {
+    if (commands.length === 0 || !await approveSetup(taskId, repoId, commands)) return;
+    setupInputs.set(taskId, commands.join("\r"));
+    setSetupRevision((revision) => revision + 1);
   };
 
   const create = async (input: NewTaskInput) => {
@@ -475,12 +490,10 @@ export function App() {
       setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
     }
     if (input.prompt !== "") firstPrompts.set(record.id, input.prompt);
-    if (record.setupCommands.length > 0 && await approveSetup(current.id, record.setupCommands)) {
-      setupInputs.set(record.id, record.setupCommands.join("\r"));
-    }
     setTasks((list) => [toTaskRow(record), ...list]);
     open(record.id);
     setDialogOpen(false);
+    void requestSetup(record.id, current.id, record.setupCommands);
   };
 
   // A task created by an agent: start its tab without moving the user's selection.
@@ -499,9 +512,6 @@ export function App() {
       setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
     }
     if (record.prompt) firstPrompts.set(record.id, record.prompt);
-    if (record.setupCommands.length > 0 && await approveSetup(record.repoId, record.setupCommands)) {
-      setupInputs.set(record.id, record.setupCommands.join("\r"));
-    }
     const listed = findTask(record.id);
     if (listed && !startListed) return;
     if (!listed && record.parentTaskId) {
@@ -515,6 +525,7 @@ export function App() {
       if (!listed) setTasks((list) => [toTaskRow(record), ...list]);
       setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
     });
+    void requestSetup(record.id, record.repoId, record.setupCommands);
   };
 
   const archive = async (task: TaskRow) => {
@@ -544,6 +555,7 @@ export function App() {
       });
       firstPrompts.delete(task.id);
       createdThisRun.delete(task.id);
+      setupRequests().get(task.id)?.answer(false);
       setSetupFailures((items) => {
         const next = new Map(items);
         next.delete(task.id);
@@ -807,6 +819,7 @@ export function App() {
               statusForKey={(id, key) => live().get(id)?.get(key)?.status}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
               onDraftOriginal={(text) => draftComment(task().id, text)}
+              setupRequest={setupRequests().get(task().id)}
               setupFailure={setupFailures().get(task().id)}
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
@@ -859,6 +872,7 @@ export function App() {
       <Show when={dialogOpen() && dialogRepo()}>
         {(current) => (
           <NewTaskDialog
+            repoName={current().name}
             defaultBranch={current().defaultBranch}
             isGit={current().isGit}
             parents={repoRows()}
