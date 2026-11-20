@@ -41,8 +41,18 @@ pub(crate) async fn serve(pipe: &str, state_dir: Option<PathBuf>) -> Result<()> 
             None
         }
     };
-    let runtime = Arc::new(Runtime::new(journal));
+    run(listener, Arc::new(Runtime::new(journal))).await
+}
+
+/// Accepts connections. Reaping and journal writes run on a blocking thread, one pass at a time,
+/// so a slow disk delays only the next pass and never the accept loop.
+async fn run(
+    listener: interprocess::local_socket::tokio::Listener,
+    runtime: Arc<Runtime>,
+) -> Result<()> {
     let mut check = tokio::time::interval(Duration::from_secs(1));
+    check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut maintenance: Option<tokio::task::JoinHandle<()>> = None;
     loop {
         let stream = tokio::select! {
             accepted = listener.accept() => match accepted {
@@ -54,8 +64,13 @@ pub(crate) async fn serve(pipe: &str, state_dir: Option<PathBuf>) -> Result<()> 
                     continue;
                 }
             },
-            _ = check.tick() => {
-                runtime.maintain();
+            _ = check.tick(), if maintenance.is_none() => {
+                let runtime = Arc::clone(&runtime);
+                maintenance = Some(tokio::task::spawn_blocking(move || runtime.maintain()));
+                continue;
+            }
+            _ = async { (&mut maintenance.as_mut().expect("guarded")).await }, if maintenance.is_some() => {
+                maintenance = None;
                 if runtime.finished() {
                     return Ok(());
                 }
@@ -232,5 +247,72 @@ pub(crate) async fn follow(
             changed = session.updates.changed() => { changed.context("terminal updates closed")?; }
             _ = stream.read(&mut input) => return Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod stalled_journal_tests {
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use brachio_runtime::client::Client;
+    use brachio_runtime::transport;
+    use brachio_runtime::wire::{Action, ResponseResult};
+
+    use super::run;
+    use crate::journal::Journal;
+    use crate::runtime::Runtime;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stalled_journal_write_does_not_stop_new_requests() {
+        let directory = std::env::temp_dir().join(format!("brachio-stall-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let mut journal = Journal::open(&directory).expect("open journal");
+        let (entered_sender, entered) = mpsc::channel();
+        let (release, release_receiver) = mpsc::channel::<()>();
+        let entered_sender = Mutex::new(entered_sender);
+        let release_receiver = Mutex::new(release_receiver);
+        journal.before_save = Some(Box::new(move || {
+            let _ = entered_sender.lock().expect("entered").send(());
+            let _ = release_receiver.lock().expect("release").recv();
+        }));
+        let runtime = Arc::new(Runtime::new(Some(journal)));
+        let pipe = format!("stall-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let launch = Arc::clone(&runtime);
+        let key = "task/stalled".to_owned();
+        let cwd = std::env::temp_dir();
+        tokio::task::spawn_blocking(move || {
+            launch.execute(brachio_runtime::wire::Request {
+                version: brachio_runtime::protocol::CURRENT,
+                action: Action::Ensure { key, cwd },
+            })
+        })
+        .await
+        .expect("join")
+        .expect("launch");
+        let listener = transport::listen(&pipe).expect("listen");
+        let server = tokio::spawn(run(listener, Arc::clone(&runtime)));
+
+        tokio::task::spawn_blocking(move || entered.recv_timeout(Duration::from_secs(30)))
+            .await
+            .expect("join")
+            .expect("journal write never started");
+        let client = Client::new(&pipe);
+        let reply = tokio::time::timeout(Duration::from_secs(10), client.call(Action::Hello))
+            .await
+            .expect("hello answered while the journal write is stalled")
+            .expect("hello");
+        assert!(matches!(reply.result, ResponseResult::Hello { .. }));
+
+        drop(release);
+        server.abort();
+        let _ = runtime.execute(brachio_runtime::wire::Request {
+            version: brachio_runtime::protocol::CURRENT,
+            action: Action::Stop {
+                key: "task/stalled".to_owned(),
+            },
+        });
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

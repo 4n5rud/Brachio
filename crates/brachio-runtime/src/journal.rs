@@ -28,6 +28,8 @@ pub(crate) struct SessionRecord {
 /// A directory of one JSON file per shell key.
 pub(crate) struct Journal {
     directory: PathBuf,
+    #[cfg(test)]
+    pub(crate) before_save: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 /// Records read at startup, and the files that could not be read.
@@ -41,11 +43,17 @@ impl Journal {
         fs::create_dir_all(directory)?;
         Ok(Self {
             directory: directory.to_owned(),
+            #[cfg(test)]
+            before_save: None,
         })
     }
 
     /// Replace the record in one step, so a crash leaves the old or the new one, never half.
     pub(crate) fn save(&self, record: &SessionRecord) -> io::Result<()> {
+        #[cfg(test)]
+        if let Some(hook) = &self.before_save {
+            hook();
+        }
         let path = self.path(&record.key);
         let scratch = path.with_extension("json.tmp");
         fs::write(
