@@ -68,6 +68,29 @@ pub enum Action {
         #[arg(long, default_value_t = 80)]
         cols: u16,
     },
+    /// Launch once for a caller-provided operation ID and runtime instance.
+    LaunchOnce {
+        /// Runtime instance the caller observed.
+        instance: String,
+        /// Unique operation ID, retained for the life of this runtime.
+        operation_id: String,
+        /// Terminal key.
+        key: String,
+        /// Working directory.
+        cwd: PathBuf,
+        /// Program.
+        program: String,
+        /// Program arguments.
+        #[arg(long = "arg")]
+        args: Vec<String>,
+        /// Environment entries.
+        #[arg(long)]
+        env: Vec<String>,
+        /// Initial rows.
+        rows: u16,
+        /// Initial columns.
+        cols: u16,
+    },
     /// Read the shell identity and number of PTY bytes received.
     Inspect {
         /// Name the caller chose for the shell.
@@ -129,6 +152,15 @@ pub enum Action {
         /// Text to send, including any line ending.
         text: String,
     },
+    /// Stop only the specific runtime session observed by the caller.
+    StopGuarded {
+        /// Name the caller chose for the shell.
+        key: String,
+        /// Runtime instance that returned the session.
+        instance: String,
+        /// Runtime-local session identifier.
+        session_id: u64,
+    },
     /// Stop one shell explicitly.
     Stop {
         /// Name the caller chose for the shell.
@@ -171,6 +203,8 @@ impl Action {
             Action::Resize { .. } => (2, "resize"),
             Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
             Action::Launch { .. } => (4, "launch"),
+            Action::StopGuarded { .. } => (5, "guarded stop"),
+            Action::LaunchOnce { .. } => (6, "idempotent launch"),
             _ => (1, "this action"),
         }
     }

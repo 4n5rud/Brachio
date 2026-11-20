@@ -411,7 +411,32 @@ pub async fn task_retry_setup_copy(
 /// Hides a task from the list. The worktree and branch stay on disk.
 #[tauri::command]
 pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), String> {
-    TaskRecord::archive(&*database.lock()?, &id, now_ms()).map_err(to_text)
+    archive_unless_children_open(&*database.lock()?, &id, now_ms())
+}
+
+/// Stable start of the refusal, so the UI can recognise it.
+const OPEN_CHILDREN_PREFIX: &str = "has open children:";
+
+/// Archives the task, but not a lead whose child tasks are still open: they could no longer reach
+/// their parent with `send --to parent`, and nothing would show that they lost their supervisor.
+fn archive_unless_children_open(
+    connection: &Connection,
+    id: &str,
+    now_ms: i64,
+) -> Result<(), String> {
+    let children: Vec<String> = TaskRecord::list_open(connection)
+        .map_err(to_text)?
+        .into_iter()
+        .filter(|task| task.parent_task_id.as_deref() == Some(id))
+        .map(|task| task.title)
+        .collect();
+    if !children.is_empty() {
+        return Err(format!(
+            "{OPEN_CHILDREN_PREFIX} {}. Archive or finish these child tasks first, then archive the lead.",
+            children.join(", ")
+        ));
+    }
+    TaskRecord::archive(connection, id, now_ms).map_err(to_text)
 }
 
 /// Lists archived task records.
@@ -1536,6 +1561,58 @@ mod git_action_guard_tests {
             same.as_mut().poll(&mut context),
             Poll::Ready(Ok(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod archive_children_tests {
+    use std::path::Path;
+
+    use brachio_store::{open_in_memory, NewRepo, NewTask, RepoRecord, TaskRecord};
+
+    use super::archive_unless_children_open;
+
+    fn task<'a>(id: &'a str, parent: Option<&'a str>) -> NewTask<'a> {
+        NewTask {
+            id,
+            repo_id: "r",
+            parent_task_id: parent,
+            title: id,
+            prompt: "",
+            branch: id,
+            worktree_path: Path::new("/w"),
+            agent_kind: None,
+            agent_session_id: None,
+            created_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_lead_with_an_open_child_is_refused_until_the_child_is_archived() {
+        let connection = open_in_memory().expect("open");
+        let repo = NewRepo {
+            id: "r",
+            name: "r",
+            path: Path::new("/r"),
+            default_branch: "main",
+            added_at_ms: 0,
+            is_git: true,
+        };
+        RepoRecord::insert(&connection, &repo).expect("repo");
+        TaskRecord::insert(&connection, &task("lead", None)).expect("lead");
+        TaskRecord::insert(&connection, &task("c1", Some("lead"))).expect("c1");
+        TaskRecord::insert(&connection, &task("c2", Some("lead"))).expect("c2");
+        TaskRecord::archive(&connection, "c2", 1).expect("archive c2");
+
+        let refusal = archive_unless_children_open(&connection, "lead", 2).expect_err("refused");
+        assert!(refusal.starts_with("has open children: c1."), "{refusal}");
+        assert!(TaskRecord::get(&connection, "lead")
+            .expect("lead")
+            .archived_at_ms
+            .is_none());
+
+        archive_unless_children_open(&connection, "c1", 3).expect("a child archives");
+        archive_unless_children_open(&connection, "lead", 4).expect("lead now archives");
     }
 }
 

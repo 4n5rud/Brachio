@@ -5,6 +5,7 @@ mod conflict_report;
 mod file_list;
 mod git;
 mod naming;
+mod nul_records;
 mod port_pool;
 mod pull_request;
 mod pull_request_status;

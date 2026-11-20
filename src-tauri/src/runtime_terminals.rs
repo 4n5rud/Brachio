@@ -49,6 +49,8 @@ const HOSTED_HANDLE_BASE: u64 = 1 << 40;
 /// an older one than the app would start now.
 struct Attached {
     key: String,
+    instance: String,
+    session_id: u64,
     client: Client,
     pump: JoinHandle<()>,
 }
@@ -136,7 +138,7 @@ impl RuntimeTerminals {
             Some(reply) => reply,
             None => client.call(launch_action(&key, launch)).await?,
         };
-        let ResponseResult::Success { .. } = reply.result else {
+        let ResponseResult::Success { session, .. } = reply.result else {
             bail!("the terminal runtime sent an unexpected reply");
         };
         let (first, following) = if attached {
@@ -150,7 +152,18 @@ impl RuntimeTerminals {
                 .await?
         };
         let id = self.new_handle();
-        self.register(id, key, client, pump(first, following, channel, agent))?;
+        let session_id = session
+            .session_id
+            .to_string()
+            .parse()
+            .map_err(|_| anyhow!("invalid runtime session ID"))?;
+        self.register(
+            id,
+            key,
+            client,
+            (reply.instance, session_id),
+            pump(first, following, channel, agent),
+        )?;
         Ok(Some((id, attached)))
     }
 
@@ -180,8 +193,23 @@ impl RuntimeTerminals {
 
     /// Ends the program on purpose. `None` when `id` is not runtime-hosted.
     pub async fn stop(&self, id: SessionId) -> Option<Result<()>> {
-        let (client, key) = self.target(id).await?;
-        let stopped = client.call(Action::Stop { key }).await;
+        let (client, key, instance, session_id) = {
+            let attached = self.attached.lock().ok()?;
+            let found = attached.get(&id)?;
+            (
+                found.client.clone(),
+                found.key.clone(),
+                found.instance.clone(),
+                found.session_id,
+            )
+        };
+        let stopped = client
+            .call(Action::StopGuarded {
+                key,
+                instance,
+                session_id,
+            })
+            .await;
         self.drop_attachment(id);
         Some(stopped.map(|_| ()).map_err(Into::into))
     }
@@ -230,6 +258,7 @@ impl RuntimeTerminals {
         id: SessionId,
         key: String,
         client: Client,
+        (instance, session_id): (String, u64),
         forward: impl Future<Output = ()> + Send + 'static,
     ) -> Result<()> {
         let map = Arc::clone(&self.attached);
@@ -244,7 +273,16 @@ impl RuntimeTerminals {
                 map.remove(&id);
             }
         });
-        attached.insert(id, Attached { key, client, pump });
+        attached.insert(
+            id,
+            Attached {
+                key,
+                instance,
+                session_id,
+                client,
+                pump,
+            },
+        );
         Ok(())
     }
 
@@ -447,6 +485,8 @@ mod handle_tests {
             id,
             Attached {
                 key: "test:agent".to_owned(),
+                instance: "test".to_owned(),
+                session_id: 1,
                 client,
                 pump,
             },
@@ -478,7 +518,13 @@ mod handle_tests {
         let id = terminals.new_handle();
         let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
         terminals
-            .register(id, "test:agent".to_owned(), client, async {})
+            .register(
+                id,
+                "test:agent".to_owned(),
+                client,
+                ("test".to_owned(), 1),
+                async {},
+            )
             .expect("register");
         for _ in 0..100 {
             if terminals.attached.lock().expect("lock").is_empty() {

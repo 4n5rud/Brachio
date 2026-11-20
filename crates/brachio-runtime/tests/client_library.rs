@@ -327,6 +327,7 @@ async fn a_slow_lifecycle_reply_over_the_socket_stays_pending_until_the_outcome(
             })
             .await
     });
+    answer_hello(&listener).await;
     let mut socket = BufReader::new(listener.accept().await.expect("accept"));
     let bytes = read_message(&mut socket, MAX_MESSAGE)
         .await
@@ -373,6 +374,7 @@ async fn a_disconnect_after_dispatching_stop_leaves_its_outcome_unknown() {
             .call(Action::Stop { key: "stop".into() })
             .await
     });
+    answer_hello(&listener).await;
     let mut socket = BufReader::new(listener.accept().await.expect("accept"));
     assert!(read_message(&mut socket, MAX_MESSAGE)
         .await
@@ -383,4 +385,39 @@ async fn a_disconnect_after_dispatching_stop_leaves_its_outcome_unknown() {
         client.await.expect("join"),
         Err(ClientError::OutcomeUnknown(_))
     ));
+}
+
+async fn answer_hello(listener: &interprocess::local_socket::tokio::Listener) {
+    use brachio_runtime::protocol;
+    use brachio_runtime::wire::{
+        read_message, write_message, Request, Response, RuntimeInfo, MAX_MESSAGE, MAX_RESPONSE,
+    };
+    use interprocess::local_socket::traits::tokio::Listener as _;
+    use tokio::io::BufReader;
+
+    let mut socket = BufReader::new(listener.accept().await.expect("accept hello"));
+    let bytes = read_message(&mut socket, MAX_MESSAGE)
+        .await
+        .expect("read hello")
+        .expect("hello request");
+    let request: Request = serde_json::from_slice(&bytes).expect("decode hello");
+    assert!(matches!(request.action, Action::Hello));
+    write_message(
+        socket.get_mut(),
+        &Response {
+            version: request.version,
+            instance: "fixture",
+            result: ResponseResult::Hello {
+                runtime: RuntimeInfo {
+                    pid: 0,
+                    oldest_version: protocol::OLDEST,
+                    current_version: protocol::CURRENT,
+                    draining: false,
+                },
+            },
+        },
+        MAX_RESPONSE,
+    )
+    .await
+    .expect("answer hello");
 }
