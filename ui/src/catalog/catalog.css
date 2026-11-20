@@ -95,3 +95,6 @@
   border: 1px solid var(--color-line);
   border-radius: var(--radius-md);
 }
+.catalog-menu {
+  position: static;
+}

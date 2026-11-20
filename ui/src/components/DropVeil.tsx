@@ -2,14 +2,18 @@ import { t } from "../i18n";
 import { Icon } from "./Icon";
 import "./DropVeil.css";
 
-/** Covers the window while a folder is dragged over it: dropping adds the folder as a project. */
-export function DropVeil() {
+/**
+ * Shown while something is dragged over the window. `window` covers it for a folder to add as a
+ * project; `terminal` covers one terminal pane for files whose paths go into the agent input.
+ */
+export function DropVeil(props: { target?: "window" | "terminal" }) {
+  const terminal = () => props.target === "terminal";
   return (
-    <div class="drop-veil" role="status">
+    <div class="drop-veil" classList={{ "drop-veil-terminal": terminal() }} role="status">
       <div>
-        <Icon name="plus" class="icon drop-veil-icon" />
-        <strong>{t("sidebar.dropTitle")}</strong>
-        <span>{t("sidebar.dropBody")}</span>
+        <Icon name={terminal() ? "download" : "plus"} class="icon drop-veil-icon" />
+        <strong>{terminal() ? t("terminal.dropTitle") : t("sidebar.dropTitle")}</strong>
+        <span>{terminal() ? t("terminal.dropNote") : t("sidebar.dropBody")}</span>
       </div>
     </div>
   );

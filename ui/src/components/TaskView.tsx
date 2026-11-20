@@ -15,6 +15,9 @@ import { ApprovalBar } from "./ApprovalBar";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
+import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
+import { DropVeil } from "./DropVeil";
+import { taskIdOf } from "../lib/approvals";
 import { CORE_AGENT } from "../lib/terminal";
 import { MAX_MOUNTED_TERMINALS, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
@@ -68,10 +71,15 @@ export function TaskView(props: {
   unreadForTab?: (key: string | undefined) => number;
   mailboxRevision: number;
   onMailboxReminder?: (tabKey: string) => void;
+  /** Files are being dragged over the terminal. */
+  filesOver?: boolean;
+  /** Opens the problem report with the error text. */
+  onReportProblem?: (message: string) => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [promptFeedback, setPromptFeedback] = createSignal<{ taskId: string; message: string }>();
   const [inboxTab, setInboxTab] = createSignal<string>();
+  const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredAgents = new Map<string, string>();
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [tabsReady, setTabsReady] = createSignal(false);
@@ -248,17 +256,46 @@ export function TaskView(props: {
             aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
             onClick={() => selectAgent(props.task.id, true)}>
             <StatusGlyph tone={tabTone(currentExtraKey(props.task.id))} />
+            <AgentIcon agent={secondaryKind(props.task)} />
             {AGENT_NAME[secondaryKind(props.task)]}
             <MailboxBadge count={props.unreadForTab?.(currentExtraKey(props.task.id)) ?? 0} />
+            <TabClose disabled={tabsSaving()} onClose={() => void changeSecondary(props.task.id)} />
           </button>
         </Show>
-        <Show when={shells().has(props.task.id)} fallback={
-          <Show when={props.task.worktreePath}>
-            <IconButton icon="plus" size="sm" label={t("task.newTab")} onClick={() => setLayout("shell")} />
-          </Show>
-        }>
+        <Show when={shells().has(props.task.id)}>
           <button class="tab" role="tab" aria-selected={layout() === "shell"} type="button"
-            onClick={() => setLayout("shell")}>{t("task.shell")}</button>
+            onClick={() => setLayout("shell")}>
+            <Icon name="terminal" class="icon-sm" />
+            {t("task.shell")}
+            <TabClose onClose={closeShell} />
+          </button>
+        </Show>
+        <Show when={props.task.worktreePath}>
+          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.newTab")} aria-haspopup="menu"
+            aria-expanded={tabMenu() !== undefined}
+            onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
+        </Show>
+        <Show when={tabMenu()}>
+          {(anchor) => (
+            <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
+              <Show when={!shells().has(props.task.id)}>
+                <MenuItem icon={<Icon name="terminal" class="icon-sm" />} hint={t("task.tabHintShell")}
+                  onSelect={() => { setTabMenu(undefined); setLayout("shell"); }}>{t("task.shell")}</MenuItem>
+              </Show>
+              <Show when={!secondary().has(props.task.id)}>
+                <MenuItem icon={<AgentIcon agent={secondaryKind(props.task)} />} hint={t("task.tabHintAgent")}
+                  disabled={!tabsReady() || tabsSaving()}
+                  onSelect={() => { setTabMenu(undefined); void changeSecondary(props.task.id, crypto.randomUUID()); }}>
+                  {AGENT_NAME[secondaryKind(props.task)]}
+                </MenuItem>
+              </Show>
+              <MenuSeparator />
+              <MenuItem icon={<Icon name="split" class="icon-sm" />}
+                onSelect={() => { setTabMenu(undefined); setLayout(layout() === "split" ? "agent" : "split"); }}>
+                {layout() === "split" ? t("task.unsplit") : t("task.splitSideBySide")}
+              </MenuItem>
+            </Menu>
+          )}
         </Show>
       </div>
       <div class="pane">
@@ -268,35 +305,9 @@ export function TaskView(props: {
             AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
           <div class="pane-actions">
             <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
-              {(key) => <Button size="sm"
+              {(key) => <Button size="sm" icon="mail"
                 aria-expanded={inboxTab() === key()}
                 onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())}>{t("mailbox.inbox")}</Button>}
-            </Show>
-            <Show when={(props.unreadForTab?.(activeAgentTab()) ?? 0) > 0 && activeAgentTab()}>
-              {(key) => <Button size="sm"
-                onClick={() => props.onMailboxReminder?.(key())}>{t("mailbox.reminder")}</Button>}
-            </Show>
-            <Show when={props.task.worktreePath && !secondary().has(props.task.id)}>
-              <Button size="sm" disabled={!tabsReady() || tabsSaving()}
-                onClick={() => void changeSecondary(props.task.id, crypto.randomUUID())}>
-                {t("task.addAgent")} {AGENT_NAME[secondaryKind(props.task)]}
-              </Button>
-            </Show>
-            <Show when={layout() !== "shell" && isSecondarySelected(props.task.id)}>
-              <Button size="sm" disabled={tabsSaving()}
-                onClick={() => void changeSecondary(props.task.id)}>
-                {t("task.closeAgent")}
-              </Button>
-            </Show>
-            <Show when={props.task.worktreePath}>
-              <IconButton icon="split" size="sm" label={t("task.split")}
-                aria-pressed={layout() === "split"}
-                onClick={() => setLayout(layout() === "split" ? "agent" : "split")} />
-            </Show>
-            <Show when={shells().has(props.task.id)}>
-              <Button size="sm" onClick={closeShell}>
-                {t("task.closeShell")}
-              </Button>
             </Show>
           </div>
         </div>
@@ -304,23 +315,25 @@ export function TaskView(props: {
           {(prompt) => (
             <details class="terminal-recovery">
               <summary>{t("task.originalPrompt")}</summary>
-              <pre class="inspector-patch">{prompt()}</pre>
-              <Button size="sm" onClick={async () => {
-                const taskId = props.task.id;
-                try {
-                  const drafted = await props.onDraftOriginal?.(prompt());
-                  setPromptFeedback({ taskId, message: t(drafted ? "task.promptDrafted" : "diff.notReady") });
-                } catch (error) {
-                  setPromptFeedback({ taskId, message: String(error) });
-                }
-              }}>{t("task.draftOriginalPrompt")}</Button>
-              <Show when={promptFeedback()?.taskId === props.task.id}>
-                <span role="status">{promptFeedback()?.message}</span>
-              </Show>
+              <pre class="terminal-recovery-prompt">{prompt()}</pre>
+              <div class="terminal-recovery-actions">
+                <Button size="sm" onClick={async () => {
+                  const taskId = props.task.id;
+                  try {
+                    const drafted = await props.onDraftOriginal?.(prompt());
+                    setPromptFeedback({ taskId, message: t(drafted ? "task.promptDrafted" : "diff.notReady") });
+                  } catch (error) {
+                    setPromptFeedback({ taskId, message: String(error) });
+                  }
+                }}>{t("task.draftOriginalPrompt")}</Button>
+                <Show when={promptFeedback()?.taskId === props.task.id}>
+                  <span class="terminal-recovery-note" role="status">{promptFeedback()?.message}</span>
+                </Show>
+              </div>
             </details>
           )}
         </Show>
-        <Show when={tabError()}>{(message) => <p role="alert">{message()}</p>}</Show>
+        <Show when={tabError()}>{(message) => <Notice tone="error" lead={t("error.title")}>{message()}</Notice>}</Show>
         <Show when={props.setupFailure}>
           {(message) => (
             <Notice tone="error" lead={t("setup.copyFailed")}
@@ -330,11 +343,8 @@ export function TaskView(props: {
             </Notice>
           )}
         </Show>
-        <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
-          {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
-            onClose={() => setInboxTab(undefined)} />}
-        </Show>
         <div class="pane-body">
+          <Show when={props.filesOver}><DropVeil target="terminal" /></Show>
           <For each={mounted()}>
             {(id) => {
               const primarySession = sessionFor(id);
@@ -350,6 +360,10 @@ export function TaskView(props: {
                         session={primarySession}
                         leave="park"
                         onHosted={(hosted) => noteHosted(id, hosted)}
+                        onReport={props.onReportProblem}
+                        onInsertPrompt={props.findTask(id)?.prompt
+                          ? () => props.onDraftOriginal?.(props.findTask(id)?.prompt ?? "") ?? Promise.resolve(false)
+                          : undefined}
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
@@ -379,6 +393,7 @@ export function TaskView(props: {
                               active={selected() && mode() !== "shell" && extraSelected()}
                               leave="park"
                               onHosted={(hosted) => noteHosted(id, hosted)}
+                              onReport={props.onReportProblem}
                               theme={props.theme}
                               onStatus={(status, message) => props.onStatus?.(id, extraKey(id, sessionId), status, message)}
                               registerDraftWriter={(prepare) => {
@@ -399,7 +414,7 @@ export function TaskView(props: {
                       <div class="terminal-cell" hidden={mode() === "agent"}>
                         <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell"), initialInput: props.takeSetupInput?.(id) }} theme={props.theme}
                           active={selected() && mode() !== "agent"} focus={mode() === "shell"}
-                          leave="park" onHosted={(hosted) => noteHosted(id, hosted)} />
+                          leave="park" onHosted={(hosted) => noteHosted(id, hosted)} onReport={props.onReportProblem} />
                       </div>
                     )}
                   </Show>
@@ -408,11 +423,19 @@ export function TaskView(props: {
             }}
           </For>
         </div>
+        <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
+          {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
+            sourceTitle={(fromKey) => props.findTask(taskIdOf(fromKey))?.title ?? fromKey}
+            onReminder={() => props.onMailboxReminder?.(key)}
+            onClose={() => setInboxTab(undefined)} />}
+        </Show>
         <Show when={otherApproval()}>
           {(pending) => (
-            <Notice tone="blocked" actions={<Button size="sm"
-              onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}>
-              {t("group.needs")}
+            <Notice tone="blocked" lead={t("approval.otherTabLead").replace("{agent}",
+              pending().key === currentExtraKey(props.task.id) ? AGENT_NAME[secondaryKind(props.task)] : AGENT_NAME[props.task.agent])}
+              actions={<Button size="sm"
+                onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}>
+              {t("approval.otherTabNote")}
             </Notice>
           )}
         </Show>
@@ -434,5 +457,20 @@ export function TaskView(props: {
         </Show>
       </div>
     </section>
+  );
+}
+
+/** The close mark inside a tab; the tab itself is a button, so this is a button role on a span. */
+function TabClose(props: { onClose: () => void; disabled?: boolean }) {
+  const close = (event: Event) => {
+    event.stopPropagation();
+    if (!props.disabled) props.onClose();
+  };
+  return (
+    <span class="tab-close" role="button" tabindex="0" aria-label={t("task.closeTab")} aria-disabled={props.disabled}
+      onClick={close}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); close(event); } }}>
+      <Icon name="x" class="icon-xs" />
+    </span>
   );
 }

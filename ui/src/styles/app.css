@@ -157,11 +157,6 @@ p {
   overflow-y: auto;
   padding-bottom: var(--space-3);
 }
-.mailbox-inbox {
-  max-height: min(35vh, 240px);
-  overflow: auto;
-  overflow-wrap: anywhere;
-}
 .project-heading {
   display: flex;
   align-items: center;
@@ -231,9 +226,9 @@ p {
   gap: 2px;
 }
 .pane-body {
+  position: relative;
   flex: 1;
   min-height: 0;
-  padding: 10px 14px;
 }
 .terminal-slot,
 .terminal-host {
@@ -264,6 +259,47 @@ p {
 .terminal-content .terminal-host {
   flex: 1;
   min-height: 0;
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+.terminal-host.terminal-dim {
+  opacity: 0.55;
+}
+.terminal-recovery {
+  flex: none;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+}
+.terminal-recovery > summary {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-2);
+}
+.terminal-recovery[open] > summary {
+  margin-bottom: var(--space-2);
+}
+.terminal-recovery-prompt {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) 10px;
+  max-height: 132px;
+  overflow: auto;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  font: var(--text-sm) / 1.55 var(--font-mono);
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+.terminal-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.terminal-recovery-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-3);
 }
 
 /* Inspector */

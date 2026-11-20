@@ -29,6 +29,10 @@ import { IconButton } from "../components/ui/IconButton";
 import { Input, Select, TextArea } from "../components/ui/Input";
 import { Kbd } from "../components/ui/Kbd";
 import { Notice } from "../components/ui/Notice";
+import { Menu, MenuItem, MenuSeparator } from "../components/ui/Menu";
+import { AgentIcon } from "../components/AgentIcon";
+import { Icon } from "../components/Icon";
+import { StatusGlyph } from "../components/ui/StatusBadge";
 import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { Toast, ToastHost } from "../components/ui/Toast";
 import { Toggle } from "../components/ui/Toggle";
@@ -109,6 +113,7 @@ function Catalog() {
   const [mode, setMode] = createSignal<"tasks" | "board">("tasks");
   const [notify, setNotify] = createSignal(true);
   const [veil, setVeil] = createSignal(false);
+  const [menuAnchor, setMenuAnchor] = createSignal<HTMLElement>();
   const [dialog, setDialog] = createSignal<"plain" | "confirm" | "newTask" | undefined>();
   const applyTheme = (value: string) => {
     setTheme(value);
@@ -256,16 +261,89 @@ function Catalog() {
         </Row>
       </Section>
 
-      <Section title="Notice">
+      <Section title="Terminal notices">
         <div class="catalog-stack" style={{ width: "100%" }}>
-          <Notice tone="info" lead="Last screen recovered.">Output before the restart is skipped.</Notice>
+          <Notice tone="info" lead={t("terminal.restored")}>{t("terminal.restoredNote")}</Notice>
+          <Notice tone="success" lead={t("terminal.liveAttached")} />
+          <Notice tone="progress">{t("terminal.conversationResuming")}</Notice>
+          <Notice tone="progress">{t("terminal.newConversation")}</Notice>
+          <Notice tone="info">{t("terminal.resumeFailed")}</Notice>
           <Notice tone="progress">{t("terminal.checkingConversations")}</Notice>
-          <Notice tone="success" lead="Reattached.">The terminal kept running.</Notice>
-          <Notice tone="blocked" lead={t("terminal.launchUncertain")}
-            actions={<Button size="sm">{t("terminal.launchReset")}</Button>} />
-          <Notice tone="error" lead="Lost the runtime connection."
-            actions={<Button size="sm">{t("terminal.reopen")}</Button>}>Reopen the session to continue.</Notice>
+          <Notice tone="info" actions={<>
+            <Button size="sm">Nov 19, 16:40 <code>3f9a21bc</code></Button>
+            <Button size="sm">{t("terminal.startNewConversation")}</Button></>}>{t("terminal.chooseConversation")}</Notice>
+          <Notice tone="error" lead={t("terminal.conversationCheckFailed")}
+            actions={<Button size="sm">{t("terminal.startNewConversation")}</Button>} />
+          <Notice tone="error" lead={t("terminal.detached")}
+            actions={<Button size="sm" variant="primary">{t("terminal.reopen")}</Button>} />
+          <Notice tone="info" lead={t("terminal.exited")}
+            actions={<Button size="sm" variant="primary">{t("terminal.reopen")}</Button>}>
+            {t("terminal.exitedCode").replace("{code}", "0")}</Notice>
+          <Notice tone="error" lead={t("terminal.exited")}
+            actions={<><Button size="sm" variant="primary">{t("terminal.reopen")}</Button>
+              <Button size="sm">{t("terminal.copyError")}</Button></>}>
+            {t("terminal.exitedCode").replace("{code}", "101")}</Notice>
+          <Notice tone="error" lead={t("terminal.startFailed")}
+            actions={<><Button size="sm">{t("terminal.reopen")}</Button>
+              <Button size="sm">{t("error.report")}</Button></>}>claude was not found on PATH.</Notice>
+          <Notice tone="blocked" lead={t("terminal.signInLead").replace("{agent}", "Claude Code")}>
+            {t("terminal.signInNote").replace("{command}", "claude auth login")}</Notice>
+          <Notice tone="error" lead={t("terminal.inputFailed")}>The runtime did not answer.</Notice>
+          <Notice tone="info">{t("terminal.outputTrimmed")}</Notice>
+          <Notice tone="blocked" lead={t("terminal.promptNotSentLead")}
+            actions={<Button size="sm">{t("task.draftOriginalPrompt")}</Button>}>{t("terminal.promptNotSent")}</Notice>
+          <Notice tone="info" actions={<Button size="sm">{t("task.draftOriginalPrompt")}</Button>}>
+            {t("terminal.promptDeferredAfterInput")}</Notice>
+          <Notice tone="info">{t("task.promptDrafted")}</Notice>
+          <Notice tone="error" lead={t("setup.copyFailed")}
+            actions={<Button size="sm" variant="primary">{t("setup.retryCopy")}</Button>}>
+            .env.local: permission denied {t("setup.copyFailedNote")}</Notice>
+          <Notice tone="blocked" lead={t("terminal.launchUncertainLead")}
+            actions={<Button size="sm">{t("terminal.launchReset")}</Button>}>{t("terminal.launchUncertainNote")}</Notice>
+          <Notice tone="error" lead={t("terminal.launchResetLead")}
+            actions={<><Button size="sm" variant="danger">{t("terminal.launchResetAnyway")}</Button>
+              <Button size="sm">{t("terminal.launchResetCancel")}</Button></>}>{t("terminal.launchResetNote")}</Notice>
+          <Notice tone="blocked" lead={t("approval.otherTabLead").replace("{agent}", "Codex")}
+            actions={<Button size="sm">{t("approval.openTab")}</Button>}>{t("approval.otherTabNote")}</Notice>
         </div>
+      </Section>
+
+      <Section title="Tabs, menu and drop">
+        <div class="tabs" role="tablist" style={{ width: "100%" }}>
+          <button class="tab" role="tab" aria-selected="true" type="button">
+            <StatusGlyph tone="ready" />Claude Code</button>
+          <button class="tab" role="tab" aria-selected="false" type="button">
+            <StatusGlyph tone="blocked" /><AgentIcon agent="codex" />Codex
+            <span class="tab-close" role="button" tabindex="0" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></span></button>
+          <button class="tab" role="tab" aria-selected="false" type="button">
+            <Icon name="terminal" class="icon-sm" />{t("task.shell")}
+            <span class="tab-close" role="button" tabindex="0" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></span></button>
+          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.newTab")} />
+        </div>
+        <div class="menu catalog-menu" role="menu">
+          <div class="menu-item" role="menuitem"><Icon name="terminal" class="icon-sm" />{t("task.shell")}<small>{t("task.tabHintShell")}</small></div>
+          <div class="menu-item" role="menuitem"><AgentIcon agent="codex" />Codex<small>{t("task.tabHintAgent")}</small></div>
+          <div class="menu-sep" />
+          <div class="menu-item" role="menuitem"><Icon name="split" class="icon-sm" />{t("task.splitSideBySide")}</div>
+        </div>
+        <Row cap="live">
+          <Button onClick={(event) => setMenuAnchor(menuAnchor() ? undefined : event.currentTarget)}>Open menu</Button>
+          <Show when={menuAnchor()}>{(anchor) => (
+            <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setMenuAnchor(undefined)}>
+              <MenuItem icon={<Icon name="terminal" class="icon-sm" />} hint={t("task.tabHintShell")} onSelect={() => setMenuAnchor(undefined)}>{t("task.shell")}</MenuItem>
+              <MenuItem icon={<AgentIcon agent="codex" />} hint={t("task.tabHintAgent")} disabled onSelect={() => {}}>Codex</MenuItem>
+              <MenuSeparator />
+              <MenuItem icon={<Icon name="split" class="icon-sm" />} onSelect={() => setMenuAnchor(undefined)}>{t("task.splitSideBySide")}</MenuItem>
+            </Menu>)}</Show>
+        </Row>
+        <div style={{ position: "relative", height: "150px", width: "100%", background: "var(--color-term-bg)" }}>
+          <DropVeil target="terminal" />
+        </div>
+        <details class="terminal-recovery" open style={{ width: "100%" }}>
+          <summary>{t("task.originalPrompt")}</summary>
+          <pre class="terminal-recovery-prompt">Add a per-IP rate limit to POST /login.</pre>
+          <div class="terminal-recovery-actions"><Button size="sm">{t("task.draftOriginalPrompt")}</Button></div>
+        </details>
       </Section>
 
       <Section title="EmptyState">

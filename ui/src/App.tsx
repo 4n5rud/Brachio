@@ -129,6 +129,7 @@ export function App() {
   const [archiving, setArchiving] = createSignal(false);
   const [revealed, setRevealed] = createSignal<{ id: string }>();
   const [folderOverWindow, setFolderOverWindow] = createSignal(false);
+  const [filesOverTerminal, setFilesOverTerminal] = createSignal(false);
   const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived" | "activity">();
   const [activity, setActivity] = createSignal<readonly TaskActivity[]>([]);
   const activeTaskIds = createMemo(() => new Set(tasks().map((task) => task.id)));
@@ -671,9 +672,12 @@ export function App() {
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
       const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
         if (payload.type === "enter" || payload.type === "over") {
-          setFolderOverWindow(!dialogOpen() && !workspacePanel() && !dropTargetsTerminal(payload.position));
+          const overTerminal = !dialogOpen() && !workspacePanel() && dropTargetsTerminal(payload.position);
+          setFolderOverWindow(!dialogOpen() && !workspacePanel() && !overTerminal);
+          setFilesOverTerminal(overTerminal);
         } else {
           setFolderOverWindow(false);
+          setFilesOverTerminal(false);
         }
         if (payload.type !== "drop") return;
         if (dropTargetsTerminal(payload.position)) {
@@ -826,6 +830,8 @@ export function App() {
               registerDraftTarget={registerDraftTarget}
               unreadForTab={inTauri ? unreadForTab : undefined}
               mailboxRevision={mailbox().revision}
+              filesOver={filesOverTerminal()}
+              onReportProblem={inTauri ? (message) => setIssueReport(message) : undefined}
               onMailboxReminder={(key) => {
                 void draftComment(task().id, MAILBOX_REMINDER, key)
                   .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
