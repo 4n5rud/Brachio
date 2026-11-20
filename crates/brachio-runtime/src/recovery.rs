@@ -129,13 +129,6 @@ impl Runtime {
 
     /// Drop the saved screens of every gone shell whose key starts with `prefix`, such as
     /// `"<task id>:"` for a permanently deleted task. Running shells are left alone.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no wire action calls this yet; the app half is a follow-up"
-        )
-    )]
     pub(crate) fn forget_lost_with_prefix(&self, prefix: &str) -> Result<usize> {
         if prefix.is_empty() {
             anyhow::bail!("a key prefix is required");

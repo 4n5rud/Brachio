@@ -309,6 +309,31 @@ impl RuntimeTerminals {
     }
 }
 
+/// Drops the saved screens of a deleted task from the current runtime and every older one that is
+/// still up. A runtime that is not running or predates the action has none to drop, and a failure
+/// here never undoes the delete.
+pub async fn forget_task_screens(task_id: &str) {
+    if !runtime_client::enabled() {
+        return;
+    }
+    let mut clients = vec![Client::new(&runtime_client::endpoint())];
+    clients.extend(runtime_client::older_clients().await);
+    for client in clients {
+        let action = Action::ForgetTask {
+            prefix: format!("{task_id}:"),
+        };
+        match client.call(action).await {
+            Ok(_) | Err(ClientError::NotRunning) => {}
+            Err(ClientError::Refused(reason)) => {
+                tracing::debug!(%reason, "runtime kept the deleted task's saved screens");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not forget the deleted task's saved screens");
+            }
+        }
+    }
+}
+
 /// The terminal keys a task can have, as the UI and `terminal_authorization` name them.
 fn task_terminal_keys(task_id: &str, second_agent_tabs: &[String]) -> Vec<String> {
     let mut keys = vec![format!("{task_id}:agent"), format!("{task_id}:shell")];
