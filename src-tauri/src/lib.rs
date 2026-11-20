@@ -194,6 +194,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            terminal::terminal_detach,
             task_tabs::task_secondary_tabs,
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,

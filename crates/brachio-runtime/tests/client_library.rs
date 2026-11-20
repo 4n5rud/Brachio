@@ -53,6 +53,49 @@ async fn ready(client: &Client) {
 }
 
 #[tokio::test]
+async fn dropping_a_follower_leaves_the_session_running_and_followable_again() {
+    let name = endpoint();
+    let _host = server(&name);
+    let client = Client::new(&name);
+    ready(&client).await;
+    client
+        .call(Action::Ensure {
+            key: "detach".to_owned(),
+            cwd: std::env::temp_dir(),
+        })
+        .await
+        .expect("start shell");
+    let follow = || Action::Follow {
+        key: "detach".to_owned(),
+        after: 0,
+    };
+    let (_, following) = client.follow(follow()).await.expect("follow");
+    drop(following);
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let reply = client
+        .call(Action::Inspect {
+            key: "detach".to_owned(),
+        })
+        .await
+        .expect("inspect");
+    let ResponseResult::Success { session, .. } = reply.result else {
+        panic!("unexpected reply");
+    };
+    assert!(
+        !session.exited,
+        "a dropped follower must not end the session"
+    );
+    client.follow(follow()).await.expect("follow again");
+    client
+        .call(Action::Stop {
+            key: "detach".to_owned(),
+        })
+        .await
+        .expect("stop");
+}
+
+#[tokio::test]
 async fn a_missing_runtime_is_reported_as_not_running() {
     let client = Client::new(&endpoint());
     let error = client.call(Action::Hello).await.expect_err("no runtime");

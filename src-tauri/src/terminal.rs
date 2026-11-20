@@ -273,7 +273,8 @@ pub async fn terminal_resize(
     resized.map_err(|error| to_message(&error))
 }
 
-/// Stops a terminal's process. The exit event still arrives on its channel.
+/// Stops a terminal's program for good. The exit event still arrives on its channel.
+/// Use `terminal_detach` to only stop watching it.
 #[tauri::command]
 pub async fn terminal_close(
     terminals: State<'_, Terminals>,
@@ -284,6 +285,17 @@ pub async fn terminal_close(
         return result.map_err(|error| to_message(&error));
     }
     terminals.0.kill(id).map_err(|error| to_message(&error))
+}
+
+/// Stops the UI from watching a runtime-hosted terminal; its program keeps running and opening the
+/// same key reattaches. An in-app terminal has no runtime to keep it, so it is refused rather than
+/// killed or orphaned.
+#[tauri::command]
+pub fn terminal_detach(hosted: State<'_, RuntimeTerminals>, id: SessionId) -> CommandResult<()> {
+    match hosted.detach(id) {
+        Some(result) => result.map_err(|error| to_message(&error)),
+        None => Err("this terminal is not hosted by the runtime and cannot be detached".to_owned()),
+    }
 }
 
 /// The command for an agent: its earlier conversation when asked to resume
