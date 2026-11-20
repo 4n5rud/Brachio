@@ -852,6 +852,8 @@ export function App() {
                 task={task()}
                 isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
                 onDraft={draftComment}
+                activity={activity().filter((item) => item.taskId === task().id)}
+                now={now()}
                 onDiffTotals={recordDiffTotals}
                 onWide={setInspectorWide}
               />

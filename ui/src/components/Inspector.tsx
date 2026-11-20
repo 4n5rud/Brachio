@@ -18,6 +18,8 @@ import { InspectorSection } from "./InspectorSection";
 import { TaskFiles } from "./TaskFiles";
 import { TaskQaRun } from "./TaskQaRun";
 import { TaskOrchestration } from "./TaskOrchestration";
+import { TaskActivityList } from "./TaskActivityList";
+import type { TaskActivity } from "./WorkspaceDialog";
 
 type Pane = "changes" | "files" | "qa" | "tasks" | "activity";
 
@@ -27,6 +29,9 @@ export function Inspector(props: {
   /** False for a plain folder project, which has no changes, branch or pull request to show. */
   isGit?: boolean;
   onDraft: (taskId: string, text: string) => Promise<boolean>;
+  /** This session's events for the selected task. */
+  activity: readonly TaskActivity[];
+  now: number;
   onDiffTotals: (taskId: string, totals: DiffTotals | undefined) => void;
   /** True while a diff is open side by side, so the inspector can widen. */
   onWide?: (wide: boolean) => void;
@@ -73,12 +78,10 @@ export function Inspector(props: {
       </div>
       <Switch>
         <Match when={pane() === "files"}>
-          <section class="inspector-section">
-            <Show when={props.task.worktreePath && props.task.id} keyed
-              fallback={<p class="muted">{t("files.empty")}</p>}>
-              {(id) => <TaskFiles taskId={id} />}
-            </Show>
-          </section>
+          <Show when={props.task.worktreePath && props.task.id} keyed
+            fallback={<InspectorSection title={t("files.title")}><InspectorNote>{t("files.empty")}</InspectorNote></InspectorSection>}>
+            {(id) => <TaskFiles taskId={id} onInsert={(path) => void props.onDraft(id, `@${path} `)} />}
+          </Show>
         </Match>
         <Match when={pane() === "changes"}>
           <div class="inspector-changes">
@@ -121,25 +124,20 @@ export function Inspector(props: {
           </div>
         </Match>
         <Match when={pane() === "qa"}>
-          <section class="inspector-section">
-            <Show when={props.task.qa} fallback={<p class="muted">{t("inspector.qa.none")}</p>}>
-              {(qa) => (
-                <div class="qa-summary">
-                  <div>
-                    <strong class="qa-passed">{qa().passed}</strong>
-                    <span>{t("inspector.qa.passed")}</span>
-                  </div>
-                  <div>
-                    <strong classList={{ "qa-failed": qa().failed > 0 }}>{qa().failed}</strong>
-                    <span>{t("inspector.qa.failed")}</span>
-                  </div>
-                </div>
-              )}
-            </Show>
-            <Show when={isGit() && props.task.worktreePath && props.task.id} keyed>
-              {(id) => <TaskQaRun taskId={id} />}
-            </Show>
-          </section>
+          <Show when={props.task.qa}>
+            {(qa) => (
+              <InspectorSection title={t("inspector.qa.counts")}>
+                <dl class="kv2">
+                  <dt>{t("inspector.qa.passed")}</dt><dd>{qa().passed}</dd>
+                  <dt>{t("inspector.qa.failed")}</dt><dd>{qa().failed}</dd>
+                </dl>
+              </InspectorSection>
+            )}
+          </Show>
+          <Show when={isGit() && props.task.worktreePath && props.task.id} keyed
+            fallback={<InspectorSection title={t("inspector.qa")}><InspectorNote>{t("inspector.qa.none")}</InspectorNote></InspectorSection>}>
+            {(id) => <TaskQaRun taskId={id} onDraft={(text) => props.onDraft(id, text)} />}
+          </Show>
         </Match>
         <Match when={pane() === "tasks" && isLead()}>
           <section class="inspector-section">
@@ -147,9 +145,7 @@ export function Inspector(props: {
           </section>
         </Match>
         <Match when={pane() === "activity"}>
-          <section class="inspector-section">
-            <p class="muted">{t("inspector.activity.none")}</p>
-          </section>
+          <TaskActivityList items={props.activity} now={props.now} />
         </Match>
       </Switch>
       <Show when={props.task.worktreePath && props.task.id} keyed>

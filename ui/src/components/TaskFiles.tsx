@@ -1,5 +1,8 @@
 import { Input } from "./ui/Input";
-import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
+import { FileRow } from "./FileRow";
+import { InspectorNote, OutputLog } from "./InspectorNote";
+import { InspectorSection } from "./InspectorSection";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { listTaskFiles, previewTaskFile, previewTaskMedia } from "../lib/workspace";
@@ -10,7 +13,67 @@ const mediaTypes = new Map([
   ["gif", "image/gif"], ["webp", "image/webp"], ["pdf", "application/pdf"],
 ]);
 
-export function TaskFiles(props: { taskId: string }) {
+export interface FilePreview {
+  loading?: boolean;
+  error?: string;
+  /** Null for a file that is not UTF-8 text. */
+  text?: string | null;
+  truncated?: boolean;
+  media?: { url: string; type: string };
+}
+
+/** Search box and matching files, then the chosen file under them. */
+export function FilesPanel(props: {
+  filter: string;
+  onFilter: (value: string) => void;
+  loading: boolean;
+  error?: string;
+  matches: readonly string[];
+  selected: string;
+  onSelect: (path: string) => void;
+  onRefresh: () => void;
+  preview?: FilePreview;
+}) {
+  return (
+    <>
+      <InspectorSection title={t("files.title")}
+        end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} disabled={props.loading} onClick={props.onRefresh} />}>
+        <Input aria-label={t("files.filter")} placeholder={t("files.filter")} mono value={props.filter}
+          onInput={(event) => props.onFilter(event.currentTarget.value)} />
+        <Show when={props.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+        <Show when={!props.loading && !props.error && props.matches.length === 0}>
+          <InspectorNote>{t("files.empty")}</InspectorNote>
+        </Show>
+        <For each={props.matches.slice(0, RESULT_LIMIT)}>{(file) => (
+          <FileRow path={file} selected={file === props.selected} onSelect={() => props.onSelect(file)} />
+        )}</For>
+        <Show when={props.matches.length > RESULT_LIMIT}><InspectorNote>{t("files.more")}</InspectorNote></Show>
+      </InspectorSection>
+      <Show when={props.preview}>
+        {(preview) => (
+          <InspectorSection title={props.selected}>
+            <Show when={preview().loading}><InspectorNote tone="progress">{t("files.loading")}</InspectorNote></Show>
+            <Show when={preview().media} keyed>
+              {(item) => item.type === "application/pdf"
+                ? <iframe class="file-preview-pdf" src={item.url} title={props.selected} />
+                : <img class="file-preview-image" src={item.url} alt={props.selected} />}
+            </Show>
+            <Show when={preview().error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+            <Show when={preview().text !== undefined && !preview().loading}>
+              <Show when={preview().text !== null} fallback={<InspectorNote>{t("files.binary")}</InspectorNote>}>
+                <OutputLog text={preview().text ?? ""} />
+              </Show>
+              <Show when={preview().truncated}><InspectorNote>{t("files.truncated")}</InspectorNote></Show>
+            </Show>
+          </InspectorSection>
+        )}
+      </Show>
+    </>
+  );
+}
+
+/** Lists the task's files; choosing one previews it and adds @path to the agent prompt. */
+export function TaskFiles(props: { taskId: string; onInsert: (path: string) => void }) {
   const [filter, setFilter] = createSignal("");
   const [path, setPath] = createSignal("");
   const [media, setMedia] = createSignal<{ url: string; type: string }>();
@@ -50,44 +113,20 @@ export function TaskFiles(props: { taskId: string }) {
     return (files()?.paths ?? []).filter((file) => file.toLowerCase().includes(query));
   });
 
+  const previewState = (): FilePreview | undefined => {
+    if (!path()) return undefined;
+    if (preview.loading) return { loading: true };
+    const result = preview();
+    if (result?.path !== path()) return undefined;
+    return { error: result.error, text: result.file?.text, truncated: result.file?.truncated, media: media() };
+  };
+  const choose = (file: string) => {
+    setPath(file);
+    props.onInsert(file);
+  };
+
   return (
-    <>
-      <Input label={t("files.filter")} value={filter()} onInput={(event) => setFilter(event.currentTarget.value)} />
-      <Button size="sm" disabled={files.loading} onClick={() => void refetch()}>
-        {t("inspector.refresh")}
-      </Button>
-      <Show when={files()?.error}>{(error) => <p role="alert">{error()}</p>}</Show>
-      <Show when={!files.loading && !files()?.error && matches().length === 0}>
-        <p class="muted">{t("files.empty")}</p>
-      </Show>
-      <div class="quick-open-results">
-        <For each={matches().slice(0, RESULT_LIMIT)}>{(file) => (
-          <button class="quick-open-result" classList={{ selected: file === path() }} type="button"
-            aria-pressed={file === path()} onClick={() => setPath(file)}>{file}</button>
-        )}</For>
-      </div>
-      <Show when={matches().length > RESULT_LIMIT}><p class="muted">{t("files.more")}</p></Show>
-      <Show when={preview.loading}><p role="status">{t("files.loading")}</p></Show>
-      <Show when={media()} keyed>
-        {(item) => item.type === "application/pdf"
-          ? <iframe class="file-preview-pdf" src={item.url} title={path()} />
-          : <img class="file-preview-image" src={item.url} alt={path()} />}
-      </Show>
-      <Show when={!preview.loading && preview()?.path === path() && preview()}>
-        {(result) => (
-          <>
-            <Show when={result().error}>{(error) => <p role="alert">{error()}</p>}</Show>
-            <Show when={result().file}>{(file) => (
-              <>
-                <Show when={file().text !== null} fallback={<p class="muted">{t("files.binary")}</p>}>
-                  <pre class="inspector-patch" tabIndex={0} aria-label={path()}>{file().text}</pre>
-                </Show>
-                <Show when={file().truncated}><p class="muted">{t("files.truncated")}</p></Show>
-              </>
-            )}</Show>
-          </>
-        )}
-      </Show>
-    </>
+    <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading} error={files()?.error}
+      matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()} />
   );
 }

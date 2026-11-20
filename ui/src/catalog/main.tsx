@@ -6,6 +6,7 @@ import { locale, setLocale, t } from "../i18n";
 import { COLOR_THEMES } from "../lib/theme";
 import { pushToast } from "../lib/toasts";
 import { ChangesStates } from "./changes-states";
+import { FilesQaStates } from "./files-qa-states";
 import { ApprovalBar } from "../components/ApprovalBar";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
@@ -479,6 +480,10 @@ function Catalog() {
 
       <Section title="Changes, diff and pull request">
         <ChangesStates />
+      </Section>
+
+      <Section title="Files, QA, local ports and activity">
+        <FilesQaStates />
       </Section>
 
       <Section title="BoardTile">
