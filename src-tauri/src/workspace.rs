@@ -1718,7 +1718,9 @@ mod github_output_tests {
         }
         #[cfg(unix)]
         {
-            std::os::unix::process::ExitStatusExt::from_raw(i32::try_from(code).unwrap() << 8)
+            std::os::unix::process::ExitStatusExt::from_raw(
+                i32::try_from(code).expect("exit code fits in i32") << 8,
+            )
         }
     }
 

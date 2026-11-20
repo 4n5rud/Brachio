@@ -461,11 +461,14 @@ mod stalled_child_tests {
             .spawn(&spec, Arc::new(|_| {}))
             .expect("start a child that ignores its input");
 
-        // A megabyte is far more than a PTY accepts from a child that is not reading.
+        // A megabyte is far more than a PTY accepts from a child that is not reading. It goes in
+        // 64 KiB writes, the most one write may carry.
         let started = Instant::now();
-        manager
-            .write(id, &vec![b'x'; 1 << 20])
-            .expect("queue input");
+        for _ in 0..16 {
+            manager
+                .write(id, &vec![b'x'; 64 * 1024])
+                .expect("queue input");
+        }
         manager
             .resize(id, 30, 100)
             .expect("resize while input is pending");

@@ -735,9 +735,17 @@ mod handle_tests {
         locate, spawn, Attached, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE,
     };
 
+    /// Short enough for the Unix socket path limit on macOS, where temp directories are long.
+    fn missing_runtime_name() -> String {
+        format!(
+            "missing-{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..12]
+        )
+    }
+
     fn attach_to_dead_runtime(terminals: &RuntimeTerminals) -> SessionId {
         let id = terminals.new_handle();
-        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let client = Client::new(&missing_runtime_name());
         let pump = spawn(std::future::pending::<()>());
         terminals.attached.lock().expect("lock").insert(
             id,
@@ -775,7 +783,7 @@ mod handle_tests {
     async fn an_attachment_is_released_when_its_pump_ends() {
         let terminals = RuntimeTerminals::default();
         let id = terminals.new_handle();
-        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let client = Client::new(&missing_runtime_name());
         terminals
             .register(
                 id,
@@ -811,7 +819,7 @@ mod handle_tests {
         let parked = attach_to_dead_runtime(&terminals);
         let other = attach_to_dead_runtime(&terminals);
         terminals.park(parked).expect("hosted").expect("parked");
-        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let client = Client::new(&missing_runtime_name());
         let fresh = terminals.new_handle();
         terminals
             .register(
@@ -846,7 +854,7 @@ mod handle_tests {
 
     #[tokio::test]
     async fn a_missing_current_runtime_is_distinct_from_a_missing_terminal() {
-        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let client = Client::new(&missing_runtime_name());
         assert!(matches!(
             locate(&client, "test:agent").await,
             Err(ClientError::NotRunning)
