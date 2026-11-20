@@ -1,3 +1,4 @@
+import { Button } from "./ui/Button";
 import { For, Show, createResource } from "solid-js";
 import { t } from "../i18n";
 import { listFolderRepos } from "../lib/workspace";
@@ -35,9 +36,9 @@ export function FolderRepos(props: {
           {(repo) => (
             <div class="folder-repo">
               <span class="folder-repo-name" title={repo.path}>{repo.name}</span>
-              <button type="button" class="button button-sm" disabled={repo.added} onClick={() => void add(repo.path)}>
+              <Button size="sm" disabled={repo.added} onClick={() => void add(repo.path)}>
                 {repo.added ? t("folderRepos.added") : t("folderRepos.add")}
-              </button>
+              </Button>
             </div>
           )}
         </For>

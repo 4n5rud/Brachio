@@ -1,3 +1,4 @@
+import { Button } from "./ui/Button";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import {
@@ -57,9 +58,9 @@ export function PullRequestStatus(props: { taskId: string }) {
     <section class="pr-status" aria-label={t("prStatus.title")}>
       <h3>
         {t("prStatus.title")}
-        <button type="button" disabled={busy()} onClick={() => void refresh(true)}>
+        <Button size="sm" disabled={busy()} onClick={() => void refresh(true)}>
           {t("prStatus.refresh")}
-        </button>
+        </Button>
       </h3>
       <Show when={failure()}>{(message) => <p role="alert">{message()}</p>}</Show>
       <Show when={!report() && !failure()}><p role="status">{t("prStatus.checking")}</p></Show>

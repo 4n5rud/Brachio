@@ -1,3 +1,5 @@
+import { IconButton } from "./ui/IconButton";
+import { Button } from "./ui/Button";
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { statusTone } from "../lib/status";
@@ -76,9 +78,9 @@ export function TaskList(props: {
           <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
         </Show>
         <Show when={props.onAddRepo}>
-          <button class="button button-primary button-sm" type="button" onClick={() => props.onAddRepo?.()}>
+          <Button variant="primary" size="sm" onClick={() => props.onAddRepo?.()}>
             <Icon name="plus" />{t("sidebar.addProject")}
-          </button>
+          </Button>
         </Show>
       </div>
       <nav class="task-groups" aria-label={t("sidebar.projects")}>
@@ -96,9 +98,9 @@ export function TaskList(props: {
                     <span class="count">{tasks().length}</span>
                   </button>
                   <Show when={id && props.onNewTask}>
-                    <button class="icon-button icon-button-sm project-new-task" type="button"
-                      title={t("sidebar.newTask")} aria-label={`${t("sidebar.newTask")} · ${name()}`}
-                      onClick={() => props.onNewTask?.(id)}><Icon name="plus" /></button>
+                    <IconButton class="project-new-task" icon="plus" size="sm"
+                      title={t("sidebar.newTask")} label={`${t("sidebar.newTask")} · ${name()}`}
+                      onClick={() => props.onNewTask?.(id)} />
                   </Show>
                 </div>
                 <Show when={expanded()}>

@@ -1,3 +1,4 @@
+import { Button } from "./ui/Button";
 import { For, createMemo } from "solid-js";
 import { t } from "../i18n";
 import { AGENT_NAME, GROUP_ORDER, groupTasks, shortBranch, type TaskRow } from "../lib/tasks";
@@ -39,9 +40,9 @@ export function Board(props: { tasks: readonly TaskRow[]; now: number; onOpen: (
               <footer class="tile-foot">
                 <DiffStat additions={task.additions} deletions={task.deletions} />
                 <span>{formatAge(task.updatedAt, props.now)}</span>
-                <button class="button button-ghost button-sm" type="button" onClick={() => props.onOpen(task.id)}>
+                <Button variant="ghost" size="sm" onClick={() => props.onOpen(task.id)}>
                   {t("board.open")}
-                </button>
+                </Button>
               </footer>
             </article>
           )}

@@ -1,3 +1,4 @@
+import { Button } from "./ui/Button";
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
@@ -81,9 +82,9 @@ export function PullRequestFeedback(props: { taskId: string; onDraft: (text: str
 
   return (
     <div>
-      <button class="button button-sm" type="button" disabled={busy()} onClick={() => void load()}>
+      <Button size="sm" disabled={busy()} onClick={() => void load()}>
         {t("prFeedback.load")}
-      </button>
+      </Button>
       <Show when={loaded()}>
         <Show when={items().length} fallback={<p class="muted">{t("prFeedback.empty")}</p>}>
           <ul class="quick-open-results">
@@ -91,9 +92,9 @@ export function PullRequestFeedback(props: { taskId: string; onDraft: (text: str
               <li>
                 <strong>{item.label}</strong>
                 <p class="muted">{item.text.slice(0, 240)}</p>
-                <button class="button button-sm" type="button" onClick={() => void draft(item.text)}>
+                <Button size="sm" onClick={() => void draft(item.text)}>
                   {t("diff.insert")}
-                </button>
+                </Button>
               </li>
             )}</For>
           </ul>

@@ -1,3 +1,5 @@
+import { Input } from "./ui/Input";
+import { Button } from "./ui/Button";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { shortSha } from "../lib/qa-run";
@@ -118,26 +120,26 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
             </Show>
             <Show when={handoff().canReview}>
               <div class="orchestration-actions">
-                <button type="button" class="button-primary" disabled={busy()}
+                <Button variant="primary" disabled={busy()}
                   onClick={() => void decide(handoff().id, true)}>
                   {t("orchestration.approve")}
-                </button>
-                <button type="button" disabled={busy()} onClick={() => setRejecting((open) => !open)}>
+                </Button>
+                <Button disabled={busy()} onClick={() => setRejecting((open) => !open)}>
                   {t("orchestration.reject")}
-                </button>
+                </Button>
               </div>
               <Show when={rejecting()}>
                 <form class="orchestration-reject" onSubmit={(event) => {
                   event.preventDefault();
                   void decide(handoff().id, false);
                 }}>
-                  <input type="text" maxLength={300} value={reason()}
+                  <Input type="text" maxLength={300} value={reason()}
                     placeholder={t("orchestration.reasonPlaceholder")}
                     aria-label={t("orchestration.reasonPlaceholder")}
                     onInput={(event) => setReason(event.currentTarget.value)} />
-                  <button type="submit" disabled={busy() || reason().trim() === ""}>
+                  <Button type="submit" disabled={busy() || reason().trim() === ""}>
                     {t("orchestration.confirmReject")}
-                  </button>
+                  </Button>
                 </form>
               </Show>
             </Show>

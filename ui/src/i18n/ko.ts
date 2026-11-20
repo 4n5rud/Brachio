@@ -338,6 +338,8 @@ export const ko: Messages = {
   "newTask.noParent": "상위 작업 없음",
   "newTask.agent": "에이전트",
   "newTask.cancel": "취소",
+  "confirm.cancel": "취소",
+  "confirm.discard": "버리기",
   "newTask.create": "작업 만들기",
   "newTask.creating": "만드는 중...",
   "empty.task.title": "고른 작업이 없어요",

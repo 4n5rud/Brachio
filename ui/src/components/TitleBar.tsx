@@ -2,6 +2,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t } from "../i18n";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
+import { IconButton } from "./ui/IconButton";
+import { Kbd } from "./ui/Kbd";
+import { SegmentedControl } from "./ui/SegmentedControl";
 import { QUICK_OPEN_KEYS, TOGGLE_INSPECTOR_KEYS, TOGGLE_SIDEBAR_KEYS } from "../lib/shortcut";
 
 export type View = "tasks" | "board";
@@ -52,41 +55,27 @@ export function TitleBar(props: {
   return (
     <header class="titlebar" data-tauri-drag-region>
       <BrandMark />
-      <button class="icon-button" type="button" aria-pressed={props.sidebarOpen}
-        aria-label={t("titlebar.toggleSidebar")} title={`${t("titlebar.toggleSidebar")} (${TOGGLE_SIDEBAR_KEYS})`}
-        onClick={props.onToggleSidebar}>
-        <Icon name="panelLeft" />
-      </button>
+      <IconButton icon="panelLeft" aria-pressed={props.sidebarOpen}
+        label={t("titlebar.toggleSidebar")} title={`${t("titlebar.toggleSidebar")} (${TOGGLE_SIDEBAR_KEYS})`}
+        onClick={props.onToggleSidebar} />
       <span class="active-project" title={props.repo}>{props.repo}</span>
       <button class="search" type="button" onClick={props.onQuickOpen}>
         <Icon name="search" />
         <span>{t("titlebar.search")}</span>
-        <kbd>{QUICK_OPEN_KEYS}</kbd>
+        <Kbd>{QUICK_OPEN_KEYS}</Kbd>
       </button>
       <div class="titlebar-end">
-        <div class="segmented" role="group" aria-label={t("titlebar.view")}>
-          <button type="button" aria-pressed={props.view === "tasks"} onClick={() => props.onView("tasks")}>
-            <Icon name="list" />
-            {t("view.tasks")}
-          </button>
-          <button type="button" aria-pressed={props.view === "board"} onClick={() => props.onView("board")}>
-            <Icon name="board" />
-            {t("view.board")}
-          </button>
-        </div>
-        <button class="icon-button" type="button" aria-pressed={props.inspectorOpen}
-          aria-label={t("titlebar.toggleInspector")} title={`${t("titlebar.toggleInspector")} (${TOGGLE_INSPECTOR_KEYS})`}
-          onClick={props.onToggleInspector}>
-          <Icon name="panelRight" />
-        </button>
-        <button class="icon-button" type="button" aria-haspopup="dialog"
-          aria-label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity}>
-          <Icon name="bell" />
-          {props.needsYou > 0 && <span class="count-badge">{props.needsYou}</span>}
-        </button>
-        <button class="icon-button" type="button" aria-label={t("titlebar.settings")} onClick={props.onSettings}>
-          <Icon name="sliders" />
-        </button>
+        <SegmentedControl label={t("titlebar.view")} value={props.view} onChange={props.onView}
+          options={[
+            { value: "tasks", label: t("view.tasks"), icon: "list" },
+            { value: "board", label: t("view.board"), icon: "board" },
+          ]} />
+        <IconButton icon="panelRight" aria-pressed={props.inspectorOpen}
+          label={t("titlebar.toggleInspector")} title={`${t("titlebar.toggleInspector")} (${TOGGLE_INSPECTOR_KEYS})`}
+          onClick={props.onToggleInspector} />
+        <IconButton icon="bell" aria-haspopup="dialog" badge={props.needsYou}
+          label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity} />
+        <IconButton icon="sliders" label={t("titlebar.settings")} onClick={props.onSettings} />
         {ownWindowButtons() && <WindowButtons />}
       </div>
     </header>

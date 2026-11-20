@@ -1,0 +1,110 @@
+.button {
+  height: var(--size-row);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-line);
+  background: var(--color-raised);
+  color: var(--color-text);
+  font: var(--text-label);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.button:hover,
+.button.is-hover {
+  background: var(--color-hover);
+}
+.button:active,
+.button.is-press {
+  background: var(--color-press);
+}
+.button-primary {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+.button-primary:hover,
+.button-primary:active,
+.button-primary.is-press {
+  background: var(--color-accent);
+}
+.button-primary:hover,
+.button-primary.is-hover {
+  filter: brightness(0.92);
+}
+.button-primary:active,
+.button-primary.is-press {
+  filter: brightness(0.86);
+}
+.button-primary kbd {
+  color: var(--color-accent-ink);
+  border-color: currentColor;
+  opacity: 0.8;
+}
+.button-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-2);
+}
+.button-ghost:hover,
+.button-ghost.is-hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+.button-ghost:active {
+  background: var(--color-press);
+}
+.button-danger {
+  background: var(--color-danger);
+  color: var(--color-danger-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+.button-danger:hover,
+.button-danger:active {
+  background: var(--color-danger);
+}
+.button-danger:hover,
+.button-danger.is-hover {
+  filter: brightness(0.92);
+}
+.button-danger:active {
+  filter: brightness(0.86);
+}
+.button-sm {
+  height: 26px;
+  padding: 0 var(--space-2);
+}
+.button:disabled {
+  opacity: 0.45;
+  filter: none;
+}
+.button:disabled:hover,
+.button:disabled:active {
+  background: var(--color-raised);
+}
+.button-primary:disabled:hover,
+.button-primary:disabled:active {
+  background: var(--color-accent);
+}
+.button-danger:disabled:hover,
+.button-danger:disabled:active {
+  background: var(--color-danger);
+}
+.button-ghost:disabled:hover,
+.button-ghost:disabled:active {
+  background: transparent;
+}
+/* Both labels share one grid cell so loading keeps the button's width. */
+.button-label {
+  display: inline-grid;
+}
+.button-label > span {
+  grid-area: 1 / 1;
+}
+.button-label > .is-hidden {
+  visibility: hidden;
+}

@@ -1,3 +1,4 @@
+import { Button } from "./ui/Button";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { previewTaskMerge, type TaskMergePreview as MergePreview } from "../lib/workspace";
@@ -22,9 +23,9 @@ export function TaskMergePreview(props: { taskId: string }) {
 
   return (
     <div class="merge-preview">
-      <button class="button button-sm" type="button" disabled={busy()} onClick={() => void check()}>
+      <Button size="sm" disabled={busy()} onClick={() => void check()}>
         {t(busy() ? "mergePreview.checking" : "mergePreview.check")}
-      </button>
+      </Button>
       <Show when={result()} keyed>
         {(preview) => (
           <div classList={{ "worktree-conflicts": preview.conflicts.length > 0 }} role="status">

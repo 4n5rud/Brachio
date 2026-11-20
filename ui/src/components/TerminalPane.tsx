@@ -1,3 +1,5 @@
+import { Notice } from "./ui/Notice";
+import { Button } from "./ui/Button";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -417,69 +419,71 @@ export function TerminalPane(props: {
   });
   return (
     <div class="terminal-content">
-      <Show when={restoredFrame() || continuity()}>
-        <div class="terminal-recovery" role="status">
-          <Show when={restoredFrame()}><span>{t("terminal.restored")}</span></Show>
-          <Show when={continuity()}>{(message) => <span>{t(message())}</span>}</Show>
-        </div>
+      <Show when={restoredFrame()}>
+        <Notice tone="info">{t("terminal.restored")}</Notice>
       </Show>
+      <Show when={continuity()}>{(message) => <Notice tone="info">{t(message())}</Notice>}</Show>
       <div ref={host} class="terminal-host" data-agent-terminal={props.session?.agent ? "" : undefined} />
       <Show when={checkingConversations()}>
-        <div class="terminal-recovery" role="status">{t("terminal.checkingConversations")}</div>
+        <Notice tone="progress">{t("terminal.checkingConversations")}</Notice>
       </Show>
       <Show when={choices()}>
         {(candidates) => (
-          <section class="terminal-recovery terminal-conversations" aria-label={t("terminal.chooseConversation")}>
-            <Show when={conversationCheckFailed()} fallback={<p>{t("terminal.chooseConversation")}</p>}>
-              <p role="alert">{t("terminal.conversationCheckFailed")}</p>
-            </Show>
-            <For each={candidates()}>{(candidate) => (
-              <button class="button button-sm" type="button" title={candidate.id}
-                onClick={() => chooseConversation(candidate.id)}>
-                {candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))
-                  ? new Date(candidate.timestamp).toLocaleString() + " · " : ""}
-                {candidate.id.slice(-8)}
-              </button>
-            )}</For>
-            <button class="button button-sm" type="button" onClick={() => chooseConversation()}>
-              {t("terminal.startNewConversation")}
-            </button>
-          </section>
+          <Notice
+            tone={conversationCheckFailed() ? "error" : "info"}
+            actions={
+              <>
+                <For each={candidates()}>{(candidate) => (
+                  <Button size="sm" title={candidate.id}
+                    onClick={() => chooseConversation(candidate.id)}>
+                    {candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))
+                      ? new Date(candidate.timestamp).toLocaleString() + " · " : ""}
+                    {candidate.id.slice(-8)}
+                  </Button>
+                )}</For>
+                <Button size="sm" onClick={() => chooseConversation()}>
+                  {t("terminal.startNewConversation")}
+                </Button>
+              </>
+            }
+          >
+            {conversationCheckFailed() ? t("terminal.conversationCheckFailed") : t("terminal.chooseConversation")}
+          </Notice>
         )}
       </Show>
       <Show when={uncertainOperation()}>
         {(operation) => (
-          <div class="terminal-recovery" role="alert">
-            <span>{t("terminal.launchUncertain")}</span>
-            <Show
-              when={confirmingReset()}
-              fallback={<button type="button" class="button button-sm" onClick={() => setConfirmingReset(true)}>{t("terminal.launchReset")}</button>}
-            >
-              <span>{t("terminal.launchResetConfirm")}</span>
-              <button type="button" class="button button-sm" onClick={async () => {
-                if (!props.session?.key) return;
-                try {
-                  await forgetUncertainLaunch(props.session.key, operation());
-                  setUncertainOperation(undefined);
-                  setConfirmingReset(false);
-                  setResetError(undefined);
-                  reopen();
-                } catch (error) {
-                  setResetError(String(error));
-                }
-              }}>{t("terminal.launchResetAnyway")}</button>
-              <button type="button" class="button button-sm" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</button>
-            </Show>
-            <Show when={resetError()}>{(message) => <span>{message()}</span>}</Show>
-          </div>
+          <Notice
+            tone="blocked"
+            actions={
+              <Show
+                when={confirmingReset()}
+                fallback={<Button size="sm" onClick={() => setConfirmingReset(true)}>{t("terminal.launchReset")}</Button>}
+              >
+                <Button size="sm" variant="danger" onClick={async () => {
+                  if (!props.session?.key) return;
+                  try {
+                    await forgetUncertainLaunch(props.session.key, operation());
+                    setUncertainOperation(undefined);
+                    setConfirmingReset(false);
+                    setResetError(undefined);
+                    reopen();
+                  } catch (error) {
+                    setResetError(String(error));
+                  }
+                }}>{t("terminal.launchResetAnyway")}</Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</Button>
+              </Show>
+            }
+          >
+            {t("terminal.launchUncertain")}
+            <Show when={confirmingReset()}>{" "}{t("terminal.launchResetConfirm")}</Show>
+            <Show when={resetError()}>{(message) => <>{" "}{message()}</>}</Show>
+          </Notice>
         )}
       </Show>
       <Show when={canReopen()}>
-        <div class="terminal-recovery">
-          <button type="button" class="button button-sm" onClick={() => reopen()}>
-            {t("terminal.reopen")}
-          </button>
-        </div>
+        <Notice tone="info" actions={<Button size="sm" onClick={() => reopen()}>{t("terminal.reopen")}</Button>} />
       </Show>
     </div>
   );

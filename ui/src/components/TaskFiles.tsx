@@ -1,3 +1,5 @@
+import { Input } from "./ui/Input";
+import { Button } from "./ui/Button";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { listTaskFiles, previewTaskFile, previewTaskMedia } from "../lib/workspace";
@@ -50,13 +52,10 @@ export function TaskFiles(props: { taskId: string }) {
 
   return (
     <>
-      <label class="form-field">
-        <span>{t("files.filter")}</span>
-        <input class="input" value={filter()} onInput={(event) => setFilter(event.currentTarget.value)} />
-      </label>
-      <button class="button button-sm" type="button" disabled={files.loading} onClick={() => void refetch()}>
+      <Input label={t("files.filter")} value={filter()} onInput={(event) => setFilter(event.currentTarget.value)} />
+      <Button size="sm" disabled={files.loading} onClick={() => void refetch()}>
         {t("inspector.refresh")}
-      </button>
+      </Button>
       <Show when={files()?.error}>{(error) => <p role="alert">{error()}</p>}</Show>
       <Show when={!files.loading && !files()?.error && matches().length === 0}>
         <p class="muted">{t("files.empty")}</p>

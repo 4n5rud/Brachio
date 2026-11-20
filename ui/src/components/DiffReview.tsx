@@ -1,3 +1,5 @@
+import { SegmentedControl } from "./ui/SegmentedControl";
+import { Button } from "./ui/Button";
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { diffRows, splitDiffRows, type DiffLocation, type DiffRow } from "../lib/diff";
@@ -52,10 +54,12 @@ export function DiffReview(props: {
 
   return (
     <>
-      <div class="segmented diff-layout" role="group" aria-label={t("diff.layout")}>
-        <button type="button" aria-pressed={!split()} onClick={() => setSplit(false)}>{t("diff.unified")}</button>
-        <button type="button" aria-pressed={split()} onClick={() => setSplit(true)}>{t("diff.split")}</button>
-      </div>
+      <SegmentedControl class="diff-layout" label={t("diff.layout")} value={split() ? "split" : "unified"}
+        onChange={(value) => setSplit(value === "split")}
+        options={[
+          { value: "unified", label: t("diff.unified") },
+          { value: "split", label: t("diff.split") },
+        ]} />
       <div class="inspector-patch" classList={{ "inspector-patch-split": split() }}
         tabIndex={0} aria-label={t("inspector.changes")}>
         <Show when={split()} fallback={<For each={rows()}>{line}</For>}>
@@ -81,9 +85,9 @@ export function DiffReview(props: {
               <textarea rows={3} maxLength={2000} disabled={sending()} value={comment()}
                 onInput={(event) => setComment(event.currentTarget.value)} />
             </label>
-            <button type="submit" class="button button-sm" disabled={sending() || !comment().trim()}>
+            <Button size="sm" type="submit" disabled={sending() || !comment().trim()}>
               {t("diff.insert")}
-            </button>
+            </Button>
             <Show when={error()}><p role="alert">{error()}</p></Show>
           </form>
         )}
