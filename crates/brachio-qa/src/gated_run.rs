@@ -111,6 +111,34 @@ pub enum QaOutcome {
     ProcessError,
 }
 
+impl QaOutcome {
+    /// The name used in storage and in the UI.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::TimedOut => "timedOut",
+            Self::OutputLimit => "outputLimit",
+            Self::ProcessError => "processError",
+        }
+    }
+
+    /// The inverse of [`QaOutcome::as_str`].
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        [
+            Self::Passed,
+            Self::Failed,
+            Self::TimedOut,
+            Self::OutputLimit,
+            Self::ProcessError,
+        ]
+        .into_iter()
+        .find(|outcome| outcome.as_str() == text)
+    }
+}
+
 /// What the UI shows for the last run of a task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

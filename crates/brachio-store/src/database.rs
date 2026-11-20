@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0008_retired_secondary_tabs.sql"),
     include_str!("../migrations/0009_worker_report_generation.sql"),
     include_str!("../migrations/0010_task_orchestration.sql"),
+    include_str!("../migrations/0011_qa_results.sql"),
 ];
 
 /// Why a storage call failed.
@@ -131,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn orchestration_tables_arrive_on_a_database_at_the_previous_version() {
+    fn qa_results_arrive_on_a_database_at_the_previous_version() {
         let mut connection = Connection::open_in_memory().expect("open");
         connection
             .pragma_update(None, "foreign_keys", "ON")
@@ -157,10 +158,12 @@ mod tests {
         migrate(&mut connection).expect("upgrade");
         connection
             .execute(
-                "INSERT INTO task_orchestration (task_id, state, updated_at_ms) VALUES ('t', 'queued', 0)",
+                "INSERT INTO qa_results (task_id, command, cwd, outcome, exit_code, duration_ms, commit_sha,
+                    verified_by_brachio, stdout, stderr, truncated, retry_allowed, created_at_ms)
+                 VALUES ('t', 'c', '/w', 'passed', 0, 1, 'a', 1, '', '', 0, 1, 0)",
                 [],
             )
-            .expect("existing task accepts orchestration state");
+            .expect("existing task accepts a QA result");
     }
 
     #[test]
