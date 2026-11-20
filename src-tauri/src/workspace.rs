@@ -451,7 +451,8 @@ pub fn task_restore(database: State<'_, Database>, id: String) -> Result<TaskRec
     TaskRecord::restore(&*database.lock()?, &id).map_err(to_text)
 }
 
-/// Converts files from a native drop into worktree-relative paths for the agent draft.
+/// Converts dropped files and folders into agent draft paths: worktree-relative inside the
+/// worktree, absolute elsewhere.
 #[tauri::command]
 pub async fn task_drop_paths(
     database: State<'_, Database>,
@@ -466,29 +467,7 @@ pub async fn task_drop_paths(
         let root = task.worktree_path.canonicalize().map_err(to_text)?;
         let mut files = Vec::new();
         for path in paths {
-            if !path.is_absolute() {
-                return Err("Drop files from inside the current worktree.".to_owned());
-            }
-            let file = path.canonicalize().map_err(to_text)?;
-            let relative = file
-                .strip_prefix(&root)
-                .map_err(|_| "Drop files from inside the current worktree.".to_owned())?;
-            if !file.is_file()
-                || relative
-                    .components()
-                    .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
-            {
-                return Err("Only regular worktree files can be dropped.".to_owned());
-            }
-            let parts = relative
-                .components()
-                .map(|component| component.as_os_str().to_str())
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| "The dropped path is not valid UTF-8.".to_owned())?;
-            let path = parts.join("/");
-            if path.chars().any(char::is_control) || (cfg!(windows) && path.contains(':')) {
-                return Err("The dropped path contains an unsupported character.".to_owned());
-            }
+            let path = dropped_path(&root, &path)?;
             if !files.contains(&path) {
                 files.push(path);
             }
@@ -497,6 +476,54 @@ pub async fn task_drop_paths(
     })
     .await
     .map_err(to_text)?
+}
+
+fn dropped_path(root: &Path, path: &Path) -> Result<String, String> {
+    if !path.is_absolute() {
+        return Err("The dropped path is not absolute.".to_owned());
+    }
+    let file = path.canonicalize().map_err(to_text)?;
+    let relative = file.strip_prefix(root).ok();
+    if relative.is_some_and(|relative| {
+        relative
+            .components()
+            .any(|component| component.as_os_str().eq_ignore_ascii_case(".git"))
+    }) {
+        return Err("Files inside .git cannot be dropped.".to_owned());
+    }
+    let text = match relative {
+        Some(relative) => {
+            let parts = relative
+                .components()
+                .map(|component| component.as_os_str().to_str())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| "The dropped path is not valid UTF-8.".to_owned())?;
+            let text = parts.join("/");
+            if cfg!(windows) && text.contains(':') {
+                return Err("The dropped path contains an unsupported character.".to_owned());
+            }
+            text
+        }
+        None => strip_verbatim_prefix(
+            file.to_str()
+                .ok_or_else(|| "The dropped path is not valid UTF-8.".to_owned())?,
+        ),
+    };
+    if text.chars().any(char::is_control) {
+        return Err("The dropped path contains an unsupported character.".to_owned());
+    }
+    Ok(text)
+}
+
+/// Turns a Windows verbatim path into the plain form agents expect.
+fn strip_verbatim_prefix(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        path.to_owned()
+    }
 }
 
 /// Lists the files of a task's worktree, tracked and not ignored, for quick open.
@@ -1782,5 +1809,52 @@ mod folder_task_deletion_tests {
         tauri::async_runtime::block_on(delete_task(&database, &locks, &runtime, &in_app, "t1", ""))
             .expect("deleted once stopped");
         assert!(TaskRecord::get(&database.lock().expect("lock"), "t1").is_err());
+    }
+}
+
+#[cfg(test)]
+mod dropped_path_tests {
+    use std::path::Path;
+
+    use super::{dropped_path, strip_verbatim_prefix};
+
+    #[test]
+    fn strips_windows_verbatim_prefixes() {
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\x\a.png"), r"C:\x\a.png");
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share\x"),
+            r"\\server\share\x"
+        );
+        assert_eq!(strip_verbatim_prefix("/home/a/b.txt"), "/home/a/b.txt");
+        assert_eq!(strip_verbatim_prefix(r"C:\x"), r"C:\x");
+    }
+
+    #[test]
+    fn dropped_paths_are_relative_inside_and_absolute_outside() {
+        let worktree = tempfile::tempdir().expect("worktree");
+        let elsewhere = tempfile::tempdir().expect("elsewhere");
+        let root = worktree.path().canonicalize().expect("root");
+        std::fs::create_dir_all(root.join("src/pics")).expect("dirs");
+        std::fs::create_dir_all(root.join(".git")).expect("git");
+        std::fs::write(root.join("src/a.txt"), "a").expect("file");
+        std::fs::write(root.join(".git/config"), "c").expect("config");
+        let outside = elsewhere.path().canonicalize().expect("outside");
+        std::fs::write(outside.join("shot.png"), "p").expect("shot");
+        std::fs::create_dir(outside.join("logs")).expect("logs");
+
+        assert_eq!(
+            dropped_path(&root, &root.join("src/a.txt")).as_deref(),
+            Ok("src/a.txt")
+        );
+        assert_eq!(
+            dropped_path(&root, &root.join("src/pics")).as_deref(),
+            Ok("src/pics")
+        );
+        assert!(dropped_path(&root, &root.join(".git/config")).is_err());
+        let shot = dropped_path(&root, &outside.join("shot.png")).expect("outside file");
+        assert!(!shot.starts_with(r"\\?\"));
+        assert!(Path::new(&shot).is_absolute() && shot.ends_with("shot.png"));
+        let logs = dropped_path(&root, &outside.join("logs")).expect("outside folder");
+        assert!(Path::new(&logs).is_absolute() && logs.ends_with("logs"));
     }
 }
