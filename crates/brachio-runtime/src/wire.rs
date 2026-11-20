@@ -237,7 +237,8 @@ pub struct LostInfo {
 /// Version range and drain state of a runtime.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RuntimeInfo {
-    /// Process ID of the runtime.
+    /// Process ID of the runtime. 0 when the runtime did not say.
+    #[serde(default)]
     pub pid: u32,
     /// Oldest protocol version it answers.
     pub oldest_version: u8,
@@ -356,4 +357,17 @@ pub async fn write_message(
     stream.write_all(&message).await?;
     stream.flush().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeInfo;
+
+    #[test]
+    fn runtime_info_without_pid_is_unknown() {
+        let info: RuntimeInfo =
+            serde_json::from_str(r#"{"oldest_version":1,"current_version":4,"draining":false}"#)
+                .expect("runtime info without pid parses");
+        assert_eq!(info.pid, 0);
+    }
 }

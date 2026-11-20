@@ -80,6 +80,13 @@ fn older_endpoints() -> Vec<String> {
     names
 }
 
+/// Endpoints this installation's runtimes may serve, current first, then the older generations.
+pub fn own_endpoints() -> Vec<String> {
+    let mut names = vec![endpoint()];
+    names.extend(older_endpoints());
+    names
+}
+
 /// Clients of the older runtimes that are still running.
 pub async fn older_clients() -> Vec<Client> {
     let mut running = Vec::new();
