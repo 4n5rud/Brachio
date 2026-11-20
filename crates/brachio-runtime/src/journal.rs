@@ -239,6 +239,28 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_checkpoint_write_keeps_the_last_committed_screen() {
+        let directory = scratch("write-failure");
+        let journal = Journal::open(&directory).expect("open journal");
+        let original = record("task", 7);
+        journal.save(&original).expect("save original");
+        let blocked = directory.join("task.json.tmp");
+        fs::create_dir(&blocked).expect("block the checkpoint scratch file");
+
+        assert!(journal.save(&record("task", 9)).is_err());
+        assert_eq!(
+            journal.load().expect("load old checkpoint").records,
+            vec![original]
+        );
+
+        fs::remove_dir(blocked).expect("unblock the checkpoint");
+        let updated = record("task", 9);
+        journal.save(&updated).expect("save repaired checkpoint");
+        assert_eq!(journal.load().expect("load update").records, vec![updated]);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn removing_is_idempotent_and_keys_cannot_escape_the_directory() {
         let directory = scratch("remove");
         let journal = Journal::open(&directory).expect("open journal");
