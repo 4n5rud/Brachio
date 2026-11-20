@@ -297,10 +297,6 @@ p {
   align-items: center;
   gap: 6px;
 }
-.terminal-recovery-note {
-  font-size: var(--text-xs);
-  color: var(--color-text-3);
-}
 
 /* Inspector */
 .inspector {

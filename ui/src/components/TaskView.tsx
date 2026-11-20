@@ -15,6 +15,7 @@ import { ApprovalBar } from "./ApprovalBar";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
+import { pushToast } from "../lib/toasts";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { DropVeil } from "./DropVeil";
 import { taskIdOf } from "../lib/approvals";
@@ -77,7 +78,6 @@ export function TaskView(props: {
   onReportProblem?: (message: string) => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
-  const [promptFeedback, setPromptFeedback] = createSignal<{ taskId: string; message: string }>();
   const [inboxTab, setInboxTab] = createSignal<string>();
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredAgents = new Map<string, string>();
@@ -318,17 +318,14 @@ export function TaskView(props: {
               <pre class="terminal-recovery-prompt">{prompt()}</pre>
               <div class="terminal-recovery-actions">
                 <Button size="sm" onClick={async () => {
-                  const taskId = props.task.id;
                   try {
                     const drafted = await props.onDraftOriginal?.(prompt());
-                    setPromptFeedback({ taskId, message: t(drafted ? "task.promptDrafted" : "diff.notReady") });
+                    if (drafted) pushToast({ tone: "success", message: t("task.promptDrafted") });
+                    else pushToast({ tone: "error", message: t("diff.notReady") });
                   } catch (error) {
-                    setPromptFeedback({ taskId, message: String(error) });
+                    pushToast({ tone: "error", title: t("error.title"), message: String(error) });
                   }
                 }}>{t("task.draftOriginalPrompt")}</Button>
-                <Show when={promptFeedback()?.taskId === props.task.id}>
-                  <span class="terminal-recovery-note" role="status">{promptFeedback()?.message}</span>
-                </Show>
               </div>
             </details>
           )}

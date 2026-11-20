@@ -217,9 +217,6 @@ export function WorkspaceDialog(props: {
                   onChange={(enabled) => updates().onEnabled(enabled)} />
                 <Button size="sm" disabled={updates().status === "checking"}
                   onClick={() => updates().onCheck()}>{t("updates.check")}</Button>
-                <Show when={updates().status !== "idle"}>
-                  <p role="status">{t(`updates.${updates().status}` as "updates.checking" | "updates.current" | "updates.unavailable")}</p>
-                </Show>
                 <Show when={updates().version}>{(version) => (
                   <div>
                     <p role="status">{t("updates.available").replace("{version}", version())}</p>
