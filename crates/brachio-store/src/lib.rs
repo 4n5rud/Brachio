@@ -4,6 +4,7 @@ mod child_report;
 mod database;
 mod message_record;
 mod orchestration_record;
+mod orchestration_schedule;
 mod pr_status_record;
 mod qa_result_record;
 mod repo_record;
@@ -22,6 +23,10 @@ pub use orchestration_record::{
     add_dependency, apply_transition, decide_handoff, load_graph, mark_running, record_handoff,
     review_handoff, submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff,
     OrchestrationError,
+};
+pub use orchestration_schedule::{
+    fail_lost, running_children, schedule_next, scheduled_leads, scheduler_enabled,
+    set_scheduler_enabled, state_reason, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
 pub use qa_result_record::{

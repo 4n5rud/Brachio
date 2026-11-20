@@ -215,6 +215,8 @@ pub fn run() {
             mailbox::mailbox_inbox,
             orchestration::orchestration_view,
             orchestration::handoff_review,
+            orchestration::orchestration_set_scheduler,
+            orchestration::orchestration_schedule,
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,

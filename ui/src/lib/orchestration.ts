@@ -48,14 +48,22 @@ export interface ChildView {
   title: string;
   branch: string;
   state: ChildState;
+  /** Why Brachio failed it, such as "lost after restart". */
+  reason: string | null;
   dependencies: DependencyView[];
   handoff: HandoffView | null;
 }
 
 export interface OrchestrationView {
   leadTaskId: string;
+  /** Ready children start by themselves, at most `maxRunning` at a time. Off by default. */
+  schedulerEnabled: boolean;
+  maxRunning: number;
   children: ChildView[];
 }
+
+export const setScheduler = (leadTaskId: string, enabled: boolean) =>
+  invoke<void>("orchestration_set_scheduler", { leadTaskId, enabled });
 
 export const readOrchestration = (leadTaskId: string) =>
   invoke<OrchestrationView>("orchestration_view", { leadTaskId });

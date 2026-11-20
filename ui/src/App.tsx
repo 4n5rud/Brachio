@@ -20,7 +20,7 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
-import { watchCreatedTasks } from "./lib/created-task-events";
+import { scheduleReadyTasks, watchCreatedTasks, watchStartedTasks } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
@@ -426,13 +426,14 @@ export function App() {
   };
 
   // A task created by an agent: start its tab without moving the user's selection.
-  const adoptCreatedTask = async (record: CreatedTask) => {
-    if (findTask(record.id)) return;
+  // A task the scheduler starts may already be listed, because it was created earlier and waited.
+  const adoptCreatedTask = async (record: CreatedTask, startListed = false) => {
+    if (findTask(record.id) && !startListed) return;
     if (!repos().some((item) => item.id === record.repoId)) {
       const stored = await listRepos();
       if (!stored.some((item) => item.id === record.repoId)) return;
       setRepos(stored);
-      if (findTask(record.id)) return;
+      if (findTask(record.id) && !startListed) return;
     }
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;
@@ -443,9 +444,10 @@ export function App() {
     if (record.setupCommands.length > 0 && await approveSetup(record.repoId, record.setupCommands)) {
       setupInputs.set(record.id, record.setupCommands.join("\r"));
     }
-    if (findTask(record.id)) return;
+    const listed = findTask(record.id);
+    if (listed && !startListed) return;
     batch(() => {
-      setTasks((list) => [toTaskRow(record), ...list]);
+      if (!listed) setTasks((list) => [toTaskRow(record), ...list]);
       setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
     });
   };
@@ -554,6 +556,8 @@ export function App() {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
       onCleanup(watchCreatedTasks((record) => void adoptCreatedTask(record).catch(report)));
+      onCleanup(watchStartedTasks((record) => void adoptCreatedTask(record, true).catch(report)));
+      scheduleReadyTasks().catch((error) => console.warn("Could not start ready tasks", error));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);

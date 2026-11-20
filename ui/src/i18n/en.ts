@@ -283,6 +283,8 @@ export const en = {
   "inspector.qa.truncated": "Output was cut to fit the limit.",
   "inspector.tasks": "Tasks",
   "orchestration.note": "A child task is complete only when you approve its handoff. An agent finishing does not count.",
+  "orchestration.scheduler": "Start automatically",
+  "orchestration.schedulerNote": "Child tasks start once everything they wait for is approved. Nothing is merged. Tasks running at once at most",
   "orchestration.empty": "This task has no child tasks.",
   "orchestration.noHandoff": "No handoff yet.",
   "orchestration.dependsOn": "Waits for:",

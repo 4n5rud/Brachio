@@ -4,6 +4,7 @@ import { shortSha } from "../lib/qa-run";
 import {
   readOrchestration,
   reviewHandoff,
+  setScheduler,
   stateTone,
   testEvidence,
   watchOrchestration,
@@ -62,6 +63,7 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
         <strong>{props.child.title}</strong>
         <StateChip state={props.child.state} />
       </div>
+      <Show when={props.child.reason}>{(reason) => <p class="muted">{reason()}</p>}</Show>
       <Show when={props.child.dependencies.length > 0}>
         <p class="muted">
           {t("orchestration.dependsOn")}{" "}
@@ -153,6 +155,7 @@ export function TaskOrchestration(props: { leadTaskId: string }) {
     () => props.leadTaskId,
     (id) => readOrchestration(id).catch((error) => ({ error: String(error) })),
   );
+  const [schedulerError, setSchedulerError] = createSignal<string>();
   onMount(() => onCleanup(watchOrchestration(() => void refetch())));
   const current = () => {
     const value = view();
@@ -168,6 +171,20 @@ export function TaskOrchestration(props: { leadTaskId: string }) {
       <Show when={failure()}>{(text) => <p role="alert">{text()}</p>}</Show>
       <Show when={current()}>
         {(data) => (
+          <>
+          <label class="orchestration-scheduler">
+            <input type="checkbox" checked={data().schedulerEnabled}
+              onChange={(event) => {
+                const enabled = event.currentTarget.checked;
+                setScheduler(props.leadTaskId, enabled).then(() => refetch(), (error) => {
+                  setSchedulerError(String(error));
+                  void refetch();
+                });
+              }} />
+            {t("orchestration.scheduler")}
+          </label>
+          <p class="muted">{t("orchestration.schedulerNote")} ({data().maxRunning})</p>
+          <Show when={schedulerError()}>{(text) => <p role="alert">{text()}</p>}</Show>
           <Show when={data().children.length > 0} fallback={<p class="muted">{t("orchestration.empty")}</p>}>
             <ul class="orchestration-list">
               <For each={data().children}>
@@ -175,6 +192,7 @@ export function TaskOrchestration(props: { leadTaskId: string }) {
               </For>
             </ul>
           </Show>
+          </>
         )}
       </Show>
     </div>

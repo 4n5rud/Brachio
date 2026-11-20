@@ -285,6 +285,8 @@ export const ko: Messages = {
   "inspector.qa.truncated": "출력이 한도에 맞게 잘렸어요.",
   "inspector.tasks": "하위 작업",
   "orchestration.note": "하위 작업은 인계를 승인해야만 완료돼요. 에이전트가 끝났다는 사실만으로는 완료로 보지 않아요.",
+  "orchestration.scheduler": "자동으로 시작",
+  "orchestration.schedulerNote": "기다리는 작업이 모두 승인되면 하위 작업이 시작돼요. 아무것도 병합하지 않아요. 동시에 실행되는 작업은 최대",
   "orchestration.empty": "이 작업에는 하위 작업이 없어요.",
   "orchestration.noHandoff": "아직 인계가 없어요.",
   "orchestration.dependsOn": "먼저 끝나야 하는 작업:",

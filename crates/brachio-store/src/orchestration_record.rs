@@ -256,7 +256,7 @@ pub fn apply_transition(
     Ok(changes)
 }
 
-fn transition_in(
+pub(crate) fn transition_in(
     transaction: &Connection,
     task_id: &str,
     to: TaskState,
@@ -274,7 +274,8 @@ fn transition_in(
         transaction.execute(
             "INSERT INTO task_orchestration (task_id, state, updated_at_ms) VALUES (?1, ?2, ?3)
              ON CONFLICT(task_id) DO UPDATE SET state = excluded.state,
-                                                updated_at_ms = excluded.updated_at_ms",
+                                                updated_at_ms = excluded.updated_at_ms,
+                                                reason = NULL",
             params![change.id, change.to.as_str(), now_ms],
         )?;
     }

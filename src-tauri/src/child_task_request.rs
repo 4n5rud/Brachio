@@ -5,6 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use brachio_agent::AgentKind;
+use brachio_core::task_graph::TaskState;
 use brachio_store::{RepoRecord, TaskRecord};
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager};
@@ -28,6 +29,7 @@ pub struct ChildRequest {
     pub prompt: String,
     pub agent: Option<String>,
     pub base: Option<String>,
+    pub after: Vec<String>,
 }
 
 impl ChildRequest {
@@ -113,6 +115,7 @@ pub fn check_request(
         ));
     }
     agent_kind(request.agent_name())?;
+    check_after(connection, &lead.id, &request.after)?;
     let shown = [&request.title, &request.prompt]
         .into_iter()
         .chain(request.base.as_ref());
@@ -134,6 +137,54 @@ pub fn check_request(
     Ok(lead)
 }
 
+/// The ids of the open sibling tasks a new child waits for. Waiting needs the lead's scheduler,
+/// and a predecessor that already failed would leave the child waiting forever.
+fn check_after(connection: &Connection, lead_id: &str, after: &[String]) -> Result<(), String> {
+    if after.is_empty() {
+        return Ok(());
+    }
+    if after.len() > MAX_OPEN_CHILDREN as usize {
+        return Err(format!(
+            "A task can wait for at most {MAX_OPEN_CHILDREN} others."
+        ));
+    }
+    if !brachio_store::scheduler_enabled(connection, lead_id).map_err(|e| e.to_string())? {
+        return Err(
+            "Turn on \"Start automatically\" for this task in the Tasks tab before using --after."
+                .to_owned(),
+        );
+    }
+    let graph = brachio_store::load_graph(connection, lead_id).map_err(|e| e.to_string())?;
+    for key in after {
+        let id = after_task_id(key);
+        let open: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1 AND parent_task_id = ?2
+                               AND archived_at_ms IS NULL)",
+                [id, lead_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !open {
+            return Err(format!("{key} is not an open child task of this task."));
+        }
+        let state = graph.state(id).map_err(|e| e.to_string())?;
+        if matches!(
+            state,
+            TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
+        ) {
+            return Err(format!(
+                "{key} is {state}, so a task waiting for it could not run."
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn after_task_id(key: &str) -> &str {
+    key.split_once(':').map_or(key, |(id, _)| id)
+}
+
 /// The app's implementation: the real database, worktrees and window.
 pub struct AppChildTasks(pub AppHandle);
 
@@ -150,14 +201,26 @@ impl ChildTasks for AppChildTasks {
             let agent = agent_kind(request.agent_name())?;
             let database = app.state::<Database>();
             let worktrees = app.state::<TaskWorktreeLocks>();
-            let repo_id = TaskRecord::get(&*database.lock()?, &lead_id)
-                .map_err(|error| error.to_string())?
-                .repo_id;
+            let (repo_id, scheduled) = {
+                let connection = database.lock()?;
+                let repo_id = TaskRecord::get(&connection, &lead_id)
+                    .map_err(|error| error.to_string())?
+                    .repo_id;
+                let scheduled = brachio_store::scheduler_enabled(&connection, &lead_id)
+                    .map_err(|error| error.to_string())?;
+                (repo_id, scheduled)
+            };
             let created = workspace::create_task(
                 &database,
                 &worktrees,
                 CreateTaskRequest {
                     repo_id,
+                    scheduled,
+                    after: request
+                        .after
+                        .iter()
+                        .map(|key| after_task_id(key).to_owned())
+                        .collect(),
                     parent_task_id: Some(lead_id),
                     title: request.title,
                     prompt: request.prompt,
@@ -172,7 +235,9 @@ impl ChildTasks for AppChildTasks {
                 title: created.task.title.clone(),
                 branch: created.task.branch.clone(),
             };
-            if let Err(error) = app.emit(CREATED_EVENT, &created) {
+            if scheduled {
+                crate::orchestration::schedule_all(&app);
+            } else if let Err(error) = app.emit(CREATED_EVENT, &created) {
                 tracing::debug!(%error, "could not tell the window about the new task");
             }
             Ok(child)
@@ -215,6 +280,7 @@ mod tests {
             prompt: "do it".to_owned(),
             agent: None,
             base: None,
+            after: Vec::new(),
         }
     }
 

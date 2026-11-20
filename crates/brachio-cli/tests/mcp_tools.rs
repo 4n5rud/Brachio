@@ -113,6 +113,7 @@ async fn spawn_task_asks_the_app_with_this_terminals_identity_and_returns_the_ne
             prompt: "Write".into(),
             agent: Some("codex".into()),
             base: None,
+            after: Vec::new(),
         }]
     );
 }

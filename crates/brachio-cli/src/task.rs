@@ -57,6 +57,10 @@ pub struct CreateArgs {
     /// Commit-ish to branch from. Defaults to this task's branch.
     #[arg(long)]
     base: Option<String>,
+    /// Key of a sibling child task that must be completed and approved first. Repeat for
+    /// several. Needs "Start automatically" turned on for this task in the Tasks tab.
+    #[arg(long)]
+    after: Vec<String>,
 }
 
 #[derive(Args)]
@@ -168,6 +172,7 @@ fn create(args: CreateArgs) -> Result<()> {
         prompt,
         agent: args.agent,
         base: args.base,
+        after: args.after,
     };
     let MailResponse::TaskCreated { key, branch, .. } =
         mail::call_within(&endpoint, &request, CREATE_TASK_TIMEOUT)?
