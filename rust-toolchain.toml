@@ -1,3 +1,5 @@
 [toolchain]
-channel = "stable"
+# A fixed release, so CI and local builds lint with the same compiler. A floating
+# "stable" let a newer Rust deprecate an API and fail `clippy -D warnings` on CI only.
+channel = "1.95.0"
 components = ["rustfmt", "clippy"]
