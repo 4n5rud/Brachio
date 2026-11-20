@@ -173,6 +173,27 @@ fn is_folder_task(database: &Database, task: &TaskRecord) -> Result<bool, String
         .is_git)
 }
 
+/// Takes the repository's worktree lock, then loads a task that is still open in a git project.
+/// The task is read again after the wait because a deletion may have run in between.
+async fn lock_open_git_task(
+    database: &Database,
+    worktrees: &TaskWorktreeLocks,
+    id: &str,
+) -> Result<(TaskRecord, tokio::sync::OwnedMutexGuard<()>), String> {
+    let repo_id = TaskRecord::get(&*database.lock()?, id)
+        .map_err(to_text)?
+        .repo_id;
+    let guard = worktrees.acquire(&repo_id).await?;
+    let task = TaskRecord::get(&*database.lock()?, id).map_err(to_text)?;
+    if task.archived_at_ms.is_some() {
+        return Err("This task is archived. Restore it before running Git actions.".to_owned());
+    }
+    if is_folder_task(database, &task)? {
+        return Err(NOT_GIT.to_owned());
+    }
+    Ok((task, guard))
+}
+
 const NOT_GIT: &str = "This project is a plain folder, so this needs git, which it does not use.";
 
 /// Removes a repository from Brachio. Files on disk are not touched.
@@ -1103,13 +1124,12 @@ pub enum TaskGitAction {
 #[tauri::command]
 pub async fn task_git_action(
     database: State<'_, Database>,
+    worktrees: State<'_, TaskWorktreeLocks>,
     id: String,
     request: TaskGitAction,
 ) -> Result<Option<String>, String> {
-    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
-    if is_folder_task(&database, &task)? {
-        return Err(NOT_GIT.to_owned());
-    }
+    // Held until the action ends so a deletion cannot remove the worktree underneath it.
+    let (task, _guard) = lock_open_git_task(&database, &worktrees, &id).await?;
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&task.worktree_path);
         let branch_ref = format!("refs/heads/{}", task.branch);
@@ -1467,6 +1487,80 @@ mod terminal_guard_tests {
             refusal,
             "could not verify that the task's terminals are stopped"
         );
+    }
+}
+
+#[cfg(test)]
+mod git_action_guard_tests {
+    use std::future::Future;
+    use std::path::Path;
+    use std::pin::pin;
+    use std::sync::Mutex;
+    use std::task::{Context, Poll, Waker};
+
+    use brachio_store::{open_in_memory, NewRepo, RepoRecord};
+
+    use super::{lock_open_git_task, Database, TaskWorktreeLocks};
+
+    fn database() -> Database {
+        let connection = open_in_memory().expect("open database");
+        for id in ["r", "s"] {
+            let repo = NewRepo {
+                id,
+                name: id,
+                path: Path::new(if id == "r" { "/repo-r" } else { "/repo-s" }),
+                default_branch: "main",
+                added_at_ms: 0,
+                is_git: true,
+            };
+            RepoRecord::insert(&connection, &repo).expect("insert repo");
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, archived_at_ms)
+                 VALUES ('open', 'r', 'T', '', 'b1', '/w1', 'active', 0, NULL),
+                        ('old', 'r', 'T', '', 'b2', '/w2', 'active', 0, 1),
+                        ('other', 's', 'T', '', 'b3', '/w3', 'active', 0, NULL);",
+            )
+            .expect("insert tasks");
+        Database(Mutex::new(connection))
+    }
+
+    #[test]
+    fn an_archived_task_is_refused_before_any_git_runs() {
+        let database = database();
+        let locks = TaskWorktreeLocks::default();
+        let refusal = tauri::async_runtime::block_on(lock_open_git_task(&database, &locks, "old"))
+            .map(|_| ())
+            .expect_err("archived");
+        assert_eq!(
+            refusal,
+            "This task is archived. Restore it before running Git actions."
+        );
+        let opened = tauri::async_runtime::block_on(lock_open_git_task(&database, &locks, "open"));
+        assert!(opened.is_ok());
+    }
+
+    #[test]
+    fn a_git_action_waits_for_a_deletion_in_the_same_repository_only() {
+        let database = database();
+        let locks = TaskWorktreeLocks::default();
+        let deletion = tauri::async_runtime::block_on(locks.acquire("r")).expect("lock");
+        let mut context = Context::from_waker(Waker::noop());
+
+        let mut same = pin!(lock_open_git_task(&database, &locks, "open"));
+        assert!(same.as_mut().poll(&mut context).is_pending());
+        let mut independent = pin!(lock_open_git_task(&database, &locks, "other"));
+        assert!(matches!(
+            independent.as_mut().poll(&mut context),
+            Poll::Ready(Ok(_))
+        ));
+
+        drop(deletion);
+        assert!(matches!(
+            same.as_mut().poll(&mut context),
+            Poll::Ready(Ok(_))
+        ));
     }
 }
 
