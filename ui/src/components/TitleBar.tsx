@@ -2,7 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t } from "../i18n";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
-import { QUICK_OPEN_KEYS } from "../lib/shortcut";
+import { QUICK_OPEN_KEYS, TOGGLE_INSPECTOR_KEYS, TOGGLE_SIDEBAR_KEYS } from "../lib/shortcut";
 
 export type View = "tasks" | "board";
 
@@ -44,10 +44,19 @@ export function TitleBar(props: {
   onActivity: () => void;
   onQuickOpen: () => void;
   onSettings: () => void;
+  sidebarOpen: boolean;
+  inspectorOpen: boolean;
+  onToggleSidebar: () => void;
+  onToggleInspector: () => void;
 }) {
   return (
     <header class="titlebar" data-tauri-drag-region>
       <BrandMark />
+      <button class="icon-button" type="button" aria-pressed={props.sidebarOpen}
+        aria-label={t("titlebar.toggleSidebar")} title={`${t("titlebar.toggleSidebar")} (${TOGGLE_SIDEBAR_KEYS})`}
+        onClick={props.onToggleSidebar}>
+        <Icon name="panelLeft" />
+      </button>
       <span class="active-project" title={props.repo}>{props.repo}</span>
       <button class="search" type="button" onClick={props.onQuickOpen}>
         <Icon name="search" />
@@ -65,6 +74,11 @@ export function TitleBar(props: {
             {t("view.board")}
           </button>
         </div>
+        <button class="icon-button" type="button" aria-pressed={props.inspectorOpen}
+          aria-label={t("titlebar.toggleInspector")} title={`${t("titlebar.toggleInspector")} (${TOGGLE_INSPECTOR_KEYS})`}
+          onClick={props.onToggleInspector}>
+          <Icon name="panelRight" />
+        </button>
         <button class="icon-button" type="button" aria-haspopup="dialog"
           aria-label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity}>
           <Icon name="bell" />

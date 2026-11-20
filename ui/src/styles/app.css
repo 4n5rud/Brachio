@@ -219,6 +219,9 @@ kbd {
 .icon-button:hover {
   background: var(--color-hover);
 }
+.icon-button[aria-pressed="true"] {
+  color: var(--color-text);
+}
 .icon-button-sm {
   width: 24px;
   height: 24px;
@@ -385,6 +388,12 @@ kbd {
 }
 .layout-no-inspector {
   grid-template-columns: var(--size-sidebar) minmax(0, 1fr);
+}
+.layout-no-sidebar {
+  grid-template-columns: minmax(0, 1fr) var(--size-inspector);
+}
+.layout-no-sidebar.layout-no-inspector {
+  grid-template-columns: minmax(0, 1fr);
 }
 .layout-full {
   grid-template-columns: minmax(0, 1fr);

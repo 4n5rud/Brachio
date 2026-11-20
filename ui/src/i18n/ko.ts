@@ -21,6 +21,8 @@ export const ko: Messages = {
 
   "titlebar.search": "작업 찾기",
   "titlebar.view": "보기",
+  "titlebar.toggleSidebar": "사이드바 열기/닫기",
+  "titlebar.toggleInspector": "인스펙터 열기/닫기",
   "view.tasks": "작업",
   "view.board": "보드",
   "activity.title": "활동",
