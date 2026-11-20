@@ -22,6 +22,7 @@ brachio-process.workspace = true
 brachio-agent.workspace = true
 brachio-runtime.workspace = true
 brachio-store.workspace = true
+brachio-qa.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"

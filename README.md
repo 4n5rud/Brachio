@@ -86,6 +86,17 @@ run = ["pnpm install"]     # typed into the shell next to the agent
 
 `copy` entries must be plain paths inside the repository. The `run` commands are never started silently: Brachio shows them and asks once per exact list before typing them into the task's shell.
 
+## Running QA (`brachio.toml`)
+
+```toml
+[qa]
+program = "C:/Program Files/nodejs/npm.cmd"   # absolute path
+args = ["test"]
+timeout_secs = 600
+```
+
+The Inspector's QA tab has a "Run QA" button. The approval bar shows the exact command, the task's folder and the commit; the command runs once, only if you allow it, and the result (exit status, capped output, duration, commit, verified by Brachio) stays until the app closes. There are no retries and nothing is merged.
+
 ## Getting started
 
 You need Rust stable, Node 22 or later, pnpm 10 or later, and git 2.38 or later.
