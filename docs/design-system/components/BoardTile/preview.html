@@ -1,0 +1,25 @@
+<!-- @dsCard group="Tasks" height=230 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+.col{display:grid;gap:12px;}
+.cap{font:var(--text-xs)/1.5 var(--font-mono);color:var(--color-text-3);min-width:72px;}
+.panel{background:var(--color-panel);border:1px solid var(--color-line);}
+
+</style></head>
+<body>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
+<div class="tile tile-needs"><div class="tile-head"><h2>Add rate limit to the login endpoint</h2><span class="status status-blocked"><svg class="glyph" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 .8 11.2 6 6 11.2.8 6z" fill="var(--color-status-blocked)"/></svg>Needs you</span>
+<div class="tile-meta"><span class="agent-chip">Claude Code</span>rate-limit-7f2a<span class="diffstat"><span class="diffstat-add">+128</span><span class="diffstat-del">−14</span></span></div></div>
+<div class="tile-note">? Allow cargo test -p auth<br>&nbsp;&nbsp;(y) yes&nbsp;&nbsp;(n) no</div>
+<div class="tile-foot">now<button class="button button-sm button-primary">Review request</button></div></div>
+<div class="tile"><div class="tile-head"><h2>Split the PTY reader into its own task</h2><span class="status status-working"><svg class="glyph glyph-spin" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--color-status-working)" stroke-opacity=".28" stroke-width="1.8"/><path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" fill="none" stroke="var(--color-status-working)" stroke-width="1.8" stroke-linecap="round"/></svg>Working</span>
+<div class="tile-meta"><span class="agent-chip">Codex</span>pty-reader-a01b<span class="diffstat"><span class="diffstat-add">+310</span><span class="diffstat-del">−96</span></span></div></div>
+<div class="tile-note">Compiling brachio-core v0.1.0<br>running 42 tests</div>
+<div class="tile-foot">3m<button class="button button-sm">Open</button></div></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!-- @dsCard group="Inputs" height=180 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+.col{display:grid;gap:12px;}
+.cap{font:var(--text-xs)/1.5 var(--font-mono);color:var(--color-text-3);min-width:72px;}
+.panel{background:var(--color-panel);border:1px solid var(--color-line);}
+
+</style></head>
+<body>
+<div class="panel" style="padding:0 14px;border-radius:9px;max-width:520px">
+<div class="setting-row"><div>Ask before running commands<span>Agents stop and wait outside the worktree.</span></div><button class="toggle" role="switch" aria-checked="true" aria-label="Ask before running commands"></button></div>
+<div class="setting-row"><div>Show terminal previews on the board<span>Uses a little more memory per task.</span></div><button class="toggle" role="switch" aria-checked="false" aria-label="Show terminal previews"></button></div>
+<div class="setting-row" style="border:0"><div>Send crash reports<span>Not available in local builds.</span></div><button class="toggle" role="switch" aria-checked="false" disabled aria-label="Send crash reports"></button></div>
+</div>
+</body>
+</html>

@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [solid(), tailwindcss()],
   clearScreen: false,
   server: { port: 5173, strictPort: true },
-  build: { target: "es2022", sourcemap: false },
+  build: { target: "es2022", sourcemap: false, assetsInlineLimit: 0 },
   // Unit tests cover pure modules; component tests add jsdom when they arrive.
   test: { environment: "node" },
 });

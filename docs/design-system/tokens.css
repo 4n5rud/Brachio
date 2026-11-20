@@ -1,0 +1,386 @@
+/* Brachio — generated from tokens.json */
+:root, [data-theme="mint-dark"] {
+  --color-canvas: #141418; /* App background behind panels; also the field fill of inputs and command blocks. */
+  --color-panel: #1b1b20; /* Chrome surfaces: title bar, sidebar, task header, tabs, inspector, status bar, board tiles, dialogs. */
+  --color-raised: #232329; /* Secondary button fill, segmented control track, search field, selected task row, toasts. */
+  --color-hover: #2a2a31; /* Hover fill for rows, ghost and icon buttons; selected segment fill. */
+  --color-press: #31313a; /* Pressed fill for secondary buttons. */
+  --color-line: #2e2e36; /* Hairline dividers between panels and sections, and the edge of secondary buttons (their fill and label already identify them). Decorative only. */
+  --color-line-strong: #6c6c7a; /* Edges that must be seen: input and select borders, toggle track when off, checkbox, kbd, dialog edge. 3:1 or more on panel, canvas and raised in every theme. */
+  --color-text: #ececf1; /* Primary text and titles on canvas, panel, raised and hover. 12:1 or more in every theme. */
+  --color-text-2: #b4b4bf; /* Secondary text: ghost buttons, notes, inspector headings, icons in the chrome. 6.5:1 or more on every surface in every theme. */
+  --color-text-3: #9d9daa; /* Muted text: metadata, ages, group labels, placeholders, hints. 4.8:1 or more on every surface in every theme; the lightest text Brachio uses. */
+  --color-accent: #98e0bf; /* Theme accent fill: primary button, toggle on, selected theme swatch ring, progress. Changes with the color theme (Mint, Lilac, Sand, Contrast). Never used as text. */
+  --color-accent-ink: #11261c; /* Text and icons on color-accent. 4.5:1 or more in every theme (Mint 10.4:1). */
+  --color-accent-text: #98e0bf; /* Links, selected tab underline and accent text on panel and canvas. 4.5:1 or more on panel, canvas and raised in every theme. */
+  --color-focus: #98e0bf; /* 2px focus ring, offset 2px, on every focusable control. 3:1 or more on every surface. Contrast themes use yellow or blue so focus never looks like a selected fill. */
+  --color-mint: #98e0bf; /* Brand mint. The mascot and the app icon only. Fixed in every theme; the UI accent is color-accent. */
+  --color-mint-ink: #11261c; /* Text on brand mint (the cover and marketing only), 10.4:1. */
+  --color-brand-charcoal: #1f1f24; /* App icon squircle and the mascot's eyes. Not a UI surface. */
+  --color-status-working: #8db2ff; /* Working: spinning arc glyph and its label. Always with the glyph and a word. 4.5:1 or more on every surface in every theme. */
+  --color-status-blocked: #f2b65a; /* Needs you: filled diamond, the Needs you group label, the approval bar edge, the count badge fill. 4.5:1 or more on every surface in every theme. */
+  --color-status-ready: #7fd8a6; /* Ready for review: hollow ring glyph and label; QA passed. Kept green in every color theme so status reads the same everywhere. 4.5:1 or more on every surface in every theme. */
+  --color-status-error: #ff8a8a; /* Error or crashed: filled square with an x, error notes. Red appears only for errors and danger. 4.5:1 or more on every surface in every theme. */
+  --color-status-neutral: #9d9daa; /* Done (check circle) and Unknown (dashed ring). 4.5:1 or more on every surface in every theme. */
+  --color-add: #7fd8a6; /* Added lines and +N in diff stats. */
+  --color-del: #ff8f8f; /* Removed lines and -N in diff stats. */
+  --color-add-bg: rgba(127,216,166,0.1); /* Row tint behind added lines in the diff view. */
+  --color-del-bg: rgba(255,143,143,0.1); /* Row tint behind removed lines in the diff view. */
+  --color-blocked-bg: rgba(242,182,90,0.1); /* Tint behind the approval bar header row and the Needs you notice. Never behind text that is not blocked-related. */
+  --color-error-bg: rgba(255,138,138,0.1); /* Tint behind a terminal error notice (lost connection, could not start). Always with the error glyph and a sentence. */
+  --color-danger: #ff8a8a; /* Fill of destructive buttons (Delete, Forget and reopen anyway, Sign out of Codex). */
+  --color-danger-ink: #2a0b0b; /* Text on color-danger. 4.5:1 or more in every theme. */
+  --color-badge-ink: #1b1404; /* Digits on the amber count badge. 4.5:1 or more in every theme. */
+  --color-term-bg: #141418; /* Terminal pane, selected tab and board tile preview background. */
+  --color-term-text: #d9d9e0; /* Default terminal foreground and tile preview text (12:1 or more). */
+  --color-scrim: rgba(6,6,8,0.62); /* Backdrop behind dialogs and the new task sheet. */
+  --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05); /* Only on layers above the app: dialogs, toasts, menus, the quick open palette. Panels never cast shadows. */
+}
+[data-theme="mint-light"] {
+  --color-canvas: #f1f1f4;
+  --color-panel: #ffffff;
+  --color-raised: #f5f5f8;
+  --color-hover: #ebebf0;
+  --color-press: #e2e2e9;
+  --color-line: #e2e2e8;
+  --color-line-strong: #858592;
+  --color-text: #1f1f24;
+  --color-text-2: #4a4a55;
+  --color-text-3: #5c5c69;
+  --color-accent: #98e0bf;
+  --color-accent-ink: #11261c;
+  --color-accent-text: #1c7a52;
+  --color-focus: #1c7a52;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #2d5fd3;
+  --color-status-blocked: #925500;
+  --color-status-ready: #18704d;
+  --color-status-error: #c42f2f;
+  --color-status-neutral: #5c5c69;
+  --color-add: #18704d;
+  --color-del: #c42f2f;
+  --color-add-bg: rgba(24,112,77,0.08);
+  --color-del-bg: rgba(196,47,47,0.07);
+  --color-blocked-bg: rgba(146,85,0,0.08);
+  --color-error-bg: rgba(196,47,47,0.07);
+  --color-danger: #c42f2f;
+  --color-danger-ink: #ffffff;
+  --color-badge-ink: #ffffff;
+  --color-term-bg: #fafafc;
+  --color-term-text: #2a2a31;
+  --color-scrim: rgba(24,24,28,0.34);
+  --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+}
+[data-theme="lilac-dark"] {
+  --color-canvas: #141320;
+  --color-panel: #1b1a28;
+  --color-raised: #232231;
+  --color-hover: #2a2939;
+  --color-press: #323042;
+  --color-line: #2e2c3e;
+  --color-line-strong: #6f6b88;
+  --color-text: #eeedf6;
+  --color-text-2: #b9b5ca;
+  --color-text-3: #a29db6;
+  --color-accent: #bcaaf7;
+  --color-accent-ink: #1d1538;
+  --color-accent-text: #c4b5fd;
+  --color-focus: #c4b5fd;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #8db2ff;
+  --color-status-blocked: #f2b65a;
+  --color-status-ready: #7fd8a6;
+  --color-status-error: #ff8a8a;
+  --color-status-neutral: #a29db6;
+  --color-add: #7fd8a6;
+  --color-del: #ff8f8f;
+  --color-add-bg: rgba(127,216,166,0.1);
+  --color-del-bg: rgba(255,143,143,0.1);
+  --color-blocked-bg: rgba(242,182,90,0.1);
+  --color-error-bg: rgba(255,138,138,0.1);
+  --color-danger: #ff8a8a;
+  --color-danger-ink: #2a0b0b;
+  --color-badge-ink: #1b1404;
+  --color-term-bg: #131220;
+  --color-term-text: #dcd9ea;
+  --color-scrim: rgba(6,6,8,0.62);
+  --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05);
+}
+[data-theme="lilac-light"] {
+  --color-canvas: #f2f1f8;
+  --color-panel: #ffffff;
+  --color-raised: #f6f5fb;
+  --color-hover: #ecebf5;
+  --color-press: #e3e1ef;
+  --color-line: #e2e0ee;
+  --color-line-strong: #8d88a6;
+  --color-text: #1f1c2b;
+  --color-text-2: #4a4660;
+  --color-text-3: #5c5775;
+  --color-accent: #bcaaf7;
+  --color-accent-ink: #1d1538;
+  --color-accent-text: #5b3fc4;
+  --color-focus: #5b3fc4;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #2d5fd3;
+  --color-status-blocked: #925500;
+  --color-status-ready: #18704d;
+  --color-status-error: #c42f2f;
+  --color-status-neutral: #5c5775;
+  --color-add: #18704d;
+  --color-del: #c42f2f;
+  --color-add-bg: rgba(24,112,77,0.08);
+  --color-del-bg: rgba(196,47,47,0.07);
+  --color-blocked-bg: rgba(146,85,0,0.08);
+  --color-error-bg: rgba(196,47,47,0.07);
+  --color-danger: #c42f2f;
+  --color-danger-ink: #ffffff;
+  --color-badge-ink: #ffffff;
+  --color-term-bg: #fbfaff;
+  --color-term-text: #2a2738;
+  --color-scrim: rgba(24,24,28,0.34);
+  --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+}
+[data-theme="sand-dark"] {
+  --color-canvas: #171512;
+  --color-panel: #1f1c18;
+  --color-raised: #28241f;
+  --color-hover: #2f2a25;
+  --color-press: #37312b;
+  --color-line: #342e28;
+  --color-line-strong: #7a7064;
+  --color-text: #f2ece4;
+  --color-text-2: #c5baad;
+  --color-text-3: #ab9f92;
+  --color-accent: #86cadb;
+  --color-accent-ink: #0b2a33;
+  --color-accent-text: #93d3e3;
+  --color-focus: #93d3e3;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #8db2ff;
+  --color-status-blocked: #f2b65a;
+  --color-status-ready: #7fd8a6;
+  --color-status-error: #ff8a8a;
+  --color-status-neutral: #ab9f92;
+  --color-add: #7fd8a6;
+  --color-del: #ff8f8f;
+  --color-add-bg: rgba(127,216,166,0.1);
+  --color-del-bg: rgba(255,143,143,0.1);
+  --color-blocked-bg: rgba(242,182,90,0.1);
+  --color-error-bg: rgba(255,138,138,0.1);
+  --color-danger: #ff8a8a;
+  --color-danger-ink: #2a0b0b;
+  --color-badge-ink: #1b1404;
+  --color-term-bg: #16140f;
+  --color-term-text: #e4ddd2;
+  --color-scrim: rgba(6,6,8,0.62);
+  --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05);
+}
+[data-theme="sand-light"] {
+  --color-canvas: #f3efe8;
+  --color-panel: #fffdf9;
+  --color-raised: #f8f4ed;
+  --color-hover: #efe9df;
+  --color-press: #e6ded2;
+  --color-line: #e5ddd1;
+  --color-line-strong: #8c8173;
+  --color-text: #2a231c;
+  --color-text-2: #54493f;
+  --color-text-3: #665a4d;
+  --color-accent: #86cadb;
+  --color-accent-ink: #0b2a33;
+  --color-accent-text: #1d6476;
+  --color-focus: #1d6476;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #2d5fd3;
+  --color-status-blocked: #925500;
+  --color-status-ready: #18704d;
+  --color-status-error: #c42f2f;
+  --color-status-neutral: #665a4d;
+  --color-add: #18704d;
+  --color-del: #c42f2f;
+  --color-add-bg: rgba(24,112,77,0.08);
+  --color-del-bg: rgba(196,47,47,0.07);
+  --color-blocked-bg: rgba(146,85,0,0.08);
+  --color-error-bg: rgba(196,47,47,0.07);
+  --color-danger: #c42f2f;
+  --color-danger-ink: #ffffff;
+  --color-badge-ink: #ffffff;
+  --color-term-bg: #fdfbf6;
+  --color-term-text: #332b22;
+  --color-scrim: rgba(24,24,28,0.34);
+  --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+}
+[data-theme="contrast-dark"] {
+  --color-canvas: #000000;
+  --color-panel: #0c0c0e;
+  --color-raised: #18181b;
+  --color-hover: #232327;
+  --color-press: #2d2d32;
+  --color-line: #45454d;
+  --color-line-strong: #9a9aa6;
+  --color-text: #ffffff;
+  --color-text-2: #e4e4ea;
+  --color-text-3: #cbcbd3;
+  --color-accent: #ffffff;
+  --color-accent-ink: #000000;
+  --color-accent-text: #ffffff;
+  --color-focus: #ffd84d;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #a9c4ff;
+  --color-status-blocked: #ffc76b;
+  --color-status-ready: #8ff0bb;
+  --color-status-error: #ff9e9e;
+  --color-status-neutral: #cbcbd3;
+  --color-add: #8ff0bb;
+  --color-del: #ff9e9e;
+  --color-add-bg: rgba(143,240,187,0.1);
+  --color-del-bg: rgba(255,158,158,0.1);
+  --color-blocked-bg: rgba(255,199,107,0.1);
+  --color-error-bg: rgba(255,158,158,0.1);
+  --color-danger: #ff9e9e;
+  --color-danger-ink: #2a0b0b;
+  --color-badge-ink: #1b1404;
+  --color-term-bg: #000000;
+  --color-term-text: #f4f4f6;
+  --color-scrim: rgba(6,6,8,0.62);
+  --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05);
+}
+[data-theme="contrast-light"] {
+  --color-canvas: #ebebed;
+  --color-panel: #ffffff;
+  --color-raised: #f2f2f4;
+  --color-hover: #e3e3e7;
+  --color-press: #d6d6dc;
+  --color-line: #b4b4bc;
+  --color-line-strong: #5a5a64;
+  --color-text: #000000;
+  --color-text-2: #1e1e24;
+  --color-text-3: #33333b;
+  --color-accent: #111114;
+  --color-accent-ink: #ffffff;
+  --color-accent-text: #000000;
+  --color-focus: #0b57d0;
+  --color-mint: #98e0bf;
+  --color-mint-ink: #11261c;
+  --color-brand-charcoal: #1f1f24;
+  --color-status-working: #1d47b0;
+  --color-status-blocked: #7a4600;
+  --color-status-ready: #0f5e3d;
+  --color-status-error: #a31f1f;
+  --color-status-neutral: #33333b;
+  --color-add: #0f5e3d;
+  --color-del: #a31f1f;
+  --color-add-bg: rgba(15,94,61,0.08);
+  --color-del-bg: rgba(163,31,31,0.07);
+  --color-blocked-bg: rgba(122,70,0,0.08);
+  --color-error-bg: rgba(163,31,31,0.07);
+  --color-danger: #a31f1f;
+  --color-danger-ink: #ffffff;
+  --color-badge-ink: #ffffff;
+  --color-term-bg: #ffffff;
+  --color-term-text: #0a0a0c;
+  --color-scrim: rgba(24,24,28,0.34);
+  --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+}
+:root {
+  --space-1: 4px; /* Icon to text in dense rows, group head bottom padding. */
+  --space-2: 8px; /* Gap inside rows, small button padding, task row vertical rhythm. */
+  --space-3: 12px; /* Button side padding, board gap, approval padding. */
+  --space-4: 16px; /* Board padding, sidebar empty state padding. */
+  --space-5: 20px; /* Dialog padding. */
+  --space-6: 24px; /* Section gaps in settings and dialogs. */
+  --space-10: 40px; /* Gap between settings sections and board columns' top inset. */
+  --space-8: 32px; /* Empty state padding. */
+  --radius-xs: 4px; /* Kbd, agent chip. */
+  --radius-sm: 6px; /* Buttons, icon buttons, command block. */
+  --radius-md: 9px; /* Board tiles, toasts. */
+  --radius-lg: 12px; /* Dialogs and the new task sheet. */
+  --size-titlebar: 40px; /* Title bar height. */
+  --size-statusbar: 24px; /* Status bar height. */
+  --size-row: 28px; /* Default control height: buttons, icon buttons, inputs in the chrome, search. */
+  --size-tabs: 34px; /* Terminal tab strip height. */
+  --size-task-header: 60px; /* Task header (title line plus branch line). */
+  --size-sidebar: 288px; /* Task list width. */
+  --size-inspector: 360px; /* Inspector width. */
+  --size-inspector-wide: 560px; /* Inspector width while a diff is open side by side (Changes). The person can drag between 320px and 50% of the window. */
+  --size-dialog: 480px; /* Width of confirm dialogs and the report form. New task is 560px, settings 760px, quick open 640px. */
+  --font-sans: "Pretendard Variable", Pretendard, Inter, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", D2Coding, ui-monospace, monospace;
+  --text-title: 600 18px/1.4 var(--font-sans); /* Dialog titles, empty state titles, settings page titles. */
+  --text-heading: 600 15px/1.4 var(--font-sans); /* Task header title, board heading, section heads. */
+  --text-body: 400 14px/1.5 var(--font-sans); /* App base size. Task titles in the list (500), tile titles (600), running text. */
+  --text-label: 500 13px/1.5 var(--font-sans); /* Buttons, tabs, segmented control, status labels, inputs. */
+  --text-caption: 400 12px/1.5 var(--font-sans); /* Hints, notes, status bar. The smallest size anywhere in the UI. */
+  --text-group-label: 600 12px/1.5 var(--font-sans); /* Sidebar group heads and inspector section heads. */
+  --text-meta: 400 12px/1.5 var(--font-mono); /* Branches, ages, diff stats, counts, kbd. */
+  --text-terminal: 400 13px/1.5 var(--font-mono); /* Terminal (xterm.js), command blocks in the approval bar, tile previews. */
+}
+.title {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.heading {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.label {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.caption {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.group-label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.terminal {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 400;
+  letter-spacing: 0;
+}

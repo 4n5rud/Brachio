@@ -124,7 +124,7 @@ cargo tauri dev     # run the app (macOS or Windows)
 | `crates/brachio-mcp` | Stdio MCP server for read-only child task status |
 | `crates/brachio-cli` | The `brachio` helper that hooks and agents run |
 | `src-tauri` | App shell: window, tray, IPC |
-| `ui` | SolidJS UI, xterm.js, design tokens |
+| `ui` | SolidJS UI, xterm.js, design tokens (design system reference: [`docs/design-system`](docs/design-system/README.md)) |
 
 ## Contributing
 

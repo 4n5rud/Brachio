@@ -1,0 +1,1 @@
+`brachio-app-icon.svg` is the app icon: the mint brachiosaurus (`#98E0BF`) on a charcoal squircle (`#1F1F24`). `brachio-mark.svg` is the mascot alone in mint with charcoal eyes cut out, for the first-run empty state and the favicon. Use them as they are: no outlines, no recoloring, no mouth.

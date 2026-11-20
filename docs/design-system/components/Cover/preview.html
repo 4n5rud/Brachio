@@ -1,0 +1,54 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brachio</title>
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:var(--color-canvas); color:var(--color-text); font-family:var(--font-sans); overflow:hidden; padding:0; }
+  .cover { position:relative; height:288px; overflow:hidden; }
+  .art { position:absolute; top:0; left:480px; width:480px; height:288px; overflow:hidden; }
+  .art svg { display:block; width:480px; height:288px; }
+  .mint { fill:var(--color-mint); }
+  .ink { fill:var(--color-text); }
+  .blue { fill:var(--color-status-working); }
+  .amber { fill:var(--color-status-blocked); }
+  .quiet { fill:var(--color-line-strong); }
+  .t { rx:var(--radius-md); }
+  .s { rx:var(--radius-sm); }
+  .words { position:absolute; left:var(--space-6); bottom:var(--space-6); max-width:440px; }
+  .name { margin:0; font-size:104px; line-height:.92; font-weight:600; letter-spacing:-.03em; color:var(--color-text); }
+  .tag { margin:var(--space-3) 0 0; font-size:14px; line-height:1.5; color:var(--color-text-3); }
+</style>
+</head>
+<body>
+<div class="cover">
+  <div class="art">
+    <!--
+      blocks: color-mint (one 2-wide tile, two singles), color-text (ink, one 2-wide), color-status-working (one tall), color-status-blocked (one small), color-line-strong (quiet fillers)
+      arrangement: the board view's tile grid, 96px tiles on a 108 pitch (96 + space-3), bleeding off the top, right and bottom
+      pattern: tiles cut by radius-md, some merged two-wide like board tiles; chosen because Brachio's signature surface is a dense grid of agent tiles
+      steps and radii: space-3 gap, space-6 top inset, radius-md tiles, radius-sm small tile
+    -->
+    <svg viewBox="0 0 480 288" aria-hidden="true">
+      <rect class="mint t"  x="24"  y="-36" width="204" height="96"/>
+      <rect class="ink t"   x="240" y="-36" width="96"  height="96"/>
+      <rect class="blue t"  x="348" y="-36" width="96"  height="204"/>
+      <rect class="quiet t" x="24"  y="72"  width="96"  height="96"/>
+      <rect class="mint t"  x="132" y="72"  width="96"  height="96"/>
+      <rect class="amber s" x="240" y="72"  width="44"  height="44"/>
+      <rect class="quiet s" x="292" y="124" width="44"  height="44"/>
+      <rect class="mint t"  x="24"  y="180" width="96"  height="96"/>
+      <rect class="ink t"   x="132" y="180" width="204" height="96"/>
+      <rect class="quiet t" x="348" y="180" width="96"  height="96"/>
+      <rect class="mint t"  x="456" y="72"  width="96"  height="96"/>
+    </svg>
+  </div>
+  <div class="words">
+    <h1 class="name">Brachio</h1>
+    <p class="tag">A light desktop home for your coding agents.</p>
+  </div>
+</div>
+</body>
+</html>

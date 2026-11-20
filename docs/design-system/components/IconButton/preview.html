@@ -1,0 +1,22 @@
+<!-- @dsCard group="Actions" height=96 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+.col{display:grid;gap:12px;}
+.cap{font:var(--text-xs)/1.5 var(--font-mono);color:var(--color-text-3);min-width:72px;}
+.panel{background:var(--color-panel);border:1px solid var(--color-line);}
+
+</style></head>
+<body>
+<div class="row panel" style="padding:8px;border-radius:9px;width:max-content">
+<button class="icon-button" aria-label="Board view"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg></button>
+<button class="icon-button is-hover" aria-label="Split pane"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M8 3v10"/></svg></button>
+<button class="icon-button is-focus" aria-label="Settings"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/><circle cx="6" cy="4.5" r="1.4" fill="var(--color-panel)"/><circle cx="10.5" cy="8" r="1.4" fill="var(--color-panel)"/><circle cx="5" cy="11.5" r="1.4" fill="var(--color-panel)"/></svg></button>
+<button class="icon-button" aria-label="Notifications"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V7.2a4 4 0 0 1 8 0V11l1.2 1.5H2.8z"/><path d="M6.6 14.2h2.8"/></svg><span class="count-badge">2</span></button>
+<button class="icon-button icon-button-sm" aria-label="More"><svg class="icon-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></svg></button>
+</div>
+</body>
+</html>
