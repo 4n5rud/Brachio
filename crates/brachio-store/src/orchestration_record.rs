@@ -146,6 +146,8 @@ pub struct Handoff {
     pub reviewed_at_ms: Option<i64>,
     /// The decision, if there is one.
     pub review: Option<HandoffReview>,
+    /// The QA run Brachio executed on this exact commit, kept apart from `reported_tests`.
+    pub verified_qa_result_id: Option<i64>,
 }
 
 /// Builds the graph of a lead's child tasks from the database.
@@ -368,6 +370,7 @@ type HandoffRow = (
     i64,
     Option<i64>,
     Option<String>,
+    Option<i64>,
 );
 
 impl Handoff {
@@ -381,7 +384,7 @@ impl Handoff {
     ) -> Result<Vec<Self>, OrchestrationError> {
         let mut statement = connection.prepare(
             "SELECT id, task_id, commit_sha, base_sha, summary, changed_paths, reported_tests,
-                    source, created_at_ms, reviewed_at_ms, review
+                    source, created_at_ms, reviewed_at_ms, review, verified_qa_result_id
              FROM task_handoffs WHERE task_id = ?1 ORDER BY created_at_ms, rowid",
         )?;
         let rows: Vec<HandoffRow> = statement
@@ -398,6 +401,7 @@ impl Handoff {
                     row.get(8)?,
                     row.get(9)?,
                     row.get(10)?,
+                    row.get(11)?,
                 ))
             })?
             .collect::<Result<_, _>>()?;
@@ -419,6 +423,7 @@ impl Handoff {
                     created_at_ms: r.8,
                     reviewed_at_ms: r.9,
                     review: r.10.as_deref().map(HandoffReview::parse).transpose()?,
+                    verified_qa_result_id: r.11,
                 })
             })
             .collect()

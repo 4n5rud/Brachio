@@ -5,6 +5,7 @@ mod database;
 mod message_record;
 mod orchestration_record;
 mod pr_status_record;
+mod qa_result_record;
 mod repo_record;
 mod task_record;
 mod task_tabs;
@@ -22,6 +23,7 @@ pub use orchestration_record::{
     HandoffReview, HandoffSource, NewHandoff, OrchestrationError,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
+pub use qa_result_record::{latest_qa_result, save_qa_result, NewQaResult, QaResultRecord};
 pub use repo_record::{NewRepo, RepoRecord};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{
