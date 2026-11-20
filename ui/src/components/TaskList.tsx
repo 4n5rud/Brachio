@@ -1,8 +1,9 @@
 import { IconButton } from "./ui/IconButton";
 import { Button } from "./ui/Button";
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
-import { orderWithChildren, type TaskRow } from "../lib/tasks";
+import { orderWithChildren, taskGroup, type TaskRow } from "../lib/tasks";
+import type { PrChip } from "../lib/pr-status";
 import { FolderRepos } from "./FolderRepos";
 import { watchPrStatuses } from "../lib/pr-status-store";
 import { Icon } from "./Icon";
@@ -29,6 +30,13 @@ export function TaskList(props: {
   /** Adds a git repository found inside a folder project as a project of its own. */
   onAddFolderRepo?: (path: string) => Promise<void>;
   onAddRepo?: () => void;
+  onOpenArchived?: () => void;
+  /** A project to show: its group opens when the object changes. */
+  reveal?: { id: string };
+  /** Starting set of collapsed projects; read from storage when left out. */
+  initialCollapsed?: ReadonlySet<string>;
+  /** Pull request chip per task; read from the pull request store when left out. */
+  prFor?: (taskId: string) => PrChip | null;
   needsYou: number;
   now: number;
   unreadForTask?: (taskId: string) => number;
@@ -50,7 +58,28 @@ export function TaskList(props: {
   if ("__TAURI_INTERNALS__" in window) {
     onCleanup(watchPrStatuses(() => props.tasks.filter((task) => task.worktreePath).map((task) => task.id)));
   }
-  const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(loadCollapsedProjects());
+  const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(props.initialCollapsed ?? loadCollapsedProjects());
+  const countsTitle = (tasks: readonly TaskRow[]) => {
+    const needs = tasks.filter((task) => taskGroup(task.status) === "needs").length;
+    const parts = [t("sidebar.countTasks").replace("{count}", String(tasks.length))];
+    if (needs > 0) parts.push(t("sidebar.countNeeds").replace("{count}", String(needs)));
+    return parts.join(", ");
+  };
+  createEffect(() => {
+    const target = props.reveal;
+    if (!target) return;
+    setCollapsed((prev) => {
+      if (!prev.has(target.id)) return prev;
+      const next = new Set(prev);
+      next.delete(target.id);
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // The groups remain usable for this run.
+      }
+      return next;
+    });
+  });
   const toggle = (id: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -86,7 +115,8 @@ export function TaskList(props: {
             return (
               <section>
                 <div class="project-heading">
-                  <button class="group-head" type="button" aria-expanded={expanded()} onClick={() => toggle(id)}>
+                  <button class="group-head" type="button" aria-expanded={expanded()}
+                    title={expanded() ? undefined : countsTitle(tasks())} onClick={() => toggle(id)}>
                     <Icon name={expanded() ? "chevronDown" : "chevronRight"} class="icon-xs" />
                     <span class="project-name" title={name()}>{name()}</span>
                     <span class="count">{tasks().length}</span>
@@ -106,6 +136,7 @@ export function TaskList(props: {
                         selected={task.id === props.selectedId}
                         now={props.now}
                         unread={props.unreadForTask?.(task.id) ?? 0}
+                        pr={props.prFor?.(task.id)}
                         onSelect={() => props.onSelect(task.id)}
                       />
                     )}
@@ -119,6 +150,11 @@ export function TaskList(props: {
           }}
         </For>
       </nav>
+      <Show when={props.onOpenArchived}>
+        <div class="sidebar-foot">
+          <Button variant="ghost" size="sm" onClick={() => props.onOpenArchived?.()}>{t("task.archived")}</Button>
+        </div>
+      </Show>
     </aside>
   );
 }

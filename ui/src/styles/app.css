@@ -141,6 +141,13 @@ p {
 .sidebar-head .button {
   margin-left: auto;
 }
+.sidebar-foot {
+  margin-top: auto;
+  border-top: 1px solid var(--color-line);
+  padding: 6px var(--space-2);
+  display: flex;
+  gap: var(--space-1);
+}
 .project-empty {
   padding: var(--space-1) 14px var(--space-2) 30px;
   color: var(--color-text-3);
@@ -573,10 +580,37 @@ p {
 .archive-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2);
-  overflow-wrap: anywhere;
+  min-height: 40px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: 8px;
+}
+.archive-row:hover {
+  background: var(--color-hover);
+}
+.archive-text {
+  flex: 1;
+  min-width: 0;
+}
+.archive-text strong,
+.archive-text small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archive-text strong {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.archive-text small {
+  font: var(--text-xs) var(--font-mono);
+  color: var(--color-text-3);
+}
+.archive-count {
+  margin-left: var(--space-2);
+  font: 500 var(--text-xs) var(--font-mono);
+  color: var(--color-text-3);
 }
 
 .form-grid {

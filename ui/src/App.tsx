@@ -14,6 +14,7 @@ import { pushToast } from "./lib/toasts";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
+import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
 import { TaskView, type DraftTarget } from "./components/TaskView";
@@ -126,6 +127,8 @@ export function App() {
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
+  const [revealed, setRevealed] = createSignal<{ id: string }>();
+  const [folderOverWindow, setFolderOverWindow] = createSignal(false);
   const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived" | "activity">();
   const [activity, setActivity] = createSignal<readonly TaskActivity[]>([]);
   const activeTaskIds = createMemo(() => new Set(tasks().map((task) => task.id)));
@@ -410,12 +413,28 @@ export function App() {
     restoreSelection();
   };
 
+  const addProject = async (path: string) => {
+    const added = await addRepo(path);
+    const listed = repos().some((item) => item.id === added.id);
+    if (!listed) setRepos((list) => [added, ...list]);
+    const show = () => {
+      switchRepo(added.id);
+      setRevealed({ id: added.id });
+    };
+    if (listed) {
+      pushToast({
+        tone: "info",
+        message: t("project.alreadyAdded").replace("{name}", () => added.name),
+        action: { label: t("project.show"), onClick: show },
+      });
+    } else {
+      show();
+    }
+  };
+
   const chooseRepo = async () => {
     const path = await openFolder({ directory: true, multiple: false });
-    if (typeof path !== "string") return;
-    const added = await addRepo(path);
-    setRepos((list) => (list.some((item) => item.id === added.id) ? list : [added, ...list]));
-    switchRepo(added.id);
+    if (typeof path === "string") await addProject(path);
   };
 
   const addFolderRepo = async (path: string) => {
@@ -485,6 +504,13 @@ export function App() {
     }
     const listed = findTask(record.id);
     if (listed && !startListed) return;
+    if (!listed && record.parentTaskId) {
+      pushToast({
+        tone: "info",
+        message: t("task.childCreated").replace("{title}", () => record.title),
+        action: { label: t("task.open"), onClick: () => open(record.id) },
+      });
+    }
     batch(() => {
       if (!listed) setTasks((list) => [toTaskRow(record), ...list]);
       setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
@@ -496,7 +522,7 @@ export function App() {
     setArchiving(true);
     try {
       if (!await confirmDialog({
-        title: `${t("task.archive")} · ${task.title}`,
+        title: t("task.archiveTitle"),
         body: t("task.archiveBody"),
         confirmLabel: t("task.archive"),
         cancelLabel: t("workspace.close"),
@@ -524,7 +550,12 @@ export function App() {
         return next;
       });
     } catch (failure) {
-      report(failure);
+      pushToast({
+        tone: "error",
+        title: t("task.archiveFailed"),
+        message: String(failure),
+        action: { label: t("task.tryAgain"), onClick: () => void archive(task) },
+      });
     } finally {
       setArchiving(false);
     }
@@ -536,6 +567,8 @@ export function App() {
       setArchived((items) => items.filter((item) => item.id !== id));
       setTasks((items) => [task, ...items].sort((a, b) => b.updatedAt - a.updatedAt));
     });
+    open(task.id);
+    setWorkspacePanel(undefined);
   };
 
   // Shows what would be lost, and deletes the worktree and branch only after the user agrees.
@@ -581,12 +614,16 @@ export function App() {
 
   const canCreate = () => inTauri && repo() !== undefined;
 
-  const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
-    const task = selected();
-    if (!task?.worktreePath || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+  const dropTargetsTerminal = (position: { x: number; y: number }) => {
+    if (!selected()?.worktreePath || view() !== "tasks") return false;
     const ratio = window.devicePixelRatio;
     const target = document.elementFromPoint(position.x / ratio, position.y / ratio);
-    if (!target?.closest(".task-view [data-agent-terminal]")) return;
+    return !!target?.closest(".task-view [data-agent-terminal]");
+  };
+
+  const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
+    const task = selected();
+    if (!task?.worktreePath || dialogOpen() || workspacePanel() || !dropTargetsTerminal(position)) return;
     const files = await resolveDroppedTaskPaths(task.id, paths);
     if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
     const draft = files.map((path) => `@${/[\s"]/u.test(path) ? `"${path.replaceAll('"', '\\"')}"` : path}`).join(" ");
@@ -621,7 +658,19 @@ export function App() {
       listener.catch(report);
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
       const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
-        if (payload.type === "drop") void dropFiles(payload.paths, payload.position).catch(report);
+        if (payload.type === "enter" || payload.type === "over") {
+          setFolderOverWindow(!dialogOpen() && !workspacePanel() && !dropTargetsTerminal(payload.position));
+        } else {
+          setFolderOverWindow(false);
+        }
+        if (payload.type !== "drop") return;
+        if (dropTargetsTerminal(payload.position)) {
+          void dropFiles(payload.paths, payload.position).catch(report);
+        } else if (!dialogOpen() && !workspacePanel()) {
+          void (async () => {
+            for (const path of payload.paths) await addProject(path).catch(report);
+          })();
+        }
       });
       dropListener.catch(report);
       onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
@@ -727,6 +776,8 @@ export function App() {
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
+          onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
+          reveal={revealed()}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
           now={now()}
@@ -783,6 +834,7 @@ export function App() {
           )}
         </Show>
       </main>
+      <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
