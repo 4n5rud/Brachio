@@ -11,6 +11,7 @@ import { PullRequestFeedback } from "./PullRequestFeedback";
 import { PullRequestStatus } from "./PullRequestStatus";
 import { TaskMergePreview } from "./TaskMergePreview";
 import { TaskFiles } from "./TaskFiles";
+import { TaskQaRun } from "./TaskQaRun";
 
 type Pane = "changes" | "files" | "qa" | "activity";
 
@@ -144,6 +145,9 @@ export function Inspector(props: {
                   </div>
                 </div>
               )}
+            </Show>
+            <Show when={isGit() && props.task.worktreePath && props.task.id} keyed>
+              {(id) => <TaskQaRun taskId={id} />}
             </Show>
           </section>
         </Match>

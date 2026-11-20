@@ -9,6 +9,7 @@ mod issue_report;
 mod log_file;
 mod mailbox;
 mod pr_status;
+mod qa_run;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
@@ -181,6 +182,7 @@ pub fn run() {
         ))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
         .setup(|app| {
             open_database(app)?;
@@ -229,6 +231,8 @@ pub fn run() {
             workspace::task_file_media,
             workspace::task_changes,
             pr_status::task_pr_status,
+            qa_run::qa_run,
+            qa_run::qa_last_result,
             external_link::open_external_link,
             issue_report::open_issue_draft,
             workspace::task_merge_preview,

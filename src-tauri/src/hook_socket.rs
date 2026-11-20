@@ -120,6 +120,21 @@ impl Approvals {
         sender.is_some_and(|sender| sender.send(decision).is_ok())
     }
 
+    /// Shows the user a question raised by the app itself and blocks until they answer. Call it
+    /// off the async runtime. `None` when the question could not be shown.
+    pub fn ask_blocking(&self, key: String, review: String) -> Option<Decision> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        self.pending.lock().ok()?.insert(id, sender);
+        (self.notify)(Notice::Asked(Question { id, key, review }));
+        let decision = receiver.blocking_recv().ok();
+        if let Ok(mut map) = self.pending.lock() {
+            map.remove(&id);
+        }
+        (self.notify)(Notice::Closed(id));
+        decision
+    }
+
     /// Serves hooks until the listener fails.
     pub async fn serve(self: Arc<Self>, listener: Listener) {
         while let Ok(stream) = listener.accept().await {

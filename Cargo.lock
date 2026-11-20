@@ -392,6 +392,7 @@ dependencies = [
  "brachio-git",
  "brachio-process",
  "brachio-pty",
+ "brachio-qa",
  "brachio-runtime",
  "brachio-store",
  "interprocess",
@@ -479,8 +480,10 @@ version = "0.0.1"
 dependencies = [
  "brachio-git",
  "brachio-process",
+ "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "toml 0.8.2",
 ]
 
 [[package]]

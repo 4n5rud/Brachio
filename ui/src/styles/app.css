@@ -896,6 +896,23 @@ kbd {
   font-size: var(--text-xs);
   color: var(--color-text-3);
 }
+.qa-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.qa-output {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+  font: var(--text-xs) var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .qa-passed {
   color: var(--color-status-ready);
 }
