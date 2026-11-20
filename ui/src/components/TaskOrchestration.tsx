@@ -1,0 +1,182 @@
+import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { t, type MessageKey } from "../i18n";
+import { shortSha } from "../lib/qa-run";
+import {
+  readOrchestration,
+  reviewHandoff,
+  stateTone,
+  testEvidence,
+  watchOrchestration,
+  type ChildView,
+} from "../lib/orchestration";
+import { StatusGlyph } from "./StatusGlyph";
+
+const stateLabel: Record<string, MessageKey> = {
+  queued: "orchestration.state.queued",
+  ready: "orchestration.state.ready",
+  running: "orchestration.state.running",
+  review_required: "orchestration.state.review_required",
+  completed: "orchestration.state.completed",
+  blocked: "orchestration.state.blocked",
+  failed: "orchestration.state.failed",
+  cancelled: "orchestration.state.cancelled",
+};
+
+function stateText(state: string): string {
+  const key = stateLabel[state];
+  return key ? t(key) : state;
+}
+
+function StateChip(props: { state: string }) {
+  const tone = () => stateTone(props.state);
+  return (
+    <span class={`status status-${tone()}`}>
+      <StatusGlyph tone={tone()} />
+      {stateText(props.state)}
+    </span>
+  );
+}
+
+function ChildCard(props: { child: ChildView; onChanged: () => void }) {
+  const [rejecting, setRejecting] = createSignal(false);
+  const [reason, setReason] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+  const decide = async (handoffId: string, approved: boolean) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await reviewHandoff(handoffId, approved, approved ? undefined : reason().trim());
+      setRejecting(false);
+      setReason("");
+      props.onChanged();
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <li class="orchestration-child">
+      <div class="orchestration-child-head">
+        <strong>{props.child.title}</strong>
+        <StateChip state={props.child.state} />
+      </div>
+      <Show when={props.child.dependencies.length > 0}>
+        <p class="muted">
+          {t("orchestration.dependsOn")}{" "}
+          <For each={props.child.dependencies}>
+            {(dependency, index) => (
+              <>
+                <Show when={index() > 0}>{", "}</Show>
+                {dependency.title}
+                {" ("}
+                {stateText(dependency.state)}
+                {")"}
+              </>
+            )}
+          </For>
+        </p>
+      </Show>
+      <Show when={props.child.handoff} fallback={<p class="muted">{t("orchestration.noHandoff")}</p>}>
+        {(handoff) => (
+          <div class="orchestration-handoff">
+            <p>
+              {t("orchestration.commit")} <code>{shortSha(handoff().commitSha)}</code>
+              {" · "}
+              {handoff().changedPathsCount} {t("orchestration.files")}
+            </p>
+            <p class="orchestration-claim">{handoff().summary}</p>
+            <Show when={handoff().changedPaths.length > 0}>
+              <details>
+                <summary>{t("orchestration.changedFiles")}</summary>
+                <ul>
+                  <For each={handoff().changedPaths}>{(path) => <li><code>{path}</code></li>}</For>
+                </ul>
+              </details>
+            </Show>
+            <p class="muted">
+              {t("orchestration.reportedTests")}:{" "}
+              {handoff().reportedTests.length > 0 ? handoff().reportedTests.join(", ") : t("orchestration.none")}
+              {" "}({t("orchestration.agentClaim")})
+            </p>
+            <p classList={{ muted: testEvidence(handoff()) === "none", "qa-passed": testEvidence(handoff()) === "verified", "qa-failed": testEvidence(handoff()) === "failed" }}>
+              {t("orchestration.verifiedQa")}:{" "}
+              {testEvidence(handoff()) === "verified" ? t("orchestration.qa.passed")
+                : testEvidence(handoff()) === "failed" ? t("orchestration.qa.failed")
+                : t("orchestration.qa.none")}
+            </p>
+            <Show when={handoff().review}>
+              {(review) => (
+                <p class="muted">
+                  {review() === "approved" ? t("orchestration.approved") : t("orchestration.rejected")}
+                  <Show when={handoff().reviewNote}>{(note) => <>{": "}{note()}</>}</Show>
+                </p>
+              )}
+            </Show>
+            <Show when={handoff().canReview}>
+              <div class="orchestration-actions">
+                <button type="button" class="button-primary" disabled={busy()}
+                  onClick={() => void decide(handoff().id, true)}>
+                  {t("orchestration.approve")}
+                </button>
+                <button type="button" disabled={busy()} onClick={() => setRejecting((open) => !open)}>
+                  {t("orchestration.reject")}
+                </button>
+              </div>
+              <Show when={rejecting()}>
+                <form class="orchestration-reject" onSubmit={(event) => {
+                  event.preventDefault();
+                  void decide(handoff().id, false);
+                }}>
+                  <input type="text" maxLength={300} value={reason()}
+                    placeholder={t("orchestration.reasonPlaceholder")}
+                    aria-label={t("orchestration.reasonPlaceholder")}
+                    onInput={(event) => setReason(event.currentTarget.value)} />
+                  <button type="submit" disabled={busy() || reason().trim() === ""}>
+                    {t("orchestration.confirmReject")}
+                  </button>
+                </form>
+              </Show>
+            </Show>
+            <Show when={error()}>{(text) => <p role="alert">{text()}</p>}</Show>
+          </div>
+        )}
+      </Show>
+    </li>
+  );
+}
+
+/** The lead's child tasks with their dependencies and handoffs; completing one needs the user's approval. */
+export function TaskOrchestration(props: { leadTaskId: string }) {
+  const [view, { refetch }] = createResource(
+    () => props.leadTaskId,
+    (id) => readOrchestration(id).catch((error) => ({ error: String(error) })),
+  );
+  onMount(() => onCleanup(watchOrchestration(() => void refetch())));
+  const current = () => {
+    const value = view();
+    return value && "children" in value ? value : undefined;
+  };
+  const failure = () => {
+    const value = view();
+    return value && "error" in value ? value.error : undefined;
+  };
+  return (
+    <div class="orchestration">
+      <p class="muted">{t("orchestration.note")}</p>
+      <Show when={failure()}>{(text) => <p role="alert">{text()}</p>}</Show>
+      <Show when={current()}>
+        {(data) => (
+          <Show when={data().children.length > 0} fallback={<p class="muted">{t("orchestration.empty")}</p>}>
+            <ul class="orchestration-list">
+              <For each={data().children}>
+                {(child) => <ChildCard child={child} onChanged={() => void refetch()} />}
+              </For>
+            </ul>
+          </Show>
+        )}
+      </Show>
+    </div>
+  );
+}

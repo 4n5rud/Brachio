@@ -99,6 +99,16 @@ pub enum MailRequest {
         #[serde(default)]
         base: Option<String>,
     },
+    /// A child task hands its committed work over for the user's review.
+    Handoff {
+        /// The asking terminal.
+        key: String,
+        /// What the agent says it did; untrusted text.
+        summary: String,
+        /// Tests the agent says it ran; untrusted claims.
+        #[serde(default)]
+        tests: Vec<String>,
+    },
     /// The child tasks of the asking lead.
     ListTasks {
         /// The asking terminal.
@@ -222,6 +232,13 @@ pub enum MailResponse {
         title: String,
         /// The new task's branch.
         branch: String,
+    },
+    /// The handoff was stored and the task now waits for the user's review.
+    HandedOff {
+        /// The commit the handoff names.
+        commit_sha: String,
+        /// How many files differ from the base.
+        changed_paths: usize,
     },
     /// Children for `task list`, oldest first.
     TaskList {

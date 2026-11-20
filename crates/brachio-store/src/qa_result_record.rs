@@ -121,14 +121,37 @@ pub fn latest_qa_result(
     connection: &Connection,
     task_id: &str,
 ) -> Result<Option<QaResultRecord>, StoreError> {
+    select_qa_result(
+        connection,
+        "q.task_id = ?1 ORDER BY q.id DESC LIMIT 1",
+        task_id,
+    )
+}
+
+/// One QA run by row id, if it exists.
+///
+/// # Errors
+/// Fails when the query fails.
+pub fn qa_result_by_id(
+    connection: &Connection,
+    id: i64,
+) -> Result<Option<QaResultRecord>, StoreError> {
+    select_qa_result(connection, "q.id = ?1", id)
+}
+
+fn select_qa_result(
+    connection: &Connection,
+    condition: &str,
+    value: impl rusqlite::ToSql,
+) -> Result<Option<QaResultRecord>, StoreError> {
     Ok(connection
         .query_row(
-            "SELECT q.id, q.command, q.cwd, q.outcome, q.exit_code, q.duration_ms, q.commit_sha,
+            &format!("SELECT q.id, q.command, q.cwd, q.outcome, q.exit_code, q.duration_ms, q.commit_sha,
                     q.verified_by_brachio, q.stdout, q.stderr, q.truncated, q.retry_allowed,
                     q.created_at_ms,
                     EXISTS(SELECT 1 FROM task_handoffs h WHERE h.verified_qa_result_id = q.id)
-             FROM qa_results q WHERE q.task_id = ?1 ORDER BY q.id DESC LIMIT 1",
-            [task_id],
+             FROM qa_results q WHERE {condition}"),
+            [value],
             |row| {
                 Ok(QaResultRecord {
                     id: row.get(0)?,

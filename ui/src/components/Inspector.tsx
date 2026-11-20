@@ -12,8 +12,9 @@ import { PullRequestStatus } from "./PullRequestStatus";
 import { TaskMergePreview } from "./TaskMergePreview";
 import { TaskFiles } from "./TaskFiles";
 import { TaskQaRun } from "./TaskQaRun";
+import { TaskOrchestration } from "./TaskOrchestration";
 
-type Pane = "changes" | "files" | "qa" | "activity";
+type Pane = "changes" | "files" | "qa" | "tasks" | "activity";
 
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: {
@@ -24,6 +25,10 @@ export function Inspector(props: {
   onDiffTotals: (taskId: string, totals: DiffTotals | undefined) => void;
 }) {
   const isGit = () => props.isGit !== false;
+  const isLead = () => isGit() && !props.task.parentTaskId && !!props.task.worktreePath;
+  createEffect(() => {
+    if (!isLead() && pane() === "tasks") setPane("files");
+  });
   const [pane, setPane] = createSignal<Pane>(isGit() ? "changes" : "files");
   createEffect(() => {
     if (!isGit() && pane() === "changes") setPane("files");
@@ -56,6 +61,7 @@ export function Inspector(props: {
           <Show when={isGit()}>{tab("changes", t("inspector.changes"))}</Show>
           {tab("files", t("files.title"))}
           {tab("qa", t("inspector.qa"))}
+          <Show when={isLead()}>{tab("tasks", t("inspector.tasks"))}</Show>
           {tab("activity", t("inspector.activity"))}
         </div>
       </div>
@@ -149,6 +155,11 @@ export function Inspector(props: {
             <Show when={isGit() && props.task.worktreePath && props.task.id} keyed>
               {(id) => <TaskQaRun taskId={id} />}
             </Show>
+          </section>
+        </Match>
+        <Match when={pane() === "tasks" && isLead()}>
+          <section class="inspector-section">
+            <TaskOrchestration leadTaskId={props.task.id} />
           </section>
         </Match>
         <Match when={pane() === "activity"}>

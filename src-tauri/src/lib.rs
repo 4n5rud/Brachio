@@ -8,6 +8,7 @@ mod hook_socket;
 mod issue_report;
 mod log_file;
 mod mailbox;
+mod orchestration;
 mod pr_status;
 mod qa_run;
 mod resource_usage;
@@ -212,6 +213,8 @@ pub fn run() {
             hook_socket::approval_answer,
             mailbox::mailbox_unread,
             mailbox::mailbox_inbox,
+            orchestration::orchestration_view,
+            orchestration::handoff_review,
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,

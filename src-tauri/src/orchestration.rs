@@ -1,0 +1,561 @@
+//! A lead task's view of its child tasks, how a child hands work over, and how the user reviews
+//! it. Rules live in `brachio_core::task_graph` and `brachio_store`; this module reads the
+//! repository and turns the user's decision into a stored state change.
+
+use std::path::Path;
+
+use brachio_core::task_graph::TaskState;
+use brachio_git::Git;
+use brachio_runtime::mailbox::MailResponse;
+use brachio_store::{
+    decide_handoff, load_graph, qa_result_by_id, send_message, submit_handoff, Handoff,
+    HandoffReview, HandoffSource, NewHandoff, NewMessage, RepoRecord, TaskRecord,
+};
+use rusqlite::Connection;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
+
+use crate::child_task_request::is_hidden_or_control;
+use crate::mailbox::agent_owner;
+use crate::workspace::Database;
+
+/// Tells the interface that a child's state or handoff changed.
+pub const CHANGED_EVENT: &str = "orchestration://changed";
+const MAX_SUMMARY_CHARS: usize = 4000;
+const MAX_TESTS: usize = 20;
+const MAX_TEST_CHARS: usize = 200;
+const MAX_NOTE_CHARS: usize = 300;
+const MAX_SHOWN_PATHS: usize = 200;
+
+/// A lead's children as the Tasks tab shows them.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrchestrationView {
+    pub lead_task_id: String,
+    pub children: Vec<ChildView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildView {
+    pub id: String,
+    pub title: String,
+    pub branch: String,
+    pub state: String,
+    pub dependencies: Vec<DependencyView>,
+    pub handoff: Option<HandoffView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyView {
+    pub id: String,
+    pub title: String,
+    pub state: String,
+}
+
+/// What an agent claimed and, apart from it, what Brachio verified.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffView {
+    pub id: String,
+    pub commit_sha: String,
+    pub base_sha: String,
+    /// Agent's words; untrusted.
+    pub summary: String,
+    pub changed_paths_count: usize,
+    pub changed_paths: Vec<String>,
+    /// Tests the agent says it ran; untrusted.
+    pub reported_tests: Vec<String>,
+    /// A QA run Brachio executed on exactly this commit.
+    pub verified_qa: Option<VerifiedQaView>,
+    /// `approved` or `rejected` once the user decided.
+    pub review: Option<String>,
+    pub review_note: Option<String>,
+    pub created_at_ms: i64,
+    /// The task waits for the user's decision on this handoff.
+    pub can_review: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifiedQaView {
+    pub outcome: String,
+    pub command: String,
+    pub exit_code: Option<i32>,
+    pub duration_ms: i64,
+}
+
+/// Reads the lead's children, their dependencies and latest handoffs.
+pub fn build_view(connection: &Connection, lead_id: &str) -> Result<OrchestrationView, String> {
+    let graph = load_graph(connection, lead_id).map_err(|e| e.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, title, branch, archived_at_ms IS NOT NULL FROM tasks
+             WHERE parent_task_id = ?1 ORDER BY created_at_ms, id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String, bool)> = statement
+        .query_map([lead_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .and_then(Iterator::collect)
+        .map_err(|e| e.to_string())?;
+    let title_of = |id: &str| {
+        rows.iter()
+            .find(|row| row.0 == id)
+            .map_or_else(|| id.to_owned(), |row| row.1.clone())
+    };
+    let mut children = Vec::new();
+    for (id, title, branch, archived) in &rows {
+        if *archived {
+            continue;
+        }
+        let state = graph.state(id).map_err(|e| e.to_string())?;
+        let dependencies = graph
+            .dependencies_of(id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|dependency| DependencyView {
+                id: dependency.to_owned(),
+                title: title_of(dependency),
+                state: graph
+                    .state(dependency)
+                    .map_or_else(|_| "unknown".to_owned(), |s| s.as_str().to_owned()),
+            })
+            .collect();
+        let handoff = Handoff::latest(connection, id)
+            .map_err(|e| e.to_string())?
+            .map(|handoff| handoff_view(connection, handoff, state))
+            .transpose()?;
+        children.push(ChildView {
+            id: id.clone(),
+            title: title.clone(),
+            branch: branch.clone(),
+            state: state.as_str().to_owned(),
+            dependencies,
+            handoff,
+        });
+    }
+    Ok(OrchestrationView {
+        lead_task_id: lead_id.to_owned(),
+        children,
+    })
+}
+
+fn handoff_view(
+    connection: &Connection,
+    handoff: Handoff,
+    state: TaskState,
+) -> Result<HandoffView, String> {
+    let verified_qa = match handoff.verified_qa_result_id {
+        Some(id) => qa_result_by_id(connection, id)
+            .map_err(|e| e.to_string())?
+            .map(|qa| VerifiedQaView {
+                outcome: qa.outcome,
+                command: qa.command,
+                exit_code: qa.exit_code,
+                duration_ms: qa.duration_ms,
+            }),
+        None => None,
+    };
+    Ok(HandoffView {
+        can_review: state == TaskState::ReviewRequired && handoff.review.is_none(),
+        id: handoff.id,
+        commit_sha: handoff.commit_sha,
+        base_sha: handoff.base_sha,
+        summary: handoff.summary,
+        changed_paths_count: handoff.changed_paths.len(),
+        changed_paths: handoff
+            .changed_paths
+            .into_iter()
+            .take(MAX_SHOWN_PATHS)
+            .collect(),
+        reported_tests: handoff.reported_tests,
+        verified_qa,
+        review: handoff.review.map(|review| {
+            match review {
+                HandoffReview::Approved => "approved",
+                HandoffReview::Rejected => "rejected",
+            }
+            .to_owned()
+        }),
+        review_note: handoff.review_note,
+        created_at_ms: handoff.created_at_ms,
+    })
+}
+
+fn clean_text(label: &str, text: &str, max_chars: usize) -> Result<String, String> {
+    let text = text.trim();
+    if text.is_empty() || text.chars().count() > max_chars {
+        return Err(format!("{label} must be 1 to {max_chars} characters."));
+    }
+    if text.chars().any(is_hidden_or_control) {
+        return Err(format!(
+            "{label} contains control or invisible characters, which are not allowed."
+        ));
+    }
+    Ok(text.to_owned())
+}
+
+/// Records the handoff of the asking child: the app, not the agent, reads the commit, the base
+/// and the changed files from the child's worktree.
+pub fn handoff_request(
+    connection: &mut Connection,
+    key: &str,
+    summary: &str,
+    tests: &[String],
+    now_ms: i64,
+    handoff_id: &str,
+) -> Result<MailResponse, String> {
+    let child = agent_owner(connection, key)?;
+    let lead_id = child
+        .parent_task_id
+        .clone()
+        .ok_or_else(|| "Only a child task can hand off work.".to_owned())?;
+    let lead = TaskRecord::get(connection, &lead_id).map_err(|e| e.to_string())?;
+    if !RepoRecord::get(connection, &child.repo_id)
+        .map_err(|e| e.to_string())?
+        .is_git
+    {
+        return Err("Handoffs need a git project.".to_owned());
+    }
+    let summary = clean_text("The summary", summary, MAX_SUMMARY_CHARS)?;
+    if tests.len() > MAX_TESTS {
+        return Err(format!("At most {MAX_TESTS} tests can be listed."));
+    }
+    let tests = tests
+        .iter()
+        .map(|test| clean_text("A test name", test, MAX_TEST_CHARS))
+        .collect::<Result<Vec<_>, _>>()?;
+    let snapshot = read_commit(&child.worktree_path, &lead.branch)?;
+    submit_handoff(
+        connection,
+        &NewHandoff {
+            id: handoff_id,
+            task_id: &child.id,
+            commit_sha: &snapshot.head,
+            base_sha: &snapshot.base,
+            summary: &summary,
+            changed_paths: &snapshot.changed,
+            reported_tests: &tests,
+            source: HandoffSource::ReportedByAgent,
+            created_at_ms: now_ms,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(MailResponse::HandedOff {
+        commit_sha: snapshot.head,
+        changed_paths: snapshot.changed.len(),
+    })
+}
+
+struct CommitSnapshot {
+    head: String,
+    base: String,
+    changed: Vec<String>,
+}
+
+fn read_commit(worktree: &Path, lead_branch: &str) -> Result<CommitSnapshot, String> {
+    let git = Git::new(worktree);
+    let dirty = git
+        .run_text(&["status", "--porcelain"])
+        .map_err(|e| e.to_string())?;
+    if !dirty.trim().is_empty() {
+        return Err("Commit your work first: the worktree has uncommitted changes.".to_owned());
+    }
+    let head = git.run(&["rev-parse", "HEAD"]).map_err(|e| e.to_string())?;
+    let base = git
+        .run(&["merge-base", "HEAD", lead_branch])
+        .map_err(|e| e.to_string())?;
+    if head == base {
+        return Err("There are no commits on this branch to hand off.".to_owned());
+    }
+    let changed = git
+        .run_text(&["diff", "--name-only", "-z", &base, &head])
+        .map_err(|e| e.to_string())?
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok(CommitSnapshot {
+        head,
+        base,
+        changed,
+    })
+}
+
+/// The commit currently checked out in `worktree`.
+pub fn worktree_head(worktree: &Path) -> Result<String, String> {
+    Git::new(worktree)
+        .run(&["rev-parse", "HEAD"])
+        .map_err(|e| e.to_string())
+}
+
+fn short(sha: &str) -> &str {
+    &sha[..sha.len().min(8)]
+}
+
+/// Applies the user's decision. Approving needs the branch to still be at the handed-off
+/// commit; rejecting needs a reason, which is also mailed to the child's agent.
+pub fn review_decision(
+    connection: &mut Connection,
+    handoff_id: &str,
+    approved: bool,
+    note: Option<&str>,
+    head_of: impl Fn(&Path) -> Result<String, String>,
+    now_ms: i64,
+    message_id: &str,
+) -> Result<(), String> {
+    let handoff = Handoff::get(connection, handoff_id).map_err(|e| e.to_string())?;
+    let task = TaskRecord::get(connection, &handoff.task_id).map_err(|e| e.to_string())?;
+    if approved {
+        let head = head_of(&task.worktree_path)?;
+        if head != handoff.commit_sha {
+            return Err(format!(
+                "The branch moved after the handoff (handed off {}, now {}). Nothing was approved; ask the agent to hand off again.",
+                short(&handoff.commit_sha),
+                short(&head)
+            ));
+        }
+        return decide_handoff(
+            connection,
+            handoff_id,
+            HandoffReview::Approved,
+            None,
+            now_ms,
+        )
+        .map_err(|e| e.to_string());
+    }
+    let note = clean_text("The reason", note.unwrap_or(""), MAX_NOTE_CHARS)?;
+    decide_handoff(
+        connection,
+        handoff_id,
+        HandoffReview::Rejected,
+        Some(&note),
+        now_ms,
+    )
+    .map_err(|e| e.to_string())?;
+    if let Some(lead_id) = task.parent_task_id.as_deref() {
+        let sent = send_message(
+            connection,
+            &NewMessage {
+                id: message_id,
+                from_key: &format!("{lead_id}:agent"),
+                to_key: &format!("{}:agent", task.id),
+                kind: "status",
+                priority: "high",
+                subject: "Review rejected: rework needed",
+                body: &note,
+                payload_json: None,
+                reply_to: None,
+                request_id: None,
+                created_at_ms: now_ms,
+            },
+        );
+        if let Err(error) = sent {
+            tracing::debug!(%error, "could not mail the rejection to the child");
+        }
+    }
+    Ok(())
+}
+
+/// The lead's children with state, dependencies and latest handoff.
+#[tauri::command]
+pub fn orchestration_view(
+    database: State<'_, Database>,
+    lead_task_id: String,
+) -> Result<OrchestrationView, String> {
+    build_view(&*database.lock()?, &lead_task_id)
+}
+
+/// The user's decision on a handoff. Approving completes the child, rejecting sends it back to
+/// work with the reason. Nothing here merges anything.
+#[tauri::command]
+pub async fn handoff_review(
+    app: AppHandle,
+    database: State<'_, Database>,
+    handoff_id: String,
+    approved: bool,
+    note: Option<String>,
+) -> Result<(), String> {
+    let worktree = {
+        let connection = database.lock()?;
+        let handoff = Handoff::get(&connection, &handoff_id).map_err(|e| e.to_string())?;
+        TaskRecord::get(&connection, &handoff.task_id)
+            .map_err(|e| e.to_string())?
+            .worktree_path
+    };
+    // Read off the UI thread; the decision below re-checks nothing but the stored handoff.
+    let head = if approved {
+        let path = worktree.clone();
+        Some(
+            tauri::async_runtime::spawn_blocking(move || worktree_head(&path))
+                .await
+                .map_err(|e| e.to_string())??,
+        )
+    } else {
+        None
+    };
+    {
+        let mut connection = database.lock()?;
+        review_decision(
+            &mut connection,
+            &handoff_id,
+            approved,
+            note.as_deref(),
+            |_| head.clone().ok_or_else(|| "no head was read".to_owned()),
+            crate::pr_status::now_ms(),
+            &uuid::Uuid::new_v4().hyphenated().to_string(),
+        )?;
+    }
+    if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+        tracing::debug!(%error, "could not tell the window about the review");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use brachio_runtime::mailbox::MailResponse;
+    use brachio_store::open_in_memory;
+
+    use super::{build_view, handoff_request, review_decision, worktree_head};
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    /// A repository on branch `child` with one commit past `main`, plus a database that holds
+    /// a lead on `main` and the child in that directory.
+    fn setup() -> (tempfile::TempDir, rusqlite::Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-q", "-m", "init"]);
+        git(dir.path(), &["checkout", "-q", "-b", "child"]);
+        std::fs::write(dir.path().join("b.txt"), "b").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-q", "-m", "work"]);
+        let db = open_in_memory().unwrap();
+        let path = dir.path().to_str().unwrap();
+        db.execute(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', ?1, 'main')",
+            [path],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+             VALUES ('lead', 'r', 'Lead', '', 'main', ?1, 'new', 0)",
+            [path],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO tasks (id, repo_id, parent_task_id, title, prompt, branch, worktree_path, state, created_at_ms)
+             VALUES ('child', 'r', 'lead', 'Child', '', 'child', ?1, 'new', 1)",
+            [path],
+        )
+        .unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn a_handoff_records_the_commit_and_waits_for_review() {
+        let (dir, mut db) = setup();
+        let response = handoff_request(
+            &mut db,
+            "child:agent",
+            "added b",
+            &["cargo test".to_owned()],
+            5,
+            "h1",
+        )
+        .unwrap();
+        let head = worktree_head(dir.path()).unwrap();
+        assert_eq!(
+            response,
+            MailResponse::HandedOff {
+                commit_sha: head.clone(),
+                changed_paths: 1
+            }
+        );
+        let view = build_view(&db, "lead").unwrap();
+        let child = &view.children[0];
+        assert_eq!(child.state, "review_required");
+        let handoff = child.handoff.as_ref().unwrap();
+        assert_eq!(handoff.commit_sha, head);
+        assert_eq!(handoff.changed_paths, vec!["b.txt".to_owned()]);
+        assert_eq!(handoff.reported_tests, vec!["cargo test".to_owned()]);
+        assert!(handoff.verified_qa.is_none() && handoff.can_review);
+    }
+
+    #[test]
+    fn uncommitted_work_and_a_lead_are_refused() {
+        let (dir, mut db) = setup();
+        std::fs::write(dir.path().join("c.txt"), "c").unwrap();
+        let dirty = handoff_request(&mut db, "child:agent", "s", &[], 5, "h1").unwrap_err();
+        assert!(dirty.contains("uncommitted"), "{dirty}");
+        let lead = handoff_request(&mut db, "lead:agent", "s", &[], 5, "h2").unwrap_err();
+        assert!(lead.contains("child"), "{lead}");
+    }
+
+    #[test]
+    fn approving_a_moved_branch_is_refused_and_changes_nothing() {
+        let (dir, mut db) = setup();
+        handoff_request(&mut db, "child:agent", "added b", &[], 5, "h1").unwrap();
+        std::fs::write(dir.path().join("d.txt"), "d").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-q", "-m", "late"]);
+        let error =
+            review_decision(&mut db, "h1", true, None, worktree_head_of, 9, "m1").unwrap_err();
+        assert!(error.contains("moved after the handoff"), "{error}");
+        assert_eq!(
+            build_view(&db, "lead").unwrap().children[0].state,
+            "review_required"
+        );
+    }
+
+    fn worktree_head_of(path: &Path) -> Result<String, String> {
+        worktree_head(path)
+    }
+
+    #[test]
+    fn approving_completes_and_rejecting_needs_a_reason() {
+        let (_dir, mut db) = setup();
+        handoff_request(&mut db, "child:agent", "added b", &[], 5, "h1").unwrap();
+        let blank = review_decision(&mut db, "h1", false, Some("  "), worktree_head_of, 6, "m1");
+        assert!(blank.is_err());
+        review_decision(
+            &mut db,
+            "h1",
+            false,
+            Some("add tests"),
+            worktree_head_of,
+            7,
+            "m1",
+        )
+        .unwrap();
+        assert_eq!(
+            build_view(&db, "lead").unwrap().children[0].state,
+            "running"
+        );
+        handoff_request(&mut db, "child:agent", "added tests", &[], 8, "h2").unwrap();
+        review_decision(&mut db, "h2", true, None, worktree_head_of, 9, "m2").unwrap();
+        assert_eq!(
+            build_view(&db, "lead").unwrap().children[0].state,
+            "completed"
+        );
+    }
+}

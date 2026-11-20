@@ -338,6 +338,14 @@ pub(crate) async fn create_task(
             });
         }
     };
+    if task.parent_task_id.is_some() {
+        let started = database.lock().and_then(|mut c| {
+            brachio_store::mark_running(&mut c, &task.id, now_ms()).map_err(to_text)
+        });
+        if let Err(error) = started {
+            tracing::warn!(%error, "could not record that the child task started");
+        }
+    }
     let setup_copy_error = brachio_git::copy_setup_files(&repo.path, &path, &setup)
         .err()
         .map(to_text);

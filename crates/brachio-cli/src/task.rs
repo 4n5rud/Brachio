@@ -27,6 +27,20 @@ pub enum TaskCommand {
     /// Ask the user to create a child task with its own worktree and branch. The user is asked
     /// first; nothing is created unless they allow it. Prints the new task's terminal key.
     Create(CreateArgs),
+    /// Hand this child task's committed work over for the user's review. The app records the
+    /// current commit and changed files itself; the task is not complete until the user approves.
+    Handoff(HandoffArgs),
+}
+
+#[derive(Args)]
+pub struct HandoffArgs {
+    /// What was done, in a few sentences.
+    #[arg(long)]
+    summary: String,
+    /// JSON array of strings naming the tests you ran, such as '["cargo test"]'. The user also
+    /// sees whether Brachio itself verified a QA run.
+    #[arg(long)]
+    tests: Option<String>,
 }
 
 #[derive(Args)]
@@ -62,6 +76,7 @@ pub struct WaitArgs {
 pub fn run(command: TaskCommand) -> Result<()> {
     match command {
         TaskCommand::Create(args) => create(args),
+        TaskCommand::Handoff(args) => handoff(&args),
         TaskCommand::List => list(),
         TaskCommand::Wait(args) => wait(&args),
     }
@@ -161,4 +176,51 @@ fn create(args: CreateArgs) -> Result<()> {
     };
     println!("created {key} ({branch})");
     Ok(())
+}
+
+fn parse_tests(text: Option<&str>) -> Result<Vec<String>> {
+    match text {
+        None => Ok(Vec::new()),
+        Some(text) => serde_json::from_str(text)
+            .map_err(|_| anyhow::anyhow!("--tests must be a JSON array of strings.")),
+    }
+}
+
+fn handoff(args: &HandoffArgs) -> Result<()> {
+    let tests = parse_tests(args.tests.as_deref())?;
+    let (endpoint, key) = mail::endpoint_and_key()?;
+    let request = MailRequest::Handoff {
+        key,
+        summary: args.summary.clone(),
+        tests,
+    };
+    let MailResponse::HandedOff {
+        commit_sha,
+        changed_paths,
+    } = mail::call_within(&endpoint, &request, CALL_TIMEOUT)?
+    else {
+        bail!("Brachio answered with something unexpected.");
+    };
+    println!(
+        "handed off {} ({changed_paths} changed files); waiting for the user's review",
+        &commit_sha[..commit_sha.len().min(12)]
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::parse_tests;
+
+    #[test]
+    fn tests_must_be_a_json_array_of_strings() {
+        assert_eq!(parse_tests(None).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse_tests(Some(r#"["cargo test"]"#)).unwrap(),
+            vec!["cargo test".to_owned()]
+        );
+        assert!(parse_tests(Some("cargo test")).is_err());
+        assert!(parse_tests(Some(r#"{"a":1}"#)).is_err());
+    }
 }
