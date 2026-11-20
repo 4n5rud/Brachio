@@ -1,13 +1,31 @@
-//! Memory and CPU of the app's process tree and the terminal runtimes, for the status bar.
+//! Memory and CPU of the app's process tree and this app's terminal runtimes, for the status bar.
+//!
+//! Memory is the sum of each counted process's resident memory (RSS on Unix, working set on
+//! Windows) over the app tree and the trees of the runtimes this installation owns. Pages shared
+//! between processes can be counted more than once, so the sum can exceed the unique memory in use.
+//! The runtimes are the processes that answer `Hello` on this installation's own endpoints (current
+//! and older generations); a runtime that does not answer or reports no PID is not counted, and
+//! no process is picked by its name.
 
 use std::collections::HashSet;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
+use brachio_runtime::client::Client;
+use brachio_runtime::wire::{Action, ResponseResult};
 use serde::Serialize;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
+use crate::runtime_client;
+
+const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_millis(500);
+const RUNTIME_PIDS_TTL: Duration = Duration::from_secs(30);
+
 #[derive(Default)]
-pub struct ResourceMonitor(Mutex<System>);
+pub struct ResourceMonitor {
+    system: Mutex<System>,
+    runtime_pids: Mutex<Option<(Instant, Vec<Pid>)>>,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,18 +36,14 @@ pub struct ResourceUsage {
     cpu_percent: f32,
 }
 
-type ProcessRow = (Pid, Option<Pid>, String);
-
-fn is_runtime_name(name: &str) -> bool {
-    name.eq_ignore_ascii_case("brachio-runtime") || name.eq_ignore_ascii_case("brachio-runtime.exe")
-}
+type ProcessRow = (Pid, Option<Pid>);
 
 /// Every root and every process below any of them.
 fn tree_pids(processes: &[ProcessRow], roots: impl IntoIterator<Item = Pid>) -> HashSet<Pid> {
     let mut pids: HashSet<Pid> = roots.into_iter().collect();
     loop {
         let before = pids.len();
-        for (pid, parent, _) in processes {
+        for (pid, parent) in processes {
             if parent.is_some_and(|parent| pids.contains(&parent)) {
                 pids.insert(*pid);
             }
@@ -40,36 +54,67 @@ fn tree_pids(processes: &[ProcessRow], roots: impl IntoIterator<Item = Pid>) -> 
     }
 }
 
-/// The app's tree plus the tree of every terminal runtime, which outlives the app.
-fn counted_pids(processes: &[ProcessRow], app: Pid) -> HashSet<Pid> {
-    let runtimes = processes
-        .iter()
-        .filter(|(_, _, name)| is_runtime_name(name))
-        .map(|(pid, _, _)| *pid);
-    tree_pids(processes, runtimes.chain([app]))
+/// The app's tree plus the tree of every known runtime, which outlives the app.
+fn counted_pids(processes: &[ProcessRow], app: Pid, runtimes: &[Pid]) -> HashSet<Pid> {
+    tree_pids(processes, runtimes.iter().copied().chain([app]))
+}
+
+/// PIDs of the runtimes that answer on this installation's endpoints; silent ones add nothing.
+async fn answering_runtime_pids() -> Vec<Pid> {
+    let mut pids = Vec::new();
+    for endpoint in runtime_client::own_endpoints() {
+        let client = Client::new(&endpoint);
+        let call = client.call(Action::Hello);
+        let Ok(Ok(reply)) = tokio::time::timeout(RUNTIME_ANSWER_TIMEOUT, call).await else {
+            continue;
+        };
+        if let ResponseResult::Hello { runtime } = reply.result {
+            let pid = Pid::from_u32(runtime.pid);
+            if runtime.pid != 0 && !pids.contains(&pid) {
+                pids.push(pid);
+            }
+        }
+    }
+    pids
+}
+
+impl ResourceMonitor {
+    async fn runtime_pids(&self) -> Vec<Pid> {
+        let cached = self.runtime_pids.lock().ok().and_then(|cache| {
+            cache
+                .as_ref()
+                .filter(|(at, _)| at.elapsed() < RUNTIME_PIDS_TTL)
+                .map(|(_, pids)| pids.clone())
+        });
+        if let Some(pids) = cached {
+            return pids;
+        }
+        let pids = answering_runtime_pids().await;
+        if let Ok(mut cache) = self.runtime_pids.lock() {
+            *cache = Some((Instant::now(), pids.clone()));
+        }
+        pids
+    }
 }
 
 /// CPU is measured since the previous call, so the first reading is 0.
 #[tauri::command]
-pub fn resource_usage(monitor: tauri::State<'_, ResourceMonitor>) -> Result<ResourceUsage, String> {
+pub async fn resource_usage(
+    monitor: tauri::State<'_, ResourceMonitor>,
+) -> Result<ResourceUsage, String> {
+    let runtimes = monitor.runtime_pids().await;
     let mut system = monitor
-        .0
+        .system
         .lock()
         .map_err(|_| "resource monitor is poisoned".to_string())?;
     system.refresh_processes(ProcessesToUpdate::All, true);
     let processes: Vec<ProcessRow> = system
         .processes()
         .iter()
-        .map(|(pid, process)| {
-            (
-                *pid,
-                process.parent(),
-                process.name().to_string_lossy().into_owned(),
-            )
-        })
+        .map(|(pid, process)| (*pid, process.parent()))
         .collect();
     let app = Pid::from_u32(std::process::id());
-    let pids = counted_pids(&processes, app);
+    let pids = counted_pids(&processes, app, &runtimes);
     let app_tree = tree_pids(&processes, [app]);
     let (mut memory_bytes, mut runtime_memory_bytes, mut cpu_total) = (0u64, 0u64, 0f32);
     for pid in &pids {
@@ -94,16 +139,13 @@ pub fn resource_usage(monitor: tauri::State<'_, ResourceMonitor>) -> Result<Reso
 mod tests {
     use super::*;
 
-    fn row(pid: u32, parent: Option<u32>, name: &str) -> ProcessRow {
-        (
-            Pid::from_u32(pid),
-            parent.map(Pid::from_u32),
-            name.to_string(),
-        )
+    fn row(pid: u32, parent: Option<u32>) -> ProcessRow {
+        (Pid::from_u32(pid), parent.map(Pid::from_u32))
     }
 
-    fn counted(processes: &[ProcessRow]) -> Vec<u32> {
-        let mut pids: Vec<u32> = counted_pids(processes, Pid::from_u32(1))
+    fn counted(processes: &[ProcessRow], runtimes: &[u32]) -> Vec<u32> {
+        let runtimes: Vec<Pid> = runtimes.iter().copied().map(Pid::from_u32).collect();
+        let mut pids: Vec<u32> = counted_pids(processes, Pid::from_u32(1), &runtimes)
             .iter()
             .map(|pid| pid.as_u32())
             .collect();
@@ -112,36 +154,40 @@ mod tests {
     }
 
     #[test]
-    fn counts_app_children_and_detached_runtime_trees_only() {
+    fn counts_app_children_and_given_runtime_trees_only() {
         let processes = [
-            row(1, Some(100), "brachio"),
-            row(2, Some(1), "webview"),
-            row(10, Some(200), "brachio-runtime.exe"),
-            row(11, Some(10), "claude"),
-            row(12, Some(11), "node"),
-            row(20, Some(300), "chrome"),
-            row(21, Some(20), "chrome-helper"),
-            row(30, Some(300), "my-brachio-runtime-tool"),
-            row(31, Some(30), "child"),
+            row(1, Some(100)),
+            row(2, Some(1)),
+            row(10, Some(200)),
+            row(11, Some(10)),
+            row(12, Some(11)),
+            row(30, Some(300)),
+            row(31, Some(30)),
         ];
-        assert_eq!(counted(&processes), vec![1, 2, 10, 11, 12]);
+        assert_eq!(counted(&processes, &[10]), vec![1, 2, 10, 11, 12]);
     }
 
     #[test]
-    fn runtime_name_matches_case_insensitively_and_exactly() {
-        let processes = [row(10, None, "BRACHIO-RUNTIME"), row(11, Some(10), "x")];
-        assert_eq!(counted(&processes), vec![1, 10, 11]);
-        assert!(!is_runtime_name("brachio-runtime-old"));
+    fn current_and_old_runtimes_are_counted_once_each() {
+        let processes = [
+            row(1, None),
+            row(10, Some(200)),
+            row(11, Some(10)),
+            row(20, Some(201)),
+            row(21, Some(20)),
+        ];
+        assert_eq!(counted(&processes, &[10, 20]), vec![1, 10, 11, 20, 21]);
     }
 
     #[test]
     fn runtime_below_app_is_counted_once() {
-        let processes = [
-            row(1, None, "brachio"),
-            row(10, Some(1), "brachio-runtime"),
-            row(11, Some(10), "claude"),
-        ];
-        let pids = counted_pids(&processes, Pid::from_u32(1));
-        assert_eq!(pids.len(), 3);
+        let processes = [row(1, None), row(10, Some(1)), row(11, Some(10))];
+        assert_eq!(counted(&processes, &[10]), vec![1, 10, 11]);
+    }
+
+    #[test]
+    fn no_known_runtime_counts_only_the_app() {
+        let processes = [row(1, None), row(10, Some(200)), row(11, Some(10))];
+        assert_eq!(counted(&processes, &[]), vec![1]);
     }
 }
