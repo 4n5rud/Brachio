@@ -1,6 +1,7 @@
 //! Starting programs: the command line they get, and the PTY events they produce.
 
 use std::env;
+use std::num::NonZeroU16;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -11,6 +12,7 @@ use brachio_runtime::wire::{ResponseResult, StatusInfo};
 use tokio::sync::watch;
 
 use crate::runtime::Runtime;
+use crate::screen::{COLS, ROWS};
 use crate::session::{lock, Session, StartupOutput};
 
 impl Runtime {
@@ -63,7 +65,12 @@ impl Runtime {
     }
 
     fn start_program(&self, spec: &SpawnSpec) -> Result<Session> {
-        let output = Arc::new(Mutex::new(StartupOutput::default()));
+        let mut initial = StartupOutput::default();
+        initial.screen.resize(
+            NonZeroU16::new(spec.rows).unwrap_or(ROWS),
+            NonZeroU16::new(spec.cols).unwrap_or(COLS),
+        );
+        let output = Arc::new(Mutex::new(initial));
         let (updates, receiver) = watch::channel(());
         let sink = program_events(&output, updates, Arc::downgrade(&self.manager));
         let id = self.manager.spawn(spec, sink)?;

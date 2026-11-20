@@ -102,6 +102,37 @@ async fn a_launched_program_receives_its_arguments_and_environment() {
 }
 
 #[tokio::test]
+async fn the_first_snapshot_uses_the_dimensions_requested_at_launch() {
+    let (_host, client) = start();
+    ready(&client).await;
+    let (program, args): (&str, &[&str]) = if cfg!(windows) {
+        ("cmd.exe", &["/d"])
+    } else {
+        ("sh", &["-i"])
+    };
+    client
+        .call(launch(program, args, &[]))
+        .await
+        .expect("launch");
+    let reply = client
+        .call(Action::Snapshot {
+            key: "agent".to_owned(),
+        })
+        .await
+        .expect("read initial snapshot");
+    client
+        .call(Action::Stop {
+            key: "agent".to_owned(),
+        })
+        .await
+        .expect("stop test shell");
+    let ResponseResult::Snapshot { screen, .. } = reply.result else {
+        panic!("expected a screen snapshot");
+    };
+    assert_eq!((screen.rows, screen.cols), (30, 100));
+}
+
+#[tokio::test]
 async fn a_malformed_environment_entry_is_refused() {
     let (_host, client) = start();
     ready(&client).await;
