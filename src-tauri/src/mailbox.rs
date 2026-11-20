@@ -1,12 +1,15 @@
 //! Messages between agent sessions: what the app does with a request from `brachio send`,
 //! `check`, `inbox` or `peers`, and what the interface reads to show unread mail.
 
+use std::time::Duration;
+
 use brachio_runtime::mailbox::{
-    MailMessage, MailRequest, MailResponse, Peer, SendMail, DEFAULT_BATCH, MAX_BATCH,
+    ChildTaskInfo, MailMessage, MailRequest, MailResponse, Peer, ReportedChild, SendMail,
+    DEFAULT_BATCH, MAX_BATCH, MAX_WAIT_SECS,
 };
 use brachio_store::{
-    peek_unread, recent_messages, reply_recipient, send_message, take_unread, unread_counts,
-    Message, NewMessage, TaskRecord,
+    child_reports, peek_unread, recent_messages, reply_recipient, send_message, take_unread,
+    unread_counts, Message, NewMessage, TaskRecord,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
@@ -19,6 +22,9 @@ use crate::workspace::Database;
 pub const CHANGED_EVENT: &str = "mailbox://changed";
 const PREVIEW_CHARS: usize = 200;
 const PRIORITIES: [&str; 3] = ["low", "normal", "high"];
+const REPORT_SUBJECT_CHARS: usize = 120;
+/// How often a waiting lead's children are looked at again.
+pub const WAIT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Answers one request. The second value says whether unread counts changed.
 pub fn handle(
@@ -33,6 +39,8 @@ pub fn handle(
         MailRequest::Inbox { key, limit } => inbox(connection, &key, limit),
         MailRequest::Peers { key } => peers(connection, &key),
         MailRequest::CreateTask { .. } => Err("Creating tasks needs the user's answer.".to_owned()),
+        MailRequest::ListTasks { key } => list_tasks(connection, &key),
+        MailRequest::WaitTasks { key, .. } => child_status(connection, &key),
     };
     outcome.unwrap_or_else(|message| (MailResponse::Error { message }, false))
 }
@@ -49,18 +57,20 @@ pub(crate) fn agent_owner(connection: &Connection, key: &str) -> Result<TaskReco
 }
 
 fn send(connection: &Connection, mail: &SendMail, now_ms: i64, new_id: &str) -> Outcome {
-    agent_owner(connection, &mail.from)?;
+    let sender = agent_owner(connection, &mail.from)?;
     let to = match mail.reply_to.as_deref() {
         Some(parent) => {
             let recipient = reply_recipient(connection, parent, &mail.from)
                 .map_err(|error| error.to_string())?;
             agent_owner(connection, &recipient)?;
-            if !mail.to.trim().is_empty() && resolve_target(connection, &mail.to)? != recipient {
+            if !mail.to.trim().is_empty()
+                && resolve_target(connection, &sender, &mail.to)? != recipient
+            {
                 return Err("A reply must go to the other participant in the thread.".to_owned());
             }
             recipient
         }
-        None => resolve_target(connection, &mail.to)?,
+        None => resolve_target(connection, &sender, &mail.to)?,
     };
     if to == mail.from {
         return Err("A message cannot be sent to the terminal that sends it.".to_owned());
@@ -100,9 +110,21 @@ fn send(connection: &Connection, mail: &SendMail, now_ms: i64, new_id: &str) -> 
     ))
 }
 
-/// A terminal key, a task id or its start, or a task title.
-fn resolve_target(connection: &Connection, text: &str) -> Result<String, String> {
+/// `parent`, a terminal key, a task id or its start, or a task title.
+fn resolve_target(
+    connection: &Connection,
+    sender: &TaskRecord,
+    text: &str,
+) -> Result<String, String> {
     let text = text.trim();
+    if text == "parent" {
+        let parent = sender
+            .parent_task_id
+            .as_deref()
+            .ok_or_else(|| "this task has no parent".to_owned())?;
+        let key = format!("{parent}:agent");
+        return agent_owner(connection, &key).map(|_| key);
+    }
     if text.contains(':') {
         return agent_owner(connection, text).map(|_| text.to_owned());
     }
@@ -203,6 +225,80 @@ fn peers(connection: &Connection, key: &str) -> Outcome {
     }
     peers.retain(|peer| peer.key != key);
     Ok((MailResponse::Peers { peers }, false))
+}
+
+fn list_tasks(connection: &Connection, key: &str) -> Outcome {
+    let lead = agent_owner(connection, key)?;
+    let children = child_reports(connection, &lead.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|child| ChildTaskInfo {
+            key: format!("{}:agent", child.task_id),
+            title: child.title,
+            archived: child.archived,
+            reported: child.reported_subject.is_some(),
+            unread: child.unread,
+        })
+        .collect();
+    Ok((MailResponse::TaskList { children }, false))
+}
+
+/// Which open children of the lead have reported and which have not, right now.
+fn child_status(connection: &Connection, key: &str) -> Outcome {
+    let lead = agent_owner(connection, key)?;
+    let mut reported = Vec::new();
+    let mut pending = Vec::new();
+    for child in child_reports(connection, &lead.id).map_err(|error| error.to_string())? {
+        if child.archived {
+            continue;
+        }
+        let key = format!("{}:agent", child.task_id);
+        match child.reported_subject {
+            Some(subject) => reported.push(ReportedChild {
+                key,
+                subject: subject.chars().take(REPORT_SUBJECT_CHARS).collect(),
+            }),
+            None => pending.push(key),
+        }
+    }
+    Ok((
+        MailResponse::TasksReported {
+            reported,
+            pending,
+            timed_out: false,
+        },
+        false,
+    ))
+}
+
+/// Looks at `poll` every `interval` until the children have reported or `timeout` passes. Dropping
+/// the future stops the wait.
+pub async fn wait_for_reports(
+    mut poll: impl FnMut() -> MailResponse,
+    all: bool,
+    timeout: Duration,
+    interval: Duration,
+) -> MailResponse {
+    let deadline = tokio::time::Instant::now() + timeout.min(Duration::from_secs(MAX_WAIT_SECS));
+    loop {
+        let response = poll();
+        let MailResponse::TasksReported {
+            reported, pending, ..
+        } = response
+        else {
+            return response;
+        };
+        let done = pending.is_empty() || (!all && !reported.is_empty());
+        let now = tokio::time::Instant::now();
+        if done || now >= deadline {
+            return MailResponse::TasksReported {
+                reported,
+                pending,
+                timed_out: !done,
+            };
+        }
+        tokio::time::sleep(interval.min(deadline - now)).await;
+    }
 }
 
 fn unread_for(connection: &Connection, key: &str) -> Result<u32, String> {
@@ -315,7 +411,9 @@ mod tests {
     use brachio_runtime::mailbox::{MailRequest, MailResponse, SendMail};
     use brachio_store::open_in_memory;
 
-    use super::handle;
+    use std::time::Duration;
+
+    use super::{handle, wait_for_reports};
 
     fn database() -> rusqlite::Connection {
         let connection = open_in_memory().expect("open database");
@@ -481,5 +579,197 @@ mod tests {
             handle(&mut connection, mail("aaaa1111:agent", &key, "hi"), 2, "m1");
         assert!(changed);
         assert!(matches!(answer, MailResponse::Sent { ref to, .. } if *to == key));
+    }
+
+    fn with_children() -> rusqlite::Connection {
+        let connection = database();
+        connection
+            .execute_batch(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, parent_task_id)
+                 VALUES ('cccc3333', 'r', 'Child one', '', 'b3', '/w3', 'new', 5, 'aaaa1111'),
+                        ('dddd4444', 'r', 'Child two', '', 'b4', '/w4', 'new', 6, 'aaaa1111');",
+            )
+            .expect("insert children");
+        connection
+    }
+
+    fn done(connection: &mut rusqlite::Connection, child: &str, subject: &str) {
+        let from = format!("{child}:agent");
+        let MailRequest::Send(mut report) = mail(&from, "parent", subject) else {
+            panic!("expected a send request");
+        };
+        report.kind = "worker_done".into();
+        let (answer, _) = handle(connection, MailRequest::Send(report), 7, subject);
+        assert!(
+            matches!(answer, MailResponse::Sent { ref to, .. } if to == "aaaa1111:agent"),
+            "{answer:?}"
+        );
+    }
+
+    #[test]
+    fn to_parent_reaches_the_parent_agent_and_a_task_without_parent_is_told_so() {
+        let mut connection = with_children();
+        done(&mut connection, "cccc3333", "done one");
+        let (answer, _) = handle(
+            &mut connection,
+            mail("aaaa1111:agent", "parent", "x"),
+            8,
+            "m",
+        );
+        assert!(
+            matches!(answer, MailResponse::Error { ref message } if message == "this task has no parent")
+        );
+    }
+
+    #[test]
+    fn listing_shows_children_in_order_with_reported_and_unread() {
+        let mut connection = with_children();
+        done(&mut connection, "dddd4444", "done two");
+        let (answer, _) = handle(
+            &mut connection,
+            MailRequest::ListTasks {
+                key: "aaaa1111:agent".into(),
+            },
+            9,
+            "x",
+        );
+        let MailResponse::TaskList { children } = answer else {
+            panic!("expected a list");
+        };
+        let shown: Vec<_> = children
+            .iter()
+            .map(|c| (c.key.as_str(), c.reported, c.unread))
+            .collect();
+        assert_eq!(
+            shown,
+            [("cccc3333:agent", false, 0), ("dddd4444:agent", true, 1)]
+        );
+        let (refused, _) = handle(
+            &mut connection,
+            MailRequest::ListTasks {
+                key: "aaaa1111:shell".into(),
+            },
+            9,
+            "x",
+        );
+        assert!(matches!(refused, MailResponse::Error { .. }));
+    }
+
+    fn status(connection: &mut rusqlite::Connection) -> MailResponse {
+        handle(
+            connection,
+            MailRequest::WaitTasks {
+                key: "aaaa1111:agent".into(),
+                all: true,
+                timeout_secs: 1,
+            },
+            9,
+            "x",
+        )
+        .0
+    }
+
+    fn run(
+        mut poll: impl FnMut() -> MailResponse,
+        all: bool,
+        timeout_ms: u64,
+    ) -> (MailResponse, u32) {
+        let mut polls = 0;
+        let response = tauri::async_runtime::block_on(wait_for_reports(
+            || {
+                polls += 1;
+                poll()
+            },
+            all,
+            Duration::from_millis(timeout_ms),
+            Duration::from_millis(5),
+        ));
+        (response, polls)
+    }
+
+    fn reported_keys(response: &MailResponse) -> (Vec<&str>, Vec<&str>, bool) {
+        let MailResponse::TasksReported {
+            reported,
+            pending,
+            timed_out,
+        } = response
+        else {
+            panic!("expected a report, got {response:?}");
+        };
+        (
+            reported.iter().map(|r| r.key.as_str()).collect(),
+            pending.iter().map(String::as_str).collect(),
+            *timed_out,
+        )
+    }
+
+    #[test]
+    fn a_lead_without_open_children_does_not_wait() {
+        let mut connection = database();
+        let (response, polls) = run(|| status(&mut connection), true, 5_000);
+        assert_eq!(polls, 1);
+        assert_eq!(reported_keys(&response), (vec![], vec![], false));
+    }
+
+    #[test]
+    fn all_waits_for_every_child_and_any_for_the_first() {
+        let mut connection = with_children();
+        done(&mut connection, "cccc3333", "done one");
+        let (response, polls) = run(|| status(&mut connection), false, 5_000);
+        assert_eq!(polls, 1, "any returns at once because one has reported");
+        assert_eq!(
+            reported_keys(&response),
+            (vec!["cccc3333:agent"], vec!["dddd4444:agent"], false)
+        );
+
+        let mut ticks = 0;
+        let mut connection = with_children();
+        done(&mut connection, "cccc3333", "done one");
+        let shared = std::cell::RefCell::new(connection);
+        let (response, polls) = run(
+            || {
+                ticks += 1;
+                if ticks == 3 {
+                    done(&mut shared.borrow_mut(), "dddd4444", "done two");
+                }
+                status(&mut shared.borrow_mut())
+            },
+            true,
+            5_000,
+        );
+        assert_eq!(polls, 3, "all keeps waiting until the second child reports");
+        assert_eq!(
+            reported_keys(&response),
+            (vec!["cccc3333:agent", "dddd4444:agent"], vec![], false)
+        );
+    }
+
+    #[test]
+    fn running_out_of_time_returns_the_children_still_pending() {
+        let mut connection = with_children();
+        done(&mut connection, "cccc3333", "done one");
+        let (response, polls) = run(|| status(&mut connection), true, 30);
+        assert!(polls > 1);
+        assert_eq!(
+            reported_keys(&response),
+            (vec!["cccc3333:agent"], vec!["dddd4444:agent"], true)
+        );
+    }
+
+    #[test]
+    fn archived_children_are_not_waited_for() {
+        let mut connection = with_children();
+        connection
+            .execute(
+                "UPDATE tasks SET archived_at_ms = 1 WHERE id = 'dddd4444'",
+                [],
+            )
+            .expect("archive");
+        done(&mut connection, "cccc3333", "done one");
+        let (response, _) = run(|| status(&mut connection), true, 5_000);
+        assert_eq!(
+            reported_keys(&response),
+            (vec!["cccc3333:agent"], vec![], false)
+        );
     }
 }

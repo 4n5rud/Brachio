@@ -137,6 +137,32 @@ impl Approvals {
                     };
                     self.create_task(&mut reader, request).await
                 }
+                MailRequest::WaitTasks {
+                    key,
+                    all,
+                    timeout_secs,
+                } => {
+                    let timeout =
+                        Duration::from_secs(timeout_secs.clamp(1, mailbox::MAX_WAIT_SECS));
+                    let poll = || {
+                        (self.mail)(MailRequest::WaitTasks {
+                            key: key.clone(),
+                            all,
+                            timeout_secs,
+                        })
+                    };
+                    let waiting = crate::mailbox::wait_for_reports(
+                        poll,
+                        all,
+                        timeout,
+                        crate::mailbox::WAIT_INTERVAL,
+                    );
+                    tokio::select! {
+                        response = waiting => response,
+                        // The agent was interrupted and its command closed the connection.
+                        _ = reader.fill_buf() => return Ok(()),
+                    }
+                }
                 other => (self.mail)(other),
             };
             write_message(reader.get_mut(), &response, MAX_RESPONSE).await?;
@@ -406,6 +432,53 @@ mod tests {
                     message: "asked by t:agent".to_owned()
                 }
             );
+        });
+    }
+
+    #[test]
+    fn a_wait_stops_looking_once_the_command_hangs_up() {
+        tauri::async_runtime::block_on(async {
+            use std::sync::atomic::{AtomicU32, Ordering};
+
+            use brachio_runtime::mailbox::{MailRequest, MailResponse};
+            use brachio_runtime::wire::{write_message, MAX_MESSAGE};
+
+            let name = format!("wait-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+            let polls = Arc::new(AtomicU32::new(0));
+            let counted = Arc::clone(&polls);
+            let approvals = Approvals::with_mail(
+                |_| false,
+                |_| {},
+                move |_| {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    MailResponse::TasksReported {
+                        reported: vec![],
+                        pending: vec!["t:agent".to_owned()],
+                        timed_out: false,
+                    }
+                },
+                super::NoChildTasks,
+            );
+            let listener = transport::listen(&name).expect("listen");
+            tauri::async_runtime::spawn(approvals.serve(listener));
+
+            let mut stream = transport::connect(&name).await.expect("connect");
+            let request = MailRequest::WaitTasks {
+                key: "lead:agent".to_owned(),
+                all: true,
+                timeout_secs: 600,
+            };
+            write_message(&mut stream, &request, MAX_MESSAGE)
+                .await
+                .expect("send");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert_eq!(polls.load(Ordering::SeqCst), 1);
+            drop(stream);
+
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let after_hangup = polls.load(Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(2200)).await;
+            assert_eq!(polls.load(Ordering::SeqCst), after_hangup);
         });
     }
 

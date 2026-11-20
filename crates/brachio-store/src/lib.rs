@@ -1,5 +1,6 @@
 //! SQLite storage. One writer connection in WAL mode.
 
+mod child_report;
 mod database;
 mod message_record;
 mod pr_status_record;
@@ -7,6 +8,7 @@ mod repo_record;
 mod task_record;
 mod task_tabs;
 
+pub use child_report::{child_reports, ChildReport};
 pub use database::{open, open_in_memory, StoreError};
 pub use message_record::{
     expire_read_messages, forget_task_messages, peek_unread, recent_messages, reply_recipient,
