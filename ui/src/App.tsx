@@ -66,6 +66,7 @@ export function App() {
   narrowQuery.addEventListener("change", closeWhenNarrow);
   onCleanup(() => narrowQuery.removeEventListener("change", closeWhenNarrow));
   const toggleSidebar = () => setSidebarOpen((open) => { saveSidebarOpen(!open); return !open; });
+  const [inspectorWide, setInspectorWide] = createSignal(false);
   const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
@@ -783,6 +784,7 @@ export function App() {
       </Show>
       <main class="layout" classList={{
         "layout-no-inspector": !selected() || !inspectorOpen(),
+        "layout-inspector-wide": inspectorWide() && !!selected() && inspectorOpen(),
         "layout-no-sidebar": !sidebarOpen(),
         "view-hidden": view() !== "tasks",
       }}>
@@ -851,6 +853,7 @@ export function App() {
                 isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
                 onDraft={draftComment}
                 onDiffTotals={recordDiffTotals}
+                onWide={setInspectorWide}
               />
             </Show>
           )}

@@ -20,7 +20,7 @@
   font: var(--text-heading);
   margin-right: auto;
 }
-.catalog section {
+.catalog > section {
   margin-top: var(--space-6);
 }
 .catalog h2 {
@@ -97,4 +97,22 @@
 }
 .catalog-menu {
   position: static;
+}
+
+.catalog-cells {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.catalog-cell {
+  display: grid;
+  gap: var(--space-1);
+}
+.catalog-inspector {
+  max-width: 100%;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }

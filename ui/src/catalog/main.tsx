@@ -5,6 +5,7 @@ import "./catalog.css";
 import { locale, setLocale, t } from "../i18n";
 import { COLOR_THEMES } from "../lib/theme";
 import { pushToast } from "../lib/toasts";
+import { ChangesStates } from "./changes-states";
 import { ApprovalBar } from "../components/ApprovalBar";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
@@ -474,6 +475,10 @@ function Catalog() {
             <Notice tone="blocked" actions={<Button size="sm">{t("approval.openTab")}</Button>}>{t("group.needs")}</Notice>
           </div>
         </div>
+      </Section>
+
+      <Section title="Changes, diff and pull request">
+        <ChangesStates />
       </Section>
 
       <Section title="BoardTile">

@@ -1,16 +1,21 @@
-import { Button } from "./ui/Button";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import {
-  chipOf,
   openExternalLink,
   shortSha,
+  type PrChip as PrChipState,
   type PrStatusReport,
   type PullRequestSnapshot,
 } from "../lib/pr-status";
 import { prFailure, prRefreshing, prReport, refreshPrStatus } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
 import { PrChip } from "./ui/PrChip";
+import { IconButton } from "./ui/IconButton";
+import { StatusGlyph } from "./ui/StatusBadge";
+import { FileRow } from "./FileRow";
+import { InspectorNote } from "./InspectorNote";
+import { InspectorSection } from "./InspectorSection";
+import "./PullRequestStatus.css";
 
 const REVIEW_LABEL = {
   approved: "prStatus.reviewApproved",
@@ -32,14 +37,13 @@ const CHECKS_LABEL = {
   none: "prStatus.checksNone",
 } as const;
 
-const STATE_LABEL = { open: "prStatus.open", merged: "prStatus.merged", closed: "prStatus.closed" } as const;
+const CHECKS_TONE = { failure: "error", pending: "working", success: "ready", none: undefined } as const;
+
+const STATE_KEY = { open: "prChip.open", merged: "prChip.merged", closed: "prChip.closed" } as const;
 
 /** Where the task's pull request stands: checks, review, conflicts. Read only. */
 export function PullRequestStatus(props: { taskId: string }) {
   // The answer is shared with the task list, which keeps it fresh in the background.
-  const report = () => prReport(props.taskId);
-  const failure = () => prFailure(props.taskId) ?? "";
-  const busy = () => prRefreshing(props.taskId);
   const [now, setNow] = createSignal(Date.now());
   const refresh = (force: boolean) => refreshPrStatus(props.taskId, force).then(() => setNow(Date.now()));
 
@@ -49,102 +53,117 @@ export function PullRequestStatus(props: { taskId: string }) {
     onCleanup(() => clearInterval(clock));
   });
 
-  const age = (at: number) => formatAge(at, now());
-  const link = (url: string, label: string) => (
-    <button type="button" class="link-button" onClick={() => void openExternalLink(url).catch(() => {})}>
-      {label}
-    </button>
+  return (
+    <PullRequestPanel report={prReport(props.taskId)} failure={prFailure(props.taskId)} busy={prRefreshing(props.taskId)}
+      now={now()} onRefresh={() => void refresh(true)} />
   );
+}
+
+export function PullRequestPanel(props: {
+  report?: PrStatusReport;
+  failure?: string;
+  busy: boolean;
+  now: number;
+  onRefresh: () => void;
+}) {
+  const age = (at: number) => formatAge(at, props.now);
 
   return (
-    <section class="pr-status" aria-label={t("prStatus.title")}>
-      <h3>
-        {t("prStatus.title")}
-        <Button size="sm" disabled={busy()} onClick={() => void refresh(true)}>
-          {t("prStatus.refresh")}
-        </Button>
-      </h3>
-      <Show when={failure()}>{(message) => <p role="alert">{message()}</p>}</Show>
-      <Show when={!report() && !failure()}><p role="status">{t("prStatus.checking")}</p></Show>
-      <Show when={report()}>
+    <InspectorSection title={t("prStatus.title")}
+      end={<IconButton size="sm" icon="refresh" label={t("prStatus.refresh")} disabled={props.busy}
+        onClick={props.onRefresh} />}>
+      <Show when={props.failure}>{(message) => <InspectorNote tone="error">{message()}</InspectorNote>}</Show>
+      <Show when={!props.report && !props.failure}>
+        <InspectorNote tone="progress">{t("prStatus.checking")}</InspectorNote>
+      </Show>
+      <Show when={props.report}>
         {(current) => (
           <>
             <Show when={current().error}>
               {(error) => (
-                <p role="status" class="pr-offline">
-                  <strong>{t("prStatus.offlineTitle")}</strong>{" "}
+                <InspectorNote tone="warn">
+                  {t("prStatus.offlineTitle")}{" "}
                   {current().snapshot && current().checkedAtMs !== null
                     ? t("prStatus.offlineShowing").replace("{age}", age(current().checkedAtMs ?? 0))
                     : error()}
                   <Show when={current().retryInSeconds}>
                     {(seconds) => <> {t("prStatus.retryIn").replace("{seconds}", String(seconds()))}</>}
                   </Show>
-                </p>
+                </InspectorNote>
               )}
             </Show>
-            <Show when={current().noPullRequest}><p class="muted">{t("prStatus.noPullRequest")}</p></Show>
+            <Show when={current().noPullRequest}>
+              <InspectorNote>{t("prStatus.noPullRequest")}</InspectorNote>
+            </Show>
             <Show when={current().snapshot}>
-              {(snapshot) => <Snapshot snapshot={snapshot()} report={current()} link={link} />}
+              {(snapshot) => <Snapshot snapshot={snapshot()} report={current()} />}
             </Show>
             <Show when={current().checkedAtMs !== null && !current().error}>
-              <p class="muted">{t("prStatus.checkedAt").replace("{age}", age(current().checkedAtMs ?? 0))}</p>
+              <InspectorNote>{t("prStatus.checkedAt").replace("{age}", age(current().checkedAtMs ?? 0))}</InspectorNote>
             </Show>
           </>
         )}
       </Show>
-    </section>
+    </InspectorSection>
   );
 }
 
-function Snapshot(props: {
-  snapshot: PullRequestSnapshot;
-  report: PrStatusReport;
-  link: (url: string, label: string) => unknown;
-}) {
+function Snapshot(props: { snapshot: PullRequestSnapshot; report: PrStatusReport }) {
   const checks = () => props.snapshot.checks;
-  const chip = () => chipOf(props.report);
+  const chip = (): PrChipState => ({
+    key: props.snapshot.draft && props.snapshot.state === "open" ? "prChip.draft" : STATE_KEY[props.snapshot.state],
+    number: props.snapshot.number,
+    tone: "neutral",
+    stale: props.report.error !== null,
+  });
+  const open = (url: string) => void openExternalLink(url).catch(() => {});
   return (
-    <div class="pr-status-body">
-      <p>
-        {props.link(props.snapshot.url, `${props.snapshot.repository} #${props.snapshot.number}`) as never}{" "}
-        <Show when={chip()}>{(current) => <><PrChip chip={current()} />{" "}</>}</Show>
-        <span class="pr-state">
-          {t(STATE_LABEL[props.snapshot.state])}
-          <Show when={props.snapshot.draft}> · {t("prStatus.draft")}</Show>
-        </span>
-      </p>
-      <p classList={{ "pr-bad": checks().overall === "failure" }}>
-        <strong>{t(CHECKS_LABEL[checks().overall])}</strong>
-        <Show when={checks().overall !== "none"}>
-          {" "}
-          {t("prStatus.checkCounts")
-            .replace("{failing}", String(checks().failing))
-            .replace("{pending}", String(checks().pending))
-            .replace("{passing}", String(checks().passing))}
-        </Show>
-      </p>
-      <Show when={props.snapshot.failedChecks.length > 0}>
-        <ul class="pr-failed-checks">
-          <For each={props.snapshot.failedChecks}>{(check) => (
-            <li>
-              <code>{check.name}</code>
-              <Show when={check.url}>
-                {(url) => <> {props.link(url(), t("prStatus.openLog")) as never}</>}
-              </Show>
-            </li>
-          )}</For>
-        </ul>
+    <>
+      <div class="row-gap">
+        <PrChip chip={chip()} />
+        <button type="button" class="link-button" onClick={() => open(props.snapshot.url)}>
+          {props.snapshot.repository}
+        </button>
+      </div>
+      <dl class="kv2">
+        <dt>{t("prStatus.checks")}</dt>
+        <dd>
+          <Show when={CHECKS_TONE[checks().overall]} fallback={t(CHECKS_LABEL[checks().overall])}>
+            {(tone) => (
+              <span class={`status status-${tone()}`}>
+                <StatusGlyph tone={tone()} />
+                {t(CHECKS_LABEL[checks().overall])}
+              </span>
+            )}
+          </Show>
+          <Show when={checks().overall !== "none"}>
+            {" "}
+            {t("prStatus.checkCounts")
+              .replace("{failing}", String(checks().failing))
+              .replace("{pending}", String(checks().pending))
+              .replace("{passing}", String(checks().passing))}
+          </Show>
+        </dd>
+        <dt>{t("prStatus.review")}</dt>
+        <dd>{t(REVIEW_LABEL[props.snapshot.review])}</dd>
+        <dt>{t("prStatus.merge")}</dt>
+        <dd>{t(CONFLICT_LABEL[props.snapshot.conflict])} <code>{props.snapshot.baseBranch}</code></dd>
+      </dl>
+      <For each={props.snapshot.failedChecks}>{(check) => (
+        <FileRow mark="failed" path={check.name} label={check.name}
+          actionLabel={check.url ? t("prStatus.openLog") : undefined}
+          onAction={() => check.url && open(check.url)} />
+      )}</For>
+      <InspectorNote>{t("prStatus.commit").replace("{sha}", shortSha(props.snapshot.headSha))}</InspectorNote>
+      <Show when={props.report.headMatchesLocal === false && props.report.localHead}>
+        {(local) => (
+          <InspectorNote tone="warn">
+            {t("prStatus.localDiffers")
+              .replace("{local}", shortSha(local()))
+              .replace("{remote}", shortSha(props.snapshot.headSha))}
+          </InspectorNote>
+        )}
       </Show>
-      <p>{t(REVIEW_LABEL[props.snapshot.review])}</p>
-      <p classList={{ "pr-bad": props.snapshot.conflict === "conflicting" }}>
-        {t(CONFLICT_LABEL[props.snapshot.conflict])} <code>{props.snapshot.baseBranch}</code>
-      </p>
-      <p class="muted">
-        {t("prStatus.commit").replace("{sha}", shortSha(props.snapshot.headSha))}
-        <Show when={props.report.headMatchesLocal === false && props.report.localHead}>
-          {(local) => <> {t("prStatus.localDiffers").replace("{local}", shortSha(local()))}</>}
-        </Show>
-      </p>
-    </div>
+    </>
   );
 }

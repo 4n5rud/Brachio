@@ -1,0 +1,46 @@
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-row);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font: var(--text-meta);
+  color: var(--color-text-2);
+}
+.file-row:hover {
+  background: var(--color-hover);
+}
+.file-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-row .dir {
+  margin-left: var(--space-1);
+  color: var(--color-text-3);
+}
+.file-row .act {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent-text);
+  font: var(--text-label);
+}
+.file-row .act:disabled {
+  opacity: 0.45;
+}
+.fstat {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  font: 600 var(--text-xs) var(--font-mono);
+}
+.fstat-m { color: var(--color-status-working); }
+.fstat-a { color: var(--color-add); }
+.fstat-d { color: var(--color-del); }
+.fstat-r { color: var(--color-text-2); }
+.fstat-u { color: var(--color-text-3); }
+.fstat-c { color: var(--color-status-error); }

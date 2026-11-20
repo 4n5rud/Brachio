@@ -2,6 +2,9 @@ import { Button } from "./ui/Button";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { previewTaskMerge, type TaskMergePreview as MergePreview } from "../lib/workspace";
+import { FileRow } from "./FileRow";
+import { InspectorNote } from "./InspectorNote";
+import { InspectorSection } from "./InspectorSection";
 
 export function TaskMergePreview(props: { taskId: string }) {
   const [result, setResult] = createSignal<MergePreview>();
@@ -21,25 +24,34 @@ export function TaskMergePreview(props: { taskId: string }) {
     }
   };
 
+  return <MergeCheckView result={result()} error={error()} busy={busy()} onCheck={() => void check()} />;
+}
+
+export function MergeCheckView(props: { result?: MergePreview; error?: string; busy: boolean; onCheck: () => void }) {
   return (
-    <div class="merge-preview">
-      <Button size="sm" disabled={busy()} onClick={() => void check()}>
-        {t(busy() ? "mergePreview.checking" : "mergePreview.check")}
-      </Button>
-      <Show when={result()} keyed>
+    <InspectorSection title={t("mergePreview.title")}>
+      <Show when={props.result} keyed>
         {(preview) => (
-          <div classList={{ "worktree-conflicts": preview.conflicts.length > 0 }} role="status">
-            <p>{t(preview.conflicts.length ? "mergePreview.conflicts" : "mergePreview.clean")}{" "}
+          <>
+            <InspectorNote tone={preview.conflicts.length ? "error" : "ok"}>
+              {t(preview.conflicts.length ? "mergePreview.conflicts" : "mergePreview.clean")}{" "}
               <code>{preview.baseBranch}</code>
-            </p>
-            <Show when={!preview.remoteTracking}><p>{t("mergePreview.localOnly")}</p></Show>
+            </InspectorNote>
+            <For each={preview.conflicts}>{(path) => <FileRow mark="C" path={path} />}</For>
             <Show when={preview.conflicts.length > 0}>
-              <ul><For each={preview.conflicts}>{(path) => <li><code>{path}</code></li>}</For></ul>
+              <InspectorNote>{t("mergePreview.resolve").replace("{base}", preview.baseBranch)}</InspectorNote>
             </Show>
-          </div>
+            <Show when={!preview.remoteTracking}>
+              <InspectorNote tone="warn">{t("mergePreview.localOnly")}</InspectorNote>
+            </Show>
+          </>
         )}
       </Show>
-      <Show when={error()}><p role="alert">{error()}</p></Show>
-    </div>
+      <Show when={props.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+      <Button size="sm" icon={props.result ? "refresh" : undefined} loading={props.busy}
+        loadingLabel={t("mergePreview.checking")} onClick={props.onCheck}>
+        {t(props.result || props.error ? "mergePreview.again" : "mergePreview.check")}
+      </Button>
+    </InspectorSection>
   );
 }

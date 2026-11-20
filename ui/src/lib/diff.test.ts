@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { diffRows, diffTotals, splitDiffRows } from "./diff";
+import { diffFiles, diffRows, diffTotals, splitDiffRows } from "./diff";
 
 test("decodes Git C-quoted paths and drops locations for malformed ones", () => {
   const quoted = String.raw`"tab\tname \"q\" \\ \355\225\234.txt"`;
@@ -67,5 +67,37 @@ test("pairs replacements and keeps adjacent hunks separate", () => {
     { shared: context },
     { shared: secondHunk },
     { next: insertion },
+  ]);
+});
+
+test("lists each file with its status and line totals", () => {
+  const patch = [
+    "diff --git a/src/new.rs b/src/new.rs",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/src/new.rs",
+    "@@ -0,0 +1,2 @@",
+    "+a",
+    "+b",
+    "diff --git a/gone.rs b/gone.rs",
+    "deleted file mode 100644",
+    "--- a/gone.rs",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-x",
+    "diff --git a/old.md b/docs/new.md",
+    "similarity index 80%",
+    "rename from old.md",
+    "rename to docs/new.md",
+    "--- a/old.md",
+    "+++ b/docs/new.md",
+    "@@ -1 +1 @@",
+    "-one",
+    "+two",
+  ].join("\n");
+  expect(diffFiles(patch)).toEqual([
+    { path: "src/new.rs", status: "A", additions: 2, deletions: 0 },
+    { path: "gone.rs", status: "D", additions: 0, deletions: 1 },
+    { path: "docs/new.md", status: "R", additions: 1, deletions: 1 },
   ]);
 });

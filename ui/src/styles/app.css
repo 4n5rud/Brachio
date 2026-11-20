@@ -112,6 +112,12 @@ p {
 .layout-no-sidebar {
   grid-template-columns: minmax(0, 1fr) var(--size-inspector);
 }
+.layout-inspector-wide {
+  grid-template-columns: var(--size-sidebar) minmax(0, 1fr) clamp(var(--size-inspector), calc(100vw - var(--size-sidebar) - 352px), var(--size-inspector-wide));
+}
+.layout-inspector-wide.layout-no-sidebar {
+  grid-template-columns: minmax(0, 1fr) clamp(var(--size-inspector), calc(100vw - 352px), var(--size-inspector-wide));
+}
 .layout-no-sidebar.layout-no-inspector {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -325,9 +331,10 @@ p {
   color: var(--color-text-2);
 }
 .inspector-changes {
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
-  overflow-wrap: anywhere;
 }
 .inspector-patch {
   overflow: auto;
@@ -344,108 +351,7 @@ p {
   min-height: 24rem;
   border: 1px solid var(--color-line);
 }
-.pr-status {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md, 6px);
-  background: var(--color-panel);
-  overflow-wrap: anywhere;
-}
-.pr-status h3 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0;
-}
-.pr-status p {
-  margin: 0;
-}
-.pr-status .pr-bad {
-  border-inline-start: 3px solid var(--color-status-error);
-  padding-inline-start: var(--space-1);
-}
-.pr-status .pr-offline {
-  border-inline-start: 3px solid var(--color-status-blocked);
-  padding-inline-start: var(--space-1);
-}
 
-.pr-failed-checks {
-  margin: 0;
-  padding-inline-start: 1.5em;
-}
-.link-button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-status-working);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.worktree-conflicts {
-  padding: var(--space-2);
-  border-inline-start: 3px solid var(--color-status-blocked);
-  background: var(--color-panel);
-  overflow-wrap: anywhere;
-}
-.worktree-conflicts ul {
-  margin-block: var(--space-1) 0;
-  padding-inline-start: 1.5em;
-}
-.diff-row {
-  display: grid;
-  grid-template-columns: 4em max-content;
-  min-height: 1.5em;
-  white-space: pre;
-}
-.diff-row button {
-  color: var(--color-text-2);
-  text-align: right;
-  padding-inline-end: var(--space-2);
-}
-.diff-row button[aria-pressed="true"] {
-  text-decoration: underline;
-}
-.diff-layout {
-  margin-block-end: var(--space-2);
-}
-.diff-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.diff-column-head {
-  color: var(--color-text-2);
-  border-bottom: 1px solid var(--color-line);
-}
-.diff-column-head span {
-  padding-inline: var(--space-2);
-}
-.diff-pair > :nth-child(2) {
-  border-inline-start: 1px solid var(--color-line);
-}
-.inspector-patch-split .diff-row {
-  grid-template-columns: 3em minmax(0, 1fr);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.diff-removed:has(.diff-row) {
-  background: var(--color-del-bg);
-}
-.diff-added:has(.diff-row) {
-  background: var(--color-add-bg);
-}
-.diff-comment {
-  margin-top: var(--space-2);
-}
-.diff-comment textarea {
-  display: block;
-  width: 100%;
-  margin-block: var(--space-2);
-  border: 1px solid var(--color-line);
-  resize: vertical;
-}
 .qa-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;
