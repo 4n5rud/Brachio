@@ -4,11 +4,12 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use brachio_runtime::client::{Client, ClientError};
 use brachio_runtime::wire::Action;
+use sha2::{Digest, Sha256};
 
 /// `1` forces terminals into the runtime, `0` keeps them in the app. Unset, the runtime is used
 /// whenever its executable can be found.
@@ -222,26 +223,40 @@ fn executable() -> Result<PathBuf> {
 /// runtime is alive, which Windows would otherwise refuse, and each build gets its own copy.
 fn stable_copy(source: &Path) -> Result<PathBuf> {
     let folder = brachio_runtime::paths::state_directory()?.join("bin");
-    fs::create_dir_all(&folder)?;
-    let metadata = fs::metadata(source).with_context(|| format!("read {}", source.display()))?;
-    let modified = metadata
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    let name = format!(
-        "brachio-runtime-{}-{modified}{}",
-        metadata.len(),
-        EXE_SUFFIX
-    );
-    let copy = folder.join(&name);
-    if !copy.exists() {
-        let scratch = folder.join(format!("{name}.part"));
-        fs::copy(source, &scratch)?;
-        fs::rename(&scratch, &copy)?;
+    stage_runtime(source, &folder)
+}
+
+fn stage_runtime(source: &Path, folder: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(folder)?;
+    let digest = file_digest(source)?;
+    let copy = folder.join(format!("brachio-runtime-{digest}{EXE_SUFFIX}"));
+    if !copy.is_file() {
+        let scratch = folder.join(format!(".{}.part", uuid::Uuid::new_v4()));
+        let result = (|| -> Result<()> {
+            fs::copy(source, &scratch)?;
+            anyhow::ensure!(
+                file_digest(&scratch)? == digest,
+                "the runtime changed while staging"
+            );
+            match fs::rename(&scratch, &copy) {
+                Ok(()) => Ok(()),
+                // Another app process published the same content-addressed file.
+                Err(_) if copy.is_file() => Ok(()),
+                Err(error) => Err(error.into()),
+            }
+        })();
+        let _ = fs::remove_file(scratch);
+        result?;
     }
-    remove_older_copies(&folder, &name);
-    copy_conpty_files(source, &folder);
+    copy_conpty_files(source, folder);
     Ok(copy)
+}
+
+fn file_digest(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path).with_context(|| format!("read {}", path.display()))?;
+    let mut digest = Sha256::new();
+    std::io::copy(&mut file, &mut digest)?;
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 /// The runtime loads the newer ConPTY from beside its executable, so the copy needs the files
@@ -254,20 +269,6 @@ fn copy_conpty_files(source: &Path, folder: &Path) {
         let target = folder.join(name);
         if conpty.join(name).is_file() && !target.exists() {
             let _ = fs::copy(conpty.join(name), target);
-        }
-    }
-}
-
-/// Copies still in use cannot be removed on Windows; they go on a later start.
-fn remove_older_copies(folder: &Path, keep: &str) {
-    let Ok(entries) = fs::read_dir(folder) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if file_name.starts_with("brachio-runtime-") && file_name != keep {
-            let _ = fs::remove_file(entry.path());
         }
     }
 }
@@ -291,6 +292,34 @@ fn detach(command: &mut Command) {
 #[cfg(test)]
 mod tests {
     use super::endpoint;
+
+    #[test]
+    fn swapped_executables_with_matching_metadata_get_different_cache_entries() -> anyhow::Result<()>
+    {
+        use std::fs::{self, File, FileTimes};
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let dir = tempfile::tempdir()?;
+        let source = dir.path().join("runtime.exe");
+        let cache = dir.path().join("bin");
+        let modified = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        fs::write(&source, b"first")?;
+        File::options()
+            .write(true)
+            .open(&source)?
+            .set_times(FileTimes::new().set_modified(modified))?;
+        let first = super::stage_runtime(&source, &cache)?;
+        fs::write(&source, b"other")?;
+        File::options()
+            .write(true)
+            .open(&source)?
+            .set_times(FileTimes::new().set_modified(modified))?;
+        let second = super::stage_runtime(&source, &cache)?;
+        assert_ne!(first, second);
+        assert_eq!(fs::read(&second)?, b"other");
+        assert_eq!(super::stage_runtime(&source, &cache)?, second);
+        Ok(())
+    }
 
     #[test]
     fn the_endpoint_is_a_plain_name() {
