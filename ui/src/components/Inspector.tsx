@@ -17,10 +17,16 @@ type Pane = "changes" | "files" | "qa" | "activity";
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: {
   task: TaskRow;
+  /** False for a plain folder project, which has no changes, branch or pull request to show. */
+  isGit?: boolean;
   onDraft: (taskId: string, text: string) => Promise<boolean>;
   onDiffTotals: (taskId: string, totals: DiffTotals | undefined) => void;
 }) {
-  const [pane, setPane] = createSignal<Pane>("changes");
+  const isGit = () => props.isGit !== false;
+  const [pane, setPane] = createSignal<Pane>(isGit() ? "changes" : "files");
+  createEffect(() => {
+    if (!isGit() && pane() === "changes") setPane("files");
+  });
   const [changes, { refetch }] = createResource(
     () => pane() === "changes" && props.task.worktreePath && props.task.id,
     async (id) => {
@@ -46,7 +52,7 @@ export function Inspector(props: {
     <aside class="inspector">
       <div class="inspector-head">
         <div class="segmented" role="group">
-          {tab("changes", t("inspector.changes"))}
+          <Show when={isGit()}>{tab("changes", t("inspector.changes"))}</Show>
           {tab("files", t("files.title"))}
           {tab("qa", t("inspector.qa"))}
           {tab("activity", t("inspector.activity"))}
