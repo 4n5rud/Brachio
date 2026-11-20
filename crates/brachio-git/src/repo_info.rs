@@ -88,9 +88,6 @@ fn search(folder: &Path, depth: usize, found: &mut Vec<PathBuf>) {
         } else if depth > 1 {
             search(&child, depth - 1, found);
         }
-        if found.len() >= MAX_FOUND {
-            return;
-        }
     }
 }
 
@@ -133,4 +130,27 @@ fn has_remote(git: &Git) -> bool {
 fn current_branch(git: &Git) -> Option<String> {
     let branch = git.run(&["branch", "--show-current"]).ok()?;
     (!branch.is_empty()).then_some(branch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_discovery_ranks_every_candidate_before_limiting_results() {
+        let root = tempfile::tempdir().expect("temp folder");
+        let mut expected = Vec::new();
+        for index in (0..=MAX_FOUND).rev() {
+            let path = root.path().join(format!("project-{index:03}"));
+            fs::create_dir_all(path.join(".git")).expect("create repository marker");
+            expected.push(path);
+        }
+        let mut candidates = Vec::new();
+        search(root.path(), SEARCH_DEPTH, &mut candidates);
+        assert_eq!(candidates.len(), MAX_FOUND + 1);
+
+        expected.reverse();
+        expected.truncate(MAX_FOUND);
+        assert_eq!(find_repositories(root.path()), expected);
+    }
 }
