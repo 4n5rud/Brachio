@@ -19,6 +19,22 @@ export function isQuickOpenShortcut(event: KeyPress, mac = isMac): boolean {
     : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
+/**
+ * Panel toggles: ⌘B / ⌘⌥B on macOS. Elsewhere Ctrl+Shift+B / Ctrl+Shift+Alt+B, because plain
+ * Ctrl+B belongs to the terminal (readline backward-char, tmux prefix).
+ */
+export function panelToggleShortcut(event: KeyPress & { code?: string }, mac = isMac): "sidebar" | "inspector" | undefined {
+  if (event.key.toLowerCase() !== "b" && event.code !== "KeyB") return undefined;
+  if (mac ? !event.metaKey || event.ctrlKey || event.shiftKey : !event.ctrlKey || !event.shiftKey || event.metaKey) {
+    return undefined;
+  }
+  return event.altKey ? "inspector" : "sidebar";
+}
+
+export const TOGGLE_SIDEBAR_KEYS = isMac ? "⌘B" : "Ctrl+Shift+B";
+
+export const TOGGLE_INSPECTOR_KEYS = isMac ? "⌘⌥B" : "Ctrl+Shift+Alt+B";
+
 export const QUICK_OPEN_KEYS = isMac ? "⌘P" : "Ctrl+Shift+P";
 
 export const NEW_TASK_KEYS = isMac ? "⌘N" : "Ctrl+Shift+N";

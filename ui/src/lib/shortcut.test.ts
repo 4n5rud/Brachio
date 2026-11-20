@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTaskShortcut } from "./shortcut";
+import { isNewTaskShortcut, panelToggleShortcut } from "./shortcut";
 
 const key = (pressed: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => ({
   altKey: false,
@@ -19,5 +19,18 @@ describe("isNewTaskShortcut", () => {
   it("leaves plain Ctrl+N to the terminal elsewhere", () => {
     expect(isNewTaskShortcut(key({ key: "n", ctrlKey: true }), false)).toBe(false);
     expect(isNewTaskShortcut(key({ key: "N", ctrlKey: true, shiftKey: true }), false)).toBe(true);
+  });
+});
+
+describe("panelToggleShortcut", () => {
+  it("maps Cmd+B and Cmd+Option+B on macOS", () => {
+    expect(panelToggleShortcut(key({ key: "b", metaKey: true }), true)).toBe("sidebar");
+    expect(panelToggleShortcut({ ...key({ key: "∫", metaKey: true }), altKey: true, code: "KeyB" }, true)).toBe("inspector");
+  });
+
+  it("leaves plain Ctrl+B to the terminal elsewhere", () => {
+    expect(panelToggleShortcut(key({ key: "b", ctrlKey: true }), false)).toBeUndefined();
+    expect(panelToggleShortcut(key({ key: "B", ctrlKey: true, shiftKey: true }), false)).toBe("sidebar");
+    expect(panelToggleShortcut({ ...key({ key: "B", ctrlKey: true, shiftKey: true }), altKey: true }, false)).toBe("inspector");
   });
 });

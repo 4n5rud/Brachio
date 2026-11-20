@@ -21,7 +21,8 @@ import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import type { CommandId } from "./lib/quick-open";
-import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
+import { isNewTaskShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
 import type { DiffTotals } from "./lib/diff";
@@ -49,6 +50,10 @@ const ACTIVITY_LIMIT = 100;
 
 export function App() {
   const [now, setNow] = createSignal(Date.now());
+  const [sidebarOpen, setSidebarOpen] = createSignal(loadSidebarOpen());
+  const [inspectorOpen, setInspectorOpen] = createSignal(loadInspectorOpen());
+  const toggleSidebar = () => setSidebarOpen((open) => { saveSidebarOpen(!open); return !open; });
+  const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
   const [trayReady, setTrayReady] = createSignal(false);
@@ -562,6 +567,14 @@ export function App() {
         setWorkspacePanel("quickOpen");
         return;
       }
+      const panel = panelToggleShortcut(event);
+      if (panel) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (panel === "sidebar") toggleSidebar();
+        else toggleInspector();
+        return;
+      }
       if (isNewTaskShortcut(event) && canCreate()) {
         event.preventDefault();
         event.stopPropagation();
@@ -607,6 +620,10 @@ export function App() {
         onActivity={() => setWorkspacePanel("activity")}
         onQuickOpen={() => setWorkspacePanel("quickOpen")}
         onSettings={() => setWorkspacePanel("settings")}
+        sidebarOpen={sidebarOpen()}
+        inspectorOpen={inspectorOpen()}
+        onToggleSidebar={toggleSidebar}
+        onToggleInspector={toggleInspector}
       />
       <Show when={error()}>
         {(message) => (
@@ -643,7 +660,12 @@ export function App() {
           <Board tasks={repoRows()} now={now()} onOpen={open} />
         </main>
       </Show>
-      <main class="layout" classList={{ "layout-no-inspector": !selected(), "view-hidden": view() !== "tasks" }}>
+      <main class="layout" classList={{
+        "layout-no-inspector": !selected() || !inspectorOpen(),
+        "layout-no-sidebar": !sidebarOpen(),
+        "view-hidden": view() !== "tasks",
+      }}>
+        <Show when={sidebarOpen()}>
         <TaskList
           tasks={rows()}
           repos={repos()}
@@ -656,6 +678,7 @@ export function App() {
           unreadForTask={unreadForTask}
           now={now()}
         />
+        </Show>
         <Show when={displayedTask()}>
           {(task) => (
             <TaskView
@@ -696,12 +719,14 @@ export function App() {
         </Show>
         <Show when={selected()} fallback={noTask()}>
           {(task) => (
-            <Inspector
-              task={task()}
-              isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
-              onDraft={draftComment}
-              onDiffTotals={recordDiffTotals}
-            />
+            <Show when={inspectorOpen()}>
+              <Inspector
+                task={task()}
+                isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
+                onDraft={draftComment}
+                onDiffTotals={recordDiffTotals}
+              />
+            </Show>
           )}
         </Show>
       </main>

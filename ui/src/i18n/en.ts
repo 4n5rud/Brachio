@@ -19,6 +19,8 @@ export const en = {
 
   "titlebar.search": "Search tasks",
   "titlebar.view": "View",
+  "titlebar.toggleSidebar": "Toggle sidebar",
+  "titlebar.toggleInspector": "Toggle inspector",
   "view.tasks": "Tasks",
   "view.board": "Board",
   "activity.title": "Activity",
