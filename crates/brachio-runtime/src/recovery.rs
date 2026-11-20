@@ -10,6 +10,8 @@ use crate::runtime::Runtime;
 use crate::session::{lock, lost_info, ScreenMark, Session};
 
 #[cfg(test)]
+mod prefix_tests;
+#[cfg(test)]
 mod stop_tests;
 #[cfg(test)]
 mod tests;
@@ -123,6 +125,37 @@ impl Runtime {
         }
         lock(&self.lost)?.insert(key.to_owned(), record);
         Ok(())
+    }
+
+    /// Drop the saved screens of every gone shell whose key starts with `prefix`, such as
+    /// `"<task id>:"` for a permanently deleted task. Running shells are left alone.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no wire action calls this yet; the app half is a follow-up"
+        )
+    )]
+    pub(crate) fn forget_lost_with_prefix(&self, prefix: &str) -> Result<usize> {
+        if prefix.is_empty() {
+            anyhow::bail!("a key prefix is required");
+        }
+        let keys: Vec<String> = lock(&self.lost)?
+            .keys()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect();
+        let mut first_error = None;
+        let mut forgotten = 0;
+        for key in &keys {
+            match self.forget(key) {
+                Ok(()) => forgotten += 1,
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(forgotten), Err)
     }
 
     pub(crate) fn forget(&self, key: &str) -> Result<()> {
