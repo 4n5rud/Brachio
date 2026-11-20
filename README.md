@@ -1,135 +1,66 @@
+﻿<p align="center"><img src="src-tauri/icons/128x128@2x.png" width="112" alt="Brachio"></p>
+<h1 align="center">Brachio</h1>
+<p align="center">A desktop workspace for coding agents.</p>
+<p align="center"><a href="https://x.com/4n5rud08"><img src="https://cdn.simpleicons.org/x/888888" width="20" height="20" alt="Follow 4n5rud on X"></a></p>
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="128" alt="Brachio mascot: a mint brachiosaurus peeking up">
+English · <a href="docs/readme/README.ko.md">한국어</a> · <a href="docs/readme/README.ja.md">日本語</a> · <a href="docs/readme/README.zh-CN.md">简体中文</a> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.pt.md">Português</a> · <a href="docs/readme/README.tr.md">Türkçe</a> · <a href="docs/readme/README.ru.md">Русский</a>
 </p>
 
-<h1 align="center">Brachio</h1>
+> **Pre-alpha** · Brachio is under development and has not been released. Windows is the primary development platform. macOS support is not yet verified.
 
-<p align="center">A lightweight desktop app for running coding agents in parallel.</p>
+Brachio brings Claude Code and Codex sessions into one workspace. Organize tasks by project, review changes, and keep terminals running in a separate local runtime.
 
-Brachio runs several Claude Code and Codex sessions side by side, each in its own git worktree. It uses the WebView that ships with the OS instead of bundling Chromium and Node, so the whole app is an 8 MB binary.
+## Features
 
-> **Status: pre-alpha.** The app runs Claude Code and Codex in per-task worktrees, shows what each one is doing, and lets you review and commit their changes. Windows is the platform we test on; macOS is not verified yet.
+- **Projects and tasks** — Work with Git repositories or plain folders. Git tasks use separate branches and worktrees.
+- **Persistent terminals** — Reconnect to running sessions after the window closes. Saved screens and conversation resume help recover a stopped runtime.
+- **Review and Git** — Inspect changes and pull request status, comment on diff lines, stage, commit, push, and create pull requests.
+- **Agent coordination** — Exchange messages between tasks and request child tasks through the `brachio` helper. Child task creation requires approval.
+- **Local tools** — Browse files, assign a preferred development port, and run a configured QA command after approval.
+- **Notifications and approvals** — See task activity and respond to supported Claude Code permission requests.
 
-## What it does
+Agent status, approvals, and recovery depend on the agent and runtime. Brachio runs locally using your own agent accounts.
 
-- Gives each task its own git worktree and branch, so agents do not step on each other. Several projects show together in the sidebar.
-- Adds a plain folder as a project too: tasks run in the folder with no branch or worktree, and git repositories inside the folder are listed and can be added as projects.
-- Shows on one board whether each agent is working, waiting for approval or an answer, or done, and notifies you when it needs you.
-- Continues an agent's conversation after the app restarts.
-- Shows each task's changes, lets you comment on lines and send the comments to the agent, and stages, commits, and pushes.
-- Shows each task's pull request status as a chip in the task list and a panel in the Inspector, and remembers it across restarts.
-- Asks you in the app to approve Claude Code's permission requests.
-- Suggests a development port per task through `BRACHIO_PORT`. Two tasks in the same Brachio database never get the same port. The port is a preference, not a reservation: Brachio checks it is free on `127.0.0.1` when it assigns it, but another program (or another Brachio) can take it before your dev server starts, and IPv6 `localhost` is not checked. If the bind fails, pick another port.
-- Lets agent sessions send each other messages (see below).
-- Keeps terminals running when the window closes, through the independent runtime (see below).
-- Shows the Claude Code and Codex marks beside agent names, and uses one title bar on Windows.
+## Development
 
-- Lets an agent ask to create a child task with `brachio task create`. You approve it in the app, and the child appears under its lead (up to 4 open children, one level deep).
-- Shows the memory of terminals that outlive the window in the status bar, and bounds each terminal's pending output.
+Install Git 2.38+, Rust with rustfmt and Clippy, Node.js 22+, pnpm 10+, and the platform prerequisites for Tauri 2. Windows needs WebView2 and macOS needs Xcode command-line tools.
 
-Use `brachio task list` and `brachio task wait` to track child tasks. `brachio mcp` serves the read-only `list_child_tasks` tool over stdio and uses the same terminal identity and hook endpoint as the CLI. Task dependencies and structured handoffs are planned. Codex has no in-app status or approval hooks yet, so approvals and hook-based status cover Claude Code only.
+```sh
+pnpm --dir ui install --frozen-lockfile
+cargo install tauri-cli --version "^2" --locked
+cargo tauri dev
+```
 
-Brachio supports macOS and Windows. It runs entirely on your machine with no server, and agents run under your own accounts.
+The app targets Windows and macOS. Linux can run the platform-independent Rust checks without the Tauri app shell. See the [contribution guide](.github/CONTRIBUTING.md) for verification and pull requests.
 
-## Performance
+## Project configuration
 
-Numbers we have measured, with where and how in each row. Rows marked "not measured" are open work, not claims.
-
-| What | Brachio | Comparison | How it was measured |
-| --- | --- | --- | --- |
-| App size | 7.6 MB binary, UI included | Electron 43 runtime alone: 316 MB unpacked | Linux release build, `ls -l`; `du` of `electron/dist` |
-| Keystroke echo inside the core | 0.16 ms p50, 0.39 ms p99 | 16.3 ms p50 before the batching fix | 300 keystrokes to `cat` through `SessionManager`, Linux |
-| Terminal output throughput | about 130 MB/s, in 64 KB frames | | 256 MB of output through `SessionManager`, Linux |
-| Idle memory on macOS and Windows | not measured | | |
-| Memory with 10 agent sessions | not measured | | |
-
-The [Windows memory benchmark procedure](docs/windows-memory-benchmark.md) describes how to reproduce the measurements.
-
-Where the savings come from:
-
-- **No bundled browser.** macOS uses WKWebView and Windows uses WebView2, both already on the machine. Electron apps ship their own Chromium and Node.js.
-- **Core in Rust threads.** PTYs, git, and storage run as Rust threads, not as Node.js processes. By default they live inside the app process.
-- **Raw bytes to the screen.** Terminal output goes to the UI as binary frames over a Tauri channel, with no JSON encoding.
-- **Batching only under load.** Output after a quiet period is sent at once, so typing feels immediate. Streaming output is grouped into frames of up to 16 ms or 64 KB, so a busy agent does not flood the UI.
-
-Not every number favors Brachio. On Linux with WebKitGTK, the idle app used about 340 MB (PSS) against 292 MB for the same UI in Electron 43. Linux is not a target platform, and macOS and Windows still need their own measurements.
-
-## Messages between agent sessions
-
-Agents in different tasks can talk through the `brachio` helper: `brachio peers` lists the sessions you can reach, `brachio send` sends one a message, `brachio check` reads new messages and marks them read, and `brachio inbox` lists recent messages, read or not. Claude Code sessions are taught this through a `brachio-send` skill and are told about waiting mail by a hook; the hook costs nothing when there is none. Unread messages show in the app, and a deleted task's messages are removed with it.
-
-## Independent terminal runtime (experimental)
-
-Terminals run in `brachio-runtime`, a separate process, whenever its executable is found next to the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. Set `BRACHIO_TERMINAL_RUNTIME=0` to keep terminals inside the app instead. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable sits next to the app (release installers include it), or is named by `BRACHIO_RUNTIME_EXECUTABLE`. After an app update, a new runtime starts beside the old one; the old one keeps its agents until they end. It is tested on Windows and Linux, not on macOS.
-
-## Logs
-
-Brachio writes `brachio.log` (level `info`, or whatever `RUST_LOG` says) in:
-
-- Windows: `%LOCALAPPDATA%\Brachio\`
-- macOS: `~/Library/Logs/Brachio/`
-- Linux: `$XDG_STATE_HOME/Brachio/` (default `~/.local/state/Brachio/`)
-
-The file is capped at 1 MiB and the three previous ones are kept as `brachio.log.1` to `.3`, so logs never take more than about 4 MiB. If a rotation fails (for example another running copy of Brachio holds the file), logging carries on in the current file and rotation is retried after a minute.
-
-To report a problem, use the app's "report an issue" button and attach `brachio.log` if useful. Skim the file before sharing: it can contain folder names and error messages with your user name or private paths.
-
-## Preparing new worktrees (`brachio.toml`)
-
-A new worktree starts without the files git does not track, such as `.env`, and without installed dependencies. A repository can say what to do about that in a `brachio.toml` at its root:
+A repository may provide `brachio.toml`:
 
 ```toml
 [setup]
-copy = [".env"]            # copied from the repository into every new worktree; missing files are skipped
-run = ["pnpm install"]     # typed into the shell next to the agent
-```
+copy = [".env"]
+run = ["pnpm install"]
 
-`copy` entries must be plain paths inside the repository. The `run` commands are never started silently: Brachio shows them and asks once per exact list before typing them into the task's shell.
-
-## Running QA (`brachio.toml`)
-
-```toml
 [qa]
-program = "C:/Program Files/nodejs/npm.cmd"   # absolute path
+program = "C:/Program Files/nodejs/npm.cmd"
 args = ["test"]
 timeout_secs = 600
 ```
 
-The Inspector's QA tab has a "Run QA" button. The approval bar shows the exact command, the task's folder and the commit; the command runs once, only if you allow it, and the result (exit status, capped output, duration, commit, verified by Brachio) stays until the app closes. There are no retries and nothing is merged.
+Setup commands and QA runs require approval. Adjust paths and commands for your machine and project.
 
-## Getting started
+## Project structure
 
-You need Rust stable, Node 22 or later, pnpm 10 or later, and git 2.38 or later.
-
-```sh
-pnpm --dir ui install
-cargo install tauri-cli --version "^2" --locked   # once, for `cargo tauri`
-cargo test          # platform-independent crates
-pnpm --dir ui test
-cargo tauri dev     # run the app (macOS or Windows)
-```
-
-`cargo test` skips `src-tauri`, because it needs WebView2 (Windows) or WKWebView (macOS) to build.
-
-## Repository layout
-
-| Path | Contents |
-| --- | --- |
-| `crates/brachio-core` | Status model and the rules that merge status signals |
-| `crates/brachio-pty` | PTY sessions and batched output |
-| `crates/brachio-runtime` | Independent terminal runtime: protocol, client library, and the process that keeps shells alive |
-| `crates/brachio-git` | Worktree setup and cleanup, port allocation, conflict prediction |
-| `crates/brachio-agent` | Claude Code and Codex adapters |
-| `crates/brachio-store` | SQLite storage and migrations |
-| `crates/brachio-mcp` | Stdio MCP server for read-only child task status |
-| `crates/brachio-cli` | The `brachio` helper that hooks and agents run |
-| `src-tauri` | App shell: window, tray, IPC |
-| `ui` | SolidJS UI, xterm.js, design tokens (design system reference: [`docs/design-system`](docs/design-system/README.md)) |
+- `crates/` — Rust libraries, the terminal runtime, and the `brachio` CLI
+- `src-tauri/` — desktop shell and application commands
+- `ui/` — SolidJS interface and terminal
+- `docs/design-system/` — design reference
 
 ## Contributing
 
-See [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) for setup, branch names, checks and pull request rules, and [`.github/RELEASING.md`](.github/RELEASING.md) for how releases are cut.
+Read the [contributor guide](.github/CONTRIBUTING.md). Coding agents should also read the [agent contribution guide](.github/CONTRIBUTING-AGENTS.md). Report security issues through [private vulnerability reporting](.github/SECURITY.md).
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option.
+Brachio is licensed under the [MIT License](LICENSE-MIT).
