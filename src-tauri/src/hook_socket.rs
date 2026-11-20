@@ -31,10 +31,8 @@ pub struct Question {
     pub id: u64,
     /// The terminal the agent runs in, such as `<task id>:agent`.
     pub key: String,
-    /// The tool the agent wants to use.
-    pub tool_name: String,
-    /// The tool's arguments, shortened for display.
-    pub tool_input: Value,
+    /// The complete tool name and arguments, ready to display as text.
+    pub review: String,
 }
 
 /// What the interface needs to hear about.
@@ -118,6 +116,9 @@ impl Approvals {
         if !(self.knows)(&request.key) {
             return Ok(());
         }
+        let Some(review) = request.review() else {
+            return Ok(());
+        };
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
         self.pending
@@ -127,8 +128,7 @@ impl Approvals {
         (self.notify)(Notice::Asked(Question {
             id,
             key: request.key,
-            tool_name: request.tool_name,
-            tool_input: request.tool_input,
+            review,
         }));
         let outcome = tokio::select! {
             decision = receiver => decision.ok(),
@@ -166,7 +166,6 @@ mod tests {
 
     use brachio_runtime::approval::{self, ApprovalRequest, Decision};
     use brachio_runtime::transport;
-    use serde_json::json;
 
     use super::{Approvals, Notice};
 
@@ -175,7 +174,7 @@ mod tests {
             key: key.to_owned(),
             session_id: "s".to_owned(),
             tool_name: "Bash".to_owned(),
-            tool_input: json!({ "command": "pnpm add zod" }),
+            review_input: r#"{"command":"pnpm add zod"}"#.to_owned(),
             tool_use_id: "t".to_owned(),
         }
     }
@@ -265,6 +264,19 @@ mod tests {
             .await;
             assert_eq!(answer, None);
             assert!(notices.lock().expect("lock").is_empty());
+        });
+    }
+
+    #[test]
+    fn unreviewable_input_never_creates_a_pending_approval() {
+        tauri::async_runtime::block_on(async {
+            let (name, approvals, notices) = start("task1:agent");
+            let mut question = request("task1:agent");
+            question.review_input = format!(r#"{{"content":"{}"}}"#, "x".repeat(3_000));
+            let answer = approval::ask(&name, &question, Duration::from_secs(5)).await;
+            assert_eq!(answer, None);
+            assert!(notices.lock().expect("lock").is_empty());
+            assert!(!approvals.answer(1, Decision::Allow));
         });
     }
 
