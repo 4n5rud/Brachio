@@ -50,6 +50,7 @@ impl Backend for McpTools {
             prompt: request.prompt,
             agent: request.agent,
             base: request.base,
+            after: Vec::new(),
         };
         let MailResponse::TaskCreated { key, branch, .. } = call(&request, CREATE_TASK_TIMEOUT)?
         else {

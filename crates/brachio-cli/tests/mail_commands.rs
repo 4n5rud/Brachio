@@ -275,6 +275,7 @@ async fn task_create_sends_the_request_and_prints_the_new_key_and_branch() {
             prompt: "Document it".into(),
             agent: Some("codex".into()),
             base: None,
+            after: Vec::new(),
         }
     );
 }

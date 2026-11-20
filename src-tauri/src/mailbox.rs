@@ -420,6 +420,7 @@ pub fn serve(app: &AppHandle, request: MailRequest) -> MailResponse {
         if let Err(error) = app.emit(crate::orchestration::CHANGED_EVENT, ()) {
             tracing::debug!(%error, "could not tell the window about a handoff");
         }
+        crate::orchestration::schedule_all(app);
     }
     if changed {
         if let Err(error) = app.emit(CHANGED_EVENT, ()) {

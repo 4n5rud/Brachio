@@ -98,6 +98,9 @@ pub enum MailRequest {
         /// Commit-ish to branch from; the asking task's branch when absent.
         #[serde(default)]
         base: Option<String>,
+        /// Terminal keys or ids of sibling child tasks that must be completed first.
+        #[serde(default)]
+        after: Vec<String>,
     },
     /// A child task hands its committed work over for the user's review.
     Handoff {

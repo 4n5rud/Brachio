@@ -71,6 +71,12 @@ pub struct CreateTaskRequest {
     /// task is saved, since other requests may have been approved meanwhile.
     #[serde(skip)]
     pub max_open_children: Option<i64>,
+    /// The parent lead schedules its children, so the child waits for the scheduler to start it.
+    #[serde(skip)]
+    pub scheduled: bool,
+    /// Ids of sibling tasks the child waits for, recorded when it is saved.
+    #[serde(skip)]
+    pub after: Vec<String>,
 }
 
 /// Lists registered repositories.
@@ -226,6 +232,18 @@ pub struct CreatedTask {
     setup_copy_error: Option<String>,
 }
 
+impl CreatedTask {
+    /// A task the scheduler starts later, shaped like the one a person creates so the window
+    /// opens it the same way. The files were copied when the task was created.
+    pub(crate) fn started(task: TaskRecord, setup_commands: Vec<String>) -> Self {
+        Self {
+            task,
+            setup_commands,
+            setup_copy_error: None,
+        }
+    }
+}
+
 /// Creates a worktree on a fresh branch and stores the task. Files named in the repository's
 /// `brachio.toml` are copied into the worktree, and its setup commands are returned.
 ///
@@ -304,15 +322,18 @@ pub(crate) async fn create_task(
     let mut refused = false;
     let saved = database.lock().and_then(|mut connection| {
         if let (Some(max), Some(_)) = (request.max_open_children, task.parent_task_id) {
-            return TaskRecord::insert_child(&mut connection, &task, max).map_err(|error| {
-                refused = !matches!(error, ChildInsertError::Store(_));
-                match error {
-                    ChildInsertError::LimitReached => {
-                        format!("This task already has {max} open child tasks. Archive one first.")
+            return TaskRecord::insert_child_after(&mut connection, &task, max, &request.after)
+                .map_err(|error| {
+                    refused = !matches!(error, ChildInsertError::Store(_));
+                    match error {
+                        ChildInsertError::LimitReached => {
+                            format!(
+                                "This task already has {max} open child tasks. Archive one first."
+                            )
+                        }
+                        other => other.to_string(),
                     }
-                    other => other.to_string(),
-                }
-            });
+                });
         }
         let transaction = connection.transaction().map_err(to_text)?;
         let record = TaskRecord::insert(&transaction, &task).map_err(to_text)?;
@@ -338,7 +359,7 @@ pub(crate) async fn create_task(
             });
         }
     };
-    if task.parent_task_id.is_some() {
+    if task.parent_task_id.is_some() && !request.scheduled {
         let started = database.lock().and_then(|mut c| {
             brachio_store::mark_running(&mut c, &task.id, now_ms()).map_err(to_text)
         });
@@ -745,7 +766,7 @@ fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), Str
 
 /// Terminals of the task that are still running, in the runtime or in the app, or why that could
 /// not be told. Second agent tabs the task has since replaced are asked for too.
-async fn live_task_terminals(
+pub(crate) async fn live_task_terminals(
     database: &Database,
     terminals: &RuntimeTerminals,
     in_app: &Terminals,
@@ -1044,6 +1065,8 @@ mod folder_project_tests {
             agent: AgentKind::ClaudeCode,
             base: Some("main".to_owned()),
             max_open_children: None,
+            scheduled: false,
+            after: Vec::new(),
         };
         let created = create_folder_task(&database, &project, &request).expect("create task");
         assert_eq!(created.task.worktree_path, project.path);
@@ -1456,6 +1479,8 @@ mod agent_child_limit_tests {
             agent: AgentKind::ClaudeCode,
             base: None,
             max_open_children: Some(4),
+            scheduled: false,
+            after: Vec::new(),
         }
     }
 

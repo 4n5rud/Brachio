@@ -3,24 +3,32 @@
 //! repository and turns the user's decision into a stored state change.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use brachio_core::task_graph::TaskState;
 use brachio_git::Git;
 use brachio_runtime::mailbox::MailResponse;
 use brachio_store::{
-    decide_handoff, load_graph, qa_result_by_id, send_message, submit_handoff, Handoff,
-    HandoffReview, HandoffSource, NewHandoff, NewMessage, RepoRecord, TaskRecord,
+    decide_handoff, fail_lost, load_graph, qa_result_by_id, running_children, schedule_next,
+    scheduled_leads, scheduler_enabled, send_message, set_scheduler_enabled, state_reason,
+    submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff, NewMessage, RepoRecord,
+    TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::child_task_request::is_hidden_or_control;
 use crate::mailbox::agent_owner;
-use crate::workspace::Database;
+use crate::runtime_terminals::RuntimeTerminals;
+use crate::terminal::Terminals;
+use crate::workspace::{live_task_terminals, CreatedTask, Database};
 
 /// Tells the interface that a child's state or handoff changed.
 pub const CHANGED_EVENT: &str = "orchestration://changed";
+/// Tells the interface to open a task the scheduler just started. The payload is a
+/// `workspace::CreatedTask`, like `task://created`.
+pub const STARTED_EVENT: &str = "task://started";
 const MAX_SUMMARY_CHARS: usize = 4000;
 const MAX_TESTS: usize = 20;
 const MAX_TEST_CHARS: usize = 200;
@@ -32,6 +40,9 @@ const MAX_SHOWN_PATHS: usize = 200;
 #[serde(rename_all = "camelCase")]
 pub struct OrchestrationView {
     pub lead_task_id: String,
+    /// Ready children start by themselves, at most `max_running` at a time.
+    pub scheduler_enabled: bool,
+    pub max_running: usize,
     pub children: Vec<ChildView>,
 }
 
@@ -42,6 +53,8 @@ pub struct ChildView {
     pub title: String,
     pub branch: String,
     pub state: String,
+    /// Why Brachio failed it, such as "lost after restart".
+    pub reason: Option<String>,
     pub dependencies: Vec<DependencyView>,
     pub handoff: Option<HandoffView>,
 }
@@ -133,12 +146,15 @@ pub fn build_view(connection: &Connection, lead_id: &str) -> Result<Orchestratio
             title: title.clone(),
             branch: branch.clone(),
             state: state.as_str().to_owned(),
+            reason: state_reason(connection, id).map_err(|e| e.to_string())?,
             dependencies,
             handoff,
         });
     }
     Ok(OrchestrationView {
         lead_task_id: lead_id.to_owned(),
+        scheduler_enabled: scheduler_enabled(connection, lead_id).map_err(|e| e.to_string())?,
+        max_running: MAX_RUNNING_CHILDREN,
         children,
     })
 }
@@ -360,6 +376,128 @@ pub fn review_decision(
     Ok(())
 }
 
+/// Starts what the schedulers allow and tells the window to open those tasks. Each child is
+/// started by exactly one call, because the state change and the limit are checked in one
+/// transaction.
+pub fn schedule_all(app: &AppHandle) {
+    let database = app.state::<Database>();
+    let started = match start_ready_children(&database) {
+        Ok(started) => started,
+        Err(error) => {
+            tracing::warn!(%error, "could not schedule child tasks");
+            return;
+        }
+    };
+    if started.is_empty() {
+        return;
+    }
+    for task in started {
+        if let Err(error) = app.emit(STARTED_EVENT, &task) {
+            tracing::debug!(%error, "could not tell the window about a started task");
+        }
+    }
+    if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+        tracing::debug!(%error, "could not tell the window about started tasks");
+    }
+}
+
+fn start_ready_children(database: &Database) -> Result<Vec<CreatedTask>, String> {
+    let mut connection = database.lock()?;
+    let now = crate::pr_status::now_ms();
+    let mut started = Vec::new();
+    for lead in scheduled_leads(&connection).map_err(|e| e.to_string())? {
+        for id in schedule_next(&mut connection, &lead, now).map_err(|e| e.to_string())? {
+            let task = TaskRecord::get(&connection, &id).map_err(|e| e.to_string())?;
+            let repo = RepoRecord::get(&connection, &task.repo_id).map_err(|e| e.to_string())?;
+            let setup = brachio_git::read_setup(&repo.path)
+                .map(|setup| setup.run)
+                .unwrap_or_default();
+            started.push(CreatedTask::started(task, setup));
+        }
+    }
+    Ok(started)
+}
+
+/// After a restart, children recorded as running whose terminal is not hosted any more are
+/// failed ("lost after restart"), which blocks their dependents. A terminal the runtime still
+/// hosts, or one that could not be checked, is left running. Nothing is started or replayed.
+pub async fn reconcile_after_restart(app: &AppHandle) {
+    let database = app.state::<Database>();
+    let running = match database
+        .lock()
+        .and_then(|c| running_children(&c).map_err(|e| e.to_string()))
+    {
+        Ok(running) => running,
+        Err(error) => {
+            tracing::warn!(%error, "could not read running child tasks");
+            return;
+        }
+    };
+    let terminals = app.state::<RuntimeTerminals>();
+    let in_app = app.state::<Terminals>();
+    let mut lost = Vec::new();
+    for id in running {
+        match live_task_terminals(&database, &terminals, &in_app, &id).await {
+            Ok(live) if live.is_empty() => lost.push(id),
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, task = %id, "could not tell if a child is still running");
+            }
+        }
+    }
+    if lost.is_empty() {
+        return;
+    }
+    let failed = database.lock().and_then(|mut c| {
+        fail_lost(&mut c, &lost, crate::pr_status::now_ms()).map_err(|e| e.to_string())
+    });
+    match failed {
+        Ok(failed) => {
+            tracing::info!(
+                tasks = failed.len(),
+                reason = LOST_AFTER_RESTART,
+                "failed lost child tasks"
+            );
+        }
+        Err(error) => tracing::warn!(%error, "could not fail lost child tasks"),
+    }
+}
+
+/// Turns the lead's scheduler on or off, and starts what is ready when it goes on.
+#[tauri::command]
+pub fn orchestration_set_scheduler(
+    app: AppHandle,
+    database: State<'_, Database>,
+    lead_task_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    {
+        let connection = database.lock()?;
+        let lead = TaskRecord::get(&connection, &lead_task_id).map_err(|e| e.to_string())?;
+        if lead.parent_task_id.is_some() {
+            return Err("Only a task that is not a child can schedule child tasks.".to_owned());
+        }
+        set_scheduler_enabled(&connection, &lead_task_id, enabled).map_err(|e| e.to_string())?;
+    }
+    schedule_all(&app);
+    if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+        tracing::debug!(%error, "could not tell the window about the scheduler change");
+    }
+    Ok(())
+}
+
+/// Run by the window once it listens: the first call reconciles children left running by a
+/// previous run, then every call starts ready children of the leads that opted in. Reconciling
+/// first keeps lost children from taking up the running limit.
+#[tauri::command]
+pub async fn orchestration_schedule(app: AppHandle) {
+    static RECONCILED: AtomicBool = AtomicBool::new(false);
+    if !RECONCILED.swap(true, Ordering::SeqCst) {
+        reconcile_after_restart(&app).await;
+    }
+    schedule_all(&app);
+}
+
 /// The lead's children with state, dependencies and latest handoff.
 #[tauri::command]
 pub fn orchestration_view(
@@ -409,6 +547,7 @@ pub async fn handoff_review(
             &uuid::Uuid::new_v4().hyphenated().to_string(),
         )?;
     }
+    schedule_all(&app);
     if let Err(error) = app.emit(CHANGED_EVENT, ()) {
         tracing::debug!(%error, "could not tell the window about the review");
     }
@@ -556,6 +695,44 @@ mod tests {
         assert_eq!(
             build_view(&db, "lead").unwrap().children[0].state,
             "completed"
+        );
+    }
+
+    #[test]
+    fn a_dependent_starts_only_after_the_exact_commit_is_approved() {
+        let (dir, mut db) = setup();
+        db.execute(
+            "INSERT INTO tasks (id, repo_id, parent_task_id, title, prompt, branch, worktree_path, state, created_at_ms)
+             VALUES ('next', 'r', 'lead', 'Next', '', 'next', '/elsewhere', 'new', 2)",
+            [],
+        )
+        .unwrap();
+        brachio_store::add_dependency(&mut db, "next", "child").unwrap();
+        brachio_store::set_scheduler_enabled(&db, "lead", true).unwrap();
+        assert_eq!(
+            brachio_store::schedule_next(&mut db, "lead", 1).unwrap(),
+            vec!["child"]
+        );
+
+        handoff_request(&mut db, "child:agent", "added b", &[], 2, "h1").unwrap();
+        assert!(brachio_store::schedule_next(&mut db, "lead", 3)
+            .unwrap()
+            .is_empty());
+
+        std::fs::write(dir.path().join("late.txt"), "x").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-q", "-m", "late"]);
+        let stale = review_decision(&mut db, "h1", true, None, worktree_head_of, 4, "m1");
+        assert!(stale.unwrap_err().contains("moved after the handoff"));
+        assert!(brachio_store::schedule_next(&mut db, "lead", 5)
+            .unwrap()
+            .is_empty());
+
+        handoff_request(&mut db, "child:agent", "added b and late", &[], 6, "h2").unwrap();
+        review_decision(&mut db, "h2", true, None, worktree_head_of, 7, "m2").unwrap();
+        assert_eq!(
+            brachio_store::schedule_next(&mut db, "lead", 8).unwrap(),
+            vec!["next"]
         );
     }
 }

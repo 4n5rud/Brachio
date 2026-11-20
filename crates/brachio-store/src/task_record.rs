@@ -117,6 +117,22 @@ impl TaskRecord {
         task: &NewTask<'_>,
         max_open_children: i64,
     ) -> Result<Self, ChildInsertError> {
+        Self::insert_child_after(connection, task, max_open_children, &[])
+    }
+
+    /// Like [`Self::insert_child`], and records in the same transaction that the child waits
+    /// for each of the sibling tasks `after`, so nothing can start it before its dependencies
+    /// exist.
+    ///
+    /// # Errors
+    /// Fails with the reason the child was refused, or when the database fails, for instance
+    /// for a task that does not exist.
+    pub fn insert_child_after(
+        connection: &mut Connection,
+        task: &NewTask<'_>,
+        max_open_children: i64,
+        after: &[String],
+    ) -> Result<Self, ChildInsertError> {
         let parent_id = task.parent_task_id.ok_or(ChildInsertError::ParentClosed)?;
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -145,6 +161,14 @@ impl TaskRecord {
             return Err(ChildInsertError::LimitReached);
         }
         let record = Self::insert(&transaction, task)?;
+        for predecessor in after {
+            transaction
+                .execute(
+                    "INSERT INTO task_dependencies (task_id, depends_on) VALUES (?1, ?2)",
+                    [task.id, predecessor.as_str()],
+                )
+                .map_err(StoreError::from)?;
+        }
         transaction.commit().map_err(StoreError::from)?;
         Ok(record)
     }

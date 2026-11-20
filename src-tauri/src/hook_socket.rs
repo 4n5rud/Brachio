@@ -163,6 +163,7 @@ impl Approvals {
                     prompt,
                     agent,
                     base,
+                    after,
                 } => {
                     let request = ChildRequest {
                         key,
@@ -170,6 +171,7 @@ impl Approvals {
                         prompt,
                         agent,
                         base,
+                        after,
                     };
                     self.create_task(&mut reader, request).await
                 }
@@ -264,6 +266,7 @@ impl Approvals {
                 "title": request.title,
                 "agent": request.agent_name(),
                 "base": request.base,
+                "after": request.after,
                 "prompt": request.prompt.chars().take(REVIEW_PROMPT_CHARS).collect::<String>(),
             }))
             .unwrap_or_default()
@@ -699,6 +702,7 @@ mod tests {
             prompt: "Document the API".to_owned(),
             agent: Some("codex".to_owned()),
             base: None,
+            after: Vec::new(),
         }
     }
 
