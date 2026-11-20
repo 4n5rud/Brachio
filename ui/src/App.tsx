@@ -19,6 +19,7 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
+import { watchCreatedTasks } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import type { CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut } from "./lib/shortcut";
@@ -31,7 +32,7 @@ import { checkForRelease, openRelease } from "./lib/updates";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
-  toTaskRow, type RepoRecord } from "./lib/workspace";
+  toTaskRow, type CreatedTask, type RepoRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
 // show example tasks so the layout can be reviewed.
@@ -415,6 +416,31 @@ export function App() {
     setDialogOpen(false);
   };
 
+  // A task created by an agent: start its tab without moving the user's selection.
+  const adoptCreatedTask = async (record: CreatedTask) => {
+    if (findTask(record.id)) return;
+    if (!repos().some((item) => item.id === record.repoId)) {
+      const stored = await listRepos();
+      if (!stored.some((item) => item.id === record.repoId)) return;
+      setRepos(stored);
+      if (findTask(record.id)) return;
+    }
+    createdThisRun.add(record.id);
+    const setupCopyError = record.setupCopyError;
+    if (setupCopyError) {
+      setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
+    }
+    if (record.prompt) firstPrompts.set(record.id, record.prompt);
+    if (record.setupCommands.length > 0 && await approveSetup(record.repoId, record.setupCommands)) {
+      setupInputs.set(record.id, record.setupCommands.join("\r"));
+    }
+    if (findTask(record.id)) return;
+    batch(() => {
+      setTasks((list) => [toTaskRow(record), ...list]);
+      setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
+    });
+  };
+
   const archive = async (task: TaskRow) => {
     if (archiving()) return;
     setArchiving(true);
@@ -510,6 +536,7 @@ export function App() {
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
+      onCleanup(watchCreatedTasks((record) => void adoptCreatedTask(record).catch(report)));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);

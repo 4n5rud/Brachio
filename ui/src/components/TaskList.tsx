@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { statusTone } from "../lib/status";
-import { AGENT_NAME, shortBranch, type TaskRow } from "../lib/tasks";
+import { AGENT_NAME, orderWithChildren, shortBranch, type TaskRow } from "../lib/tasks";
 import { AgentIcon } from "./AgentIcon";
 import { FolderRepos } from "./FolderRepos";
 import { chipOf } from "../lib/pr-status";
@@ -85,7 +85,7 @@ export function TaskList(props: {
         <For each={groupIds()}>
           {(id) => {
             const name = () => projects().get(id) ?? t("sidebar.folderWorkspaces");
-            const tasks = () => tasksByGroup().get(id) ?? [];
+            const tasks = () => orderWithChildren(tasksByGroup().get(id) ?? []);
             const expanded = () => !collapsed().has(id);
             return (
               <section>
@@ -106,6 +106,7 @@ export function TaskList(props: {
                     {(task) => (
                       <TaskItem
                         task={task}
+                        child={task.parentTaskId !== undefined && tasks().some((other) => other.id === task.parentTaskId)}
                         selected={task.id === props.selectedId}
                         now={props.now}
                         unread={props.unreadForTask?.(task.id) ?? 0}
@@ -126,12 +127,12 @@ export function TaskList(props: {
   );
 }
 
-function TaskItem(props: { task: TaskRow; selected: boolean; now: number; unread: number; onSelect: () => void }) {
+function TaskItem(props: { task: TaskRow; child: boolean; selected: boolean; now: number; unread: number; onSelect: () => void }) {
   const tone = () => statusTone(props.task.status);
   return (
     <button
       class="task-item"
-      classList={{ "task-item-selected": props.selected }}
+      classList={{ "task-item-selected": props.selected, "task-item-child": props.child }}
       type="button"
       aria-current={props.selected ? "true" : undefined}
       onClick={() => props.onSelect()}

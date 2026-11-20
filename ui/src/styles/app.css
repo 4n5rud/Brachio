@@ -476,6 +476,13 @@ kbd {
 .task-item:hover {
   background: var(--color-hover);
 }
+.task-item-child {
+  width: calc(100% - 24px);
+  margin-inline-start: 18px;
+  border-inline-start: 1px solid var(--color-line);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
 .task-item-selected {
   background: var(--color-raised);
   box-shadow: inset 0 0 0 1px var(--color-line);

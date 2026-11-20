@@ -29,6 +29,8 @@ export interface TaskRow {
   worktreePath?: string;
   /** Conversation id the agent resumes after a restart. */
   agentSessionId?: string;
+  /** Lead task that created this one. */
+  parentTaskId?: string;
 }
 
 export type TaskGroup = "needs" | "working" | "review" | "done";
@@ -64,4 +66,31 @@ export const AGENT_NAME: Record<AgentKind, string> = { claude: "Claude", codex: 
 /** Branch without the `brachio/` prefix, for tight rows. */
 export function shortBranch(branch: string): string {
   return branch.replace(/^brachio\//, "");
+}
+
+/** Keeps root order and puts each task's children right after it; a child with no parent in the list stays a root. */
+export function orderWithChildren(tasks: readonly TaskRow[]): TaskRow[] {
+  const ids = new Set(tasks.map((task) => task.id));
+  const children = new Map<string, TaskRow[]>();
+  const roots: TaskRow[] = [];
+  for (const task of tasks) {
+    const parent = task.parentTaskId;
+    if (parent && parent !== task.id && ids.has(parent)) {
+      children.set(parent, [...(children.get(parent) ?? []), task]);
+    } else {
+      roots.push(task);
+    }
+  }
+  const out: TaskRow[] = [];
+  const seen = new Set<string>();
+  const visit = (task: TaskRow) => {
+    if (seen.has(task.id)) return;
+    seen.add(task.id);
+    out.push(task);
+    for (const child of children.get(task.id) ?? []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  // Tasks only reachable through a cycle are kept as roots.
+  for (const task of tasks) visit(task);
+  return out;
 }

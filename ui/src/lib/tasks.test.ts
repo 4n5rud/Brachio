@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupTasks, shortBranch, taskGroup, type TaskRow } from "./tasks";
+import { groupTasks, orderWithChildren, shortBranch, taskGroup, type TaskRow } from "./tasks";
 
 const row = (id: string, status: TaskRow["status"], updatedAt: number): TaskRow => ({
   id,
@@ -35,6 +35,26 @@ describe("groupTasks", () => {
     expect([...groups.keys()]).toEqual(["needs", "working", "review", "done"]);
     expect(groups.get("working")?.map((t) => t.id)).toEqual(["b", "a"]);
     expect(groups.get("needs")).toEqual([]);
+  });
+});
+
+describe("orderWithChildren", () => {
+  const child = (id: string, parentTaskId: string): TaskRow => ({ ...row(id, { state: "idle" }, 0), parentTaskId });
+  const root = (id: string) => row(id, { state: "idle" }, 0);
+  const ids = (list: TaskRow[]) => list.map((task) => task.id);
+
+  it("places children after their parent in incoming order and keeps root order", () => {
+    const list = [root("a"), child("a2", "a"), root("b"), child("b1", "b"), child("a1", "a")];
+    expect(ids(orderWithChildren(list))).toEqual(["a", "a2", "a1", "b", "b1"]);
+  });
+
+  it("keeps a child whose parent is missing as a root", () => {
+    expect(ids(orderWithChildren([child("x", "gone"), root("a")]))).toEqual(["x", "a"]);
+  });
+
+  it("does not hang or drop tasks on a cycle", () => {
+    const list = [child("a", "b"), child("b", "a"), root("c")];
+    expect(ids(orderWithChildren(list)).sort()).toEqual(["a", "b", "c"]);
   });
 });
 
