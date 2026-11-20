@@ -1,0 +1,21 @@
+<!-- @dsCard group="Inputs" height=400 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+.col{display:grid;gap:12px;}
+.cap{font:var(--text-xs)/1.5 var(--font-mono);color:var(--color-text-3);min-width:72px;}
+.panel{background:var(--color-panel);border:1px solid var(--color-line);}
+
+</style></head>
+<body>
+<div class="col" style="max-width:520px">
+<label class="field"><span class="field-label">Task</span><input class="input" placeholder="Describe what the agent should do"></label>
+<label class="field"><span class="field-label">Branch name</span><input class="input input-mono is-focus" value="brachio/rate-limit-7f2a"><span class="field-hint">Created from main in a new worktree.</span></label>
+<label class="field"><span class="field-label">Base branch</span><input class="input input-mono" aria-invalid="true" value="mian"><span class="field-error">No branch named mian. Pick one from the list.</span></label>
+<label class="field"><span class="field-label">Setup command</span><input class="input input-mono" disabled value="pnpm install"></label>
+</div>
+</body>
+</html>

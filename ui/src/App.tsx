@@ -14,7 +14,8 @@ import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
-import { WorkspaceDialog, type TaskActivity, type Theme } from "./components/WorkspaceDialog";
+import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
+import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
@@ -140,17 +141,20 @@ export function App() {
     const task = selected();
     if (task) void draftComment(task.id, `@${path} `).catch(report);
   };
-  const savedTheme = localStorage.getItem("brachio.theme");
-  const [theme, setTheme] = createSignal<Theme>(
-    savedTheme === "light" || savedTheme === "dark" ? savedTheme : "system",
-  );
+  const [theme, setTheme] = createSignal<ThemeMode>(loadThemeMode());
+  const [colorTheme, setColorTheme] = createSignal<ColorTheme>(loadColorTheme());
+  const lightQuery = window.matchMedia("(prefers-color-scheme: light)");
+  const [systemIsLight, setSystemIsLight] = createSignal(lightQuery.matches);
+  const onSystemTheme = (event: MediaQueryListEvent) => setSystemIsLight(event.matches);
+  lightQuery.addEventListener("change", onSystemTheme);
+  onCleanup(() => lightQuery.removeEventListener("change", onSystemTheme));
+  const dataTheme = createMemo(() => resolveDataTheme(colorTheme(), theme(), systemIsLight()));
   const [notifications, setNotifications] = createSignal(localStorage.getItem("brachio.notifications") !== "off");
   setLocale(localStorage.getItem("brachio.locale") === "ko" ? "ko" : "en");
   createEffect(() => {
-    const preference = theme();
-    if (preference === "system") delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = preference;
-    localStorage.setItem("brachio.theme", preference);
+    document.documentElement.dataset.theme = dataTheme();
+    saveThemeMode(theme());
+    saveColorTheme(colorTheme());
     localStorage.setItem("brachio.locale", locale());
     localStorage.setItem("brachio.notifications", notifications() ? "on" : "off");
     document.documentElement.lang = locale();
@@ -719,7 +723,7 @@ export function App() {
             <TaskView
               task={task()}
               visible={view() === "tasks" && !!selected()}
-              theme={theme()}
+              theme={dataTheme()}
               openIds={openIds()}
               workspaceTasks={workspaceTasks()}
               onOpenTask={open}
@@ -767,13 +771,13 @@ export function App() {
       </main>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={workspacePanel()} keyed>
-        {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} theme={theme()}
+        {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}
           archived={archived()} onRestore={restore} onDelete={deleteArchived}
           repos={repos()}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           onReportProblem={inTauri ? () => { setWorkspacePanel(undefined); setIssueReport(""); } : undefined}
-          notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
+          notifications={notifications()} onMode={setTheme} onColorTheme={setColorTheme} onNotifications={setNotifications}
           updates={inTauri ? {
             enabled: automaticUpdates(), status: updateStatus(), version: updateVersion(),
             onEnabled: setAutomaticUpdates, onCheck: () => void checkUpdates(true),

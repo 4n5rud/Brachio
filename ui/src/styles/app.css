@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "./tokens.css";
 @import "@xterm/xterm/css/xterm.css";
+@import "pretendard/dist/web/variable/pretendardvariable.css";
+@import "@fontsource-variable/jetbrains-mono";
 
 /* Base */
 html,
@@ -1036,8 +1038,8 @@ kbd {
 .field {
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-canvas);
   color: var(--color-text);
   font: inherit;
   font-size: var(--text-sm);
@@ -1046,8 +1048,8 @@ kbd {
 .btn {
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-raised);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-raised);
   color: var(--color-text);
   font: inherit;
   font-size: var(--text-sm);
@@ -1056,12 +1058,12 @@ kbd {
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
 .muted {
-  color: var(--color-text-muted);
+  color: var(--color-text-3);
 }
 
 /* New task dialog */
@@ -1273,4 +1275,66 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Theme picker: each swatch shows the theme's own panel, text and accent */
+.theme-picker {
+  display: grid;
+  gap: var(--space-3);
+}
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.swatch {
+  display: grid;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+}
+.swatch-art {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  height: 64px;
+}
+.swatch-art .sb {
+  border-right: 1px solid rgb(127 127 127 / 18%);
+}
+.swatch-art .mn {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  padding: 10px 8px;
+}
+.swatch-art i {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+}
+.swatch-art .btn-art {
+  width: 26px;
+  height: 9px;
+  margin-top: 3px;
+}
+.swatch-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px 8px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.swatch-name .check {
+  margin-left: auto;
+  color: var(--color-accent-text);
+}
+.swatch[aria-checked="true"] {
+  border-color: var(--color-accent-text);
+  box-shadow: 0 0 0 1px var(--color-accent-text);
 }

@@ -4,10 +4,11 @@ import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/q
 import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
 import type { TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
+import type { ColorTheme, ThemeMode } from "../lib/theme";
+import { ThemePicker } from "./ui/ThemePicker";
 import { AgentSettings } from "./settings/AgentSettings";
 import { TerminalSettings } from "./settings/TerminalSettings";
 
-export type Theme = "system" | "light" | "dark";
 
 const COMMANDS: readonly CommandId[] = ["newTask", "settings", "archived"];
 const COMMAND_LABEL: Record<CommandId, () => string> = {
@@ -36,9 +37,11 @@ export function WorkspaceDialog(props: {
   onDelete: (task: TaskRow) => Promise<void>;
   onOpenArchived?: () => void;
   onReportProblem?: () => void;
-  theme: Theme;
+  mode: ThemeMode;
+  colorTheme: ColorTheme;
   notifications: boolean;
-  onTheme: (theme: Theme) => void;
+  onMode: (mode: ThemeMode) => void;
+  onColorTheme: (theme: ColorTheme) => void;
   onNotifications: (enabled: boolean) => void;
   updates?: {
     enabled: boolean;
@@ -186,17 +189,10 @@ export function WorkspaceDialog(props: {
             </Show>
           </Match>
           <Match when={props.panel === "settings"}>
-            <label class="form-field">
+            <div class="form-field">
               <span class="form-label">{t("settings.theme")}</span>
-              <select class="input" value={props.theme} onChange={(event) => {
-                const theme = event.currentTarget.value;
-                if (theme === "system" || theme === "light" || theme === "dark") props.onTheme(theme);
-              }}>
-                <option value="system">{t("settings.system")}</option>
-                <option value="light">{t("settings.light")}</option>
-                <option value="dark">{t("settings.dark")}</option>
-              </select>
-            </label>
+              <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
+            </div>
             <label class="form-field">
               <span class="form-label">{t("settings.language")}</span>
               <select class="input" value={locale()} onChange={(event) =>

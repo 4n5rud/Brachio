@@ -1,0 +1,36 @@
+<!-- @dsCard group="Actions" height=200 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+.col{display:grid;gap:12px;}
+.cap{font:var(--text-xs)/1.5 var(--font-mono);color:var(--color-text-3);min-width:72px;}
+.panel{background:var(--color-panel);border:1px solid var(--color-line);}
+
+</style></head>
+<body>
+<div class="col">
+<div class="row"><span class="cap">variants</span>
+<button class="button button-primary">Create task <kbd>⌘↵</kbd></button>
+<button class="button"><svg class="icon-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="12.5" r="1.5"/><path d="M4 5v6M12 11V7a2 2 0 0 0-2-2H7.5"/><path d="M9 3.4 7.4 5 9 6.6"/></svg>Open PR</button>
+<button class="button button-ghost">Cancel</button>
+<button class="button button-danger">Delete worktree</button>
+<button class="button button-sm">Small</button></div>
+<div class="row"><span class="cap">primary</span>
+<button class="button button-primary">Default</button>
+<button class="button button-primary is-hover">Hover</button>
+<button class="button button-primary is-press">Pressed</button>
+<button class="button button-primary is-focus">Focus</button>
+<button class="button button-primary" disabled>Disabled</button>
+<button class="button button-primary" aria-busy="true"><svg class="glyph glyph-spin" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--color-mint-ink)" stroke-opacity=".28" stroke-width="1.8"/><path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" fill="none" stroke="var(--color-mint-ink)" stroke-width="1.8" stroke-linecap="round"/></svg>Creating…</button></div>
+<div class="row"><span class="cap">secondary</span>
+<button class="button">Default</button>
+<button class="button is-hover">Hover</button>
+<button class="button is-press">Pressed</button>
+<button class="button is-focus">Focus</button>
+<button class="button" disabled>Disabled</button></div>
+</div>
+</body>
+</html>
