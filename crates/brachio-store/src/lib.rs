@@ -19,11 +19,14 @@ pub use message_record::{
     MAX_UNREAD_FROM_ONE_SENDER,
 };
 pub use orchestration_record::{
-    add_dependency, apply_transition, load_graph, record_handoff, review_handoff, Handoff,
-    HandoffReview, HandoffSource, NewHandoff, OrchestrationError,
+    add_dependency, apply_transition, decide_handoff, load_graph, mark_running, record_handoff,
+    review_handoff, submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff,
+    OrchestrationError,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
-pub use qa_result_record::{latest_qa_result, save_qa_result, NewQaResult, QaResultRecord};
+pub use qa_result_record::{
+    latest_qa_result, qa_result_by_id, save_qa_result, NewQaResult, QaResultRecord,
+};
 pub use repo_record::{NewRepo, RepoRecord};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{

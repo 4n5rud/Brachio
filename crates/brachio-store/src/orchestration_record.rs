@@ -28,6 +28,9 @@ pub enum OrchestrationError {
     /// The handoff was already approved or rejected.
     #[error("handoff {0} was already reviewed")]
     AlreadyReviewed(String),
+    /// A newer handoff replaced this one, so reviewing it would approve a stale commit.
+    #[error("handoff {0} is not the task's latest handoff")]
+    NotLatestHandoff(String),
     /// A stored value is not understood.
     #[error("{0}")]
     Corrupt(String),
@@ -148,6 +151,8 @@ pub struct Handoff {
     pub review: Option<HandoffReview>,
     /// The QA run Brachio executed on this exact commit, kept apart from `reported_tests`.
     pub verified_qa_result_id: Option<i64>,
+    /// Why the reviewer rejected it, when they said.
+    pub review_note: Option<String>,
 }
 
 /// Builds the graph of a lead's child tasks from the database.
@@ -246,10 +251,21 @@ pub fn apply_transition(
     now_ms: i64,
 ) -> Result<Vec<Change>, OrchestrationError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let lead = lead_of(&transaction, task_id)?;
-    let mut graph = load_graph(&transaction, &lead)?;
+    let changes = transition_in(&transaction, task_id, to, now_ms)?;
+    transaction.commit()?;
+    Ok(changes)
+}
+
+fn transition_in(
+    transaction: &Connection,
+    task_id: &str,
+    to: TaskState,
+    now_ms: i64,
+) -> Result<Vec<Change>, OrchestrationError> {
+    let lead = lead_of(transaction, task_id)?;
+    let mut graph = load_graph(transaction, &lead)?;
     let changes = graph.transition(task_id, to)?;
-    if to == TaskState::Completed && !latest_handoff_approved(&transaction, task_id)? {
+    if to == TaskState::Completed && !latest_handoff_approved(transaction, task_id)? {
         return Err(OrchestrationError::HandoffNotApproved {
             task_id: task_id.to_owned(),
         });
@@ -262,8 +278,99 @@ pub fn apply_transition(
             params![change.id, change.to.as_str(), now_ms],
         )?;
     }
-    transaction.commit()?;
     Ok(changes)
+}
+
+/// Moves a queued or ready task to running, walking the allowed steps. A task that already
+/// runs is left alone. Dependencies that are not completed refuse the move.
+///
+/// # Errors
+/// [`OrchestrationError::Graph`] when the task cannot start, or a database failure.
+pub fn mark_running(
+    connection: &mut Connection,
+    task_id: &str,
+    now_ms: i64,
+) -> Result<(), OrchestrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    start_in(&transaction, task_id, now_ms)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn start_in(
+    transaction: &Connection,
+    task_id: &str,
+    now_ms: i64,
+) -> Result<(), OrchestrationError> {
+    let lead = lead_of(transaction, task_id)?;
+    let state = load_graph(transaction, &lead)?.state(task_id)?;
+    if state == TaskState::Queued {
+        transition_in(transaction, task_id, TaskState::Ready, now_ms)?;
+    }
+    if state != TaskState::Running {
+        transition_in(transaction, task_id, TaskState::Running, now_ms)?;
+    }
+    Ok(())
+}
+
+/// Stores an agent's handoff and moves the task to review. Nothing completes here: only
+/// [`decide_handoff`] can.
+///
+/// # Errors
+/// Bad commit ids, a task that is not running, or a database failure.
+pub fn submit_handoff(
+    connection: &mut Connection,
+    handoff: &NewHandoff<'_>,
+) -> Result<(), OrchestrationError> {
+    check_sha(handoff.commit_sha)?;
+    check_sha(handoff.base_sha)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    start_in(&transaction, handoff.task_id, handoff.created_at_ms)?;
+    transition_in(
+        &transaction,
+        handoff.task_id,
+        TaskState::ReviewRequired,
+        handoff.created_at_ms,
+    )?;
+    record_handoff(&transaction, handoff)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Records a human's decision on a task's latest handoff and applies it in one transaction.
+/// Approving completes the task; rejecting sends it back to running for rework and keeps the
+/// reason. An older handoff, or a task that is not awaiting review, is refused.
+///
+/// # Errors
+/// [`OrchestrationError::NotLatestHandoff`], [`OrchestrationError::AlreadyReviewed`],
+/// [`OrchestrationError::Graph`], or a database failure.
+pub fn decide_handoff(
+    connection: &mut Connection,
+    handoff_id: &str,
+    review: HandoffReview,
+    note: Option<&str>,
+    now_ms: i64,
+) -> Result<(), OrchestrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let handoff = Handoff::get(&transaction, handoff_id)?;
+    let latest = Handoff::latest(&transaction, &handoff.task_id)?;
+    if latest.as_ref().map(|h| h.id.as_str()) != Some(handoff_id) {
+        return Err(OrchestrationError::NotLatestHandoff(handoff_id.to_owned()));
+    }
+    review_handoff(&transaction, handoff_id, review, now_ms)?;
+    if let Some(note) = note {
+        transaction.execute(
+            "UPDATE task_handoffs SET review_note = ?2 WHERE id = ?1",
+            params![handoff_id, note],
+        )?;
+    }
+    let to = match review {
+        HandoffReview::Approved => TaskState::Completed,
+        HandoffReview::Rejected => TaskState::Running,
+    };
+    transition_in(&transaction, &handoff.task_id, to, now_ms)?;
+    transaction.commit()?;
+    Ok(())
 }
 
 fn latest_handoff_approved(
@@ -371,6 +478,7 @@ type HandoffRow = (
     Option<i64>,
     Option<String>,
     Option<i64>,
+    Option<String>,
 );
 
 impl Handoff {
@@ -382,13 +490,49 @@ impl Handoff {
         connection: &Connection,
         task_id: &str,
     ) -> Result<Vec<Self>, OrchestrationError> {
-        let mut statement = connection.prepare(
+        Self::select(connection, "task_id = ?1", task_id)
+    }
+
+    /// The task's newest handoff.
+    ///
+    /// # Errors
+    /// Fails when the query fails or a stored value is not understood.
+    pub fn latest(
+        connection: &Connection,
+        task_id: &str,
+    ) -> Result<Option<Self>, OrchestrationError> {
+        Ok(Self::for_task(connection, task_id)?.pop())
+    }
+
+    /// One handoff by id.
+    ///
+    /// # Errors
+    /// A missing handoff, or a failed query.
+    pub fn get(connection: &Connection, id: &str) -> Result<Self, OrchestrationError> {
+        Self::select(connection, "id = ?1", id)?
+            .pop()
+            .ok_or_else(|| {
+                StoreError::NotFound {
+                    table: "task_handoffs",
+                    id: id.to_owned(),
+                }
+                .into()
+            })
+    }
+
+    fn select(
+        connection: &Connection,
+        condition: &str,
+        value: &str,
+    ) -> Result<Vec<Self>, OrchestrationError> {
+        let mut statement = connection.prepare(&format!(
             "SELECT id, task_id, commit_sha, base_sha, summary, changed_paths, reported_tests,
-                    source, created_at_ms, reviewed_at_ms, review, verified_qa_result_id
-             FROM task_handoffs WHERE task_id = ?1 ORDER BY created_at_ms, rowid",
-        )?;
+                    source, created_at_ms, reviewed_at_ms, review, verified_qa_result_id,
+                    review_note
+             FROM task_handoffs WHERE {condition} ORDER BY created_at_ms, rowid"
+        ))?;
         let rows: Vec<HandoffRow> = statement
-            .query_map([task_id], |row| {
+            .query_map([value], |row| {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
@@ -402,6 +546,7 @@ impl Handoff {
                     row.get(9)?,
                     row.get(10)?,
                     row.get(11)?,
+                    row.get(12)?,
                 ))
             })?
             .collect::<Result<_, _>>()?;
@@ -424,6 +569,7 @@ impl Handoff {
                     reviewed_at_ms: r.9,
                     review: r.10.as_deref().map(HandoffReview::parse).transpose()?,
                     verified_qa_result_id: r.11,
+                    review_note: r.12,
                 })
             })
             .collect()
@@ -623,5 +769,44 @@ mod tests {
         assert_eq!(row_count(&db, "task_orchestration"), 1);
         db.execute("DELETE FROM tasks WHERE id = 'b'", []).unwrap();
         assert_eq!(row_count(&db, "task_orchestration"), 0);
+    }
+
+    #[test]
+    fn a_handoff_moves_to_review_and_only_approval_completes() {
+        let mut db = db_with_tasks(&["a"]);
+        mark_running(&mut db, "a", 1).unwrap();
+        submit_handoff(&mut db, &handoff("h1", "a", SHA_A)).unwrap();
+        assert_eq!(state(&db, "a"), TaskState::ReviewRequired);
+        decide_handoff(&mut db, "h1", HandoffReview::Approved, None, 5).unwrap();
+        assert_eq!(state(&db, "a"), TaskState::Completed);
+    }
+
+    #[test]
+    fn rejecting_sends_the_task_back_to_running_with_the_reason() {
+        let mut db = db_with_tasks(&["a"]);
+        submit_handoff(&mut db, &handoff("h1", "a", SHA_A)).unwrap();
+        decide_handoff(
+            &mut db,
+            "h1",
+            HandoffReview::Rejected,
+            Some("tests missing"),
+            5,
+        )
+        .unwrap();
+        assert_eq!(state(&db, "a"), TaskState::Running);
+        let stored = Handoff::get(&db, "h1").unwrap();
+        assert_eq!(stored.review_note.as_deref(), Some("tests missing"));
+        assert_eq!(stored.review, Some(HandoffReview::Rejected));
+    }
+
+    #[test]
+    fn an_older_handoff_cannot_be_decided() {
+        let mut db = db_with_tasks(&["a"]);
+        submit_handoff(&mut db, &handoff("h1", "a", SHA_A)).unwrap();
+        decide_handoff(&mut db, "h1", HandoffReview::Rejected, None, 2).unwrap();
+        submit_handoff(&mut db, &handoff("h2", "a", SHA_B)).unwrap();
+        let error = decide_handoff(&mut db, "h1", HandoffReview::Approved, None, 3).unwrap_err();
+        assert!(matches!(error, OrchestrationError::NotLatestHandoff(_)));
+        assert_eq!(state(&db, "a"), TaskState::ReviewRequired);
     }
 }

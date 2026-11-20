@@ -39,6 +39,14 @@ pub fn handle(
         MailRequest::Inbox { key, limit } => inbox(connection, &key, limit),
         MailRequest::Peers { key } => peers(connection, &key),
         MailRequest::CreateTask { .. } => Err("Creating tasks needs the user's answer.".to_owned()),
+        MailRequest::Handoff {
+            key,
+            summary,
+            tests,
+        } => crate::orchestration::handoff_request(
+            connection, &key, &summary, &tests, now_ms, new_id,
+        )
+        .map(|response| (response, false)),
         MailRequest::ListTasks { key } => list_tasks(connection, &key),
         MailRequest::WaitTasks { key, .. } => child_status(connection, &key),
     };
@@ -408,6 +416,11 @@ pub fn serve(app: &AppHandle, request: MailRequest) -> MailResponse {
         &uuid::Uuid::new_v4().hyphenated().to_string(),
     );
     drop(connection);
+    if matches!(response, MailResponse::HandedOff { .. }) {
+        if let Err(error) = app.emit(crate::orchestration::CHANGED_EVENT, ()) {
+            tracing::debug!(%error, "could not tell the window about a handoff");
+        }
+    }
     if changed {
         if let Err(error) = app.emit(CHANGED_EVENT, ()) {
             tracing::debug!(%error, "could not tell the window about new mail");

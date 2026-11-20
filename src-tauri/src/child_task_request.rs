@@ -63,7 +63,7 @@ fn agent_kind(name: &str) -> Result<AgentKind, String> {
     }
 }
 
-fn is_hidden_or_control(character: char) -> bool {
+pub(crate) fn is_hidden_or_control(character: char) -> bool {
     (character.is_control() && character != '\n' && character != '\t')
         || matches!(
             character,

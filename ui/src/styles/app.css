@@ -913,6 +913,42 @@ kbd {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.orchestration-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.orchestration-child {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+}
+.orchestration-child-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+.orchestration-claim {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.orchestration-actions,
+.orchestration-reject {
+  display: flex;
+  gap: var(--space-2);
+}
+.orchestration-reject input {
+  flex: 1;
+  min-width: 0;
+}
 .qa-passed {
   color: var(--color-status-ready);
 }
