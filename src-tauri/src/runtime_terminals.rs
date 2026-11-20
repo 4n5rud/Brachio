@@ -72,6 +72,44 @@ impl RuntimeTerminals {
         Ok(existing.is_some())
     }
 
+    /// Keys of the task's terminals whose program is still running, in the current runtime or an
+    /// older one that is still up. The runtime cannot list sessions, so the task's two fixed
+    /// terminals and its registered second agent tab are asked for by name. A runtime that is not
+    /// running hosts nothing. When the runtime is not used the in-app manager hosts the
+    /// terminals, and it tracks sessions by handle, not key, so none can be matched to a task.
+    ///
+    /// # Errors
+    /// Fails when a runtime cannot be asked, so the caller can refuse rather than guess.
+    pub async fn live_keys_for_task(
+        &self,
+        task_id: &str,
+        second_agent_tab: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let Some(current) = self.client().await? else {
+            return Ok(Vec::new());
+        };
+        let mut clients = vec![current];
+        clients.extend(runtime_client::older_clients().await);
+        let mut live = Vec::new();
+        for key in task_terminal_keys(task_id, second_agent_tab) {
+            for client in &clients {
+                let reply = client.call(Action::Inspect { key: key.clone() }).await;
+                match reply {
+                    Ok(Reply {
+                        result: ResponseResult::Success { session, .. },
+                        ..
+                    }) if !session.exited => {
+                        live.push(key.clone());
+                        break;
+                    }
+                    Ok(_) | Err(ClientError::Refused(_) | ClientError::NotRunning) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        Ok(live)
+    }
+
     /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
     /// is gone but its last screen was kept, that screen is shown first.
     /// Returns `None` when the runtime is not used, so the caller can host it in the app.
@@ -155,6 +193,16 @@ impl RuntimeTerminals {
         Some(stopped.map(|_| ()).map_err(Into::into))
     }
 
+    /// Stops watching a terminal while its program keeps running in the runtime; opening the same
+    /// key again reattaches. The shared client stays open. `None` when `id` is not runtime-hosted.
+    pub fn detach(&self, id: SessionId) -> Option<Result<()>> {
+        let hosted = self.attached.lock().ok()?.contains_key(&id);
+        hosted.then(|| {
+            self.drop_attachment(id);
+            Ok(())
+        })
+    }
+
     /// The runtime client, connecting on first use. `None` when the runtime is not used. A failed
     /// connection is not remembered, so the next open tries again.
     async fn client(&self) -> Result<Option<Client>> {
@@ -203,6 +251,13 @@ impl RuntimeTerminals {
             attached.pump.abort();
         }
     }
+}
+
+/// The terminal keys a task can have, as the UI and `terminal_authorization` name them.
+fn task_terminal_keys(task_id: &str, second_agent_tab: Option<&str>) -> Vec<String> {
+    let mut keys = vec![format!("{task_id}:agent"), format!("{task_id}:shell")];
+    keys.extend(second_agent_tab.map(|tab| format!("{task_id}:agent-{tab}")));
+    keys
 }
 
 /// Finds the runtime that already hosts `key`: the current one, else an older one that is still
@@ -358,7 +413,50 @@ fn deliver(
 mod handle_tests {
     use brachio_pty::SessionId;
 
-    use super::{locate, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE};
+    use super::{
+        locate, spawn, Attached, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE,
+    };
+
+    fn attach_to_dead_runtime(terminals: &RuntimeTerminals) -> SessionId {
+        let id = terminals.new_handle();
+        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let pump = spawn(std::future::pending::<()>());
+        terminals.attached.lock().expect("lock").insert(
+            id,
+            Attached {
+                key: "test:agent".to_owned(),
+                client,
+                pump,
+            },
+        );
+        id
+    }
+
+    #[tokio::test]
+    async fn detach_drops_the_attachment_without_telling_the_runtime_to_stop() {
+        let terminals = RuntimeTerminals::default();
+        let id = attach_to_dead_runtime(&terminals);
+        // A stop would call the unreachable runtime and fail; a detach must not call it at all.
+        assert!(terminals.detach(id).expect("hosted").is_ok());
+        assert!(terminals.attached.lock().expect("lock").is_empty());
+        assert!(terminals.detach(id).is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_calls_the_runtime_unlike_detach() {
+        let terminals = RuntimeTerminals::default();
+        let id = attach_to_dead_runtime(&terminals);
+        assert!(terminals.stop(id).await.expect("hosted").is_err());
+        assert!(terminals.attached.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn detaching_an_unknown_handle_is_not_hosted() {
+        let terminals = RuntimeTerminals::default();
+        assert!(terminals
+            .detach(SessionId::from_raw(HOSTED_HANDLE_BASE + 99))
+            .is_none());
+    }
 
     #[tokio::test]
     async fn a_missing_current_runtime_is_distinct_from_a_missing_terminal() {
@@ -377,5 +475,19 @@ mod handle_tests {
         assert_ne!(first, second, "two runtimes can both have a session 1");
         assert!(first > SessionId::from_raw(HOSTED_HANDLE_BASE - 1));
         assert!(first > SessionId::from_raw(1_000_000));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::task_terminal_keys;
+
+    #[test]
+    fn a_task_names_its_agent_shell_and_second_agent_terminals() {
+        assert_eq!(
+            task_terminal_keys("t1", Some("abc")),
+            ["t1:agent", "t1:shell", "t1:agent-abc"]
+        );
+        assert_eq!(task_terminal_keys("t1", None), ["t1:agent", "t1:shell"]);
     }
 }

@@ -69,6 +69,7 @@ export interface TaskLoss {
   ignoredExamples: string[];
   /** Identifies the state shown; `deleteTask` must send it back. */
   fingerprint: string;
+  runningTerminals: number;
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
 export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });

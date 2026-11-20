@@ -15,7 +15,7 @@ pub const MAX_SUBJECT_CHARS: usize = 200;
 pub const MAX_PAYLOAD_BYTES: usize = 2 * 1024;
 /// Unread messages one sender may have waiting at one receiver.
 pub const MAX_UNREAD_FROM_ONE_SENDER: usize = 50;
-/// How much one `take_unread` hands out, so the answer always fits the socket and is not lost
+/// How much one batch hands out, so the answer always fits the socket and is not lost
 /// after the messages were marked read. At least one message is always returned.
 const BATCH_BYTES: usize = 32 * 1024;
 
@@ -244,6 +244,9 @@ pub fn send_message(
 
 /// The oldest unread messages for `to_key`, at most `limit`, marked as read.
 ///
+/// Prefer [`peek_next_batch`] and [`mark_read`] when the messages still have to reach someone
+/// over a connection that can fail.
+///
 /// # Errors
 /// Fails when the database cannot be read or written.
 pub fn take_unread(
@@ -252,8 +255,23 @@ pub fn take_unread(
     limit: usize,
     now_ms: i64,
 ) -> Result<Vec<Message>, StoreError> {
-    let transaction = connection.transaction()?;
-    let mut batch = unread(&transaction, to_key, limit)?;
+    let batch = peek_next_batch(connection, to_key, limit)?;
+    let ids: Vec<&str> = batch.iter().map(|message| message.id.as_str()).collect();
+    mark_read(connection, &ids, now_ms)?;
+    Ok(batch)
+}
+
+/// The oldest unread messages for `to_key`, at most `limit` and small enough to answer in one
+/// response, left unread. At least one message is returned when any is waiting.
+///
+/// # Errors
+/// Fails when the database cannot be read.
+pub fn peek_next_batch(
+    connection: &Connection,
+    to_key: &str,
+    limit: usize,
+) -> Result<Vec<Message>, StoreError> {
+    let mut batch = unread(connection, to_key, limit)?;
     let mut size = 0;
     let fits = batch
         .iter()
@@ -265,14 +283,29 @@ pub fn take_unread(
         })
         .count();
     batch.truncate(fits.max(1).min(batch.len()));
-    for message in &batch {
-        transaction.execute(
-            "UPDATE messages SET read_at_ms = ?2 WHERE id = ?1",
-            params![message.id, now_ms],
+    Ok(batch)
+}
+
+/// Marks exactly the messages with these ids as read; ones already read keep their time.
+/// Returns how many changed.
+///
+/// # Errors
+/// Fails when the database cannot be written.
+pub fn mark_read<S: AsRef<str>>(
+    connection: &mut Connection,
+    ids: &[S],
+    now_ms: i64,
+) -> Result<usize, StoreError> {
+    let transaction = connection.transaction()?;
+    let mut changed = 0;
+    for id in ids {
+        changed += transaction.execute(
+            "UPDATE messages SET read_at_ms = ?2 WHERE id = ?1 AND read_at_ms IS NULL",
+            params![id.as_ref(), now_ms],
         )?;
     }
     transaction.commit()?;
-    Ok(batch)
+    Ok(changed)
 }
 
 /// The oldest unread messages for `to_key`, left unread.
@@ -413,6 +446,38 @@ mod tests {
         assert!(take_unread(&mut connection, "b:agent", 10, 101)
             .expect("take")
             .is_empty());
+    }
+
+    #[test]
+    fn peeking_changes_nothing_and_only_the_given_ids_are_marked_read() {
+        let mut connection = open_in_memory().expect("open");
+        send_message(&connection, &message("m1", "b:agent", 10)).expect("send");
+        send_message(&connection, &message("m2", "b:agent", 20)).expect("send");
+
+        let peeked = peek_next_batch(&connection, "b:agent", 10).expect("peek");
+        assert_eq!(peeked.len(), 2);
+        assert_eq!(
+            peek_next_batch(&connection, "b:agent", 10)
+                .expect("peek")
+                .len(),
+            2
+        );
+
+        send_message(&connection, &message("m3", "b:agent", 30)).expect("send");
+        assert_eq!(
+            mark_read(&mut connection, &["m1", "m2"], 99).expect("mark"),
+            2
+        );
+        assert_eq!(
+            mark_read(&mut connection, &["m1"], 100).expect("mark again"),
+            0
+        );
+
+        let left = peek_unread(&connection, "b:agent", 10).expect("peek");
+        assert_eq!(
+            left.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["m3"]
+        );
     }
 
     #[test]

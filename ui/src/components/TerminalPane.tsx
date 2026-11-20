@@ -55,6 +55,8 @@ export function TerminalPane(props: {
   session?: TerminalSession;
   active?: boolean;
   focus?: boolean;
+  /** What unmounting does: `stop` ends the program, `detach` leaves a runtime-hosted one running. */
+  leave?: "stop" | "detach";
   theme?: string;
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
@@ -394,7 +396,9 @@ export function TerminalPane(props: {
       input.dispose();
       resized.dispose();
       stopWebgl();
-      void handle?.close();
+      const leaving = handle;
+      if (props.leave === "detach") void leaving?.detach().catch(() => leaving.close());
+      else void leaving?.close();
       term.dispose();
     });
   });

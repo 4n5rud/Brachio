@@ -6,6 +6,7 @@ mod external_link;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
+mod log_file;
 mod mailbox;
 mod pr_status;
 mod resource_usage;
@@ -122,12 +123,15 @@ fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let file = log_file_path().and_then(|path| {
-        fs::create_dir_all(path.parent()?).ok()?;
-        fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .ok()
+        let dir = path.parent()?;
+        fs::create_dir_all(dir).ok()?;
+        log_file::RotatingLog::open(
+            dir,
+            path.file_name()?.to_str()?,
+            log_file::MAX_FILE_BYTES,
+            log_file::MAX_ARCHIVES,
+        )
+        .ok()
     });
     let builder = tracing_subscriber::fmt().with_env_filter(filter);
     let _ = match file {
@@ -194,6 +198,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            terminal::terminal_detach,
             task_tabs::task_secondary_tabs,
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
@@ -246,7 +251,8 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let knows = app.handle().clone();
     let notify = app.handle().clone();
     let mail_app = app.handle().clone();
-    let approvals = hook_socket::Approvals::with_mail(
+    let delivered_app = app.handle().clone();
+    let approvals = hook_socket::Approvals::with_delivery(
         move |key| task_is_open(&knows, key),
         move |notice| {
             let sent = match notice {
@@ -258,6 +264,7 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         move |request| mailbox::serve(&mail_app, request),
+        move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
     );
     app.manage(Arc::clone(&approvals));
