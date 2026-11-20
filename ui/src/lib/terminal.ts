@@ -76,6 +76,7 @@ interface OpenedTerminal {
   promptDelivery: PromptDelivery;
   resumed: boolean;
   attached: boolean;
+  hosted: boolean;
 }
 
 export interface TerminalHandle {
@@ -85,12 +86,19 @@ export interface TerminalHandle {
   /** Whether setup input and first prompts should be suppressed. */
   resumed: boolean;
   attached: boolean;
+  /** Whether the runtime hosts the program, so it can outlive the pane (park or detach). */
+  hosted: boolean;
   write(data: string): Promise<void>;
   resize(rows: number, cols: number): Promise<void>;
   /** Stops the program. */
   close(): Promise<void>;
   /** Only stops watching; a runtime-hosted program keeps running. Rejects for an in-app terminal. */
   detach(): Promise<void>;
+  /**
+   * Lets the pane go while the program keeps running: output stops, and only status changes reach
+   * `onStatus`. Opening the same key again replaces this attachment. Rejects for an in-app terminal.
+   */
+  park(onStatus: (status: AgentState, message: string | null) => void): Promise<void>;
 }
 
 export async function openTerminal(
@@ -109,10 +117,20 @@ export async function openTerminal(
     promptDelivery: opened.promptDelivery,
     resumed: opened.resumed,
     attached: opened.attached,
+    hosted: opened.hosted,
     write: terminalInputWriter((data) => invoke("terminal_write", { id, data })),
     resize: (rows, cols) => invoke("terminal_resize", { id, rows, cols }),
     close: () => invoke("terminal_close", { id }),
     detach: () => invoke("terminal_detach", { id }),
+    park: async (onStatus) => {
+      await invoke("terminal_park", { id });
+      channel.onmessage = (raw) => {
+        const m = decodeMessage(raw);
+        if (m?.type === "status") onStatus(m.status, m.message);
+        else if (m?.type === "exit") onStatus({ state: "exited", code: m.exitCode }, null);
+        else if (m?.type === "detached") onStatus({ state: "unknown" }, null);
+      };
+    },
   };
 }
 

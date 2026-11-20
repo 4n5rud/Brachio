@@ -98,6 +98,8 @@ pub struct Opened {
     pub resumed: bool,
     /// Whether the runtime already owned this live process.
     pub attached: bool,
+    /// Whether the runtime hosts it, so the UI may park it instead of stopping it.
+    pub hosted: bool,
 }
 
 /// Sent as JSON on the channel. Output frames are raw bytes instead.
@@ -267,6 +269,7 @@ pub async fn terminal_open(
                 },
                 resumed: resumed || attached,
                 attached,
+                hosted: true,
             });
         }
     }
@@ -292,6 +295,7 @@ pub async fn terminal_open(
         prompt_delivery,
         resumed,
         attached: false,
+        hosted: false,
     })
 }
 
@@ -351,6 +355,17 @@ pub fn terminal_detach(hosted: State<'_, RuntimeTerminals>, id: SessionId) -> Co
     match hosted.detach(id) {
         Some(result) => result.map_err(|error| to_message(&error)),
         None => Err("this terminal is not hosted by the runtime and cannot be detached".to_owned()),
+    }
+}
+
+/// Lets the UI unmount a runtime-hosted terminal while its status keeps flowing on the same channel.
+/// Output is no longer sent; opening the key again replaces the parked attachment. An in-app
+/// terminal cannot be parked.
+#[tauri::command]
+pub fn terminal_park(hosted: State<'_, RuntimeTerminals>, id: SessionId) -> CommandResult<()> {
+    match hosted.park(id) {
+        Some(result) => result.map_err(|error| to_message(&error)),
+        None => Err("this terminal is not hosted by the runtime and cannot be parked".to_owned()),
     }
 }
 
