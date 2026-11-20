@@ -1075,6 +1075,8 @@ fn git_paths(git: &Git, args: &[&str]) -> Result<Vec<String>, String> {
 pub struct TaskMergePreview {
     base_branch: String,
     conflicts: Vec<String>,
+    /// False when the comparison used the local branch because no remote copy exists.
+    remote_tracking: bool,
 }
 
 /// Checks how the task's committed HEAD would merge into the default branch, as the remote has it.
@@ -1093,15 +1095,17 @@ pub async fn task_merge_preview(
         return Ok(TaskMergePreview {
             base_branch,
             conflicts: Vec::new(),
+            remote_tracking: true,
         });
     }
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&worktree_path);
-        let base_ref = brachio_git::merge_target_ref(&git, &base_branch);
-        let report = predict_conflict(&git, &base_ref, "HEAD").map_err(to_text)?;
+        let target = brachio_git::merge_target(&git, &base_branch);
+        let report = predict_conflict(&git, &target.reference, "HEAD").map_err(to_text)?;
         Ok(TaskMergePreview {
             base_branch,
             conflicts: report.conflicted_files,
+            remote_tracking: target.remote_tracking,
         })
     })
     .await

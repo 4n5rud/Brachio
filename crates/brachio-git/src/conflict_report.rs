@@ -17,19 +17,34 @@ impl ConflictReport {
     }
 }
 
-/// The reference a pull request from this repository would be merged into: the remote-tracking
-/// copy of the default branch when there is one, which is what the remote has, otherwise the local
-/// branch. A local default branch that fell behind its remote would give a wrong prediction.
+/// What a pull request from this repository would be merged into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeTarget {
+    /// The full ref to compare against.
+    pub reference: String,
+    /// False when `origin` has no copy of the branch and the local branch, which may be behind the
+    /// remote, stands in for it.
+    pub remote_tracking: bool,
+}
+
+/// The remote-tracking copy of the default branch when there is one, which is what the remote
+/// has, otherwise the local branch, marked so the caller can say the comparison may be out of date.
 #[must_use]
-pub fn merge_target_ref(git: &Git, default_branch: &str) -> String {
+pub fn merge_target(git: &Git, default_branch: &str) -> MergeTarget {
     let remote = format!("refs/remotes/origin/{default_branch}");
     if git
         .run(&["rev-parse", "--verify", "--quiet", &remote])
         .is_ok()
     {
-        remote
+        MergeTarget {
+            reference: remote,
+            remote_tracking: true,
+        }
     } else {
-        format!("refs/heads/{default_branch}")
+        MergeTarget {
+            reference: format!("refs/heads/{default_branch}"),
+            remote_tracking: false,
+        }
     }
 }
 

@@ -14,7 +14,7 @@ mod repo_info;
 mod worktree;
 mod worktree_setup;
 
-pub use conflict_report::{merge_target_ref, predict_conflict, ConflictReport};
+pub use conflict_report::{merge_target, predict_conflict, ConflictReport, MergeTarget};
 pub use file_list::{list_files, MAX_FILES};
 pub use git::{Git, GitError};
 pub use naming::{branch_name, slugify};
