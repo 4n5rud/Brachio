@@ -5,7 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { t } from "../i18n";
 import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
-import { codexConversations, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
+import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, terminalClipboardText } from "../lib/terminal-paste";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 
@@ -69,6 +69,9 @@ export function TerminalPane(props: {
 }) {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
+  const [uncertainOperation, setUncertainOperation] = createSignal<string>();
+  const [confirmingReset, setConfirmingReset] = createSignal(false);
+  const [resetError, setResetError] = createSignal<string>();
   const [restoredFrame, setRestoredFrame] = createSignal(false);
   const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation">();
   let reopen: () => void;
@@ -247,7 +250,9 @@ export function TerminalPane(props: {
         })
         .catch((error: unknown) => {
           if (disposed || launch !== generation) return;
-          term.writeln(`\r\n${t("terminal.startFailed")}: ${String(error)}`);
+          const uncertain = /BRACHIO_LAUNCH_UNCERTAIN:([0-9a-f-]{36})/i.exec(String(error));
+          setUncertainOperation(uncertain?.[1]);
+          term.writeln(`\r\n${t("terminal.startFailed")}: ${uncertain ? t("terminal.launchUncertain") : String(error)}`);
           setCanReopen(true);
           props.onStatus?.({ state: "error" }, null);
         });
@@ -440,6 +445,33 @@ export function TerminalPane(props: {
               {t("terminal.startNewConversation")}
             </button>
           </section>
+        )}
+      </Show>
+      <Show when={uncertainOperation()}>
+        {(operation) => (
+          <div class="terminal-recovery" role="alert">
+            <span>{t("terminal.launchUncertain")}</span>
+            <Show
+              when={confirmingReset()}
+              fallback={<button type="button" class="button button-sm" onClick={() => setConfirmingReset(true)}>{t("terminal.launchReset")}</button>}
+            >
+              <span>{t("terminal.launchResetConfirm")}</span>
+              <button type="button" class="button button-sm" onClick={async () => {
+                if (!props.session?.key) return;
+                try {
+                  await forgetUncertainLaunch(props.session.key, operation());
+                  setUncertainOperation(undefined);
+                  setConfirmingReset(false);
+                  setResetError(undefined);
+                  reopen();
+                } catch (error) {
+                  setResetError(String(error));
+                }
+              }}>{t("terminal.launchResetAnyway")}</button>
+              <button type="button" class="button button-sm" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</button>
+            </Show>
+            <Show when={resetError()}>{(message) => <span>{message()}</span>}</Show>
+          </div>
         )}
       </Show>
       <Show when={canReopen()}>

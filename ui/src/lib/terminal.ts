@@ -32,6 +32,9 @@ export interface OpenOptions {
   key?: string | null;
 }
 
+export const forgetUncertainLaunch = (key: string, operationId: string) =>
+  invoke<void>("terminal_forget_uncertain_launch", { key, operationId });
+
 export interface CodexConversation {
   id: string;
   timestamp: string | null;

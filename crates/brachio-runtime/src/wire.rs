@@ -91,6 +91,13 @@ pub enum Action {
         /// Initial columns.
         cols: u16,
     },
+    /// Inspect a previously submitted idempotent launch.
+    LaunchOutcome {
+        /// Runtime instance that received the request.
+        instance: String,
+        /// Caller-supplied operation ID.
+        operation_id: String,
+    },
     /// Read the shell identity and number of PTY bytes received.
     Inspect {
         /// Name the caller chose for the shell.
@@ -210,7 +217,7 @@ impl Action {
             Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
             Action::Launch { .. } => (4, "launch"),
             Action::StopGuarded { .. } => (5, "guarded stop"),
-            Action::LaunchOnce { .. } => (6, "idempotent launch"),
+            Action::LaunchOnce { .. } | Action::LaunchOutcome { .. } => (6, "idempotent launch"),
             Action::ForgetTask { .. } => (7, "forget task"),
             _ => (1, "this action"),
         }
@@ -255,6 +262,16 @@ pub struct Reply {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum ResponseResult {
+    /// The retained outcome of a completed idempotent launch.
+    LaunchCompleted {
+        /// The original launch result.
+        launch_outcome: Box<ResponseResult>,
+    },
+    /// An idempotent launch that is still running.
+    LaunchPending {
+        /// The operation has been accepted.
+        launch_pending: bool,
+    },
     /// A running shell and its visible frame.
     Snapshot {
         /// The shell.

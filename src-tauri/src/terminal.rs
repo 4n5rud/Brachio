@@ -162,6 +162,21 @@ pub async fn terminal_codex_conversations(
     .map_err(|error| error.to_string())
 }
 
+/// Clear a specific uncertain launch after the user has confirmed the risk.
+#[tauri::command]
+pub async fn terminal_forget_uncertain_launch(
+    hosted: State<'_, RuntimeTerminals>,
+    database: State<'_, Database>,
+    key: String,
+    operation_id: String,
+) -> CommandResult<()> {
+    terminal_authorization::resolve(&*database.lock()?, &key)?;
+    hosted
+        .forget_uncertain_launch(&key, &operation_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Opens a terminal and streams its events to `on_event`.
 #[tauri::command]
 pub async fn terminal_open(

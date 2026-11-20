@@ -1,8 +1,10 @@
 //! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
 
 use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
 use std::future::Future;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,9 +14,11 @@ use brachio_core::status::AgentState;
 use brachio_pty::SessionId;
 use brachio_runtime::client::{Client, ClientError, Following};
 use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
+use serde::{Deserialize, Serialize};
 use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tokio::sync::{Mutex as AsyncMutex, OnceCell};
+use uuid::Uuid;
 
 use crate::runtime_client;
 use crate::terminal::{send, send_message, ChannelMessage};
@@ -63,6 +67,7 @@ struct Attached {
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
     restart: AsyncMutex<()>,
+    launch_lock: AsyncMutex<()>,
     attached: Arc<Mutex<HashMap<SessionId, Attached>>>,
     handles: AtomicU64,
 }
@@ -131,15 +136,98 @@ impl RuntimeTerminals {
         let Some(current) = self.client().await? else {
             return Ok(None);
         };
-        let (client, existing) = self.locate_with_restart(&current, &key).await?;
-        let attached = existing.is_some();
+        let _launch_guard = self.launch_lock.lock().await;
+        let pending = pending_launch(&key)?;
+        let (client, existing, attached) = if pending.is_some() {
+            (current.clone(), None, false)
+        } else {
+            let (client, existing) = self.locate_with_restart(&current, &key).await?;
+            let attached = existing.is_some();
+            (client, existing, attached)
+        };
         if !attached {
             show_last_screen(&client, &key, &channel).await;
         }
         let reply = match existing {
             Some(reply) => reply,
-            None => client.call(launch_action(&key, launch)).await?,
+            None => {
+                let record = match pending {
+                    Some(record) => record,
+                    None => {
+                        let hello = client.call(Action::Hello).await?;
+                        let ResponseResult::Hello { runtime } = hello.result else {
+                            bail!("runtime did not provide its protocol version");
+                        };
+                        if runtime.current_version < 6 {
+                            bail!("the running terminal runtime cannot safely start a new session; update or restart the runtime");
+                        }
+                        let record = PendingLaunch {
+                            key: key.clone(),
+                            instance: hello.instance,
+                            operation_id: Uuid::new_v4().to_string(),
+                        };
+                        save_pending_launch(&record)?;
+                        let action = launch_action(&key, launch, &record);
+                        let result = match client.call(action).await {
+                            Ok(result) => result,
+                            Err(ClientError::Refused(message)) => {
+                                remove_pending_launch(&record)?;
+                                bail!("terminal launch refused: {message}");
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
+                        let attached = self
+                            .attach_launch_reply(key, client, result, channel, agent, false)
+                            .await?;
+                        remove_pending_launch(&record)?;
+                        return Ok(attached);
+                    }
+                };
+                let looked_up = client
+                    .call(Action::LaunchOutcome {
+                        instance: record.instance.clone(),
+                        operation_id: record.operation_id.clone(),
+                    })
+                    .await;
+                let (outcome, reply_meta) = match looked_up {
+                    Ok(reply) => {
+                        let result = reply.result.clone();
+                        (Ok(result), Some(reply))
+                    }
+                    Err(error) => (Err(error), None),
+                };
+                let result = match reconcile_launch(&record, outcome)? {
+                    Reconciled::Attach(result) => result,
+                    Reconciled::NotStarted(error) => {
+                        remove_pending_launch(&record)?;
+                        bail!("terminal launch failed: {error}");
+                    }
+                };
+                let result = Reply {
+                    result,
+                    ..reply_meta.expect("outcome came from a reply")
+                };
+                let attached = self
+                    .attach_launch_reply(key, client, result, channel, agent, false)
+                    .await?;
+                remove_pending_launch(&record)?;
+                return Ok(attached);
+            }
         };
+        drop(_launch_guard);
+        self.attach_launch_reply(key, client, reply, channel, agent, attached)
+            .await
+    }
+
+    async fn attach_launch_reply(
+        &self,
+        key: String,
+        client: Client,
+        reply: Reply,
+        channel: Channel<InvokeResponseBody>,
+        agent: bool,
+        attached: bool,
+    ) -> Result<Option<(SessionId, bool)>> {
         let ResponseResult::Success { session, .. } = reply.result else {
             bail!("the terminal runtime sent an unexpected reply");
         };
@@ -169,6 +257,16 @@ impl RuntimeTerminals {
             pump(first, following, channel, agent, Arc::clone(&forwarding)),
         )?;
         Ok(Some((id, attached)))
+    }
+
+    /// Forget one unknown launch after the user explicitly confirms the duplicate risk.
+    pub async fn forget_uncertain_launch(&self, key: &str, operation_id: &str) -> Result<()> {
+        let _guard = self.launch_lock.lock().await;
+        let record = pending_launch(key)?.ok_or_else(|| anyhow!("No pending launch exists."))?;
+        if record.operation_id != operation_id {
+            bail!("The pending launch changed. Reopen the terminal to check it again.");
+        }
+        remove_pending_launch(&record)
     }
 
     /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
@@ -393,8 +491,10 @@ async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>), 
     Ok((current.clone(), None))
 }
 
-fn launch_action(key: &str, launch: Launch) -> Action {
-    Action::Launch {
+fn launch_action(key: &str, launch: Launch, pending: &PendingLaunch) -> Action {
+    Action::LaunchOnce {
+        instance: pending.instance.clone(),
+        operation_id: pending.operation_id.clone(),
         key: key.to_owned(),
         cwd: launch.cwd,
         program: launch.program,
@@ -403,6 +503,98 @@ fn launch_action(key: &str, launch: Launch) -> Action {
         rows: launch.rows,
         cols: launch.cols,
     }
+}
+
+enum Reconciled {
+    Attach(ResponseResult),
+    NotStarted(String),
+}
+
+/// Decide what a recorded launch became; anything not provably started or failed stays uncertain.
+fn reconcile_launch(
+    record: &PendingLaunch,
+    outcome: Result<ResponseResult, ClientError>,
+) -> Result<Reconciled> {
+    match outcome {
+        Ok(ResponseResult::LaunchPending { .. }) => bail!("terminal launch is still in progress"),
+        Ok(ResponseResult::LaunchCompleted { launch_outcome }) => match *launch_outcome {
+            ResponseResult::Error { error } => Ok(Reconciled::NotStarted(error)),
+            result => Ok(Reconciled::Attach(result)),
+        },
+        Ok(_) => bail!("terminal runtime sent an unexpected launch outcome"),
+        Err(ClientError::Refused(message))
+            if message.contains("launch operation was not observed")
+                || message.contains("runtime instance changed")
+                || message.contains("requires protocol") =>
+        {
+            Err(anyhow!("BRACHIO_LAUNCH_UNCERTAIN:{}", record.operation_id))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingLaunch {
+    key: String,
+    instance: String,
+    operation_id: String,
+}
+
+fn pending_dir() -> Result<PathBuf> {
+    Ok(brachio_runtime::paths::state_directory()?.join("pending-launches"))
+}
+
+fn pending_launch(key: &str) -> Result<Option<PendingLaunch>> {
+    pending_launch_in(&pending_dir()?, key)
+}
+
+fn pending_launch_in(folder: &Path, key: &str) -> Result<Option<PendingLaunch>> {
+    if !folder.exists() {
+        return Ok(None);
+    }
+    let mut found = None;
+    for entry in fs::read_dir(folder)? {
+        let path = entry?.path();
+        let bytes = fs::read(&path)?;
+        if bytes.len() > 16 * 1024 {
+            bail!("pending launch record is too large");
+        }
+        let record: PendingLaunch = serde_json::from_slice(&bytes)?;
+        if record_path(folder, &record)? != path {
+            bail!("pending launch record name does not match its operation");
+        }
+        if record.key == key {
+            if found.is_some() {
+                bail!("multiple pending launches for the same terminal");
+            }
+            found = Some(record);
+        }
+    }
+    Ok(found)
+}
+
+fn record_path(folder: &Path, record: &PendingLaunch) -> Result<PathBuf> {
+    Uuid::parse_str(&record.operation_id)?;
+    Ok(folder.join(format!("{}.json", record.operation_id)))
+}
+
+fn save_pending_launch(record: &PendingLaunch) -> Result<()> {
+    save_pending_launch_in(&pending_dir()?, record)
+}
+
+fn save_pending_launch_in(folder: &Path, record: &PendingLaunch) -> Result<()> {
+    fs::create_dir_all(folder)?;
+    let path = record_path(folder, record)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    serde_json::to_writer(&mut file, record)?;
+    file.flush()?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn remove_pending_launch(record: &PendingLaunch) -> Result<()> {
+    fs::remove_file(record_path(&pending_dir()?, record)?)?;
+    Ok(())
 }
 
 /// Show what a shell that is gone last displayed, so a restart does not look like a blank slate.
@@ -683,5 +875,106 @@ mod tests {
             ["t1:agent", "t1:shell", "t1:agent-abc", "t1:agent-old"]
         );
         assert_eq!(task_terminal_keys("t1", &[]), ["t1:agent", "t1:shell"]);
+    }
+}
+
+#[cfg(test)]
+mod pending_launch_tests {
+    use super::*;
+
+    #[test]
+    fn pending_record_survives_reopen_and_contains_no_command_data() {
+        let folder = tempfile::tempdir().expect("tempdir");
+        let pending = PendingLaunch {
+            key: "task:agent".into(),
+            instance: Uuid::new_v4().to_string(),
+            operation_id: Uuid::new_v4().to_string(),
+        };
+        save_pending_launch_in(folder.path(), &pending).expect("save");
+        let loaded = pending_launch_in(folder.path(), "task:agent")
+            .expect("read")
+            .expect("pending");
+        assert_eq!(loaded.instance, pending.instance);
+        assert_eq!(loaded.operation_id, pending.operation_id);
+        assert!(pending_launch_in(folder.path(), "other")
+            .expect("read")
+            .is_none());
+        let contents = fs::read_to_string(record_path(folder.path(), &pending).expect("path"))
+            .expect("record");
+        assert!(!contents.contains("program"));
+        assert!(!contents.contains("env"));
+        assert!(save_pending_launch_in(folder.path(), &pending).is_err());
+    }
+
+    fn record() -> PendingLaunch {
+        PendingLaunch {
+            key: "task:agent".into(),
+            instance: Uuid::new_v4().to_string(),
+            operation_id: Uuid::new_v4().to_string(),
+        }
+    }
+
+    fn success() -> ResponseResult {
+        ResponseResult::LaunchPending {
+            launch_pending: true,
+        }
+    }
+
+    #[test]
+    fn a_launch_the_runtime_finished_is_reattached() {
+        let outcome = ResponseResult::LaunchCompleted {
+            launch_outcome: Box::new(success()),
+        };
+        assert!(matches!(
+            reconcile_launch(&record(), Ok(outcome)),
+            Ok(Reconciled::Attach(_))
+        ));
+    }
+
+    #[test]
+    fn a_launch_that_failed_is_reported_as_not_started() {
+        let outcome = ResponseResult::LaunchCompleted {
+            launch_outcome: Box::new(ResponseResult::Error {
+                error: "spawn failed".into(),
+            }),
+        };
+        let Ok(Reconciled::NotStarted(error)) = reconcile_launch(&record(), Ok(outcome)) else {
+            panic!("expected not started");
+        };
+        assert_eq!(error, "spawn failed");
+    }
+
+    #[test]
+    fn a_launch_the_runtime_never_saw_or_a_new_runtime_is_uncertain() {
+        let pending = record();
+        for message in [
+            "launch operation was not observed by this runtime",
+            "runtime instance changed; launch outcome is unknown",
+        ] {
+            let error = reconcile_launch(&pending, Err(ClientError::Refused(message.into())))
+                .err()
+                .expect("uncertain");
+            assert_eq!(
+                error.to_string(),
+                format!("BRACHIO_LAUNCH_UNCERTAIN:{}", pending.operation_id)
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreachable_runtime_or_running_launch_never_forgets_the_record() {
+        let pending = record();
+        let error = reconcile_launch(&pending, Err(ClientError::NotRunning))
+            .err()
+            .expect("error");
+        assert!(!error.to_string().contains("BRACHIO_LAUNCH_UNCERTAIN"));
+        assert!(reconcile_launch(&pending, Ok(success())).is_err());
+    }
+
+    #[test]
+    fn corrupted_pending_records_fail_closed() {
+        let folder = tempfile::tempdir().expect("tempdir");
+        fs::write(folder.path().join("broken.json"), b"{").expect("write");
+        assert!(pending_launch_in(folder.path(), "task:agent").is_err());
     }
 }
