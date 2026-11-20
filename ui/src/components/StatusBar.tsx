@@ -8,6 +8,7 @@ const inTauri = "__TAURI_INTERNALS__" in window;
 
 interface ResourceUsage {
   memoryBytes: number;
+  runtimeMemoryBytes: number;
   cpuPercent: number;
 }
 
@@ -16,7 +17,7 @@ export function formatMemory(bytes: number): string {
   return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : `${Math.round(megabytes)} MB`;
 }
 
-/** Bottom bar. Memory and CPU cover the app and every process it started. */
+/** Bottom bar. Memory and CPU cover the app and every process it started, plus the terminal runtime. */
 export function StatusBar(props: { sessions: number }) {
   const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
 
