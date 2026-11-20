@@ -68,6 +68,29 @@ pub enum Action {
         #[arg(long, default_value_t = 80)]
         cols: u16,
     },
+    /// Launch once for a caller-provided operation ID and runtime instance.
+    LaunchOnce {
+        /// Runtime instance the caller observed.
+        instance: String,
+        /// Unique operation ID, retained for the life of this runtime.
+        operation_id: String,
+        /// Terminal key.
+        key: String,
+        /// Working directory.
+        cwd: PathBuf,
+        /// Program.
+        program: String,
+        /// Program arguments.
+        #[arg(long = "arg")]
+        args: Vec<String>,
+        /// Environment entries.
+        #[arg(long)]
+        env: Vec<String>,
+        /// Initial rows.
+        rows: u16,
+        /// Initial columns.
+        cols: u16,
+    },
     /// Read the shell identity and number of PTY bytes received.
     Inspect {
         /// Name the caller chose for the shell.
@@ -181,6 +204,7 @@ impl Action {
             Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
             Action::Launch { .. } => (4, "launch"),
             Action::StopGuarded { .. } => (5, "guarded stop"),
+            Action::LaunchOnce { .. } => (6, "idempotent launch"),
             _ => (1, "this action"),
         }
     }
