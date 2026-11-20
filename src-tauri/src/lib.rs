@@ -1,6 +1,7 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
 mod agent_accounts;
+mod child_task_request;
 mod external_link;
 mod hook_setup;
 mod hook_socket;
@@ -256,6 +257,7 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         move |request| mailbox::serve(&mail_app, request),
+        child_task_request::AppChildTasks(app.handle().clone()),
     );
     app.manage(Arc::clone(&approvals));
     tauri::async_runtime::spawn(async move {

@@ -32,13 +32,14 @@ pub fn handle(
         MailRequest::Check { key, limit, peek } => check(connection, &key, limit, peek, now_ms),
         MailRequest::Inbox { key, limit } => inbox(connection, &key, limit),
         MailRequest::Peers { key } => peers(connection, &key),
+        MailRequest::CreateTask { .. } => Err("Creating tasks needs the user's answer.".to_owned()),
     };
     outcome.unwrap_or_else(|message| (MailResponse::Error { message }, false))
 }
 
 type Outcome = Result<(MailResponse, bool), String>;
 
-fn agent_owner(connection: &Connection, key: &str) -> Result<TaskRecord, String> {
+pub(crate) fn agent_owner(connection: &Connection, key: &str) -> Result<TaskRecord, String> {
     let owner = terminal_authorization::resolve(connection, key)
         .map_err(|_| "This terminal does not belong to a Brachio task.".to_owned())?;
     if owner.agent.is_none() {

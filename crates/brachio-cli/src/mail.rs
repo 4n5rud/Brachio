@@ -73,7 +73,7 @@ pub struct InboxArgs {
     full: bool,
 }
 
-fn endpoint_and_key() -> Result<(String, String)> {
+pub(crate) fn endpoint_and_key() -> Result<(String, String)> {
     let endpoint = std::env::var(ENDPOINT_VARIABLE);
     let key = std::env::var(KEY_VARIABLE);
     match (endpoint, key) {
@@ -83,10 +83,18 @@ fn endpoint_and_key() -> Result<(String, String)> {
 }
 
 fn call(endpoint: &str, request: &MailRequest) -> Result<MailResponse> {
+    call_within(endpoint, request, mailbox::CALL_TIMEOUT)
+}
+
+pub(crate) fn call_within(
+    endpoint: &str,
+    request: &MailRequest,
+    timeout: Duration,
+) -> Result<MailResponse> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    match runtime.block_on(mailbox::call(endpoint, request))? {
+    match runtime.block_on(mailbox::call_with_timeout(endpoint, request, timeout))? {
         MailResponse::Error { message } => Err(anyhow!(message)),
         other => Ok(other),
     }
