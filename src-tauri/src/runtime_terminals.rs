@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -53,6 +53,8 @@ struct Attached {
     session_id: u64,
     client: Client,
     pump: JoinHandle<()>,
+    /// Cleared while the terminal is parked: output stays in the runtime, only status flows on.
+    forwarding: Arc<AtomicBool>,
 }
 
 /// App state for runtime-hosted terminals. Whether the runtime is used is decided once, so
@@ -157,12 +159,14 @@ impl RuntimeTerminals {
             .to_string()
             .parse()
             .map_err(|_| anyhow!("invalid runtime session ID"))?;
+        let forwarding = Arc::new(AtomicBool::new(true));
         self.register(
             id,
             key,
             client,
             (reply.instance, session_id),
-            pump(first, following, channel, agent),
+            &forwarding,
+            pump(first, following, channel, agent, Arc::clone(&forwarding)),
         )?;
         Ok(Some((id, attached)))
     }
@@ -224,6 +228,16 @@ impl RuntimeTerminals {
         })
     }
 
+    /// Keeps a hidden terminal's status flowing without sending its output to the web view, which
+    /// lets the UI unmount the terminal. Opening the same key again replaces the parked attachment.
+    /// `None` when `id` is not runtime-hosted.
+    pub fn park(&self, id: SessionId) -> Option<Result<()>> {
+        let attached = self.attached.lock().ok()?;
+        let found = attached.get(&id)?;
+        found.forwarding.store(false, Ordering::Relaxed);
+        Some(Ok(()))
+    }
+
     /// The runtime client, connecting on first use. `None` when the runtime is not used. A failed
     /// connection is not remembered, so the next open tries again.
     async fn client(&self) -> Result<Option<Client>> {
@@ -259,6 +273,7 @@ impl RuntimeTerminals {
         key: String,
         client: Client,
         (instance, session_id): (String, u64),
+        forwarding: &Arc<AtomicBool>,
         forward: impl Future<Output = ()> + Send + 'static,
     ) -> Result<()> {
         let map = Arc::clone(&self.attached);
@@ -273,6 +288,16 @@ impl RuntimeTerminals {
                 map.remove(&id);
             }
         });
+        let replaced: Vec<SessionId> = attached
+            .iter()
+            .filter(|(_, other)| other.key == key && !other.forwarding.load(Ordering::Relaxed))
+            .map(|(old, _)| *old)
+            .collect();
+        for old in replaced {
+            if let Some(parked) = attached.remove(&old) {
+                parked.pump.abort();
+            }
+        }
         attached.insert(
             id,
             Attached {
@@ -281,6 +306,7 @@ impl RuntimeTerminals {
                 session_id,
                 client,
                 pump,
+                forwarding: Arc::clone(forwarding),
             },
         );
         Ok(())
@@ -423,6 +449,7 @@ async fn pump(
     mut following: Following,
     channel: Channel<InvokeResponseBody>,
     agent: bool,
+    forwarding: Arc<AtomicBool>,
 ) {
     let mut last_status = None;
     let status = agent.then(|| TerminalStatus::new(channel.clone()));
@@ -430,7 +457,15 @@ async fn pump(
     let mut next = Some(first);
     loop {
         if let Some(reply) = next.take() {
-            if deliver(reply, &mut last_status, &channel, status.as_ref(), live) {
+            let forward = forwarding.load(Ordering::Relaxed);
+            if deliver(
+                reply,
+                &mut last_status,
+                &channel,
+                status.as_ref(),
+                live,
+                forward,
+            ) {
                 return;
             }
             live = true;
@@ -452,6 +487,7 @@ fn deliver(
     channel: &Channel<InvokeResponseBody>,
     status: Option<&TerminalStatus>,
     live: bool,
+    forward: bool,
 ) -> bool {
     let (session, bytes, drained) = match reply.result {
         ResponseResult::Snapshot { session, screen } => (session, screen.ansi.into_bytes(), true),
@@ -468,7 +504,9 @@ fn deliver(
         if let Some(status) = status.filter(|_| live) {
             status.activity();
         }
-        send(channel, InvokeResponseBody::Raw(bytes));
+        if forward {
+            send(channel, InvokeResponseBody::Raw(bytes));
+        }
     }
     if session.status != *last_status {
         let (state, message) = session
@@ -498,6 +536,9 @@ fn deliver(
 mod handle_tests {
     use brachio_pty::SessionId;
 
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
     use super::{
         locate, spawn, Attached, Client, ClientError, RuntimeTerminals, HOSTED_HANDLE_BASE,
     };
@@ -514,6 +555,7 @@ mod handle_tests {
                 session_id: 1,
                 client,
                 pump,
+                forwarding: Arc::new(AtomicBool::new(true)),
             },
         );
         id
@@ -548,6 +590,7 @@ mod handle_tests {
                 "test:agent".to_owned(),
                 client,
                 ("test".to_owned(), 1),
+                &Arc::new(AtomicBool::new(true)),
                 async {},
             )
             .expect("register");
@@ -558,6 +601,47 @@ mod handle_tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         panic!("the finished pump left its attachment behind");
+    }
+
+    #[tokio::test]
+    async fn parking_stops_output_forwarding_but_keeps_the_attachment() {
+        let terminals = RuntimeTerminals::default();
+        let id = attach_to_dead_runtime(&terminals);
+        assert!(terminals.park(id).expect("hosted").is_ok());
+        let attached = terminals.attached.lock().expect("lock");
+        let found = attached.get(&id).expect("still attached");
+        assert!(!found.forwarding.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn attaching_a_key_again_replaces_its_parked_attachment_only() {
+        let terminals = RuntimeTerminals::default();
+        let parked = attach_to_dead_runtime(&terminals);
+        let other = attach_to_dead_runtime(&terminals);
+        terminals.park(parked).expect("hosted").expect("parked");
+        let client = Client::new(&format!("brachio-missing-runtime-{}", uuid::Uuid::new_v4()));
+        let fresh = terminals.new_handle();
+        terminals
+            .register(
+                fresh,
+                "test:agent".to_owned(),
+                client,
+                ("test".to_owned(), 1),
+                &Arc::new(AtomicBool::new(true)),
+                std::future::pending::<()>(),
+            )
+            .expect("register");
+        let attached = terminals.attached.lock().expect("lock");
+        assert!(!attached.contains_key(&parked));
+        assert!(attached.contains_key(&other) && attached.contains_key(&fresh));
+    }
+
+    #[test]
+    fn parking_an_unknown_handle_is_not_hosted() {
+        let terminals = RuntimeTerminals::default();
+        assert!(terminals
+            .park(SessionId::from_raw(HOSTED_HANDLE_BASE + 99))
+            .is_none());
     }
 
     #[test]

@@ -202,6 +202,7 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_close,
             terminal::terminal_detach,
+            terminal::terminal_park,
             task_tabs::task_secondary_tabs,
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
