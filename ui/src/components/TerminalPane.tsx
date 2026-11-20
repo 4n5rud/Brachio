@@ -7,6 +7,7 @@ import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
 import { codexConversations, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, terminalClipboardText } from "../lib/terminal-paste";
+import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 
 /** What to run. Without it the pane stays an empty terminal. */
 export interface TerminalSession {
@@ -150,7 +151,11 @@ export function TerminalPane(props: {
       if (!session) return;
       const launch = ++generation;
       let streamEnded = false;
-      const earlyOutput: Uint8Array[] = [];
+      const earlyOutput = createEarlyOutput(EARLY_OUTPUT_MAX_BYTES);
+      const flushEarlyOutput = (write: (bytes: Uint8Array) => void) => {
+        if (earlyOutput.overflowed()) term.writeln(`\x1b[2m${t("terminal.outputTrimmed")}\x1b[0m`);
+        for (const bytes of earlyOutput.drain()) write(bytes);
+      };
       clearTimeout(promptTimer);
       typeInPrompt = null;
       handle = null;
@@ -188,7 +193,7 @@ export function TerminalPane(props: {
           return;
         }
         if (message.type === "detached") {
-          for (const bytes of earlyOutput.splice(0)) term.write(bytes);
+          flushEarlyOutput((bytes) => term.write(bytes));
           exited = true;
           handle = null;
           setCanReopen(true);
@@ -196,7 +201,7 @@ export function TerminalPane(props: {
           props.onStatus?.({ state: "unknown" }, null);
           return;
         }
-        for (const bytes of earlyOutput.splice(0)) term.write(bytes);
+        flushEarlyOutput((bytes) => term.write(bytes));
         if (resume && session.agent === "claude_code" && !handle?.attached
           && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
           term.writeln(`\r\n[${t("terminal.resumeFailed")}]\r\n`);
@@ -230,7 +235,7 @@ export function TerminalPane(props: {
           initialInputPending = null;
           // ConPTY can ask for cursor position before the open request resolves.
           // Render only after the terminal can send its response to this PTY.
-          for (const bytes of earlyOutput.splice(0)) writeOutput(bytes);
+          flushEarlyOutput(writeOutput);
         })
         .catch((error: unknown) => {
           if (disposed || launch !== generation) return;
