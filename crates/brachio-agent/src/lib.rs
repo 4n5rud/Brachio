@@ -7,7 +7,9 @@ mod codex_sessions;
 mod installed;
 
 pub use agent_kind::{AgentKind, Launch};
-pub use codex_sessions::{latest_codex_session, latest_session_in};
+pub use codex_sessions::{
+    codex_conversations, latest_codex_session, latest_session_in, CodexConversation,
+};
 pub use installed::{
     detect, detect_all, find_on_path, locate, Installed, PromptDelivery, ResolvedCommand,
 };

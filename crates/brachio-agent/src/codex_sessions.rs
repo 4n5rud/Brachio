@@ -6,14 +6,33 @@
 
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// How many of the newest conversation files to open before giving up.
 /// Keeps a restart fast for people with years of history.
 const MAX_FILES_CHECKED: usize = 500;
+const MAX_HEADER_BYTES: u64 = 128 * 1024;
+const MAX_CANDIDATES: usize = 10;
+
+/// A conversation started in the current working directory.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct CodexConversation {
+    /// The CLI conversation ID, separate from the Brachio tab ID.
+    pub id: String,
+    /// The time reported in the session metadata, when available.
+    pub timestamp: Option<String>,
+}
+
+/// Finds the most recent Codex conversations in `cwd` without selecting one.
+#[must_use]
+pub fn codex_conversations(cwd: &Path) -> Vec<CodexConversation> {
+    codex_home().map_or_else(Vec::new, |home| {
+        conversations_in(&home.join("sessions"), cwd, MAX_CANDIDATES)
+    })
+}
 
 /// The id of the newest Codex conversation started in `cwd`, if any.
 #[must_use]
@@ -25,9 +44,18 @@ pub fn latest_codex_session(cwd: &Path) -> Option<String> {
 /// default folder.
 #[must_use]
 pub fn latest_session_in(sessions: &Path, cwd: &Path) -> Option<String> {
+    conversations_in(sessions, cwd, 1)
+        .into_iter()
+        .next()
+        .map(|session| session.id)
+}
+
+fn conversations_in(sessions: &Path, cwd: &Path, limit: usize) -> Vec<CodexConversation> {
     let wanted = normalize(cwd);
     let mut budget = MAX_FILES_CHECKED;
-    find_newest(sessions, 0, &wanted, &mut budget)
+    let mut found = Vec::new();
+    collect(sessions, 0, &wanted, &mut budget, limit, &mut found);
+    found
 }
 
 #[derive(Deserialize)]
@@ -41,6 +69,7 @@ struct Record {
 struct Meta {
     id: String,
     cwd: String,
+    timestamp: Option<String>,
     /// Set for helper conversations Codex starts on its own.
     thread_source: Option<String>,
 }
@@ -57,31 +86,43 @@ fn codex_home() -> Option<PathBuf> {
 /// the newest days are listed however much history there is. Names start with the start time and
 /// the folders are dated, so sorting names sorts by time. `budget` counts the files still allowed
 /// to be opened.
-fn find_newest(folder: &Path, depth: usize, wanted: &str, budget: &mut usize) -> Option<String> {
-    let mut entries: Vec<_> = fs::read_dir(folder).ok()?.flatten().collect();
+fn collect(
+    folder: &Path,
+    depth: usize,
+    wanted: &str,
+    budget: &mut usize,
+    limit: usize,
+    found: &mut Vec<CodexConversation>,
+) {
+    let Ok(directory) = fs::read_dir(folder) else {
+        return;
+    };
+    let mut entries: Vec<_> = directory.flatten().collect();
     entries.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.file_name()));
     for entry in entries {
-        if *budget == 0 {
-            return None;
+        if *budget == 0 || found.len() >= limit {
+            break;
         }
         let path = entry.path();
         let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
         if is_folder {
             if depth < 3 {
-                if let Some(id) = find_newest(&path, depth + 1, wanted, budget) {
-                    return Some(id);
-                }
+                collect(&path, depth + 1, wanted, budget, limit, found);
             }
         } else if is_rollout(&path) {
             *budget -= 1;
             if let Some(meta) = read_meta(&path) {
-                if normalize(Path::new(&meta.cwd)) == wanted {
-                    return Some(meta.id);
+                if normalize(Path::new(&meta.cwd)) == wanted
+                    && !found.iter().any(|item| item.id == meta.id)
+                {
+                    found.push(CodexConversation {
+                        id: meta.id,
+                        timestamp: meta.timestamp,
+                    });
                 }
             }
         }
     }
-    None
 }
 
 fn is_rollout(path: &Path) -> bool {
@@ -94,7 +135,7 @@ fn is_rollout(path: &Path) -> bool {
 
 fn read_meta(file: &Path) -> Option<Meta> {
     let mut first_line = String::new();
-    BufReader::new(File::open(file).ok()?)
+    BufReader::new(File::open(file).ok()?.take(MAX_HEADER_BYTES))
         .read_line(&mut first_line)
         .ok()?;
     let record: Record = serde_json::from_str(&first_line).ok()?;
@@ -149,7 +190,7 @@ mod tests {
             "2026/11/18",
             "rollout-2026-11-18T09-mine.jsonl",
             task.path(),
-            "",
+            r#","timestamp":"2026-11-18T09:00:00Z""#,
         );
         // Newer, but from another task or a helper conversation.
         write_rollout(
@@ -170,6 +211,19 @@ mod tests {
         let found = latest_session_in(root, task.path());
 
         assert_eq!(found.as_deref(), Some("2026-11-18T09-mine"));
+        assert_eq!(
+            conversations_in(root, task.path(), 10),
+            [
+                CodexConversation {
+                    id: "2026-11-18T09-mine".into(),
+                    timestamp: Some("2026-11-18T09:00:00Z".into()),
+                },
+                CodexConversation {
+                    id: "2026-11-17T09-old".into(),
+                    timestamp: None
+                },
+            ]
+        );
     }
 
     #[test]
