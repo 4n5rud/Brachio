@@ -518,7 +518,15 @@ export function App() {
       cancelLabel: t("workspace.close"),
     });
     if (!agreed) return;
-    await deleteTask(task.id);
+    try {
+      await deleteTask(task.id, loss.fingerprint);
+    } catch (failure) {
+      const message = String(failure);
+      if (!message.includes("task changed:")) throw failure;
+      report(message.replace(/^.*task changed:\s*/u, ""));
+      await deleteArchived(task);
+      return;
+    }
     setArchived((items) => items.filter((item) => item.id !== task.id));
   };
 

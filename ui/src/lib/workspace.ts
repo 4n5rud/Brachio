@@ -67,6 +67,8 @@ export interface TaskLoss {
   /** Files git ignores, never committed, such as `.env.local`. */
   ignoredEntries: number;
   ignoredExamples: string[];
+  /** Identifies the state shown; `deleteTask` must send it back. */
+  fingerprint: string;
   runningTerminals: number;
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
@@ -75,7 +77,8 @@ export const previewTaskFile = (id: string, path: string) =>
   invoke<{ text: string | null; truncated: boolean }>("task_file_preview", { id, path });
 export const previewTaskMedia = (id: string, path: string) =>
   invoke<ArrayBuffer | number[]>("task_file_media", { id, path });
-export const deleteTask = (id: string) => invoke<void>("task_delete", { id });
+export const deleteTask = (id: string, expectedFingerprint: string) =>
+  invoke<void>("task_delete", { id, expectedFingerprint });
 
 interface TaskChanges {
   patch: string;
