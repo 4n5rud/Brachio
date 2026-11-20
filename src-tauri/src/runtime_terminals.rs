@@ -48,6 +48,8 @@ const HOSTED_HANDLE_BASE: u64 = 1 << 40;
 /// an older one than the app would start now.
 struct Attached {
     key: String,
+    instance: String,
+    session_id: u64,
     client: Client,
     pump: JoinHandle<()>,
 }
@@ -135,7 +137,7 @@ impl RuntimeTerminals {
             Some(reply) => reply,
             None => client.call(launch_action(&key, launch)).await?,
         };
-        let ResponseResult::Success { .. } = reply.result else {
+        let ResponseResult::Success { session, .. } = reply.result else {
             bail!("the terminal runtime sent an unexpected reply");
         };
         let (first, following) = if attached {
@@ -154,7 +156,20 @@ impl RuntimeTerminals {
             .attached
             .lock()
             .map_err(|_| anyhow!("terminal list lock poisoned"))?
-            .insert(id, Attached { key, client, pump });
+            .insert(
+                id,
+                Attached {
+                    key,
+                    client,
+                    pump,
+                    instance: reply.instance,
+                    session_id: session
+                        .session_id
+                        .to_string()
+                        .parse()
+                        .map_err(|_| anyhow!("invalid runtime session ID"))?,
+                },
+            );
         if let Some(previous) = previous {
             previous.pump.abort();
         }
@@ -187,8 +202,23 @@ impl RuntimeTerminals {
 
     /// Ends the program on purpose. `None` when `id` is not runtime-hosted.
     pub async fn stop(&self, id: SessionId) -> Option<Result<()>> {
-        let (client, key) = self.target(id).await?;
-        let stopped = client.call(Action::Stop { key }).await;
+        let (client, key, instance, session_id) = {
+            let attached = self.attached.lock().ok()?;
+            let found = attached.get(&id)?;
+            (
+                found.client.clone(),
+                found.key.clone(),
+                found.instance.clone(),
+                found.session_id,
+            )
+        };
+        let stopped = client
+            .call(Action::StopGuarded {
+                key,
+                instance,
+                session_id,
+            })
+            .await;
         self.drop_attachment(id);
         Some(stopped.map(|_| ()).map_err(Into::into))
     }
@@ -425,6 +455,8 @@ mod handle_tests {
             id,
             Attached {
                 key: "test:agent".to_owned(),
+                instance: "test".to_owned(),
+                session_id: 1,
                 client,
                 pump,
             },
