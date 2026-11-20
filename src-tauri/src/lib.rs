@@ -4,8 +4,10 @@ mod agent_accounts;
 mod external_link;
 mod hook_setup;
 mod hook_socket;
+mod issue_report;
 mod mailbox;
 mod pr_status;
+mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
 mod task_ports;
@@ -171,6 +173,7 @@ pub fn run() {
         .manage(terminal::Terminals(Arc::new(SessionManager::default())))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(resource_usage::ResourceMonitor::default())
         .setup(|app| {
             open_database(app)?;
             start_approvals(app)?;
@@ -181,6 +184,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_version,
+            resource_usage::resource_usage,
             tray_update_tasks,
             terminal::agents_detect,
             update_release::open_update_release,
@@ -197,6 +201,7 @@ pub fn run() {
             workspace::repo_list,
             workspace::repo_add,
             workspace::repo_remove,
+            workspace::folder_source_repos,
             agent_accounts::agent_auth_status,
             agent_accounts::codex_auth_action,
             agent_accounts::codex_usage,
@@ -215,6 +220,7 @@ pub fn run() {
             workspace::task_changes,
             pr_status::task_pr_status,
             external_link::open_external_link,
+            issue_report::open_issue_draft,
             workspace::task_merge_preview,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
@@ -316,6 +322,11 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let folder = app.path().app_data_dir()?;
     fs::create_dir_all(&folder)?;
     let connection = brachio_store::open(&folder.join("brachio.db"))?;
+    const READ_MAIL_KEPT_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+    let cutoff = pr_status::now_ms() - READ_MAIL_KEPT_MS;
+    if let Err(error) = brachio_store::expire_read_messages(&connection, cutoff) {
+        tracing::warn!(%error, "could not remove old read messages");
+    }
     app.manage(workspace::Database(Mutex::new(connection)));
     app.manage(workspace::TaskWorktreeLocks::default());
     Ok(())

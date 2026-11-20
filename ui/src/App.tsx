@@ -8,6 +8,7 @@ import { Board } from "./components/Board";
 import { answerApproval, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { Inspector } from "./components/Inspector";
+import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
@@ -149,6 +150,7 @@ export function App() {
     document.documentElement.lang = locale();
   });
   const [error, setError] = createSignal<string | null>(null);
+  const [issueReport, setIssueReport] = createSignal<string>();
   const [automaticUpdates, setAutomaticUpdates] = createSignal(localStorage.getItem("brachio.updateChecks") !== "off");
   const [updateVersion, setUpdateVersion] = createSignal<string | null>(null);
   const [dismissedVersion, setDismissedVersion] = createSignal<string>();
@@ -369,6 +371,11 @@ export function App() {
     switchRepo(added.id);
   };
 
+  const addFolderRepo = async (path: string) => {
+    const added = await addRepo(path);
+    setRepos((list) => (list.some((item) => item.id === added.id) ? list : [...list, added]));
+  };
+
   // A repository can ask for commands to run, so the user agrees once per exact list.
   const approveSetup = async (repoId: string, commands: readonly string[]) => {
     const entry = [repoId, ...commands].join("\n");
@@ -455,8 +462,9 @@ export function App() {
 
   // Shows what would be lost, and deletes the worktree and branch only after the user agrees.
   const deleteArchived = async (task: TaskRow) => {
+    const folderProject = repos().find((item) => item.id === task.repoId)?.isGit === false;
     const loss = await previewTaskDeletion(task.id);
-    const body = [
+    const gitBody = [
       t("task.deleteBody").replace("{branch}", task.branch),
       t("task.deleteLoss")
         .replace("{files}", String(loss.uncommittedFiles))
@@ -469,6 +477,10 @@ export function App() {
           ]
         : []),
     ].join("\n\n");
+    // A folder is the user's own: only the task's entry goes, never the folder.
+    const body = folderProject
+      ? t("task.deleteFolderBody").replace("{path}", task.worktreePath ?? "")
+      : gitBody;
     const agreed = await confirm(body, {
       title: `${t("task.delete")} · ${task.title}`,
       okLabel: t("task.delete"),
@@ -601,6 +613,12 @@ export function App() {
           <div class="error-banner" role="alert">
             <strong>{t("error.title")}</strong>
             <span>{message()}</span>
+            <Show when={inTauri}>
+              <button class="button button-sm" type="button"
+                onClick={() => { setIssueReport(message()); setError(null); }}>
+                {t("error.report")}
+              </button>
+            </Show>
             <button class="button button-ghost button-sm" type="button" onClick={() => setError(null)}>
               {t("error.dismiss")}
             </button>
@@ -633,6 +651,7 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
+          onAddFolderRepo={inTauri ? addFolderRepo : undefined}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
           now={now()}
@@ -676,7 +695,14 @@ export function App() {
           )}
         </Show>
         <Show when={selected()} fallback={noTask()}>
-          {(task) => <Inspector task={task()} onDraft={draftComment} onDiffTotals={recordDiffTotals} />}
+          {(task) => (
+            <Inspector
+              task={task()}
+              isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
+              onDraft={draftComment}
+              onDiffTotals={recordDiffTotals}
+            />
+          )}
         </Show>
       </main>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
@@ -686,6 +712,7 @@ export function App() {
           archived={archived()} onRestore={restore} onDelete={deleteArchived}
           repos={repos()}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
+          onReportProblem={inTauri ? () => { setWorkspacePanel(undefined); setIssueReport(""); } : undefined}
           notifications={notifications()} onTheme={setTheme} onNotifications={setNotifications}
           updates={inTauri ? {
             enabled: automaticUpdates(), status: updateStatus(), version: updateVersion(),
@@ -695,6 +722,9 @@ export function App() {
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
           onCommand={runCommand}
           onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
+      </Show>
+      <Show when={issueReport() !== undefined}>
+        <IssueReportDialog error={issueReport() ?? ""} onClose={() => setIssueReport(undefined)} />
       </Show>
       <Show when={dialogOpen() && dialogRepo()}>
         {(current) => (

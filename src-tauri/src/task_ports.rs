@@ -114,8 +114,15 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// Both tests use the first port of the pool; one holds it busy on purpose, so they must not
+    /// run at the same time.
+    static FIRST_PORT_TESTS: Mutex<()> = Mutex::new(());
+
     #[test]
     fn assignment_skips_busy_ports_and_remembers_task_reservations() {
+        let _serial = FIRST_PORT_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = brachio_store::open_in_memory().expect("open test database");
         connection.execute_batch(
             "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main');
@@ -144,6 +151,9 @@ mod tests {
 
     #[test]
     fn an_archived_task_gives_its_port_back_and_a_restored_one_never_shares_it() {
+        let _serial = FIRST_PORT_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = brachio_store::open_in_memory().expect("open test database");
         connection.execute_batch(
             "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main');

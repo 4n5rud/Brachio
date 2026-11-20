@@ -54,6 +54,46 @@ fn inside_repository(path: &Path) -> bool {
     path.ancestors().any(|folder| folder.join(".git").exists())
 }
 
+/// How deep `find_repositories` looks: `path/<a>` and `path/<a>/<b>`.
+const SEARCH_DEPTH: usize = 2;
+/// Most repositories `find_repositories` returns.
+const MAX_FOUND: usize = 40;
+/// Folders that never hold a project of their own and can be huge.
+const NOT_SEARCHED: [&str; 4] = ["node_modules", "target", ".venv", "$RECYCLE.BIN"];
+
+/// The git repositories inside a plain folder, up to two levels down, sorted. A repository's own
+/// folders are not searched, and neither are hidden folders or dependency folders.
+#[must_use]
+pub fn find_repositories(path: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    search(path, SEARCH_DEPTH, &mut found);
+    found.sort();
+    found.truncate(MAX_FOUND);
+    found
+}
+
+fn search(folder: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let child = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if !is_folder || name.starts_with('.') || NOT_SEARCHED.contains(&name.as_str()) {
+            continue;
+        }
+        if child.join(".git").exists() {
+            found.push(child);
+        } else if depth > 1 {
+            search(&child, depth - 1, found);
+        }
+        if found.len() >= MAX_FOUND {
+            return;
+        }
+    }
+}
+
 fn repositories_inside(path: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(path) else {
         return Vec::new();

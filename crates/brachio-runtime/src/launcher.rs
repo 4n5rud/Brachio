@@ -14,9 +14,6 @@ use tokio::sync::watch;
 use crate::runtime::Runtime;
 use crate::session::{lock, Session, StartupOutput};
 
-/// The answer to a program that asks where the cursor is, so it can start without a screen.
-const CURSOR_REPLY: &[u8] = b"\x1b[1;1R";
-
 impl Runtime {
     /// Start the program for `key` unless it already runs, in which case describe that one.
     pub(crate) fn launch(
@@ -58,8 +55,8 @@ impl Runtime {
             state.id = Some(id);
             state.reply_if_needed()
         };
-        if reply.is_some() {
-            self.manager.write(id, CURSOR_REPLY)?;
+        if let Some((_, bytes)) = reply {
+            self.manager.write(id, &bytes)?;
         }
         let pid = self.manager.process_id(id)?.context("read shell PID")?;
         Ok(Session {
@@ -85,8 +82,8 @@ fn program_events(
                 .ok()
                 .and_then(|mut state| state.record(&bytes));
             updates.send_replace(());
-            if let (Some(id), Some(manager)) = (reply, manager.upgrade()) {
-                let _ = manager.write(id, CURSOR_REPLY);
+            if let (Some((id, bytes)), Some(manager)) = (reply, manager.upgrade()) {
+                let _ = manager.write(id, &bytes);
             }
         }
         PtyEvent::Exit(code) => {

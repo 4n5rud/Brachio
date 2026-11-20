@@ -185,7 +185,10 @@ mod tests {
         let skill =
             std::fs::read_to_string(plugin.join("skills/brachio-send/SKILL.md")).expect("skill");
         assert_eq!(skill, SEND_SKILL);
-        assert!(skill.starts_with("---\nname: brachio-send\ndescription: "));
+        // A Windows checkout may turn the shipped file's line ends into CRLF.
+        assert!(skill
+            .replace("\r\n", "\n")
+            .starts_with("---\nname: brachio-send\ndescription: "));
         assert!(
             skill.lines().count() <= 40,
             "{} lines",
