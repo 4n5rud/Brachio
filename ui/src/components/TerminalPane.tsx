@@ -149,6 +149,7 @@ export function TerminalPane(props: {
       editedBeforePrompt = false;
       if (!session) return;
       const launch = ++generation;
+      let streamEnded = false;
       const earlyOutput: Uint8Array[] = [];
       clearTimeout(promptTimer);
       typeInPrompt = null;
@@ -168,6 +169,7 @@ export function TerminalPane(props: {
         cols: term.cols,
       };
       openTerminal(options, (message) => {
+        if (message.type === "detached" || message.type === "exit") streamEnded = true;
         if (disposed || launch !== generation) return;
         if (message.type === "output") {
           if (handle) writeOutput(message.bytes);
@@ -210,7 +212,10 @@ export function TerminalPane(props: {
         props.onStatus?.({ state: "exited", code: message.exitCode }, null);
       })
         .then((opened) => {
-          if (disposed || launch !== generation || exited) {
+          // The stream can disconnect before the open RPC resolves. Closing the returned
+          // handle in that case would stop the live PTY instead of letting it reattach.
+          if (streamEnded) return;
+          if (disposed || launch !== generation) {
             void opened.close().catch(() => {});
             return;
           }
