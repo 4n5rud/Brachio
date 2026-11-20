@@ -178,7 +178,17 @@ impl RuntimeTerminals {
                         instance: record.instance.clone(),
                         operation_id: record.operation_id.clone(),
                     })
-                    .await?;
+                    .await
+                    .map_err(|error| match &error {
+                        ClientError::Refused(message)
+                            if message.contains("launch operation was not observed")
+                                || message.contains("runtime instance changed")
+                                || message.contains("requires protocol") =>
+                        {
+                            anyhow!("BRACHIO_LAUNCH_UNCERTAIN:{}", record.operation_id)
+                        }
+                        _ => error.into(),
+                    })?;
                 let result = match result_reply_placeholder.result {
                     ResponseResult::LaunchPending { .. } => {
                         bail!("terminal launch is still in progress")
@@ -252,6 +262,16 @@ impl RuntimeTerminals {
             previous.pump.abort();
         }
         Ok(Some((id, attached)))
+    }
+
+    /// Forget one unknown launch after the user explicitly confirms the duplicate risk.
+    pub async fn forget_uncertain_launch(&self, key: &str, operation_id: &str) -> Result<()> {
+        let _guard = self.launch_lock.lock().await;
+        let record = pending_launch(key)?.ok_or_else(|| anyhow!("No pending launch exists."))?;
+        if record.operation_id != operation_id {
+            bail!("The pending launch changed. Reopen the terminal to check it again.");
+        }
+        remove_pending_launch(&record)
     }
 
     /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
