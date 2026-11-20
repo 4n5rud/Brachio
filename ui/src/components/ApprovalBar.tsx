@@ -1,4 +1,4 @@
-import { Show, onCleanup, onMount } from "solid-js";
+import { Show } from "solid-js";
 import { t } from "../i18n";
 import { approvalKeyAction } from "../lib/approval-keys";
 import { Button } from "./ui/Button";
@@ -7,7 +7,7 @@ import "./ApprovalBar.css";
 
 /**
  * The request an agent waits on, docked under its terminal with the whole request in view.
- * Enter allows and Escape denies while `keys` is on, also when the terminal has focus.
+ * Enter allows and Escape denies only while keyboard focus is inside the bar; the terminal keeps its own keys.
  */
 export function ApprovalBar(props: {
   review: string;
@@ -17,7 +17,6 @@ export function ApprovalBar(props: {
   title?: string;
   /** The answer is on its way: buttons stay off and Allow shows the working arc. */
   sending?: boolean;
-  keys?: boolean;
   onAllow?: () => void;
   onAllowAlways?: () => void;
   onDeny?: () => void;
@@ -27,32 +26,25 @@ export function ApprovalBar(props: {
   const allow = () => { if (canAllow()) props.onAllow?.(); };
   const deny = () => { if (canDeny()) props.onDeny?.(); };
 
-  onMount(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!props.keys || event.defaultPrevented) return;
-      const target = event.target instanceof Element ? event.target : null;
-      const action = approvalKeyAction({
-        key: event.key,
-        modified: event.ctrlKey || event.metaKey || event.altKey || event.shiftKey,
-        composing: event.isComposing,
-        inTerminal: !!target?.closest(".xterm"),
-        inField: !!target?.closest("input, textarea, select, [contenteditable]"),
-        onControl: !!target?.closest("button, a, summary, [role='tab']"),
-        dialogOpen: !!document.querySelector("[role='dialog'], [role='alertdialog']"),
-      });
-      if (!action) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (action === "allow") allow();
-      else deny();
-    };
-    window.addEventListener("keydown", onKey, true);
-    onCleanup(() => window.removeEventListener("keydown", onKey, true));
-  });
+  const onKeyDown = (event: KeyboardEvent & { currentTarget: HTMLElement }) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const action = approvalKeyAction({
+      key: event.key,
+      modified: event.ctrlKey || event.metaKey || event.altKey || event.shiftKey,
+      composing: event.isComposing,
+      inBar: !!target && event.currentTarget.contains(target),
+      onControl: !!target?.closest("button, a, summary, [role='tab']"),
+      dialogOpen: !!document.querySelector("[role='dialog'], [role='alertdialog']"),
+    });
+    if (!action) return;
+    event.preventDefault();
+    if (action === "allow") allow();
+    else deny();
+  };
 
   const title = () => props.title ?? t("approval.title");
   return (
-    <div class="approval2" role="region" aria-label={title()}>
+    <div class="approval2" role="region" aria-label={title()} onKeyDown={onKeyDown}>
       <div class="approval2-head">
         <StatusGlyph tone="blocked" />
         <strong>{title()}</strong>

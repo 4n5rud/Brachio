@@ -417,7 +417,7 @@ export function TaskView(props: {
         <Show when={props.onAnswer && approval()?.id} keyed>
           {(id) => (
             <ApprovalBar review={approval()?.review ?? ""} agent={AGENT_NAME[props.task.agent]}
-              keys={props.visible} sending={sending() === id}
+              sending={sending() === id}
               onAllow={() => answer(id, true)}
               onDeny={() => answer(id, false)} />
           )}
