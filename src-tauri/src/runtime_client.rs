@@ -18,7 +18,12 @@ pub const OPT_IN_VARIABLE: &str = "BRACHIO_TERMINAL_RUNTIME";
 const ENDPOINT_VARIABLE: &str = "BRACHIO_RUNTIME_ENDPOINT";
 /// Overrides where the runtime executable is looked up.
 const EXECUTABLE_VARIABLE: &str = "BRACHIO_RUNTIME_EXECUTABLE";
-const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
+const RUNTIME_NAME: &str = if cfg!(windows) {
+    "brachio-runtime.exe"
+} else {
+    "brachio-runtime"
+};
+const CONPTY_FILES: [&str; 2] = ["conpty.dll", "OpenConsole.exe"];
 const STARTUP_ATTEMPTS: u32 = 75;
 const STARTUP_STEP: Duration = Duration::from_millis(40);
 
@@ -45,7 +50,7 @@ pub fn endpoint() -> String {
 /// Raised when a change to the runtime has to reach users who update while an older runtime still
 /// hosts their agents. Each generation has an endpoint of its own, so the new runtime starts
 /// beside the old one, which keeps serving the agents it has until they end.
-pub const GENERATION: u32 = 3;
+pub const GENERATION: u32 = 4;
 
 /// The endpoint of one generation. The first generation has no suffix, which is the name earlier
 /// versions used.
@@ -207,16 +212,11 @@ fn executable() -> Result<PathBuf> {
     if let Some(path) = env::var_os(EXECUTABLE_VARIABLE) {
         return Ok(PathBuf::from(path));
     }
-    let name = if cfg!(windows) {
-        "brachio-runtime.exe"
-    } else {
-        "brachio-runtime"
-    };
     let beside = env::current_exe()?
         .parent()
-        .map(|folder| folder.join(name))
+        .map(|folder| folder.join(RUNTIME_NAME))
         .filter(|path| path.exists());
-    beside.with_context(|| format!("{name} is not installed next to the app"))
+    beside.with_context(|| format!("{RUNTIME_NAME} is not installed next to the app"))
 }
 
 /// A private copy of the runtime to run. The build output stays free to be replaced while a
@@ -226,30 +226,66 @@ fn stable_copy(source: &Path) -> Result<PathBuf> {
     stage_runtime(source, &folder)
 }
 
+/// Publish the executable and its optional ConPTY pair as one immutable directory. Keep older
+/// bundles because a draining runtime can still need its helpers while serving its terminals.
 fn stage_runtime(source: &Path, folder: &Path) -> Result<PathBuf> {
-    fs::create_dir_all(folder)?;
-    let digest = file_digest(source)?;
-    let copy = folder.join(format!("brachio-runtime-{digest}{EXE_SUFFIX}"));
-    if !copy.is_file() {
+    let mut files = vec![(RUNTIME_NAME, source.to_owned())];
+    if let Some(parent) = source.parent() {
+        let conpty = parent.join("conpty");
+        for name in CONPTY_FILES {
+            let path = conpty.join(name);
+            if path.try_exists()? {
+                files.push((name, path));
+            }
+        }
+    }
+    anyhow::ensure!(
+        files.len() != 2,
+        "the bundled ConPTY helper pair is incomplete"
+    );
+
+    let mut bundle_digest = Sha256::new();
+    let files = files
+        .into_iter()
+        .map(|(name, path)| {
+            let digest = file_digest(&path)?;
+            bundle_digest.update(digest.as_bytes());
+            Ok((name, path, digest))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let destination = folder.join(format!("brachio-runtime-{:x}", bundle_digest.finalize()));
+    let complete = || {
+        files
+            .iter()
+            .all(|(name, _, _)| destination.join(name).is_file())
+    };
+    if !complete() {
+        fs::create_dir_all(folder)?;
         let scratch = folder.join(format!(".{}.part", uuid::Uuid::new_v4()));
+        fs::create_dir(&scratch)?;
         let result = (|| -> Result<()> {
-            fs::copy(source, &scratch)?;
-            anyhow::ensure!(
-                file_digest(&scratch)? == digest,
-                "the runtime changed while staging"
-            );
-            match fs::rename(&scratch, &copy) {
+            for (name, source, digest) in &files {
+                let target = scratch.join(name);
+                fs::copy(source, &target)?;
+                anyhow::ensure!(
+                    file_digest(&target)? == *digest,
+                    "{name} changed while staging"
+                );
+            }
+            match fs::rename(&scratch, &destination) {
                 Ok(()) => Ok(()),
-                // Another app process published the same content-addressed file.
-                Err(_) if copy.is_file() => Ok(()),
+                Err(_) if complete() => Ok(()),
                 Err(error) => Err(error.into()),
             }
         })();
-        let _ = fs::remove_file(scratch);
+        for (name, _, _) in &files {
+            let _ = fs::remove_file(scratch.join(name));
+        }
+        let _ = fs::remove_dir(scratch);
         result?;
     }
-    copy_conpty_files(source, folder);
-    Ok(copy)
+    Ok(destination.join(RUNTIME_NAME))
 }
 
 fn file_digest(path: &Path) -> Result<String> {
@@ -257,20 +293,6 @@ fn file_digest(path: &Path) -> Result<String> {
     let mut digest = Sha256::new();
     std::io::copy(&mut file, &mut digest)?;
     Ok(format!("{:x}", digest.finalize()))
-}
-
-/// The runtime loads the newer ConPTY from beside its executable, so the copy needs the files
-/// too. A file in use or a failed copy only means the system ConPTY is used.
-fn copy_conpty_files(source: &Path, folder: &Path) {
-    let Some(conpty) = source.parent().map(|parent| parent.join("conpty")) else {
-        return;
-    };
-    for name in ["conpty.dll", "OpenConsole.exe"] {
-        let target = folder.join(name);
-        if conpty.join(name).is_file() && !target.exists() {
-            let _ = fs::copy(conpty.join(name), target);
-        }
-    }
 }
 
 /// Keep the runtime alive when the app exits: no console, its own process group.
@@ -291,7 +313,38 @@ fn detach(command: &mut Command) {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
+
     use super::endpoint;
+
+    #[test]
+    fn conpty_upgrade_keeps_each_running_version_with_its_own_helpers() -> anyhow::Result<()> {
+        use std::fs;
+
+        let dir = tempfile::tempdir()?;
+        let source = dir.path().join("runtime.exe");
+        let cache = dir.path().join("bin");
+        let bundled = dir.path().join("conpty");
+        fs::create_dir(&bundled)?;
+        fs::write(&source, b"same runtime")?;
+        fs::write(bundled.join("conpty.dll"), b"old dll")?;
+        fs::write(bundled.join("OpenConsole.exe"), b"old console")?;
+        let old = super::stage_runtime(&source, &cache)?;
+
+        fs::write(bundled.join("conpty.dll"), b"new dll")?;
+        fs::write(bundled.join("OpenConsole.exe"), b"new console")?;
+        let new = super::stage_runtime(&source, &cache)?;
+
+        let old_dir = old.parent().context("old generation directory")?;
+        let new_dir = new.parent().context("new generation directory")?;
+        assert_ne!(old_dir, new_dir);
+        assert_eq!(fs::read(old_dir.join("conpty.dll"))?, b"old dll");
+        assert_eq!(fs::read(old_dir.join("OpenConsole.exe"))?, b"old console");
+        assert_eq!(fs::read(new_dir.join("conpty.dll"))?, b"new dll");
+        assert_eq!(fs::read(new_dir.join("OpenConsole.exe"))?, b"new console");
+        assert_eq!(super::stage_runtime(&source, &cache)?, new);
+        Ok(())
+    }
 
     #[test]
     fn swapped_executables_with_matching_metadata_get_different_cache_entries() -> anyhow::Result<()>
