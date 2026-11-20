@@ -39,6 +39,9 @@ pub enum GitError {
         /// The repository folder.
         path: PathBuf,
     },
+    /// git succeeded but printed something that cannot be trusted.
+    #[error("{0}")]
+    UnexpectedOutput(String),
 }
 
 fn did_you_mean(suggestions: &[PathBuf]) -> String {

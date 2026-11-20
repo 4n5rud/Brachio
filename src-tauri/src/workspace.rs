@@ -606,6 +606,19 @@ pub struct TaskLoss {
     unpushed_commits: u32,
     ignored_entries: u32,
     ignored_examples: Vec<String>,
+    /// Changes whenever anything the user was shown, or the branch head, changes.
+    fingerprint: String,
+}
+
+/// Refuses deletion when the loss is no longer what the user confirmed.
+fn ensure_loss_unchanged(confirmed: &str, current: &str) -> Result<(), String> {
+    if confirmed == current {
+        return Ok(());
+    }
+    Err(
+        "task changed: The task changed after you reviewed it. Review the deletion again."
+            .to_owned(),
+    )
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -636,6 +649,7 @@ pub async fn task_delete_preview(
             unpushed_commits: 0,
             ignored_entries: 0,
             ignored_examples: Vec::new(),
+            fingerprint: String::new(),
         });
     }
     let work = tauri::async_runtime::spawn_blocking(move || {
@@ -649,6 +663,7 @@ pub async fn task_delete_preview(
         unpushed_commits: work.unpushed_commits,
         ignored_entries: work.ignored_entries,
         ignored_examples: work.ignored_examples,
+        fingerprint: work.fingerprint,
     })
 }
 
@@ -659,6 +674,7 @@ pub async fn task_delete(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
     id: String,
+    expected_fingerprint: String,
 ) -> Result<(), String> {
     let repo_id = TaskRecord::get(&*database.lock()?, &id)
         .map_err(to_text)?
@@ -668,11 +684,14 @@ pub async fn task_delete(
     // A folder project's task runs in the user's own folder, which must never be removed.
     if repo.is_git {
         tauri::async_runtime::spawn_blocking(move || {
-            brachio_git::discard_worktree(&Git::new(&repo.path), &task.worktree_path, &task.branch)
+            let git = Git::new(&repo.path);
+            let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
+                .map_err(to_text)?;
+            ensure_loss_unchanged(&expected_fingerprint, &current.fingerprint)?;
+            brachio_git::discard_worktree(&git, &task.worktree_path, &task.branch).map_err(to_text)
         })
         .await
-        .map_err(to_text)?
-        .map_err(to_text)?;
+        .map_err(to_text)??;
     }
     let connection = database.lock()?;
     // Its messages go with it, so a later task cannot be sent mail meant for this one.
@@ -852,6 +871,18 @@ mod folder_project_tests {
             std::fs::write(file, "x").expect("write file");
         }
         assert_eq!(list_folder_files(folder.path()), ["a.txt", "src/b.rs"]);
+    }
+}
+
+#[cfg(test)]
+mod deletion_loss_tests {
+    use super::ensure_loss_unchanged;
+
+    #[test]
+    fn a_changed_fingerprint_refuses_with_the_stable_prefix() {
+        assert_eq!(ensure_loss_unchanged("abc", "abc"), Ok(()));
+        let refusal = ensure_loss_unchanged("abc", "abd").expect_err("must refuse");
+        assert!(refusal.starts_with("task changed:"), "{refusal}");
     }
 }
 

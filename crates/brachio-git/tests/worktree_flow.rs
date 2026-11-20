@@ -139,15 +139,10 @@ fn deleting_a_task_reports_and_then_discards_unsaved_work() {
     fs::write(tree.join("scratch.txt"), "not committed\n").expect("write scratch.txt");
 
     let work = brachio_git::unsaved_work(&git, &tree, "brachio/d-4").expect("count unsaved work");
-    assert_eq!(
-        work,
-        brachio_git::UnsavedWork {
-            uncommitted_files: 1,
-            unpushed_commits: 1,
-            ignored_entries: 0,
-            ignored_examples: Vec::new(),
-        }
-    );
+    assert_eq!(work.uncommitted_files, 1);
+    assert_eq!(work.unpushed_commits, 1);
+    assert_eq!(work.ignored_entries, 0);
+    assert!(work.ignored_examples.is_empty());
 
     brachio_git::discard_worktree(&git, &tree, "brachio/d-4").expect("discard");
     assert!(!tree.exists(), "the worktree folder must be gone");
@@ -155,6 +150,51 @@ fn deleting_a_task_reports_and_then_discards_unsaved_work() {
         .run(&["branch", "--list", "brachio/d-4"])
         .expect("list branches");
     assert!(branches.is_empty(), "the branch must be gone: {branches}");
+}
+
+#[test]
+fn the_fingerprint_changes_when_work_appears_after_the_preview() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    fs::write(repo.path().join(".gitignore"), "*.log\n").expect("write ignore");
+    run(&git, &["add", ".gitignore"]);
+    run(&git, &["commit", "-q", "-m", "ignore logs"]);
+    let tree = trees.path().join("f");
+    add(&git, "brachio/f-6", &tree);
+    let fingerprint = || {
+        brachio_git::unsaved_work(&git, &tree, "brachio/f-6")
+            .expect("preview")
+            .fingerprint
+    };
+
+    let first = fingerprint();
+    assert_eq!(
+        first,
+        fingerprint(),
+        "unchanged state must keep its fingerprint"
+    );
+
+    fs::write(tree.join("note.txt"), "new\n").expect("write untracked");
+    let untracked = fingerprint();
+    assert_ne!(first, untracked);
+
+    fs::write(tree.join("run.log"), "log\n").expect("write ignored");
+    let ignored = fingerprint();
+    assert_ne!(untracked, ignored);
+
+    fs::write(tree.join("a.txt"), "edited\n").expect("edit tracked");
+    let modified = fingerprint();
+    assert_ne!(ignored, modified);
+    fs::write(tree.join("a.txt"), "edited again\n").expect("edit tracked again");
+    assert_ne!(
+        modified,
+        fingerprint(),
+        "more edits to a changed file must show"
+    );
+
+    commit_in(&tree, "committed\n");
+    assert_ne!(modified, fingerprint());
 }
 
 #[test]

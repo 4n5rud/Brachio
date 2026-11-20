@@ -56,6 +56,9 @@ pub struct UnsavedWork {
     pub ignored_entries: u32,
     /// Some of their names, top level only.
     pub ignored_examples: Vec<String>,
+    /// Identifies exactly this state: the facts above, the branch head, tracked changes and the
+    /// names of every changed or ignored entry. A later difference means the user saw stale facts.
+    pub fingerprint: String,
 }
 
 /// How many ignored names are returned as examples.
@@ -67,7 +70,7 @@ const IGNORED_EXAMPLES: usize = 5;
 /// # Errors
 /// Fails when git cannot read the repository.
 pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork, GitError> {
-    let (uncommitted_files, ignored) = if path.is_dir() {
+    let (mut status_entries, mut ignored, tracked_changes) = if path.is_dir() {
         let worktree = Git::new(path);
         let status = worktree.run_text(&["status", "--porcelain", "-z"])?;
         let ignored = worktree.run_text(&[
@@ -78,10 +81,10 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
             "--directory",
             "-z",
         ])?;
-        let names: Vec<String> = ignored.split_terminator('\0').map(str::to_owned).collect();
-        (count(status.split_terminator('\0').count()), names)
+        let tracked = worktree.run_text(&["diff", "HEAD", "--no-ext-diff", "--no-textconv"])?;
+        (names(&status), names(&ignored), tracked)
     } else {
-        (0, Vec::new())
+        (Vec::new(), Vec::new(), String::new())
     };
     let reference = format!("refs/heads/{branch}");
     // Commits another branch or a remote also holds survive the deletion, so they are not counted.
@@ -95,12 +98,68 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
         &exclude,
         "--branches",
     ])?;
+    let unpushed_commits = parse_count(&unpushed).map_err(GitError::UnexpectedOutput)?;
+    let head = git.run(&["rev-parse", "--verify", &reference])?;
+    let uncommitted_files = count(status_entries.len());
+    let ignored_entries = count(ignored.len());
+    let ignored_examples: Vec<String> = ignored.iter().take(IGNORED_EXAMPLES).cloned().collect();
+    status_entries.sort();
+    ignored.sort();
+    let mut hash = Fnv1a::new();
+    hash.field(&uncommitted_files.to_string());
+    hash.field(&unpushed_commits.to_string());
+    hash.field(&ignored_entries.to_string());
+    for example in &ignored_examples {
+        hash.field(example);
+    }
+    hash.field(&head);
+    hash.field(&tracked_changes);
+    for entry in status_entries.iter().chain(&ignored) {
+        hash.field(entry);
+    }
     Ok(UnsavedWork {
         uncommitted_files,
-        unpushed_commits: unpushed.parse().unwrap_or(0),
-        ignored_entries: count(ignored.len()),
-        ignored_examples: ignored.into_iter().take(IGNORED_EXAMPLES).collect(),
+        unpushed_commits,
+        ignored_entries,
+        ignored_examples,
+        fingerprint: hash.finish(),
     })
+}
+
+fn names(nul_separated: &str) -> Vec<String> {
+    nul_separated
+        .split_terminator('\0')
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Parses a git count. Anything else is an error so an unknown count never reads as zero.
+fn parse_count(text: &str) -> Result<u32, String> {
+    text.trim()
+        .parse()
+        .map_err(|_| format!("could not count unpushed commits: unexpected output {text:?}"))
+}
+
+/// FNV-1a 64-bit. `DefaultHasher` is not stable across runs and no hashing crate is a dependency
+/// here; the fingerprint only needs to differ when the state differs, not to resist attackers.
+struct Fnv1a(u64);
+
+impl Fnv1a {
+    fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    /// Mixes a field and a separator so adjacent fields cannot run together.
+    fn field(&mut self, text: &str) {
+        for byte in text.bytes().chain([0xff]) {
+            self.0 ^= u64::from(byte);
+            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+
+    fn finish(&self) -> String {
+        format!("{:016x}", self.0)
+    }
 }
 
 /// Removes the worktree and its branch whatever they hold. The caller must have shown
@@ -137,6 +196,14 @@ pub fn worktree_path(repo: &Path, branch: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_count_that_is_not_a_number_is_an_error_not_zero() {
+        assert_eq!(parse_count("3\n"), Ok(3));
+        assert!(parse_count("").is_err());
+        assert!(parse_count("warning: 3").is_err());
+        assert!(parse_count("-1").is_err());
+    }
 
     #[test]
     fn worktree_sits_beside_the_repo() {
