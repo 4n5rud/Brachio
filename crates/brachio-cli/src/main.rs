@@ -4,6 +4,7 @@
 
 mod mail;
 mod mail_hook;
+mod task;
 
 use std::io::Read;
 use std::time::Duration;
@@ -39,6 +40,11 @@ enum Command {
     Inbox(mail::InboxArgs),
     /// List the open tasks a message can be sent to.
     Peers,
+    /// Ask the user to start other tasks.
+    Task {
+        #[command(subcommand)]
+        command: task::TaskCommand,
+    },
     /// Commands that an agent's hooks run.
     Hook {
         #[command(subcommand)]
@@ -73,6 +79,7 @@ fn main() -> Result<()> {
         Command::Check(args) => mail::check(&args),
         Command::Inbox(args) => mail::inbox(&args),
         Command::Peers => mail::peers(),
+        Command::Task { command } => task::run(command),
         Command::Notify { event } => bail!("notify is not implemented yet (event {event}); M1"),
         Command::Mcp => bail!("mcp is not implemented yet; M3"),
     }

@@ -190,7 +190,7 @@ pub fn task_list(database: State<'_, Database>) -> Result<Vec<TaskRecord>, Strin
 #[serde(rename_all = "camelCase")]
 pub struct CreatedTask {
     #[serde(flatten)]
-    task: TaskRecord,
+    pub(crate) task: TaskRecord,
     /// Commands from the repository's `brachio.toml` that the user is asked to run in the new
     /// worktree. Nothing runs without the user's say-so.
     setup_commands: Vec<String>,
@@ -206,6 +206,15 @@ pub struct CreatedTask {
 pub async fn task_create(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
+    request: CreateTaskRequest,
+) -> Result<CreatedTask, String> {
+    create_task(&database, &worktrees, request).await
+}
+
+/// The work of [`task_create`], shared with tasks that agents ask for.
+pub(crate) async fn create_task(
+    database: &Database,
+    worktrees: &TaskWorktreeLocks,
     request: CreateTaskRequest,
 ) -> Result<CreatedTask, String> {
     let _guard = worktrees.acquire(&request.repo_id).await?;
@@ -224,7 +233,7 @@ pub async fn task_create(
         (repo, parent_branch)
     };
     if !repo.is_git {
-        return create_folder_task(&database, &repo, &request);
+        return create_folder_task(database, &repo, &request);
     }
     // Read first, so a broken file stops the task before anything is created.
     let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;

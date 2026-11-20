@@ -16,12 +16,15 @@ use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPON
 use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::tokio::{Listener, Stream};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
+use crate::child_task_request::{ChildRequest, ChildTasks};
+
 /// How long a hook may take to send its question once connected.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+const REVIEW_PROMPT_CHARS: usize = 2000;
 
 /// A question the user is being asked.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -51,6 +54,7 @@ pub struct Approvals {
     knows: Box<dyn Fn(&str) -> bool + Send + Sync>,
     notify: Box<dyn Fn(Notice) + Send + Sync>,
     mail: Box<dyn Fn(MailRequest) -> MailResponse + Send + Sync>,
+    children: Box<dyn ChildTasks>,
 }
 
 impl Approvals {
@@ -61,17 +65,24 @@ impl Approvals {
         knows: impl Fn(&str) -> bool + Send + Sync + 'static,
         notify: impl Fn(Notice) + Send + Sync + 'static,
     ) -> Arc<Self> {
-        Self::with_mail(knows, notify, |_| MailResponse::Error {
-            message: "Messages are not available.".to_owned(),
-        })
+        Self::with_mail(
+            knows,
+            notify,
+            |_| MailResponse::Error {
+                message: "Messages are not available.".to_owned(),
+            },
+            NoChildTasks,
+        )
     }
 
     /// Like [`Approvals::new`], and `mail` answers the message requests that arrive on the same
-    /// socket.
+    /// socket. `children` checks and carries out requests to create tasks, which wait for the
+    /// user like a permission question.
     pub fn with_mail(
         knows: impl Fn(&str) -> bool + Send + Sync + 'static,
         notify: impl Fn(Notice) + Send + Sync + 'static,
         mail: impl Fn(MailRequest) -> MailResponse + Send + Sync + 'static,
+        children: impl ChildTasks + 'static,
     ) -> Arc<Self> {
         Arc::new(Self {
             pending: Mutex::default(),
@@ -79,6 +90,7 @@ impl Approvals {
             knows: Box::new(knows),
             notify: Box::new(notify),
             mail: Box::new(mail),
+            children: Box::new(children),
         })
     }
 
@@ -108,7 +120,25 @@ impl Approvals {
         let value: Value = serde_json::from_slice(&message)?;
         if mailbox::is_mail(&value) {
             let request: MailRequest = serde_json::from_value(value)?;
-            let response = (self.mail)(request);
+            let response = match request {
+                MailRequest::CreateTask {
+                    key,
+                    title,
+                    prompt,
+                    agent,
+                    base,
+                } => {
+                    let request = ChildRequest {
+                        key,
+                        title,
+                        prompt,
+                        agent,
+                        base,
+                    };
+                    self.create_task(&mut reader, request).await
+                }
+                other => (self.mail)(other),
+            };
             write_message(reader.get_mut(), &response, MAX_RESPONSE).await?;
             return Ok(());
         }
@@ -119,17 +149,26 @@ impl Approvals {
         let Some(review) = request.review() else {
             return Ok(());
         };
+        if let Some(decision) = self.ask_user(&mut reader, request.key, review).await? {
+            write_message(reader.get_mut(), &decision, MAX_RESPONSE).await?;
+        }
+        Ok(())
+    }
+
+    /// Shows the user a question and waits for the answer. `None` when the client hung up first.
+    async fn ask_user(
+        &self,
+        reader: &mut BufReader<Stream>,
+        key: String,
+        review: String,
+    ) -> Result<Option<Decision>> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
         self.pending
             .lock()
             .map_err(|_| anyhow!("approval list lock poisoned"))?
             .insert(id, sender);
-        (self.notify)(Notice::Asked(Question {
-            id,
-            key: request.key,
-            review,
-        }));
+        (self.notify)(Notice::Asked(Question { id, key, review }));
         let outcome = tokio::select! {
             decision = receiver => decision.ok(),
             // The hook closed its end: answered in the terminal, or it gave up waiting.
@@ -139,10 +178,60 @@ impl Approvals {
             map.remove(&id);
         }
         (self.notify)(Notice::Closed(id));
-        if let Some(decision) = outcome {
-            write_message(reader.get_mut(), &decision, MAX_RESPONSE).await?;
+        Ok(outcome)
+    }
+
+    async fn create_task(
+        &self,
+        reader: &mut BufReader<Stream>,
+        request: ChildRequest,
+    ) -> MailResponse {
+        let lead_id = match self.children.check(&request) {
+            Ok(id) => id,
+            Err(message) => return MailResponse::Error { message },
+        };
+        let review = format!(
+            "Create task\n{}",
+            serde_json::to_string_pretty(&json!({
+                "title": request.title,
+                "agent": request.agent_name(),
+                "base": request.base,
+                "prompt": request.prompt.chars().take(REVIEW_PROMPT_CHARS).collect::<String>(),
+            }))
+            .unwrap_or_default()
+        );
+        let key = request.key.clone();
+        match self.ask_user(reader, key, review).await {
+            Ok(Some(Decision::Allow)) => {}
+            Ok(_) | Err(_) => {
+                return MailResponse::Error {
+                    message: "The user did not allow creating the task.".to_owned(),
+                }
+            }
         }
-        Ok(())
+        match self.children.create(lead_id, request).await {
+            Ok(child) => MailResponse::TaskCreated {
+                key: child.key,
+                title: child.title,
+                branch: child.branch,
+            },
+            Err(message) => MailResponse::Error { message },
+        }
+    }
+}
+
+/// Used where creating tasks is not wired up.
+#[cfg(test)]
+struct NoChildTasks;
+
+#[cfg(test)]
+impl ChildTasks for NoChildTasks {
+    fn check(&self, _: &ChildRequest) -> Result<String, String> {
+        Err("Creating tasks is not available.".to_owned())
+    }
+
+    fn create(&self, _: String, _: ChildRequest) -> crate::child_task_request::CreateFuture {
+        Box::pin(async { Err("Creating tasks is not available.".to_owned()) })
     }
 }
 
@@ -168,6 +257,7 @@ mod tests {
     use brachio_runtime::transport;
 
     use super::{Approvals, Notice};
+    use crate::child_task_request::{ChildRequest, ChildTask, ChildTasks, CreateFuture};
 
     fn request(key: &str) -> ApprovalRequest {
         ApprovalRequest {
@@ -297,6 +387,7 @@ mod tests {
                         message: "other".to_owned(),
                     },
                 },
+                super::NoChildTasks,
             );
             let listener = transport::listen(&name).expect("listen");
             tauri::async_runtime::spawn(approvals.serve(listener));
@@ -315,6 +406,127 @@ mod tests {
                     message: "asked by t:agent".to_owned()
                 }
             );
+        });
+    }
+
+    struct StandInChildren {
+        created: Arc<Mutex<Vec<ChildRequest>>>,
+    }
+
+    impl ChildTasks for StandInChildren {
+        fn check(&self, _: &ChildRequest) -> Result<String, String> {
+            Ok("lead1111".to_owned())
+        }
+
+        fn create(&self, lead_id: String, request: ChildRequest) -> CreateFuture {
+            assert_eq!(lead_id, "lead1111");
+            self.created.lock().expect("lock").push(request);
+            Box::pin(async {
+                Ok(ChildTask {
+                    key: "child001:agent".to_owned(),
+                    title: "Write docs".to_owned(),
+                    branch: "write-docs-abc123".to_owned(),
+                })
+            })
+        }
+    }
+
+    type Notices = Arc<Mutex<Vec<Notice>>>;
+    type Created = Arc<Mutex<Vec<ChildRequest>>>;
+
+    fn start_with_children() -> (String, Arc<Approvals>, Notices, Created) {
+        let name = format!("child-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+        let notices = Arc::new(Mutex::new(Vec::new()));
+        let created = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&notices);
+        let approvals = Approvals::with_mail(
+            |_| false,
+            move |notice| sink.lock().expect("lock").push(notice),
+            |_| unreachable!("create_task does not use the mail closure"),
+            StandInChildren {
+                created: Arc::clone(&created),
+            },
+        );
+        let listener = transport::listen(&name).expect("listen");
+        tauri::async_runtime::spawn(Arc::clone(&approvals).serve(listener));
+        (name, approvals, notices, created)
+    }
+
+    fn create_request() -> brachio_runtime::mailbox::MailRequest {
+        brachio_runtime::mailbox::MailRequest::CreateTask {
+            key: "lead1111:agent".to_owned(),
+            title: "Write docs".to_owned(),
+            prompt: "Document the API".to_owned(),
+            agent: Some("codex".to_owned()),
+            base: None,
+        }
+    }
+
+    async fn asked_review(notices: &Arc<Mutex<Vec<Notice>>>) -> (u64, String) {
+        let id = first_question(notices).await;
+        let review = notices
+            .lock()
+            .expect("lock")
+            .iter()
+            .find_map(|notice| match notice {
+                Notice::Asked(question) => Some(question.review.clone()),
+                Notice::Closed(_) => None,
+            })
+            .expect("question");
+        (id, review)
+    }
+
+    #[test]
+    fn an_allowed_task_request_creates_the_task_and_returns_its_key() {
+        tauri::async_runtime::block_on(async {
+            use brachio_runtime::mailbox::{self, MailResponse};
+
+            let (name, approvals, notices, created) = start_with_children();
+            let waiting = tokio::spawn({
+                let name = name.clone();
+                async move { mailbox::call(&name, &create_request()).await }
+            });
+            let (id, review) = asked_review(&notices).await;
+            assert!(review.starts_with("Create task\n"));
+            assert!(review.contains("Document the API"));
+            assert!(created.lock().expect("lock").is_empty());
+            assert!(approvals.answer(id, Decision::Allow));
+            assert_eq!(
+                waiting.await.expect("task").expect("answer"),
+                MailResponse::TaskCreated {
+                    key: "child001:agent".to_owned(),
+                    title: "Write docs".to_owned(),
+                    branch: "write-docs-abc123".to_owned(),
+                }
+            );
+            let made = created.lock().expect("lock");
+            assert_eq!(made.len(), 1);
+            assert_eq!(made[0].agent.as_deref(), Some("codex"));
+        });
+    }
+
+    #[test]
+    fn a_denied_task_request_is_refused_and_nothing_is_created() {
+        tauri::async_runtime::block_on(async {
+            use brachio_runtime::mailbox::{self, MailResponse};
+
+            let (name, approvals, notices, created) = start_with_children();
+            let waiting = tokio::spawn({
+                let name = name.clone();
+                async move { mailbox::call(&name, &create_request()).await }
+            });
+            let (id, _) = asked_review(&notices).await;
+            let denied = Decision::Deny {
+                message: "no".to_owned(),
+            };
+            assert!(approvals.answer(id, denied));
+            assert_eq!(
+                waiting.await.expect("task").expect("answer"),
+                MailResponse::Error {
+                    message: "The user did not allow creating the task.".to_owned()
+                }
+            );
+            assert!(created.lock().expect("lock").is_empty());
         });
     }
 }

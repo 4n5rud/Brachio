@@ -15,6 +15,8 @@ use crate::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 
 /// How long a command waits for the app to answer.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long `brachio task create` waits: the user is asked first and may take a while.
+pub const CREATE_TASK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Messages returned by one `check` unless asked for fewer.
 pub const DEFAULT_BATCH: usize = 10;
 /// The most messages one request can return.
@@ -77,6 +79,21 @@ pub enum MailRequest {
     Peers {
         /// The asking terminal.
         key: String,
+    },
+    /// Ask the user to create a child task of the asking terminal's task.
+    CreateTask {
+        /// The asking terminal.
+        key: String,
+        /// Title of the new task.
+        title: String,
+        /// The prompt the new task's agent starts with.
+        prompt: String,
+        /// `claude` or `codex`; `claude` when absent.
+        #[serde(default)]
+        agent: Option<String>,
+        /// Commit-ish to branch from; the asking task's branch when absent.
+        #[serde(default)]
+        base: Option<String>,
     },
 }
 
@@ -150,6 +167,15 @@ pub enum MailResponse {
         /// The open tasks.
         peers: Vec<Peer>,
     },
+    /// The user allowed a new task and it exists.
+    TaskCreated {
+        /// Terminal key of the new task's agent.
+        key: String,
+        /// The new task's title.
+        title: String,
+        /// The new task's branch.
+        branch: String,
+    },
     /// The request was refused, and why.
     Error {
         /// What the agent should be told.
@@ -168,6 +194,18 @@ pub fn is_mail(message: &serde_json::Value) -> bool {
 /// # Errors
 /// Fails when the app is not running, closes the connection, or does not answer in time.
 pub async fn call(endpoint: &str, request: &MailRequest) -> Result<MailResponse> {
+    call_with_timeout(endpoint, request, CALL_TIMEOUT).await
+}
+
+/// Like [`call`], with a different time to wait for the answer.
+///
+/// # Errors
+/// Fails when the app is not running, closes the connection, or does not answer in time.
+pub async fn call_with_timeout(
+    endpoint: &str,
+    request: &MailRequest,
+    timeout: Duration,
+) -> Result<MailResponse> {
     let exchange = async {
         let mut stream = transport::connect(endpoint)
             .await
@@ -179,7 +217,7 @@ pub async fn call(endpoint: &str, request: &MailRequest) -> Result<MailResponse>
             .ok_or_else(|| anyhow!("Brachio closed the connection without answering."))?;
         Ok::<_, anyhow::Error>(serde_json::from_slice::<MailResponse>(&message)?)
     };
-    tokio::time::timeout(CALL_TIMEOUT, exchange)
+    tokio::time::timeout(timeout, exchange)
         .await
         .map_err(|_| anyhow!("Brachio did not answer in time."))?
 }

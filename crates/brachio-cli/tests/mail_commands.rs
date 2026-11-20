@@ -201,3 +201,42 @@ async fn outside_a_brachio_terminal_or_with_the_app_closed_it_says_so_and_fails(
     assert_ne!(code, 0);
     assert!(error.contains("not running"), "{error}");
 }
+
+#[tokio::test]
+async fn task_create_sends_the_request_and_prints_the_new_key_and_branch() {
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::TaskCreated {
+            key: "child001:agent".into(),
+            title: "Write docs".into(),
+            branch: "write-docs-abc123".into(),
+        },
+    );
+    let (out, _, code) = brachio(
+        Some(&endpoint),
+        &[
+            "task",
+            "create",
+            "--title",
+            "Write docs",
+            "--prompt",
+            "Document it",
+            "--agent",
+            "codex",
+        ],
+    )
+    .await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "created child001:agent (write-docs-abc123)");
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::CreateTask {
+            key: "task1:agent".into(),
+            title: "Write docs".into(),
+            prompt: "Document it".into(),
+            agent: Some("codex".into()),
+            base: None,
+        }
+    );
+}
