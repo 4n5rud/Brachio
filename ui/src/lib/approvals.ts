@@ -14,15 +14,29 @@ export const taskIdOf = (key: string): string => key.split(":")[0] ?? key;
 /** Resolves to false when the question was already over, for example answered in the terminal. */
 export const answerApproval = (id: number, allow: boolean) => invoke<boolean>("approval_answer", { id, allow });
 
-/** Calls back for every question that opens or closes. Returns a function that stops listening. */
-export async function watchApprovals(
+/** Calls back for every question that opens or closes. Returns a function that stops listening, even before the subscriptions resolve. */
+export function watchApprovals(
   onAsked: (question: ApprovalQuestion) => void,
   onClosed: (id: number) => void,
-): Promise<() => void> {
-  const stopAsked = await listen<ApprovalQuestion>("approval-asked", (event) => onAsked(event.payload));
-  const stopClosed = await listen<number>("approval-closed", (event) => onClosed(event.payload));
+  onError: (error: unknown) => void = (error) => console.warn("Could not subscribe to approvals", error),
+): () => void {
+  let disposed = false;
+  const asked = listen<ApprovalQuestion>("approval-asked", (event) => {
+    if (!disposed) onAsked(event.payload);
+  });
+  const closed = listen<number>("approval-closed", (event) => {
+    if (!disposed) onClosed(event.payload);
+  });
+  const release = (subscription: Promise<() => void>) => void subscription.then((unlisten) => unlisten(), () => {});
+  Promise.all([asked, closed]).catch((error) => {
+    disposed = true;
+    release(asked);
+    release(closed);
+    onError(error);
+  });
   return () => {
-    stopAsked();
-    stopClosed();
+    disposed = true;
+    release(asked);
+    release(closed);
   };
 }
