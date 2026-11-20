@@ -540,7 +540,7 @@ export function App() {
     if (!target?.closest(".task-view [data-agent-terminal]")) return;
     const files = await resolveDroppedTaskPaths(task.id, paths);
     if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
-    const draft = files.map((path) => `@${/[\s"\\]/u.test(path) ? JSON.stringify(path) : path}`).join(" ");
+    const draft = files.map((path) => `@${/[\s"]/u.test(path) ? `"${path.replaceAll('"', '\\"')}"` : path}`).join(" ");
     if (!(await draftComment(task.id, draft + " "))) report(t("diff.notReady"));
   };
 
