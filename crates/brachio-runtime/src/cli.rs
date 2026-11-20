@@ -60,6 +60,7 @@ pub(crate) async fn run() -> Result<()> {
 
 pub(crate) async fn request(mut stream: Stream, protocol: u8, action: Action) -> Result<()> {
     let changes_state = action.changes_state();
+    let wait_for_completion = action.is_session_lifecycle();
     let following = matches!(action, Action::Follow { .. } | Action::FollowFrame { .. });
     tokio::time::timeout(
         IO_TIMEOUT,
@@ -79,8 +80,9 @@ pub(crate) async fn request(mut stream: Stream, protocol: u8, action: Action) ->
     } else {
         "runtime closed before responding"
     };
-    let first = await_outcome(changes_state, read_message(&mut reader, MAX_RESPONSE))
-        .await?
+    let first = await_outcome(wait_for_completion, read_message(&mut reader, MAX_RESPONSE))
+        .await
+        .context(reason)?
         .context(reason)?
         .context(reason)?;
     let completed = print_response(&first, protocol)?;

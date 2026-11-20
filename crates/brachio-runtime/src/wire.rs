@@ -19,16 +19,15 @@ pub const MAX_RESPONSE: u64 = 256 * 1024;
 /// How long one request or response may take to cross the connection.
 pub const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// After dispatching a state change, wait for its actual outcome. Dropping the
-/// future for a blocking action only loses its result and does not cancel it.
+/// Wait for an outcome, keeping a deadline when a caller can handle an uncertain result.
 ///
 /// # Errors
-/// A read-only operation that exceeds the connection deadline returns a timeout.
+/// An operation with a deadline returns a timeout when the deadline expires.
 pub async fn await_outcome<T>(
-    changes_state: bool,
+    wait_for_completion: bool,
     operation: impl std::future::Future<Output = T>,
 ) -> Result<T, tokio::time::error::Elapsed> {
-    if changes_state {
+    if wait_for_completion {
         Ok(operation.await)
     } else {
         tokio::time::timeout(IO_TIMEOUT, operation).await
@@ -150,6 +149,16 @@ impl Action {
                 | Self::Resize { .. }
                 | Self::Write { .. }
                 | Self::Stop { .. }
+        )
+    }
+
+    /// Lifecycle changes wait for a definitive result because a delayed launch or stop
+    /// cannot be safely inferred from a client-side timeout.
+    #[must_use]
+    pub fn is_session_lifecycle(&self) -> bool {
+        matches!(
+            self,
+            Self::Ensure { .. } | Self::Launch { .. } | Self::Stop { .. }
         )
     }
 

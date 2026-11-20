@@ -29,6 +29,9 @@ pub enum ClientError {
     /// The runtime answered with something this client cannot use.
     #[error("terminal runtime sent an unexpected reply: {0}")]
     Unexpected(String),
+    /// The connection stopped confirming a state change. Retrying may apply it twice.
+    #[error("terminal runtime operation outcome is unknown: {0}")]
+    OutcomeUnknown(String),
     /// The connection broke after it was made.
     #[error("connection to the terminal runtime failed: {0}")]
     Connection(String),
@@ -79,21 +82,14 @@ impl Client {
             (_, Err(error)) => return Err(ClientError::Unreachable(error)),
         };
         let changes_state = action.changes_state();
+        let wait_for_completion = action.is_session_lifecycle();
         let request = Request {
             version: protocol::CURRENT,
             action,
         };
         timed(write_message(&mut stream, &request, MAX_MESSAGE)).await?;
         let mut reader = BufReader::new(stream);
-        let reply = read_reply(&mut reader, changes_state)
-            .await?
-            .ok_or_else(|| {
-                ClientError::Connection(if changes_state {
-                    "runtime closed before responding; operation outcome is unknown".to_owned()
-                } else {
-                    "runtime closed before responding".to_owned()
-                })
-            })?;
+        let reply = read_reply(&mut reader, wait_for_completion, changes_state).await?;
         Ok((reply, Following { reader }))
     }
 }
@@ -113,20 +109,25 @@ impl Following {
 
 async fn read_reply(
     reader: &mut BufReader<Stream>,
+    wait_for_completion: bool,
     changes_state: bool,
-) -> Result<Option<Reply>, ClientError> {
-    let message = await_outcome(changes_state, read_message(reader, MAX_RESPONSE))
+) -> Result<Reply, ClientError> {
+    let missing_reply = |message: String| {
+        if changes_state {
+            ClientError::OutcomeUnknown(message)
+        } else {
+            ClientError::Connection(message)
+        }
+    };
+    let message = await_outcome(wait_for_completion, read_message(reader, MAX_RESPONSE))
         .await
-        .map_err(|error| ClientError::Connection(error.to_string()))?
-        .map_err(|error| {
-            let suffix = if changes_state {
-                "; operation outcome is unknown"
-            } else {
-                ""
-            };
-            ClientError::Connection(format!("{error:#}{suffix}"))
-        })?;
-    message.map(|message| decode(&message)).transpose()
+        .map_err(|error| missing_reply(error.to_string()))?
+        .map_err(|error| missing_reply(format!("{error:#}")))?
+        .ok_or_else(|| missing_reply("runtime closed before responding".to_owned()))?;
+    match decode(&message) {
+        Err(ClientError::Unexpected(message)) if changes_state => Err(missing_reply(message)),
+        result => result,
+    }
 }
 
 fn decode(message: &[u8]) -> Result<Reply, ClientError> {
