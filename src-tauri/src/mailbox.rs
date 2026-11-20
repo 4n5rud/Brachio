@@ -8,8 +8,8 @@ use brachio_runtime::mailbox::{
     DEFAULT_BATCH, MAX_BATCH, MAX_WAIT_SECS,
 };
 use brachio_store::{
-    child_reports, peek_unread, recent_messages, reply_recipient, send_message, take_unread,
-    unread_counts, Message, NewMessage, TaskRecord,
+    child_reports, mark_read, peek_next_batch, peek_unread, recent_messages, reply_recipient,
+    send_message, unread_counts, Message, NewMessage, TaskRecord,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
@@ -35,7 +35,7 @@ pub fn handle(
 ) -> (MailResponse, bool) {
     let outcome = match request {
         MailRequest::Send(mail) => send(connection, &mail, now_ms, new_id),
-        MailRequest::Check { key, limit, peek } => check(connection, &key, limit, peek, now_ms),
+        MailRequest::Check { key, limit, .. } => check(connection, &key, limit),
         MailRequest::Inbox { key, limit } => inbox(connection, &key, limit),
         MailRequest::Peers { key } => peers(connection, &key),
         MailRequest::CreateTask { .. } => Err("Creating tasks needs the user's answer.".to_owned()),
@@ -151,22 +151,12 @@ fn resolve_target(
     }
 }
 
-fn check(
-    connection: &mut Connection,
-    key: &str,
-    limit: Option<usize>,
-    peek: bool,
-    now_ms: i64,
-) -> Outcome {
+/// The next unread messages, still unread: the socket marks them with [`mark_delivered`] once
+/// the answer was written, so a client that left cannot lose them.
+fn check(connection: &mut Connection, key: &str, limit: Option<usize>) -> Outcome {
     agent_owner(connection, key)?;
     let limit = limit.unwrap_or(DEFAULT_BATCH).clamp(1, MAX_BATCH);
-    let batch = if peek {
-        peek_unread(connection, key, limit)
-    } else {
-        take_unread(connection, key, limit, now_ms)
-    }
-    .map_err(|error| error.to_string())?;
-    let changed = !peek && !batch.is_empty();
+    let batch = peek_next_batch(connection, key, limit).map_err(|error| error.to_string())?;
     let messages = batch
         .into_iter()
         .map(|message| mail_message(connection, message, false))
@@ -176,7 +166,7 @@ fn check(
             messages,
             unread_left: unread_for(connection, key)?,
         },
-        changed,
+        false,
     ))
 }
 
@@ -382,6 +372,26 @@ pub fn mailbox_inbox(
         .collect())
 }
 
+/// Marks messages read after the answer that carried them was written to the client.
+pub fn mark_delivered(app: &AppHandle, ids: &[String]) {
+    let database = app.state::<Database>();
+    let Ok(mut connection) = database.lock() else {
+        tracing::warn!("could not mark delivered messages read: database busy");
+        return;
+    };
+    let marked = mark_read(&mut connection, ids, crate::pr_status::now_ms());
+    drop(connection);
+    match marked {
+        Ok(0) => {}
+        Ok(_) => {
+            if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+                tracing::debug!(%error, "could not tell the window about read mail");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not mark delivered messages read"),
+    }
+}
+
 /// Runs a request from the socket against the app's database and tells the interface when the
 /// unread counts changed.
 pub fn serve(app: &AppHandle, request: MailRequest) -> MailResponse {
@@ -467,7 +477,7 @@ mod tests {
             )
         };
         let (first, changed) = check(&mut connection);
-        assert!(changed);
+        assert!(!changed);
         let MailResponse::Messages {
             messages,
             unread_left,
@@ -478,7 +488,12 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "Which port?");
         assert_eq!(messages[0].from_title.as_deref(), Some("Build API"));
-        assert_eq!(unread_left, 0);
+        assert_eq!(unread_left, 1);
+        let (again, _) = check(&mut connection);
+        assert!(
+            matches!(again, MailResponse::Messages { ref messages, .. } if messages.len() == 1)
+        );
+        brachio_store::mark_read(&mut connection, &["m1"], 25).expect("mark");
         let (second, changed) = check(&mut connection);
         assert!(!changed);
         assert!(

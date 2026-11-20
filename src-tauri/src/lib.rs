@@ -251,7 +251,8 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let knows = app.handle().clone();
     let notify = app.handle().clone();
     let mail_app = app.handle().clone();
-    let approvals = hook_socket::Approvals::with_mail(
+    let delivered_app = app.handle().clone();
+    let approvals = hook_socket::Approvals::with_delivery(
         move |key| task_is_open(&knows, key),
         move |notice| {
             let sent = match notice {
@@ -263,6 +264,7 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         move |request| mailbox::serve(&mail_app, request),
+        move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
     );
     app.manage(Arc::clone(&approvals));
