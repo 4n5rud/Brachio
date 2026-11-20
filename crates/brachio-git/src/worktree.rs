@@ -1,6 +1,8 @@
 //! Creating and removing task worktrees.
 
-use std::path::{Path, PathBuf};
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 
 use crate::git::{Git, GitError};
 use crate::nul_records::NulRecords;
@@ -58,27 +60,38 @@ pub struct UnsavedWork {
     /// Some of their names, top level only.
     pub ignored_examples: Vec<String>,
     /// Identifies exactly this state: the facts above, the branch head, tracked changes and the
-    /// names of every changed or ignored entry. A later difference means the user saw stale facts.
+    /// names and contents of untracked and ignored entries. A later difference means the user saw
+    /// stale facts.
     pub fingerprint: String,
 }
 
 /// How many ignored names are returned as examples.
 const IGNORED_EXAMPLES: usize = 5;
+const MAX_UNTRACKED_LIST_BYTES: usize = 1024 * 1024;
+const MAX_UNTRACKED_ENTRIES: usize = 20_000;
+const MAX_UNTRACKED_CONTENT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Counts what deleting the task would lose, without changing anything. A worktree folder that is
 /// already gone has no uncommitted files.
 ///
 /// # Errors
-/// Fails when git cannot read the repository.
+/// Fails when git cannot read the repository or the untracked contents cannot be fingerprinted
+/// within the scan limits.
 pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork, GitError> {
+    let mut hash = Fnv1a::new();
     let mut status = StatusEntries::default();
     let mut ignored = IgnoredEntries::default();
     let mut tracked_changes = Fnv1a::new();
     if path.is_dir() {
         let worktree = Git::new(path);
-        stream_records(&worktree, &["status", "--porcelain", "-z"], |record| {
-            status.add(record);
-        })?;
+        fingerprint_untracked(&worktree, &mut hash)?;
+        stream_records(
+            &worktree,
+            &["status", "--porcelain", "--untracked-files=normal", "-z"],
+            |record| {
+                status.add(record);
+            },
+        )?;
         stream_records(
             &worktree,
             &[
@@ -93,9 +106,8 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
         )?;
         worktree.stream_stdout(
             &["diff", "HEAD", "--no-ext-diff", "--no-textconv"],
-            |chunk| tracked_changes.bytes(chunk),
+            |chunk| tracked_changes.update(chunk),
         )?;
-        tracked_changes.bytes(&[SEPARATOR]);
     }
     let reference = format!("refs/heads/{branch}");
     // Commits another branch or a remote also holds survive the deletion, so they are not counted.
@@ -114,7 +126,6 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
     let uncommitted_files = count(status.entries);
     let ignored_entries = count(ignored.entries);
     // Entries are summed rather than sorted because they are streamed, so their order is free.
-    let mut hash = Fnv1a::new();
     hash.field(&uncommitted_files.to_string());
     hash.field(&unpushed_commits.to_string());
     hash.field(&ignored_entries.to_string());
@@ -202,6 +213,110 @@ impl IgnoredEntries {
     }
 }
 
+fn fingerprint_untracked(git: &Git, hash: &mut Fnv1a) -> Result<(), GitError> {
+    // Without exclude rules Git lists both untracked and ignored entries. Walk collapsed
+    // directories below to include every file inside them, including empty directories.
+    let (output, truncated) = git.run_bytes_capped(
+        &["ls-files", "--others", "--directory", "-z"],
+        MAX_UNTRACKED_LIST_BYTES,
+    )?;
+    if truncated {
+        return Err(scan_limit());
+    }
+    let mut pending: Vec<_> = output
+        .split(|&byte| byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| resolve_entry(git.repo(), entry))
+        .collect::<Result<_, _>>()?;
+    if pending.len() > MAX_UNTRACKED_ENTRIES {
+        return Err(scan_limit());
+    }
+    pending.sort_unstable();
+    pending.reverse();
+    let mut remaining_entries = MAX_UNTRACKED_ENTRIES;
+    let mut remaining_bytes = MAX_UNTRACKED_CONTENT_BYTES;
+    let mut buffer = [0; 8192];
+    while let Some(path) = pending.pop() {
+        remaining_entries = remaining_entries.checked_sub(1).ok_or_else(scan_limit)?;
+        let relative = path
+            .strip_prefix(git.repo())
+            .map_err(|_| unreadable_entry(&path))?;
+        hash.bytes(relative.as_os_str().as_encoded_bytes());
+        let metadata = fs::symlink_metadata(&path)?;
+        let kind = metadata.file_type();
+        if kind.is_symlink() {
+            hash.field("symlink");
+            hash.bytes(fs::read_link(&path)?.as_os_str().as_encoded_bytes());
+        } else if kind.is_dir() {
+            hash.field("directory");
+            let mut children = Vec::new();
+            for child in fs::read_dir(&path)? {
+                if pending.len() + children.len() >= remaining_entries {
+                    return Err(scan_limit());
+                }
+                children.push(child?.path());
+            }
+            children.sort_unstable();
+            pending.extend(children.into_iter().rev());
+        } else if kind.is_file() {
+            hash.field("file");
+            let len = metadata.len();
+            remaining_bytes = remaining_bytes.checked_sub(len).ok_or_else(scan_limit)?;
+            hash.update(&len.to_le_bytes());
+            let mut file = File::open(&path)?.take(len + 1);
+            loop {
+                let read = file.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                hash.update(&buffer[..read]);
+            }
+            if file.limit() != 1 {
+                return Err(unreadable_entry(&path));
+            }
+        } else {
+            return Err(unreadable_entry(&path));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_entry(root: &Path, entry: &[u8]) -> Result<PathBuf, GitError> {
+    let entry = entry.strip_suffix(b"/").unwrap_or(entry);
+    #[cfg(unix)]
+    let name = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(entry);
+    #[cfg(not(unix))]
+    let name = std::str::from_utf8(entry)
+        .map_err(|_| GitError::UnexpectedOutput("could not decode an untracked git path".into()))?;
+    let mut path = root.to_owned();
+    let mut components = Path::new(name).components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(GitError::UnexpectedOutput(
+                "unsafe untracked path from git".into(),
+            ));
+        };
+        path.push(name);
+        if components.peek().is_some() && !fs::symlink_metadata(&path)?.is_dir() {
+            return Err(unreadable_entry(&path));
+        }
+    }
+    Ok(path)
+}
+
+fn scan_limit() -> GitError {
+    GitError::UnexpectedOutput(
+        "Cannot safely confirm deletion: untracked and ignored files exceed the scan limits. Move or remove them before trying again.".into(),
+    )
+}
+
+fn unreadable_entry(path: &Path) -> GitError {
+    GitError::UnexpectedOutput(format!(
+        "Cannot safely confirm deletion: could not fingerprint {}.",
+        path.display()
+    ))
+}
+
 /// Parses a git count. Anything else is an error so an unknown count never reads as zero.
 fn parse_count(text: &str) -> Result<u32, String> {
     text.trim()
@@ -213,20 +328,22 @@ fn parse_count(text: &str) -> Result<u32, String> {
 /// here; the fingerprint only needs to differ when the state differs, not to resist attackers.
 struct Fnv1a(u64);
 
-const SEPARATOR: u8 = 0xff;
-
 impl Fnv1a {
     fn new() -> Self {
         Self(0xcbf2_9ce4_8422_2325)
     }
 
-    /// Mixes a field and a separator so adjacent fields cannot run together.
+    /// Mixes a length-prefixed field so adjacent fields cannot run together.
     fn field(&mut self, text: &str) {
         self.bytes(text.as_bytes());
-        self.bytes(&[SEPARATOR]);
     }
 
     fn bytes(&mut self, bytes: &[u8]) {
+        self.update(&(bytes.len() as u64).to_le_bytes());
+        self.update(bytes);
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
         for byte in bytes {
             self.0 ^= u64::from(*byte);
             self.0 = self.0.wrapping_mul(0x0100_0000_01b3);

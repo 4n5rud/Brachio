@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { matchesAll, rankFiles } from "./quick-open";
+import { loadFilesUnlessCancelled, matchesAll, rankFiles } from "./quick-open";
+
+describe("quick open file loading", () => {
+  it("drops a slower earlier response and a stale failure once cancelled", async () => {
+    let resolveA: (files: string[]) => void = () => {};
+    let rejectC: (error: Error) => void = () => {};
+    const applied: Array<readonly string[]> = [];
+    const cancelA = loadFilesUnlessCancelled(() => new Promise((resolve) => { resolveA = resolve; }), (f) => applied.push(f));
+    cancelA();
+    const cancelC = loadFilesUnlessCancelled(() => new Promise((_, reject) => { rejectC = reject; }), (f) => applied.push(f));
+    loadFilesUnlessCancelled(() => Promise.resolve(["b.ts"]), (f) => applied.push(f));
+    await Promise.resolve();
+    cancelC();
+    resolveA(["a.ts"]);
+    rejectC(new Error("late"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(applied).toEqual([["b.ts"]]);
+  });
+});
 
 describe("quick open file search", () => {
   const files = [

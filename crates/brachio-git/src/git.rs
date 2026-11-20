@@ -112,6 +112,16 @@ impl Git {
         args: &[&str],
         max_bytes: usize,
     ) -> Result<(String, bool), GitError> {
+        let (bytes, truncated) = self.run_bytes_capped(args, max_bytes)?;
+        // A cut can split a multi-byte character, which becomes one replacement mark.
+        Ok((String::from_utf8_lossy(&bytes).into_owned(), truncated))
+    }
+
+    pub(crate) fn run_bytes_capped(
+        &self,
+        args: &[&str],
+        max_bytes: usize,
+    ) -> Result<(Vec<u8>, bool), GitError> {
         let mut command = self.command(args);
         let capped = brachio_process::output_capped(&mut command, GIT_TIME_LIMIT, max_bytes)?;
         let output = capped.output;
@@ -124,11 +134,7 @@ impl Git {
         }
         let mut bytes = output.stdout;
         bytes.truncate(max_bytes);
-        // A cut can split a multi-byte character, which becomes one replacement mark.
-        Ok((
-            String::from_utf8_lossy(&bytes).into_owned(),
-            capped.truncated,
-        ))
+        Ok((bytes, capped.truncated))
     }
 
     /// Runs git and passes its stdout to `on_chunk` as it arrives, so a huge answer is never

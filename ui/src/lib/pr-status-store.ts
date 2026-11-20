@@ -19,14 +19,28 @@ export const prFailure = (taskId: string): string | undefined => failures().get(
 export const prRefreshing = (taskId: string): boolean => running().has(taskId);
 
 const inFlight = new Set<string>();
+/** Tasks forgotten while a lookup was running; that lookup's answer is thrown away. */
+const discarded = new Set<string>();
+
+const without = <V>(current: ReadonlyMap<string, V>, keep: ReadonlySet<string>): ReadonlyMap<string, V> =>
+  new Map([...current].filter(([id]) => keep.has(id)));
+
+/** Drops everything remembered about tasks that are no longer tracked. */
+export function forgetPrStatusesExcept(keep: ReadonlySet<string>): void {
+  for (const id of inFlight) if (!keep.has(id)) discarded.add(id);
+  setReports((current) => (current.size === 0 ? current : without(current, keep)));
+  setFailures((current) => (current.size === 0 ? current : without(current, keep)));
+}
 
 /** Asks for a task's status. A task that is already being asked about is not asked twice. */
 export async function refreshPrStatus(taskId: string, force = false): Promise<void> {
   if (inFlight.has(taskId)) return;
   inFlight.add(taskId);
+  discarded.delete(taskId);
   setRunning((current) => new Set(current).add(taskId));
   try {
     const report = await loadPrStatus(taskId, force);
+    if (discarded.has(taskId)) return;
     setReports((current) => new Map(current).set(taskId, report));
     setFailures((current) => {
       const next = new Map(current);
@@ -34,9 +48,10 @@ export async function refreshPrStatus(taskId: string, force = false): Promise<vo
       return next;
     });
   } catch (error) {
-    setFailures((current) => new Map(current).set(taskId, String(error)));
+    if (!discarded.has(taskId)) setFailures((current) => new Map(current).set(taskId, String(error)));
   } finally {
     inFlight.delete(taskId);
+    discarded.delete(taskId);
     setRunning((current) => {
       const next = new Set(current);
       next.delete(taskId);
@@ -74,11 +89,16 @@ export function pickDue(ids: readonly string[], dueAt: ReadonlyMap<string, numbe
 export function watchPrStatuses(ids: () => readonly string[]): () => void {
   const dueAt = new Map<string, number>();
   const timer = setInterval(() => {
-    const id = pickDue(ids(), dueAt, Date.now());
+    const current = ids();
+    const keep = new Set(current);
+    for (const id of dueAt.keys()) if (!keep.has(id)) dueAt.delete(id);
+    forgetPrStatusesExcept(keep);
+    const id = pickDue(current, dueAt, Date.now());
     if (id === undefined) return;
     // Hold the task until its answer arrives, so a slow lookup is not started twice.
     dueAt.set(id, Number.POSITIVE_INFINITY);
     void refreshPrStatus(id).then(() => {
+      if (!dueAt.has(id)) return;
       const delay = delayAfter(prReport(id), prFailure(id));
       dueAt.set(id, delay === null ? Number.POSITIVE_INFINITY : Date.now() + delay);
     });
