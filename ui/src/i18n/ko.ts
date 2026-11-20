@@ -319,8 +319,10 @@ export const ko: Messages = {
   "board.open": "열기",
   "board.reviewRequest": "요청 검토",
 
-  "statusbar.agentOne": "에이전트 {count}개 실행 중",
-  "statusbar.agentMany": "에이전트 {count}개 실행 중",
+  "statusbar.coreOk": "코어 정상",
+  "statusbar.coreStopped": "코어 멈춤",
+  "statusbar.sessions": "세션",
+  "statusbar.memoryParts": "앱과 에이전트 {app}, 런타임 {runtime}",
   "statusbar.memory": "메모리",
   "statusbar.cpu": "CPU",
 

@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t } from "../i18n";
+import { AppIcon } from "./BrandMark";
 import { Icon } from "./Icon";
 import { IconButton } from "./ui/IconButton";
 import { Kbd } from "./ui/Kbd";
@@ -62,13 +63,11 @@ export function TitleBar(props: {
   return (
     <header class="titlebar" classList={{ "titlebar-mac": platform() === "macos", "titlebar-windows": platform() === "windows" }}
       data-tauri-drag-region>
+      <AppIcon />
       <IconButton icon="panelLeft" aria-pressed={props.sidebarOpen}
         label={t("titlebar.toggleSidebar")} title={`${t("titlebar.toggleSidebar")} (${TOGGLE_SIDEBAR_KEYS})`}
         onClick={props.onToggleSidebar} />
-      <span class="repo-switch" title={props.repo}>
-        <Icon name="folder" class="icon-sm" />
-        <span class="active-project">{props.repo}</span>
-      </span>
+      <span class="active-project" title={props.repo}>{props.repo}</span>
       <button class="search" type="button" onClick={props.onQuickOpen}>
         <Icon name="search" class="icon-sm" />
         <span>{t("titlebar.search")}</span>

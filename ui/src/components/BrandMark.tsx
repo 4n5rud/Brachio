@@ -12,3 +12,15 @@ export function Mascot() {
     </svg>
   );
 }
+
+/** The app icon at title bar size: the mascot on the charcoal squircle. */
+export function AppIcon() {
+  return (
+    <svg class="app-icon" viewBox="0 0 1024 1024" aria-hidden="true">
+      <rect width="1024" height="1024" rx="230" fill="var(--color-brand-charcoal)" />
+      <g transform="scale(0.9184) translate(-70 -70)">
+        <path fill-rule="evenodd" fill="var(--color-mint)" d={`${NECK} ${EYES}`} />
+      </g>
+    </svg>
+  );
+}

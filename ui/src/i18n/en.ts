@@ -317,8 +317,10 @@ export const en = {
   "board.open": "Open",
   "board.reviewRequest": "Review request",
 
-  "statusbar.agentOne": "{count} agent running",
-  "statusbar.agentMany": "{count} agents running",
+  "statusbar.coreOk": "Core OK",
+  "statusbar.coreStopped": "Core stopped",
+  "statusbar.sessions": "Sessions",
+  "statusbar.memoryParts": "App and agents {app}, runtime {runtime}",
   "statusbar.memory": "Memory",
   "statusbar.cpu": "CPU",
 
