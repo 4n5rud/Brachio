@@ -43,6 +43,8 @@ Numbers we have measured, with where and how in each row. Rows marked "not measu
 | Idle memory on macOS and Windows | not measured | | |
 | Memory with 10 agent sessions | not measured | | |
 
+The [Windows memory benchmark procedure](docs/windows-memory-benchmark.md) describes how to reproduce the measurements.
+
 Where the savings come from:
 
 - **No bundled browser.** macOS uses WKWebView and Windows uses WebView2, both already on the machine. Electron apps ship their own Chromium and Node.js.
