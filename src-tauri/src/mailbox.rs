@@ -8,7 +8,7 @@ use brachio_store::{
     peek_unread, recent_messages, send_message, take_unread, unread_counts, Message, NewMessage,
     TaskRecord,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -166,15 +166,30 @@ fn inbox(connection: &Connection, key: &str, limit: Option<usize>) -> Outcome {
 fn peers(connection: &Connection, key: &str) -> Outcome {
     agent_owner(connection, key)?;
     let tasks = TaskRecord::list_open(connection).map_err(|error| error.to_string())?;
-    let peers = tasks
-        .into_iter()
-        .map(|task| Peer {
+    let mut peers = Vec::new();
+    for task in tasks {
+        let second_tab: Option<String> = connection
+            .query_row(
+                "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
+                [&task.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(tab_id) = second_tab {
+            peers.push(Peer {
+                key: format!("{}:agent-{tab_id}", task.id),
+                title: format!("{} (second agent)", task.title),
+                branch: task.branch.clone(),
+            });
+        }
+        peers.push(Peer {
             key: format!("{}:agent", task.id),
             title: task.title,
             branch: task.branch,
-        })
-        .filter(|peer| peer.key != key)
-        .collect();
+        });
+    }
+    peers.retain(|peer| peer.key != key);
     Ok((MailResponse::Peers { peers }, false))
 }
 
@@ -396,5 +411,37 @@ mod tests {
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].key, "bbbb2222:agent");
         assert_eq!(peers[0].title, "Write docs");
+    }
+
+    #[test]
+    fn a_second_agent_tab_is_listed_and_can_receive_mail() {
+        let mut connection = database();
+        let tab = "123e4567-e89b-12d3-a456-426614174000";
+        connection
+            .execute(
+                "INSERT INTO task_secondary_tabs (task_id, tab_id) VALUES ('bbbb2222', ?1)",
+                [tab],
+            )
+            .expect("register tab");
+        let key = format!("bbbb2222:agent-{tab}");
+        let (answer, _) = handle(
+            &mut connection,
+            MailRequest::Peers {
+                key: "aaaa1111:agent".into(),
+            },
+            1,
+            "x",
+        );
+        let MailResponse::Peers { peers } = answer else {
+            panic!("expected peers")
+        };
+        let second = peers.iter().find(|peer| peer.key == key).expect("listed");
+        assert_eq!(second.title, "Write docs (second agent)");
+        assert_eq!(second.branch, "b2");
+
+        let (answer, changed) =
+            handle(&mut connection, mail("aaaa1111:agent", &key, "hi"), 2, "m1");
+        assert!(changed);
+        assert!(matches!(answer, MailResponse::Sent { ref to, .. } if *to == key));
     }
 }
