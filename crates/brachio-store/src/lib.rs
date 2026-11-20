@@ -17,5 +17,5 @@ pub use message_record::{
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
 pub use repo_record::{NewRepo, RepoRecord};
-pub use task_record::{NewTask, TaskRecord};
+pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{load_secondary_tabs, set_secondary_tab};

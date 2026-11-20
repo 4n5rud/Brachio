@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
 use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
-use brachio_store::{NewRepo, NewTask, RepoRecord, TaskRecord};
+use brachio_store::{ChildInsertError, NewRepo, NewTask, RepoRecord, TaskRecord};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -64,6 +64,10 @@ pub struct CreateTaskRequest {
     pub agent: AgentKind,
     /// Commit-ish to branch from. Defaults to the repository's default branch.
     pub base: Option<String>,
+    /// Set for tasks an agent asked for: the parent's open children are counted again when the
+    /// task is saved, since other requests may have been approved meanwhile.
+    #[serde(skip)]
+    pub max_open_children: Option<i64>,
 }
 
 /// Lists registered repositories.
@@ -273,7 +277,19 @@ pub(crate) async fn create_task(
         agent_session_id: session_id.as_deref(),
         created_at_ms: now_ms(),
     };
+    let mut refused = false;
     let saved = database.lock().and_then(|mut connection| {
+        if let (Some(max), Some(_)) = (request.max_open_children, task.parent_task_id) {
+            return TaskRecord::insert_child(&mut connection, &task, max).map_err(|error| {
+                refused = !matches!(error, ChildInsertError::Store(_));
+                match error {
+                    ChildInsertError::LimitReached => {
+                        format!("This task already has {max} open child tasks. Archive one first.")
+                    }
+                    other => other.to_string(),
+                }
+            });
+        }
         let transaction = connection.transaction().map_err(to_text)?;
         let record = TaskRecord::insert(&transaction, &task).map_err(to_text)?;
         transaction.commit().map_err(to_text)?;
@@ -290,6 +306,7 @@ pub(crate) async fn create_task(
             .map_err(to_text)
             .and_then(|result| result.map_err(to_text));
             return Err(match cleanup {
+                Ok(()) if refused => error,
                 Ok(()) => format!("Could not register task. The new worktree was removed. {error}"),
                 Err(cleanup_error) => format!(
                     "Could not register task. Git could not finish cleanup at {location}: {cleanup_error}. {error}"
@@ -825,6 +842,7 @@ mod folder_project_tests {
             prompt: String::new(),
             agent: AgentKind::ClaudeCode,
             base: Some("main".to_owned()),
+            max_open_children: None,
         };
         let created = create_folder_task(&database, &project, &request).expect("create task");
         assert_eq!(created.task.worktree_path, project.path);
@@ -1144,4 +1162,111 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     i64::try_from(since_epoch.as_millis()).unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod agent_child_limit_tests {
+    use std::path::Path;
+    use std::process::Command;
+    use std::sync::Mutex;
+
+    use brachio_agent::AgentKind;
+    use brachio_store::{open_in_memory, NewRepo, RepoRecord, TaskRecord};
+
+    use super::{create_task, CreateTaskRequest, Database, TaskWorktreeLocks};
+
+    fn git(folder: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(folder)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?}");
+    }
+
+    fn git_output(folder: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(folder)
+            .args(args)
+            .output()
+            .expect("run git");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    fn request(title: &str) -> CreateTaskRequest {
+        CreateTaskRequest {
+            repo_id: "r".to_owned(),
+            parent_task_id: Some("lead".to_owned()),
+            title: title.to_owned(),
+            prompt: String::new(),
+            agent: AgentKind::ClaudeCode,
+            base: None,
+            max_open_children: Some(4),
+        }
+    }
+
+    #[test]
+    fn two_approved_requests_with_three_open_children_leave_four_and_no_extra_worktree() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let repo_path = root.path().join("repo");
+        std::fs::create_dir(&repo_path).expect("make repo");
+        git(&repo_path, &["init", "-b", "main"]);
+        git(&repo_path, &["commit", "--allow-empty", "-m", "start"]);
+        let connection = open_in_memory().expect("open database");
+        let repo = NewRepo {
+            id: "r",
+            name: "repo",
+            path: &repo_path,
+            default_branch: "main",
+            added_at_ms: 0,
+            is_git: true,
+        };
+        RepoRecord::insert(&connection, &repo).expect("insert repo");
+        connection
+            .execute_batch(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+                 VALUES ('lead', 'r', 'Lead', '', 'main', '/w0', 'active', 0);
+                 INSERT INTO tasks (id, repo_id, parent_task_id, title, prompt, branch, worktree_path, state, created_at_ms)
+                 VALUES ('c1', 'r', 'lead', 'C', '', 'b1', '/w1', 'active', 0),
+                        ('c2', 'r', 'lead', 'C', '', 'b2', '/w2', 'active', 0),
+                        ('c3', 'r', 'lead', 'C', '', 'b3', '/w3', 'active', 0);",
+            )
+            .expect("insert tasks");
+        let database = Database(Mutex::new(connection));
+        let locks = TaskWorktreeLocks::default();
+
+        let (first, second) = tauri::async_runtime::block_on(async {
+            tokio::join!(
+                create_task(&database, &locks, request("First")),
+                create_task(&database, &locks, request("Second"))
+            )
+        });
+
+        let mut results = [first, second];
+        results.sort_by_key(Result::is_err);
+        assert!(
+            results[0].is_ok(),
+            "one request fits: {:?}",
+            results[0].as_ref().err()
+        );
+        assert_eq!(
+            results[1].as_ref().err().map(String::as_str),
+            Some("This task already has 4 open child tasks. Archive one first.")
+        );
+        let connection = database.lock().expect("lock");
+        let open: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE parent_task_id = 'lead' AND archived_at_ms IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(open, 4);
+        assert_eq!(TaskRecord::count_for_repo(&connection, "r").expect("n"), 5);
+        let listed = git_output(&repo_path, &["worktree", "list", "--porcelain"]);
+        assert_eq!(listed.matches("worktree ").count(), 2, "{listed}");
+        let branches = git_output(&repo_path, &["branch", "--format=%(refname:short)"]);
+        assert_eq!(branches.lines().count(), 2, "{branches}");
+    }
 }

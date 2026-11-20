@@ -60,6 +60,23 @@ pub struct NewTask<'a> {
     pub created_at_ms: i64,
 }
 
+/// Why [`TaskRecord::insert_child`] did not add the task.
+#[derive(Debug, thiserror::Error)]
+pub enum ChildInsertError {
+    /// The parent already has the most open children allowed.
+    #[error("the parent already has the most open child tasks")]
+    LimitReached,
+    /// The parent does not exist or was archived.
+    #[error("the parent task is no longer open")]
+    ParentClosed,
+    /// The parent is itself a child, and children cannot have children.
+    #[error("the parent task is itself a child task")]
+    ParentIsChild,
+    /// The database failed.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
 const COLUMNS: &str =
     "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms, \
      agent_session_id, prompt, parent_task_id";
@@ -88,6 +105,48 @@ impl TaskRecord {
             ],
         )?;
         Self::get(connection, task.id)
+    }
+
+    /// Adds a child of `task.parent_task_id`, checking in the same transaction that the parent
+    /// is open, is not a child, and has fewer than `max_open_children` open children.
+    ///
+    /// # Errors
+    /// Fails with the reason the child was refused, or when the database fails.
+    pub fn insert_child(
+        connection: &mut Connection,
+        task: &NewTask<'_>,
+        max_open_children: i64,
+    ) -> Result<Self, ChildInsertError> {
+        let parent_id = task.parent_task_id.ok_or(ChildInsertError::ParentClosed)?;
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(StoreError::from)?;
+        let parent: Option<(Option<String>, Option<i64>)> = transaction
+            .query_row(
+                "SELECT parent_task_id, archived_at_ms FROM tasks WHERE id = ?1",
+                [parent_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(StoreError::from)?;
+        match parent {
+            None | Some((_, Some(_))) => return Err(ChildInsertError::ParentClosed),
+            Some((Some(_), None)) => return Err(ChildInsertError::ParentIsChild),
+            Some((None, None)) => {}
+        }
+        let open: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?1 AND archived_at_ms IS NULL",
+                [parent_id],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::from)?;
+        if open >= max_open_children {
+            return Err(ChildInsertError::LimitReached);
+        }
+        let record = Self::insert(&transaction, task)?;
+        transaction.commit().map_err(StoreError::from)?;
+        Ok(record)
     }
 
     /// Tasks that are not archived, newest first.
@@ -312,6 +371,57 @@ mod tests {
             TaskRecord::list_open(&connection).expect("list open").len(),
             1
         );
+    }
+
+    fn child<'a>(id: &'a str, parent: &'a str) -> NewTask<'a> {
+        NewTask {
+            parent_task_id: Some(parent),
+            ..sample(id, 1)
+        }
+    }
+
+    fn lead_with_children(count: usize) -> Connection {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("lead", 0)).expect("insert lead");
+        for index in 0..count {
+            let id = format!("c{index}");
+            TaskRecord::insert(&connection, &child(&id, "lead")).expect("insert child");
+        }
+        connection
+    }
+
+    #[test]
+    fn only_one_of_two_children_fits_under_the_limit() {
+        let mut connection = lead_with_children(3);
+        let first = TaskRecord::insert_child(&mut connection, &child("n1", "lead"), 4);
+        let second = TaskRecord::insert_child(&mut connection, &child("n2", "lead"), 4);
+        assert!(first.is_ok());
+        assert!(matches!(second, Err(ChildInsertError::LimitReached)));
+        assert!(TaskRecord::get(&connection, "n2").is_err());
+    }
+
+    #[test]
+    fn archived_children_do_not_count_toward_the_limit() {
+        let mut connection = lead_with_children(4);
+        TaskRecord::archive(&connection, "c0", 5).expect("archive");
+        assert!(TaskRecord::insert_child(&mut connection, &child("n1", "lead"), 4).is_ok());
+    }
+
+    #[test]
+    fn a_child_cannot_be_a_parent() {
+        let mut connection = lead_with_children(1);
+        let refused = TaskRecord::insert_child(&mut connection, &child("n1", "c0"), 4);
+        assert!(matches!(refused, Err(ChildInsertError::ParentIsChild)));
+    }
+
+    #[test]
+    fn an_archived_or_missing_parent_is_refused() {
+        let mut connection = lead_with_children(0);
+        TaskRecord::archive(&connection, "lead", 5).expect("archive");
+        let archived = TaskRecord::insert_child(&mut connection, &child("n1", "lead"), 4);
+        assert!(matches!(archived, Err(ChildInsertError::ParentClosed)));
+        let missing = TaskRecord::insert_child(&mut connection, &child("n2", "ghost"), 4);
+        assert!(matches!(missing, Err(ChildInsertError::ParentClosed)));
     }
 
     #[test]
