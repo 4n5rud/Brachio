@@ -278,3 +278,127 @@ async fn task_create_sends_the_request_and_prints_the_new_key_and_branch() {
         }
     );
 }
+
+#[tokio::test]
+async fn task_list_prints_one_line_per_child_or_says_there_are_none() {
+    use brachio_runtime::mailbox::ChildTaskInfo;
+
+    let child = |key: &str, title: &str, archived, reported, unread| ChildTaskInfo {
+        key: key.into(),
+        title: title.into(),
+        archived,
+        reported,
+        unread,
+    };
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::TaskList {
+            children: vec![
+                child("c1:agent", "Parser", false, true, 2),
+                child("c2:agent", "Docs", false, false, 0),
+                child("c3:agent", "Old", true, false, 0),
+            ],
+        },
+    );
+    let (out, _, code) = brachio(Some(&endpoint), &["task", "list"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(
+        out,
+        "c1:agent  Parser  open reported  unread=2\nc2:agent  Docs  open  unread=0\nc3:agent  Old  archived  unread=0"
+    );
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::ListTasks {
+            key: "task1:agent".into()
+        }
+    );
+
+    let endpoint = name();
+    app(&endpoint, MailResponse::TaskList { children: vec![] });
+    let (out, _, _) = brachio(Some(&endpoint), &["task", "list"]).await;
+    assert_eq!(out, "no child tasks");
+}
+
+#[tokio::test]
+async fn task_wait_prints_reports_and_exits_with_three_on_timeout() {
+    use brachio_runtime::mailbox::ReportedChild;
+
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::TasksReported {
+            reported: vec![ReportedChild {
+                key: "c1:agent".into(),
+                subject: "done: parser".into(),
+            }],
+            pending: vec!["c2:agent".into(), "c3:agent".into()],
+            timed_out: true,
+        },
+    );
+    let (out, _, code) = brachio(
+        Some(&endpoint),
+        &["task", "wait", "--any", "--timeout-secs", "30"],
+    )
+    .await;
+    assert_eq!(code, 3);
+    assert_eq!(
+        out,
+        "timeout\nc1:agent done: parser\npending: c2:agent c3:agent"
+    );
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::WaitTasks {
+            key: "task1:agent".into(),
+            all: false,
+            timeout_secs: 30
+        }
+    );
+}
+
+#[tokio::test]
+async fn task_wait_defaults_to_all_children_and_prints_each_report() {
+    use brachio_runtime::mailbox::ReportedChild;
+
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::TasksReported {
+            reported: vec![
+                ReportedChild {
+                    key: "c1:agent".into(),
+                    subject: "one".into(),
+                },
+                ReportedChild {
+                    key: "c2:agent".into(),
+                    subject: "two".into(),
+                },
+            ],
+            pending: vec![],
+            timed_out: false,
+        },
+    );
+    let (out, _, code) = brachio(Some(&endpoint), &["task", "wait"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "c1:agent one\nc2:agent two");
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::WaitTasks {
+            key: "task1:agent".into(),
+            all: true,
+            timeout_secs: 600
+        }
+    );
+
+    let endpoint = name();
+    app(
+        &endpoint,
+        MailResponse::TasksReported {
+            reported: vec![],
+            pending: vec![],
+            timed_out: false,
+        },
+    );
+    let (out, _, code) = brachio(Some(&endpoint), &["task", "wait"]).await;
+    assert_eq!((out.as_str(), code), ("no child tasks", 0));
+}

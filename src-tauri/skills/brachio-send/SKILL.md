@@ -14,6 +14,7 @@ Send when you finish something others depend on, are blocked, or need a decision
     brachio reply "<message id>" --subject "<one-line answer>"
 
 - `--type`: status, question, handoff, escalation, merge_ready, decision_gate, worker_done.
+- `--to parent` reaches the task that created yours.
 - Keep the body short. Put long text in a file and send its path in the body.
 - `ask` queues a question and returns. `reply` reaches the other participant in the same thread.
 

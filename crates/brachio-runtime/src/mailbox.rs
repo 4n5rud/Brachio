@@ -17,6 +17,10 @@ use crate::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long `brachio task create` waits: the user is asked first and may take a while.
 pub const CREATE_TASK_TIMEOUT: Duration = Duration::from_secs(300);
+/// `brachio task wait` waits this long unless told otherwise.
+pub const DEFAULT_WAIT_SECS: u64 = 600;
+/// The longest `brachio task wait` may be asked to wait.
+pub const MAX_WAIT_SECS: u64 = 3600;
 /// Messages returned by one `check` unless asked for fewer.
 pub const DEFAULT_BATCH: usize = 10;
 /// The most messages one request can return.
@@ -95,6 +99,22 @@ pub enum MailRequest {
         #[serde(default)]
         base: Option<String>,
     },
+    /// The child tasks of the asking lead.
+    ListTasks {
+        /// The asking terminal.
+        key: String,
+    },
+    /// Hold the answer until the lead's open children have reported done, or time runs out.
+    WaitTasks {
+        /// The asking terminal.
+        key: String,
+        /// Wait for every open child; otherwise for the first one.
+        #[serde(default)]
+        all: bool,
+        /// Longest wait, capped at [`MAX_WAIT_SECS`].
+        #[serde(default)]
+        timeout_secs: u64,
+    },
 }
 
 /// A message as the receiver sees it.
@@ -140,6 +160,33 @@ pub struct Peer {
     pub branch: String,
 }
 
+/// A child task as `brachio task list` shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildTaskInfo {
+    /// The child agent's terminal key.
+    pub key: String,
+    /// The child's title.
+    pub title: String,
+    /// The child is archived.
+    #[serde(default)]
+    pub archived: bool,
+    /// The child's agent sent a `worker_done` message to the lead.
+    #[serde(default)]
+    pub reported: bool,
+    /// Messages from the child the lead has not read.
+    #[serde(default)]
+    pub unread: u32,
+}
+
+/// A child that reported done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportedChild {
+    /// The child agent's terminal key.
+    pub key: String,
+    /// Subject of its `worker_done` message.
+    pub subject: String,
+}
+
 /// The app's answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
@@ -175,6 +222,24 @@ pub enum MailResponse {
         title: String,
         /// The new task's branch.
         branch: String,
+    },
+    /// Children for `task list`, oldest first.
+    TaskList {
+        /// The lead's child tasks.
+        #[serde(default)]
+        children: Vec<ChildTaskInfo>,
+    },
+    /// Open children that reported, for `task wait`.
+    TasksReported {
+        /// Open children that have reported.
+        #[serde(default)]
+        reported: Vec<ReportedChild>,
+        /// Keys of open children that have not.
+        #[serde(default)]
+        pending: Vec<String>,
+        /// The wait ended because time ran out.
+        #[serde(default)]
+        timed_out: bool,
     },
     /// The request was refused, and why.
     Error {
