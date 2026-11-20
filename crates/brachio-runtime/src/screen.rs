@@ -17,6 +17,7 @@ pub(crate) struct TerminalScreen {
     parser: vt100::Parser,
     boundary: OutputBoundary,
     size: (NonZeroU16, NonZeroU16),
+    resize_revision: u64,
     /// The normal screen as it was when the alternate screen was entered.
     normal_frame: Option<String>,
     /// Trailing bytes of the previous chunk, in case an entry sequence is split.
@@ -41,6 +42,7 @@ impl Default for TerminalScreen {
             parser: vt100::Parser::new(ROWS, COLS, 0),
             boundary: OutputBoundary::default(),
             size: (ROWS, COLS),
+            resize_revision: 0,
             normal_frame: None,
             tail: Vec::new(),
             alternate_1047: false,
@@ -105,8 +107,16 @@ impl TerminalScreen {
 
     /// Change the emulated size so later frames match the PTY.
     pub(crate) fn resize(&mut self, rows: NonZeroU16, cols: NonZeroU16) {
+        if self.size == (rows, cols) {
+            return;
+        }
         self.parser.set_size(rows, cols);
         self.size = (rows, cols);
+        self.resize_revision = self.resize_revision.wrapping_add(1);
+    }
+
+    pub(crate) fn resize_revision(&self) -> u64 {
+        self.resize_revision
     }
 
     /// Find the next switch away from the normal screen, even when it straddles two chunks.

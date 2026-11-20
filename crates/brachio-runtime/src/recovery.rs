@@ -7,7 +7,7 @@ use brachio_runtime::wire::{LostInfo, ResponseResult, ScreenSnapshot};
 
 use crate::journal::{Journal, SessionRecord};
 use crate::runtime::Runtime;
-use crate::session::{lock, lost_info, Session};
+use crate::session::{lock, lost_info, ScreenMark, Session};
 
 impl Journal {
     /// Records left by runtimes that are gone. Unreadable files are reported and set aside.
@@ -37,14 +37,14 @@ impl Runtime {
         let Some(journal) = &self.journal else { return };
         // Only a session that changed since its last save has its screen formatted, and the
         // sessions lock is not held while writing to disk.
-        let records: Vec<SessionRecord> = {
+        let (records, mut saved) = {
             let Ok(sessions) = lock(&self.sessions) else {
                 return;
             };
             let Ok(saved) = lock(&self.saved) else {
                 return;
             };
-            sessions
+            let records: Vec<(SessionRecord, ScreenMark)> = sessions
                 .iter()
                 .filter(|(key, session)| {
                     session
@@ -52,13 +52,12 @@ impl Runtime {
                         .is_ok_and(|mark| saved.get(key.as_str()) != Some(&mark))
                 })
                 .filter_map(|(key, session)| session.record(key, &self.instance).ok())
-                .collect()
+                .collect();
+            // Retain save ordering across the unlocked disk write. A stop or exit may take
+            // the sessions lock now, but it must update the journal after this snapshot.
+            (records, saved)
         };
-        let Ok(mut saved) = lock(&self.saved) else {
-            return;
-        };
-        for record in records {
-            let mark = (record.output_bytes, record.exited);
+        for (record, mark) in records {
             if saved.get(&record.key) != Some(&mark) && journal.save(&record).is_ok() {
                 saved.insert(record.key, mark);
             }
@@ -91,22 +90,26 @@ impl Runtime {
         if lock(&self.stopped)?.remove(key) {
             return Ok(());
         }
-        let mut record = session.record(key, &self.instance)?;
+        let (mut record, _) = session.record(key, &self.instance)?;
         record.exited = true;
-        if let Some(journal) = &self.journal {
-            journal.save(&record)?;
+        {
+            let mut saved = lock(&self.saved)?;
+            if let Some(journal) = &self.journal {
+                journal.save(&record)?;
+            }
+            saved.remove(key);
         }
-        lock(&self.saved)?.remove(key);
         lock(&self.lost)?.insert(key.to_owned(), record);
         Ok(())
     }
 
     pub(crate) fn forget(&self, key: &str) -> Result<()> {
         lock(&self.lost)?.remove(key);
-        lock(&self.saved)?.remove(key);
+        let mut saved = lock(&self.saved)?;
         if let Some(journal) = &self.journal {
             journal.remove(key)?;
         }
+        saved.remove(key);
         Ok(())
     }
 
