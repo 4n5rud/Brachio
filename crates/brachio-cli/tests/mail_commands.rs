@@ -402,3 +402,40 @@ async fn task_wait_defaults_to_all_children_and_prints_each_report() {
     let (out, _, code) = brachio(Some(&endpoint), &["task", "wait"]).await;
     assert_eq!((out.as_str(), code), ("no child tasks", 0));
 }
+
+#[tokio::test]
+async fn mcp_lists_child_status_using_the_cli_terminal_identity() {
+    let endpoint = name();
+    let request = app(&endpoint, MailResponse::TaskList { children: vec![] });
+    let mut process = Command::new(BRACHIO)
+        .arg("mcp")
+        .env("BRACHIO_HOOK_ENDPOINT", &endpoint)
+        .env("BRACHIO_TERMINAL_KEY", "task1:agent")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start MCP server");
+    let mut input = process.stdin.take().expect("stdin");
+    let requests = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_child_tasks"}}"#,
+        "\n",
+    );
+    input
+        .write_all(requests.as_bytes())
+        .await
+        .expect("send MCP requests");
+    drop(input);
+    let output = process.wait_with_output().await.expect("MCP response");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 protocol");
+    let last: serde_json::Value =
+        serde_json::from_str(stdout.lines().last().expect("tool response")).expect("JSON response");
+    assert_eq!(last["result"]["content"][0]["text"], "[]");
+    let observed = request.await.expect("receive socket request");
+    assert!(matches!(observed, MailRequest::ListTasks { key } if key == "task1:agent"));
+}

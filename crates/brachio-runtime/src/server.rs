@@ -10,8 +10,8 @@ use brachio_runtime::endpoint::{self, Liveness};
 use brachio_runtime::protocol;
 use brachio_runtime::transport;
 use brachio_runtime::wire::{
-    accepted, read_message, write_message, Action, Request, Response, ResponseResult, StatusInfo,
-    IO_TIMEOUT, MAX_MESSAGE, MAX_RESPONSE,
+    accepted, await_outcome, read_message, write_message, Action, Request, Response,
+    ResponseResult, StatusInfo, IO_TIMEOUT, MAX_MESSAGE, MAX_RESPONSE,
 };
 use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::tokio::Stream;
@@ -153,8 +153,8 @@ pub(crate) async fn respond(mut stream: Stream, runtime: Arc<Runtime>) -> Result
             }
         }
         Ok(request) => {
-            tokio::time::timeout(
-                IO_TIMEOUT,
+            await_outcome(
+                request.action.changes_state(),
                 tokio::task::spawn_blocking({
                     let runtime = Arc::clone(&runtime);
                     move || runtime.execute(request)
