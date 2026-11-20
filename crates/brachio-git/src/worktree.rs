@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::git::{Git, GitError};
+use crate::nul_records::NulRecords;
 
 /// Inputs for `add_worktree`.
 #[derive(Debug, Clone)]
@@ -70,22 +71,32 @@ const IGNORED_EXAMPLES: usize = 5;
 /// # Errors
 /// Fails when git cannot read the repository.
 pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork, GitError> {
-    let (mut status_entries, mut ignored, tracked_changes) = if path.is_dir() {
+    let mut status = StatusEntries::default();
+    let mut ignored = IgnoredEntries::default();
+    let mut tracked_changes = Fnv1a::new();
+    if path.is_dir() {
         let worktree = Git::new(path);
-        let status = worktree.run_text(&["status", "--porcelain", "-z"])?;
-        let ignored = worktree.run_text(&[
-            "ls-files",
-            "--others",
-            "--ignored",
-            "--exclude-standard",
-            "--directory",
-            "-z",
-        ])?;
-        let tracked = worktree.run_text(&["diff", "HEAD", "--no-ext-diff", "--no-textconv"])?;
-        (names(&status), names(&ignored), tracked)
-    } else {
-        (Vec::new(), Vec::new(), String::new())
-    };
+        stream_records(&worktree, &["status", "--porcelain", "-z"], |record| {
+            status.add(record);
+        })?;
+        stream_records(
+            &worktree,
+            &[
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+            ],
+            |record| ignored.add(record),
+        )?;
+        worktree.stream_stdout(
+            &["diff", "HEAD", "--no-ext-diff", "--no-textconv"],
+            |chunk| tracked_changes.bytes(chunk),
+        )?;
+        tracked_changes.bytes(&[SEPARATOR]);
+    }
     let reference = format!("refs/heads/{branch}");
     // Commits another branch or a remote also holds survive the deletion, so they are not counted.
     let exclude = format!("--exclude={branch}");
@@ -100,37 +111,95 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
     ])?;
     let unpushed_commits = parse_count(&unpushed).map_err(GitError::UnexpectedOutput)?;
     let head = git.run(&["rev-parse", "--verify", &reference])?;
-    let uncommitted_files = count(status_entries.len());
-    let ignored_entries = count(ignored.len());
-    let ignored_examples: Vec<String> = ignored.iter().take(IGNORED_EXAMPLES).cloned().collect();
-    status_entries.sort();
-    ignored.sort();
+    let uncommitted_files = count(status.entries);
+    let ignored_entries = count(ignored.entries);
+    // Entries are summed rather than sorted because they are streamed, so their order is free.
     let mut hash = Fnv1a::new();
     hash.field(&uncommitted_files.to_string());
     hash.field(&unpushed_commits.to_string());
     hash.field(&ignored_entries.to_string());
-    for example in &ignored_examples {
+    for example in &ignored.examples {
         hash.field(example);
     }
     hash.field(&head);
-    hash.field(&tracked_changes);
-    for entry in status_entries.iter().chain(&ignored) {
-        hash.field(entry);
-    }
+    hash.bytes(&tracked_changes.0.to_le_bytes());
+    hash.bytes(&status.fingerprint.to_le_bytes());
+    hash.bytes(&ignored.fingerprint.to_le_bytes());
     Ok(UnsavedWork {
         uncommitted_files,
         unpushed_commits,
         ignored_entries,
-        ignored_examples,
+        ignored_examples: ignored.examples,
         fingerprint: hash.finish(),
     })
 }
 
-fn names(nul_separated: &str) -> Vec<String> {
-    nul_separated
-        .split_terminator('\0')
-        .map(str::to_owned)
-        .collect()
+/// Feeds each NUL-terminated record of a git command to `on_record` without collecting them.
+fn stream_records(
+    git: &Git,
+    args: &[&str],
+    mut on_record: impl FnMut(&str),
+) -> Result<(), GitError> {
+    let mut records = NulRecords::default();
+    git.stream_stdout(args, |chunk| records.push(chunk, &mut on_record))?;
+    records
+        .finish(on_record)
+        .map_err(GitError::UnexpectedOutput)
+}
+
+/// Counts `git status --porcelain -z` entries. A rename or copy is one entry that spans two
+/// records: the new path, then the original path.
+#[derive(Default)]
+struct StatusEntries {
+    entries: usize,
+    fingerprint: u64,
+    open: Option<Fnv1a>,
+}
+
+impl StatusEntries {
+    fn add(&mut self, record: &str) {
+        if let Some(mut entry) = self.open.take() {
+            entry.field(record);
+            self.close(&entry);
+            return;
+        }
+        let mut entry = Fnv1a::new();
+        entry.field(record);
+        let moved = record
+            .bytes()
+            .take(2)
+            .any(|code| matches!(code, b'R' | b'C'));
+        if moved {
+            self.open = Some(entry);
+        } else {
+            self.close(&entry);
+        }
+    }
+
+    fn close(&mut self, entry: &Fnv1a) {
+        self.entries += 1;
+        self.fingerprint = self.fingerprint.wrapping_add(entry.0);
+    }
+}
+
+/// Counts ignored entries and keeps the first few names.
+#[derive(Default)]
+struct IgnoredEntries {
+    entries: usize,
+    fingerprint: u64,
+    examples: Vec<String>,
+}
+
+impl IgnoredEntries {
+    fn add(&mut self, record: &str) {
+        self.entries += 1;
+        let mut entry = Fnv1a::new();
+        entry.field(record);
+        self.fingerprint = self.fingerprint.wrapping_add(entry.0);
+        if self.examples.len() < IGNORED_EXAMPLES {
+            self.examples.push(record.to_owned());
+        }
+    }
 }
 
 /// Parses a git count. Anything else is an error so an unknown count never reads as zero.
@@ -144,6 +213,8 @@ fn parse_count(text: &str) -> Result<u32, String> {
 /// here; the fingerprint only needs to differ when the state differs, not to resist attackers.
 struct Fnv1a(u64);
 
+const SEPARATOR: u8 = 0xff;
+
 impl Fnv1a {
     fn new() -> Self {
         Self(0xcbf2_9ce4_8422_2325)
@@ -151,8 +222,13 @@ impl Fnv1a {
 
     /// Mixes a field and a separator so adjacent fields cannot run together.
     fn field(&mut self, text: &str) {
-        for byte in text.bytes().chain([0xff]) {
-            self.0 ^= u64::from(byte);
+        self.bytes(text.as_bytes());
+        self.bytes(&[SEPARATOR]);
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
             self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
         }
     }

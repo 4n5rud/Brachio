@@ -344,6 +344,52 @@ fn deleting_a_task_counts_ignored_files_that_no_commit_holds() {
 }
 
 #[test]
+fn a_huge_ignored_listing_is_counted_exactly_and_only_the_first_names_are_kept() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    fs::write(repo.path().join(".gitignore"), "*.tmp\n").expect("write ignore");
+    run(&git, &["add", ".gitignore"]);
+    run(&git, &["commit", "-q", "-m", "ignore temp files"]);
+    let trees = temp_dir();
+    let tree = trees.path().join("h");
+    add(&git, "brachio/h-1", &tree);
+
+    // Long names push the listing past several stream chunks.
+    let stem = "generated-한글-".repeat(8);
+    for index in 0..3000 {
+        fs::write(tree.join(format!("{stem}{index:05}.tmp")), "x").expect("write ignored");
+    }
+    let work = brachio_git::unsaved_work(&git, &tree, "brachio/h-1").expect("preview");
+    assert_eq!(work.ignored_entries, 3000);
+    assert_eq!(work.uncommitted_files, 0);
+    assert_eq!(work.ignored_examples.len(), 5);
+    assert!(work
+        .ignored_examples
+        .iter()
+        .all(|name| name.starts_with(&stem) && name.ends_with(".tmp")));
+}
+
+#[test]
+fn a_rename_is_one_changed_file_and_a_changed_name_changes_the_fingerprint() {
+    let repo = temp_dir();
+    let git = init_repo(repo.path());
+    let trees = temp_dir();
+    let tree = trees.path().join("r");
+    add(&git, "brachio/r-1", &tree);
+    let tree_git = Git::new(&tree);
+    run(&tree_git, &["mv", "a.txt", "renamed 한글.txt"]);
+    fs::write(tree.join("other.txt"), "new\n").expect("write untracked");
+
+    let first = brachio_git::unsaved_work(&git, &tree, "brachio/r-1").expect("preview");
+    assert_eq!(first.uncommitted_files, 2);
+
+    run(&tree_git, &["mv", "renamed 한글.txt", "renamed again.txt"]);
+    let second = brachio_git::unsaved_work(&git, &tree, "brachio/r-1").expect("preview");
+    assert_eq!(second.uncommitted_files, 2);
+    assert_ne!(first.fingerprint, second.fingerprint);
+}
+
+#[test]
 fn the_merge_target_is_the_remote_copy_of_the_default_branch_when_the_local_one_is_behind() {
     let repo = temp_dir();
     let git = init_repo(repo.path());
