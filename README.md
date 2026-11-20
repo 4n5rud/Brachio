@@ -26,7 +26,7 @@ Brachio runs several Claude Code and Codex sessions side by side, each in its ow
 - Lets an agent ask to create a child task with `brachio task create`. You approve it in the app, and the child appears under its lead (up to 4 open children, one level deep).
 - Shows the memory of terminals that outlive the window in the status bar, and bounds each terminal's pending output.
 
-Not built yet: listing and waiting for child tasks (`brachio task list`, `brachio task wait`), task dependencies and handoff of results between agents, and the MCP server (`crates/brachio-mcp` only reserves tool names). Codex has no in-app status or approval hooks yet, so approvals and hook-based status cover Claude Code only.
+Use `brachio task list` and `brachio task wait` to track child tasks. `brachio mcp` serves the read-only `list_child_tasks` tool over stdio and uses the same terminal identity and hook endpoint as the CLI. Task dependencies and structured handoffs are planned. Codex has no in-app status or approval hooks yet, so approvals and hook-based status cover Claude Code only.
 
 Brachio supports macOS and Windows. It runs entirely on your machine with no server, and agents run under your own accounts.
 
@@ -107,7 +107,7 @@ cargo tauri dev     # run the app (macOS or Windows)
 | `crates/brachio-git` | Worktree setup and cleanup, port allocation, conflict prediction |
 | `crates/brachio-agent` | Claude Code and Codex adapters |
 | `crates/brachio-store` | SQLite storage and migrations |
-| `crates/brachio-mcp` | Reserved tool names for a future MCP server (not implemented) |
+| `crates/brachio-mcp` | Stdio MCP server for read-only child task status |
 | `crates/brachio-cli` | The `brachio` helper that hooks and agents run |
 | `src-tauri` | App shell: window, tray, IPC |
 | `ui` | SolidJS UI, xterm.js, design tokens |

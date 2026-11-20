@@ -415,6 +415,7 @@ name = "brachio-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "brachio-mcp",
  "brachio-runtime",
  "clap",
  "interprocess",
@@ -450,6 +451,10 @@ dependencies = [
 [[package]]
 name = "brachio-mcp"
 version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "brachio-process"
