@@ -8,8 +8,18 @@
   font: var(--text-meta);
   color: var(--color-text-2);
 }
+button.file-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
 .file-row:hover {
   background: var(--color-hover);
+}
+.file-row.on {
+  background: var(--color-raised);
+  color: var(--color-text);
 }
 .file-row .name {
   flex: 1;

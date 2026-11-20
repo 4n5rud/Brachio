@@ -96,7 +96,7 @@ const git = (initial: Parameters<typeof TaskGitActions>[0]["initial"] = {}, stag
 const REJECTED = "! [rejected]        brachio/rate-limit-7f2a -> brachio/rate-limit-7f2a (fetch first)\nerror: failed to push some refs";
 const DENIED = "remote: Permission to 4n5rud/brachio.git denied to jmk-bot.\nfatal: unable to access 'https://github.com/4n5rud/brachio.git/': The requested URL returned error: 403";
 
-function Cell(props: { cap: string; width?: number; children: JSX.Element }) {
+export function Cell(props: { cap: string; width?: number; children: JSX.Element }) {
   return (
     <div class="catalog-cell">
       <span class="catalog-cap">{props.cap}</span>
