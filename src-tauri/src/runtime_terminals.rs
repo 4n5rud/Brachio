@@ -75,16 +75,16 @@ impl RuntimeTerminals {
 
     /// Keys of the task's terminals whose program is still running, in the current runtime or an
     /// older one that is still up. The runtime cannot list sessions, so the task's two fixed
-    /// terminals and its registered second agent tab are asked for by name. A runtime that is not
+    /// terminals and every second agent tab it has had are asked for by name. A runtime that is not
     /// running hosts nothing. When the runtime is not used the in-app manager hosts the
-    /// terminals, and it tracks sessions by handle, not key, so none can be matched to a task.
+    /// terminals, which `Terminals::live_keys_for_task` answers instead.
     ///
     /// # Errors
     /// Fails when a runtime cannot be asked, so the caller can refuse rather than guess.
     pub async fn live_keys_for_task(
         &self,
         task_id: &str,
-        second_agent_tab: Option<&str>,
+        second_agent_tabs: &[String],
     ) -> Result<Vec<String>> {
         let Some(current) = self.client().await? else {
             return Ok(Vec::new());
@@ -92,7 +92,7 @@ impl RuntimeTerminals {
         let mut clients = vec![current];
         clients.extend(runtime_client::older_clients().await);
         let mut live = Vec::new();
-        for key in task_terminal_keys(task_id, second_agent_tab) {
+        for key in task_terminal_keys(task_id, second_agent_tabs) {
             for client in &clients {
                 let reply = client.call(Action::Inspect { key: key.clone() }).await;
                 match reply {
@@ -272,9 +272,13 @@ impl RuntimeTerminals {
 }
 
 /// The terminal keys a task can have, as the UI and `terminal_authorization` name them.
-fn task_terminal_keys(task_id: &str, second_agent_tab: Option<&str>) -> Vec<String> {
+fn task_terminal_keys(task_id: &str, second_agent_tabs: &[String]) -> Vec<String> {
     let mut keys = vec![format!("{task_id}:agent"), format!("{task_id}:shell")];
-    keys.extend(second_agent_tab.map(|tab| format!("{task_id}:agent-{tab}")));
+    keys.extend(
+        second_agent_tabs
+            .iter()
+            .map(|tab| format!("{task_id}:agent-{tab}")),
+    );
     keys
 }
 
@@ -520,9 +524,9 @@ mod tests {
     #[test]
     fn a_task_names_its_agent_shell_and_second_agent_terminals() {
         assert_eq!(
-            task_terminal_keys("t1", Some("abc")),
-            ["t1:agent", "t1:shell", "t1:agent-abc"]
+            task_terminal_keys("t1", &["abc".to_owned(), "old".to_owned()]),
+            ["t1:agent", "t1:shell", "t1:agent-abc", "t1:agent-old"]
         );
-        assert_eq!(task_terminal_keys("t1", None), ["t1:agent", "t1:shell"]);
+        assert_eq!(task_terminal_keys("t1", &[]), ["t1:agent", "t1:shell"]);
     }
 }

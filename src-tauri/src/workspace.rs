@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::runtime_terminals::RuntimeTerminals;
+use crate::terminal::Terminals;
 
 /// App state that owns the database connection.
 pub struct Database(pub Mutex<Connection>);
@@ -661,27 +662,47 @@ fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), Str
     ))
 }
 
-/// Terminals of the task that are still running, or why that could not be told.
+/// Terminals of the task that are still running, in the runtime or in the app, or why that could
+/// not be told. Second agent tabs the task has since replaced are asked for too.
 async fn live_task_terminals(
     database: &Database,
     terminals: &RuntimeTerminals,
+    in_app: &Terminals,
     task_id: &str,
 ) -> Result<Vec<String>, String> {
-    let second_tab: Option<String> = {
+    let (current, retired) = {
         let connection = database.lock()?;
-        connection
+        let current: Option<String> = connection
             .query_row(
                 "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
                 [task_id],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(to_text)?
+            .map_err(to_text)?;
+        let retired =
+            brachio_store::retired_secondary_tabs(&connection, task_id).map_err(to_text)?;
+        (current, retired)
     };
-    terminals
-        .live_keys_for_task(task_id, second_tab.as_deref())
+    let tabs: Vec<String> = current.into_iter().chain(retired.iter().cloned()).collect();
+    let mut live = terminals
+        .live_keys_for_task(task_id, &tabs)
         .await
-        .map_err(to_text)
+        .map_err(to_text)?;
+    live.extend(
+        in_app
+            .1
+            .live_for_task(&in_app.0, task_id)
+            .map_err(to_text)?,
+    );
+    let connection = database.lock()?;
+    for tab in retired {
+        if !live.contains(&format!("{task_id}:agent-{tab}")) {
+            // A failed cleanup only keeps the id for the next check.
+            let _ = brachio_store::forget_retired_secondary_tab(&connection, task_id, &tab);
+        }
+    }
+    Ok(live)
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -704,6 +725,7 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
 pub async fn task_delete_preview(
     database: State<'_, Database>,
     terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
     id: String,
 ) -> Result<TaskLoss, String> {
     let (task, repo) = archived_task(&database, &id)?;
@@ -717,7 +739,7 @@ pub async fn task_delete_preview(
             running_terminals: 0,
         });
     }
-    let running_terminals = live_task_terminals(&database, &terminals, &id)
+    let running_terminals = live_task_terminals(&database, &terminals, &in_app, &id)
         .await
         .map_or(0, |keys| keys.len());
     let work = tauri::async_runtime::spawn_blocking(move || {
@@ -743,6 +765,7 @@ pub async fn task_delete(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
     terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
     id: String,
     expected_fingerprint: String,
 ) -> Result<(), String> {
@@ -753,7 +776,7 @@ pub async fn task_delete(
     let (task, repo) = archived_task(&database, &id)?;
     // A folder project's task runs in the user's own folder, which must never be removed.
     if repo.is_git {
-        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &id).await)?;
+        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &in_app, &id).await)?;
         tauri::async_runtime::spawn_blocking(move || {
             let git = Git::new(&repo.path);
             let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
