@@ -23,6 +23,8 @@ pub(crate) struct Runtime {
     pub(crate) pending_launches: Mutex<HashSet<String>>,
     pub(crate) launch_finished: Condvar,
     pub(crate) draining: AtomicBool,
+    operations: Mutex<HashMap<String, (String, Option<ResponseResult>)>>,
+    operations_finished: Condvar,
     pub(crate) journal: Option<Journal>,
     /// Shells that are gone but whose last screen can still be read.
     pub(crate) lost: Mutex<HashMap<String, SessionRecord>>,
@@ -42,6 +44,8 @@ impl Runtime {
             pending_launches: Mutex::default(),
             launch_finished: Condvar::new(),
             draining: AtomicBool::new(false),
+            operations: Mutex::default(),
+            operations_finished: Condvar::new(),
             journal,
             lost: Mutex::new(lost),
             stopped: Mutex::default(),
@@ -86,6 +90,75 @@ impl Runtime {
                     cols: COLS.get(),
                 };
                 self.launch(key, spec)
+            }
+            Action::LaunchOnce {
+                instance,
+                operation_id,
+                key,
+                cwd,
+                program,
+                args,
+                env,
+                rows,
+                cols,
+            } => {
+                if instance != self.instance {
+                    bail!("runtime instance changed; launch outcome is unknown");
+                }
+                if operation_id.is_empty() || operation_id.len() > 128 {
+                    bail!("invalid launch operation ID");
+                }
+                let arguments =
+                    serde_json::to_string(&(&key, &cwd, &program, &args, &env, rows, cols))?;
+                let mut operations = lock(&self.operations)?;
+                loop {
+                    match operations.get(&operation_id) {
+                        Some((saved, _)) if saved != &arguments => {
+                            bail!("launch operation ID already used with different arguments")
+                        }
+                        Some((_, Some(result))) => return Ok(result.clone()),
+                        Some((_, None)) => {
+                            operations = self
+                                .operations_finished
+                                .wait(operations)
+                                .map_err(|_| anyhow::anyhow!("launch operations lock poisoned"))?;
+                        }
+                        None => {
+                            let stored_bytes: usize = operations
+                                .iter()
+                                .map(|(id, (saved, _))| id.len() + saved.len())
+                                .sum();
+                            if operations.len() >= 4096
+                                || stored_bytes + operation_id.len() + arguments.len() > 1024 * 1024
+                            {
+                                bail!("launch operation history is full");
+                            }
+                            operations.insert(operation_id.clone(), (arguments, None));
+                            break;
+                        }
+                    }
+                }
+                drop(operations);
+                let result = (|| {
+                    let spec = SpawnSpec {
+                        program,
+                        args,
+                        cwd,
+                        env: parse_env(env)?,
+                        rows: rows.max(1),
+                        cols: cols.max(1),
+                    };
+                    self.launch(key, spec)
+                })()
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    error: format!("{error:#}"),
+                });
+                let mut operations = lock(&self.operations)?;
+                if let Some((_, saved)) = operations.get_mut(&operation_id) {
+                    *saved = Some(result.clone());
+                }
+                self.operations_finished.notify_all();
+                Ok(result)
             }
             Action::Launch {
                 key,
@@ -176,5 +249,111 @@ impl Runtime {
         self.manager.resize(session.id, rows.get(), cols.get())?;
         lock(&session.output)?.screen.resize(rows, cols);
         session.describe(None)
+    }
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+
+    fn launch(instance: String, operation_id: &str, program: &str) -> Request {
+        Request {
+            version: 6,
+            action: Action::LaunchOnce {
+                instance,
+                operation_id: operation_id.to_owned(),
+                key: "test".to_owned(),
+                cwd: std::env::temp_dir(),
+                program: program.to_owned(),
+                args: Vec::new(),
+                env: Vec::new(),
+                rows: 24,
+                cols: 80,
+            },
+        }
+    }
+
+    #[test]
+    fn completed_failure_is_retained_and_ids_are_bound_to_arguments_and_instance() {
+        let runtime = Runtime::new(None);
+        let request = launch(runtime.instance.clone(), "operation", "");
+        let first = runtime.execute(request.clone()).expect("stored failure");
+        assert!(matches!(first, ResponseResult::Error { .. }));
+        let second = runtime.execute(request).expect("replayed failure");
+        assert_eq!(
+            serde_json::to_string(&first).expect("json"),
+            serde_json::to_string(&second).expect("json")
+        );
+        assert!(runtime
+            .execute(launch(runtime.instance.clone(), "operation", "other"))
+            .is_err());
+        assert!(runtime
+            .execute(launch("other instance".to_owned(), "operation", ""))
+            .is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn same_operation_reuses_original_result_after_the_process_exits() {
+        let runtime = Runtime::new(None);
+        let mut request = launch(runtime.instance.clone(), "completed", "cmd.exe");
+        if let Action::LaunchOnce { args, .. } = &mut request.action {
+            *args = vec!["/d".into(), "/c".into(), "exit".into()];
+        }
+        let first = runtime.execute(request.clone()).expect("launch");
+        let ResponseResult::Success { session, .. } = first else {
+            panic!("launch failed");
+        };
+        runtime.manager.kill(session.session_id).ok();
+        let second = runtime.execute(request).expect("replay");
+        let ResponseResult::Success { session: again, .. } = second else {
+            panic!("replay failed");
+        };
+        assert_eq!(session.session_id, again.session_id);
+    }
+
+    #[test]
+    fn a_full_history_refuses_a_new_id_before_starting_a_process() {
+        let runtime = Runtime::new(None);
+        {
+            let mut history = runtime.operations.lock().expect("history");
+            for n in 0..4096 {
+                history.insert(
+                    n.to_string(),
+                    (
+                        String::new(),
+                        Some(ResponseResult::Error {
+                            error: "done".into(),
+                        }),
+                    ),
+                );
+            }
+        }
+        assert!(runtime
+            .execute(launch(runtime.instance.clone(), "new", "anything"))
+            .is_err());
+        assert!(runtime.manager.ids().expect("sessions").is_empty());
+    }
+    #[test]
+    fn concurrent_identical_operations_share_one_result() {
+        let runtime = Runtime::new(None);
+        let request = launch(runtime.instance.clone(), "concurrent", "");
+        let barrier = std::sync::Barrier::new(3);
+        std::thread::scope(|scope| {
+            let first_request = request.clone();
+            let first = scope.spawn(|| {
+                barrier.wait();
+                runtime.execute(first_request).expect("first")
+            });
+            let second = scope.spawn(|| {
+                barrier.wait();
+                runtime.execute(request).expect("second")
+            });
+            barrier.wait();
+            assert_eq!(
+                serde_json::to_string(&first.join().expect("first thread")).expect("json"),
+                serde_json::to_string(&second.join().expect("second thread")).expect("json")
+            );
+        });
+        assert_eq!(runtime.operations.lock().expect("history").len(), 1);
     }
 }

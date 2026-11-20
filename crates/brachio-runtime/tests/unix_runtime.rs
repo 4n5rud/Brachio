@@ -114,7 +114,7 @@ fn a_leftover_socket_of_a_killed_runtime_is_replaced() {
     ready(&name);
     assert_eq!(
         response(send(&name, &["hello"]))["runtime"]["current_version"],
-        4
+        6
     );
 }
 
