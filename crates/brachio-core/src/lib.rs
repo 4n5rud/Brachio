@@ -4,3 +4,4 @@
 //! Everything here is pure and tested with injected clocks.
 
 pub mod status;
+pub mod task_graph;
