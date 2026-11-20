@@ -35,6 +35,7 @@ export function WorkspaceDialog(props: {
   onRestore: (id: string) => Promise<void>;
   onDelete: (task: TaskRow) => Promise<void>;
   onOpenArchived?: () => void;
+  onReportProblem?: () => void;
   theme: Theme;
   notifications: boolean;
   onTheme: (theme: Theme) => void;
@@ -241,6 +242,11 @@ export function WorkspaceDialog(props: {
               <AgentSettings />
               <button type="button" class="button button-sm" onClick={() => props.onOpenArchived?.()}>
                 {t("task.archived")}
+              </button>
+            </Show>
+            <Show when={props.onReportProblem}>
+              <button type="button" class="button button-sm" onClick={() => props.onReportProblem?.()}>
+                {t("settings.reportProblem")}
               </button>
             </Show>
           </Match>

@@ -16,8 +16,13 @@ use crate::journal::SessionRecord;
 use crate::output::{OutputHistory, Page};
 use crate::screen::TerminalScreen;
 
-/// The cursor position query that a terminal program sends at startup; the runtime answers it.
+/// The cursor position query that a terminal program sends at startup; the runtime answers it
+/// so the program can start without a screen.
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+const CURSOR_REPLY: &[u8] = b"\x1b[1;1R";
+/// The newer ConPTY passes the device attributes query through and waits about 3 s for an answer.
+const DEVICE_QUERY: &[u8] = b"\x1b[c";
+const DEVICE_REPLY: &[u8] = b"\x1b[?61;4c";
 
 #[derive(Clone)]
 pub(crate) struct Session {
@@ -113,38 +118,65 @@ pub(crate) struct StartupOutput {
     pub(crate) id: Option<SessionId>,
     pub(crate) history: OutputHistory,
     pub(crate) screen: TerminalScreen,
-    pub(crate) matched: usize,
-    pub(crate) answered: bool,
+    cursor: StartupQuery,
+    device: StartupQuery,
     pub(crate) exited: bool,
     pub(crate) exit_code: Option<u32>,
 }
 
-impl StartupOutput {
-    pub(crate) fn record(&mut self, bytes: &[u8]) -> Option<SessionId> {
-        self.history.push(bytes);
-        self.screen.process(bytes);
-        if !self.answered && self.matched < CURSOR_QUERY.len() {
-            for &byte in bytes {
-                if byte == CURSOR_QUERY[self.matched] {
-                    self.matched += 1;
-                    if self.matched == CURSOR_QUERY.len() {
-                        break;
-                    }
-                } else {
-                    self.matched = usize::from(byte == CURSOR_QUERY[0]);
+/// Finds the first occurrence of one query in the output, even when it is split across chunks.
+#[derive(Default)]
+struct StartupQuery {
+    matched: usize,
+    answered: bool,
+}
+
+impl StartupQuery {
+    fn scan(&mut self, query: &[u8], bytes: &[u8]) {
+        if self.answered || self.matched == query.len() {
+            return;
+        }
+        for &byte in bytes {
+            if byte == query[self.matched] {
+                self.matched += 1;
+                if self.matched == query.len() {
+                    break;
                 }
+            } else {
+                self.matched = usize::from(byte == query[0]);
             }
         }
+    }
+
+    fn take_reply<'a>(&mut self, query: &[u8], reply: &'a [u8]) -> Option<&'a [u8]> {
+        if self.answered || self.matched != query.len() {
+            return None;
+        }
+        self.answered = true;
+        Some(reply)
+    }
+}
+
+impl StartupOutput {
+    pub(crate) fn record(&mut self, bytes: &[u8]) -> Option<(SessionId, Vec<u8>)> {
+        self.history.push(bytes);
+        self.screen.process(bytes);
+        self.cursor.scan(CURSOR_QUERY, bytes);
+        self.device.scan(DEVICE_QUERY, bytes);
         self.reply_if_needed()
     }
 
-    pub(crate) fn reply_if_needed(&mut self) -> Option<SessionId> {
-        if self.answered || self.matched != CURSOR_QUERY.len() {
-            return None;
-        }
+    /// The session and the bytes that answer the startup queries seen so far.
+    pub(crate) fn reply_if_needed(&mut self) -> Option<(SessionId, Vec<u8>)> {
         let id = self.id?;
-        self.answered = true;
-        Some(id)
+        let mut reply = Vec::new();
+        if let Some(bytes) = self.cursor.take_reply(CURSOR_QUERY, CURSOR_REPLY) {
+            reply.extend_from_slice(bytes);
+        }
+        if let Some(bytes) = self.device.take_reply(DEVICE_QUERY, DEVICE_REPLY) {
+            reply.extend_from_slice(bytes);
+        }
+        (!reply.is_empty()).then_some((id, reply))
     }
 }
 
@@ -180,4 +212,24 @@ pub(crate) fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
     value
         .lock()
         .map_err(|_| anyhow!("runtime state lock poisoned"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_queries_are_each_answered_once_even_when_split() {
+        let mut output = StartupOutput {
+            id: serde_json::from_str("1").ok(),
+            ..StartupOutput::default()
+        };
+        let mut replies = Vec::new();
+        for chunk in [&b"hi\x1b[6"[..], b"n\x1b", b"[c more\x1b[6n\x1b[c"] {
+            if let Some((_, bytes)) = output.record(chunk) {
+                replies.push(bytes);
+            }
+        }
+        assert_eq!(replies, [b"\x1b[1;1R".to_vec(), b"\x1b[?61;4c".to_vec()]);
+    }
 }

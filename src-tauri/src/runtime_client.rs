@@ -44,7 +44,7 @@ pub fn endpoint() -> String {
 /// Raised when a change to the runtime has to reach users who update while an older runtime still
 /// hosts their agents. Each generation has an endpoint of its own, so the new runtime starts
 /// beside the old one, which keeps serving the agents it has until they end.
-pub const GENERATION: u32 = 2;
+pub const GENERATION: u32 = 3;
 
 /// The endpoint of one generation. The first generation has no suffix, which is the name earlier
 /// versions used.
@@ -226,7 +226,22 @@ fn stable_copy(source: &Path) -> Result<PathBuf> {
         fs::rename(&scratch, &copy)?;
     }
     remove_older_copies(&folder, &name);
+    copy_conpty_files(source, &folder);
     Ok(copy)
+}
+
+/// The runtime loads the newer ConPTY from beside its executable, so the copy needs the files
+/// too. A file in use or a failed copy only means the system ConPTY is used.
+fn copy_conpty_files(source: &Path, folder: &Path) {
+    let Some(conpty) = source.parent().map(|parent| parent.join("conpty")) else {
+        return;
+    };
+    for name in ["conpty.dll", "OpenConsole.exe"] {
+        let target = folder.join(name);
+        if conpty.join(name).is_file() && !target.exists() {
+            let _ = fs::copy(conpty.join(name), target);
+        }
+    }
 }
 
 /// Copies still in use cannot be removed on Windows; they go on a later start.
