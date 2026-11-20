@@ -59,6 +59,18 @@ Agents in different tasks can talk through the `brachio` helper: `brachio peers`
 
 Terminals run in `brachio-runtime`, a separate process, whenever its executable is found next to the app. Closing the window then leaves your shells and agents running, and the next launch attaches to them. Set `BRACHIO_TERMINAL_RUNTIME=0` to keep terminals inside the app instead. If the runtime itself is gone, the app shows the last screen it saved and starts the program again; agents are restarted with their saved conversation. The runtime executable sits next to the app (release installers include it), or is named by `BRACHIO_RUNTIME_EXECUTABLE`. After an app update, a new runtime starts beside the old one; the old one keeps its agents until they end. It is tested on Windows and Linux, not on macOS.
 
+## Logs
+
+Brachio writes `brachio.log` (level `info`, or whatever `RUST_LOG` says) in:
+
+- Windows: `%LOCALAPPDATA%\Brachio\`
+- macOS: `~/Library/Logs/Brachio/`
+- Linux: `$XDG_STATE_HOME/Brachio/` (default `~/.local/state/Brachio/`)
+
+The file is capped at 1 MiB and the three previous ones are kept as `brachio.log.1` to `.3`, so logs never take more than about 4 MiB. If a rotation fails (for example another running copy of Brachio holds the file), logging carries on in the current file and rotation is retried after a minute.
+
+To report a problem, use the app's "report an issue" button and attach `brachio.log` if useful. Skim the file before sharing: it can contain folder names and error messages with your user name or private paths.
+
 ## Preparing new worktrees (`brachio.toml`)
 
 A new worktree starts without the files git does not track, such as `.env`, and without installed dependencies. A repository can say what to do about that in a `brachio.toml` at its root:
