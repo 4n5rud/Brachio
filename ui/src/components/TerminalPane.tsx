@@ -1,5 +1,6 @@
-import { Notice } from "./ui/Notice";
+import { Notice, type NoticeTone } from "./ui/Notice";
 import { Button } from "./ui/Button";
+import { pushToast } from "../lib/toasts";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -42,6 +43,20 @@ const TYPE_IN_DELAY_MS = 1_000;
 /** How long the size must stay unchanged before the PTY is told, so a window drag sends one resize. */
 const RESIZE_SETTLE_MS = 80;
 
+type Ended = { kind: "exited"; code: number | null } | { kind: "detached" } | { kind: "failed"; reason: string };
+
+const CONTINUITY_TONE: Record<string, NoticeTone> = {
+  "terminal.liveAttached": "success",
+  "terminal.conversationResuming": "progress",
+  "terminal.newConversation": "progress",
+  "terminal.resumeFailed": "info",
+};
+
+const SIGN_IN: Record<AgentKind, { name: string; command: string }> = {
+  claude_code: { name: "Claude Code", command: "claude auth login" },
+  codex: { name: "Codex", command: "codex login" },
+};
+
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /**
@@ -68,6 +83,10 @@ export function TerminalPane(props: {
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
   registerDraftWriter?: (prepare: PrepareDraft) => () => void;
+  /** Puts the task's original prompt into the agent input; resolves to whether it went in. */
+  onInsertPrompt?: () => Promise<boolean>;
+  /** Opens the problem report with the error text. */
+  onReport?: (message: string) => void;
 }) {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
@@ -75,7 +94,13 @@ export function TerminalPane(props: {
   const [confirmingReset, setConfirmingReset] = createSignal(false);
   const [resetError, setResetError] = createSignal<string>();
   const [restoredFrame, setRestoredFrame] = createSignal(false);
-  const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation">();
+  const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation" | "terminal.resumeFailed">();
+  const [ended, setEnded] = createSignal<Ended>();
+  const [inputFailure, setInputFailure] = createSignal<string>();
+  const [outputTrimmed, setOutputTrimmed] = createSignal(false);
+  const [promptNote, setPromptNote] = createSignal<"notSent" | "deferred" | "inserted">();
+  const [authNeeded, setAuthNeeded] = createSignal(false);
+  let copyTail: () => string = () => "";
   let reopen: () => void;
   let chooseConversation: (id?: string) => void;
   const [choices, setChoices] = createSignal<readonly CodexConversation[]>();
@@ -130,6 +155,14 @@ export function TerminalPane(props: {
       webgl?.dispose();
       webgl = null;
     };
+    copyTail = () => {
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let row = Math.max(0, buffer.length - 30); row < buffer.length; row++) {
+        lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+      }
+      return lines.join("\n").trimEnd();
+    };
     // A hidden host has no size; fitting it would shrink the PTY to nothing.
     const fitVisible = () => {
       if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
@@ -157,6 +190,11 @@ export function TerminalPane(props: {
     let initialInputPending = session?.initialInput ?? null;
     const start = (resume: boolean, initialPrompt: string | null, codexConversationId?: string) => {
       setContinuity(undefined);
+      setEnded(undefined);
+      setInputFailure(undefined);
+      setOutputTrimmed(false);
+      setPromptNote(undefined);
+      setAuthNeeded(false);
       blocked = false;
       working = false;
       editedBeforePrompt = false;
@@ -165,7 +203,7 @@ export function TerminalPane(props: {
       let streamEnded = false;
       const earlyOutput = createEarlyOutput(EARLY_OUTPUT_MAX_BYTES);
       const flushEarlyOutput = (write: (bytes: Uint8Array) => void) => {
-        if (earlyOutput.overflowed()) term.writeln(`\x1b[2m${t("terminal.outputTrimmed")}\x1b[0m`);
+        if (earlyOutput.overflowed()) setOutputTrimmed(true);
         for (const bytes of earlyOutput.drain()) write(bytes);
       };
       clearTimeout(promptTimer);
@@ -196,6 +234,7 @@ export function TerminalPane(props: {
         if (message.type === "status") {
           if (exited) return;
           blocked = message.status.state === "blocked";
+          setAuthNeeded(message.status.state === "blocked" && message.status.reason === "auth");
           working = message.status.state === "working";
           props.onStatus?.(message.status, message.message);
           return;
@@ -209,6 +248,7 @@ export function TerminalPane(props: {
           exited = true;
           handle = null;
           setCanReopen(true);
+          setEnded({ kind: "detached" });
           term.writeln(`\r\n[${t("terminal.detached")}]`);
           props.onStatus?.({ state: "unknown" }, null);
           return;
@@ -218,13 +258,14 @@ export function TerminalPane(props: {
           && message.exitCode !== 0 && Date.now() - startedAt < RESUME_GRACE_MS) {
           term.writeln(`\r\n[${t("terminal.resumeFailed")}]\r\n`);
           start(false, initialPrompt);
-          setContinuity("terminal.newConversation");
+          setContinuity("terminal.resumeFailed");
           return;
         }
         const code = message.exitCode === null ? "" : ` (${message.exitCode})`;
         exited = true;
         handle = null;
         setCanReopen(true);
+        setEnded({ kind: "exited", code: message.exitCode });
         term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
         props.onStatus?.({ state: "exited", code: message.exitCode }, null);
       })
@@ -256,12 +297,14 @@ export function TerminalPane(props: {
           setUncertainOperation(uncertain?.[1]);
           term.writeln(`\r\n${t("terminal.startFailed")}: ${uncertain ? t("terminal.launchUncertain") : String(error)}`);
           setCanReopen(true);
+          if (!uncertain) setEnded({ kind: "failed", reason: String(error) });
           props.onStatus?.({ state: "error" }, null);
         });
     };
     const prepareOpen = async (resume: boolean, initialPrompt: string | null) => {
       if (resume && session?.agent === "codex" && session.key) {
         setCanReopen(false);
+        setEnded(undefined);
         setCheckingConversations(true);
         setConversationCheckFailed(false);
         const candidates = await codexConversations(session.key).catch(() => undefined);
@@ -319,10 +362,12 @@ export function TerminalPane(props: {
         if (!destination || destination !== handle || exited || disposed) return;
         if (session?.agent && editedBeforePrompt) {
           term.writeln(`\r\n[${t("terminal.promptDeferredAfterInput")}]`);
+          setPromptNote("deferred");
           return;
         }
         if (session?.agent && (!term.modes.bracketedPasteMode || blocked)) {
           term.writeln(`\r\n[${t("terminal.promptNotSent")}]`);
+          setPromptNote("notSent");
           return;
         }
         try {
@@ -334,6 +379,7 @@ export function TerminalPane(props: {
         } catch (failure) {
           if (destination === handle && !exited && !disposed) {
             term.writeln(`\r\n[${t("terminal.inputFailed")} ${String(failure)}]`);
+            setInputFailure(String(failure));
           }
         }
       }, TYPE_IN_DELAY_MS);
@@ -368,11 +414,12 @@ export function TerminalPane(props: {
       inputRevision += 1;
       const destination = handle;
       if (!destination || exited) return;
-      void destination.write(data).then(() => { lastWriteFailure = ""; }).catch((failure: unknown) => {
+      void destination.write(data).then(() => { lastWriteFailure = ""; setInputFailure(undefined); }).catch((failure: unknown) => {
         const message = String(failure);
         if (destination !== handle || exited || disposed || message === lastWriteFailure) return;
         lastWriteFailure = message;
         term.writeln(`\r\n[${t("terminal.inputFailed")} ${message}]`);
+        setInputFailure(message);
       });
     });
     // Dragging a window edge changes the size every frame, and each change makes the PTY redraw.
@@ -417,13 +464,39 @@ export function TerminalPane(props: {
       term.dispose();
     });
   });
+  const exitCopy = (end: Extract<Ended, { kind: "exited" }>) =>
+    end.code === null ? t("terminal.exitedNoCode") : t("terminal.exitedCode").replace("{code}", String(end.code));
+  const reopenAction = (primary: boolean) => (
+    <Button size="sm" variant={primary ? "primary" : undefined} onClick={() => reopen()}>{t("terminal.reopen")}</Button>
+  );
+  const copyError = async () => {
+    try {
+      await navigator.clipboard.writeText(copyTail());
+      pushToast({ tone: "success", message: t("terminal.copied") });
+    } catch (error) {
+      pushToast({ tone: "error", title: t("error.title"), message: String(error) });
+    }
+  };
+  const insertPrompt = async () => {
+    try {
+      if (await props.onInsertPrompt?.()) setPromptNote("inserted");
+      else pushToast({ tone: "error", message: t("diff.notReady") });
+    } catch (error) {
+      pushToast({ tone: "error", title: t("error.title"), message: String(error) });
+    }
+  };
+  const promptAction = () => props.onInsertPrompt
+    ? <Button size="sm" onClick={() => void insertPrompt()}>{t("task.draftOriginalPrompt")}</Button>
+    : undefined;
   return (
     <div class="terminal-content">
       <Show when={restoredFrame()}>
-        <Notice tone="info">{t("terminal.restored")}</Notice>
+        <Notice tone="info" lead={t("terminal.restored")}>{t("terminal.restoredNote")}</Notice>
       </Show>
-      <Show when={continuity()}>{(message) => <Notice tone="info">{t(message())}</Notice>}</Show>
-      <div ref={host} class="terminal-host" data-agent-terminal={props.session?.agent ? "" : undefined} />
+      <Show when={continuity()}>{(message) => <Notice tone={CONTINUITY_TONE[message()] ?? "info"}
+        lead={message() === "terminal.liveAttached" ? t(message()) : undefined}>
+        {message() === "terminal.liveAttached" ? undefined : t(message())}</Notice>}</Show>
+      <Show when={outputTrimmed()}><Notice tone="info">{t("terminal.outputTrimmed")}</Notice></Show>
       <Show when={checkingConversations()}>
         <Notice tone="progress">{t("terminal.checkingConversations")}</Notice>
       </Show>
@@ -431,14 +504,16 @@ export function TerminalPane(props: {
         {(candidates) => (
           <Notice
             tone={conversationCheckFailed() ? "error" : "info"}
+            lead={conversationCheckFailed() ? t("terminal.conversationCheckFailed") : undefined}
             actions={
               <>
                 <For each={candidates()}>{(candidate) => (
                   <Button size="sm" title={candidate.id}
                     onClick={() => chooseConversation(candidate.id)}>
-                    {candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))
-                      ? new Date(candidate.timestamp).toLocaleString() + " · " : ""}
-                    {candidate.id.slice(-8)}
+                    <Show when={candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))}>
+                      <span>{new Date(candidate.timestamp!).toLocaleString()}</span>
+                    </Show>
+                    <code>{candidate.id.slice(-8)}</code>
                   </Button>
                 )}</For>
                 <Button size="sm" onClick={() => chooseConversation()}>
@@ -447,14 +522,15 @@ export function TerminalPane(props: {
               </>
             }
           >
-            {conversationCheckFailed() ? t("terminal.conversationCheckFailed") : t("terminal.chooseConversation")}
+            {conversationCheckFailed() ? undefined : t("terminal.chooseConversation")}
           </Notice>
         )}
       </Show>
       <Show when={uncertainOperation()}>
         {(operation) => (
           <Notice
-            tone="blocked"
+            tone={confirmingReset() ? "error" : "blocked"}
+            lead={confirmingReset() ? t("terminal.launchResetLead") : t("terminal.launchUncertainLead")}
             actions={
               <Show
                 when={confirmingReset()}
@@ -472,19 +548,65 @@ export function TerminalPane(props: {
                     setResetError(String(error));
                   }
                 }}>{t("terminal.launchResetAnyway")}</Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</Button>
+                <Button size="sm" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</Button>
               </Show>
             }
           >
-            {t("terminal.launchUncertain")}
-            <Show when={confirmingReset()}>{" "}{t("terminal.launchResetConfirm")}</Show>
+            {confirmingReset() ? t("terminal.launchResetNote") : t("terminal.launchUncertainNote")}
             <Show when={resetError()}>{(message) => <>{" "}{message()}</>}</Show>
           </Notice>
         )}
       </Show>
-      <Show when={canReopen()}>
-        <Notice tone="info" actions={<Button size="sm" onClick={() => reopen()}>{t("terminal.reopen")}</Button>} />
+      <Show when={ended()}>
+        {(end) => {
+          const e = end();
+          if (e.kind === "exited") {
+            const crashed = e.code !== null && e.code !== 0;
+            return (
+              <Notice tone={crashed ? "error" : "info"} lead={t("terminal.exited")}
+                actions={<>{reopenAction(true)}
+                  <Show when={crashed}><Button size="sm" onClick={() => void copyError()}>{t("terminal.copyError")}</Button></Show></>}>
+                {exitCopy(e)}
+              </Notice>
+            );
+          }
+          if (e.kind === "detached") {
+            return <Notice tone="error" lead={t("terminal.detached")} actions={reopenAction(true)} />;
+          }
+          return (
+            <Notice tone="error" lead={t("terminal.startFailed")}
+              actions={<>{reopenAction(false)}
+                <Show when={props.onReport}>
+                  <Button size="sm" onClick={() => props.onReport?.(e.reason)}>{t("error.report")}</Button>
+                </Show></>}>
+              {e.reason}
+            </Notice>
+          );
+        }}
       </Show>
+      <Show when={authNeeded() && props.session?.agent}>
+        {(agent) => (
+          <Notice tone="blocked" lead={t("terminal.signInLead").replace("{agent}", SIGN_IN[agent()].name)}>
+            {t("terminal.signInNote").replace("{command}", SIGN_IN[agent()].command)}
+          </Notice>
+        )}
+      </Show>
+      <Show when={inputFailure()}>
+        {(failure) => <Notice tone="error" lead={t("terminal.inputFailed")}>{failure()}</Notice>}
+      </Show>
+      <Show when={promptNote()}>
+        {(note) => (
+          <Show when={note() !== "inserted"} fallback={<Notice tone="info">{t("task.promptDrafted")}</Notice>}>
+            <Notice tone={note() === "notSent" ? "blocked" : "info"}
+              lead={note() === "notSent" ? t("terminal.promptNotSentLead") : undefined}
+              actions={promptAction()}>
+              {note() === "notSent" ? t("terminal.promptNotSent") : t("terminal.promptDeferredAfterInput")}
+            </Notice>
+          </Show>
+        )}
+      </Show>
+      <div ref={host} class="terminal-host" classList={{ "terminal-dim": uncertainOperation() !== undefined }}
+        data-agent-terminal={props.session?.agent ? "" : undefined} />
     </div>
   );
 }
