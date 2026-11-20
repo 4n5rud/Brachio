@@ -98,7 +98,7 @@ export function TerminalPane(props: {
   const [ended, setEnded] = createSignal<Ended>();
   const [inputFailure, setInputFailure] = createSignal<string>();
   const [outputTrimmed, setOutputTrimmed] = createSignal(false);
-  const [promptNote, setPromptNote] = createSignal<"notSent" | "deferred" | "inserted">();
+  const [promptNote, setPromptNote] = createSignal<"notSent" | "deferred">();
   const [authNeeded, setAuthNeeded] = createSignal(false);
   let copyTail: () => string = () => "";
   let reopen: () => void;
@@ -479,7 +479,7 @@ export function TerminalPane(props: {
   };
   const insertPrompt = async () => {
     try {
-      if (await props.onInsertPrompt?.()) setPromptNote("inserted");
+      if (await props.onInsertPrompt?.()) pushToast({ tone: "success", message: t("task.promptDrafted") });
       else pushToast({ tone: "error", message: t("diff.notReady") });
     } catch (error) {
       pushToast({ tone: "error", title: t("error.title"), message: String(error) });
@@ -596,13 +596,11 @@ export function TerminalPane(props: {
       </Show>
       <Show when={promptNote()}>
         {(note) => (
-          <Show when={note() !== "inserted"} fallback={<Notice tone="info">{t("task.promptDrafted")}</Notice>}>
-            <Notice tone={note() === "notSent" ? "blocked" : "info"}
-              lead={note() === "notSent" ? t("terminal.promptNotSentLead") : undefined}
-              actions={promptAction()}>
-              {note() === "notSent" ? t("terminal.promptNotSent") : t("terminal.promptDeferredAfterInput")}
-            </Notice>
-          </Show>
+          <Notice tone={note() === "notSent" ? "blocked" : "info"}
+            lead={note() === "notSent" ? t("terminal.promptNotSentLead") : undefined}
+            actions={promptAction()}>
+            {note() === "notSent" ? t("terminal.promptNotSent") : t("terminal.promptDeferredAfterInput")}
+          </Notice>
         )}
       </Show>
       <div ref={host} class="terminal-host" classList={{ "terminal-dim": uncertainOperation() !== undefined }}

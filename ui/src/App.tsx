@@ -181,13 +181,16 @@ export function App() {
   const checkUpdates = async (manual: boolean) => {
     if (updateStatus() === "checking") return;
     setUpdateStatus("checking");
+    if (manual) pushToast({ tone: "info", message: t("updates.checking") });
     try {
       const version = await checkForRelease();
       if (manual || automaticUpdates()) setUpdateVersion(version);
       if (manual) setDismissedVersion(undefined);
       setUpdateStatus(version ? "idle" : "current");
+      if (manual && !version) pushToast({ tone: "success", message: t("updates.current") });
     } catch {
       setUpdateStatus(manual ? "unavailable" : "idle");
+      if (manual) pushToast({ tone: "error", message: t("updates.unavailable") });
     }
   };
   createEffect(() => {

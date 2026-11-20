@@ -84,6 +84,7 @@ const STATES: readonly AgentState[] = [
   { state: "error" }, { state: "exited", code: 101 }, { state: "exited", code: 0 }, { state: "unknown" },
 ];
 const REQUEST = "tool     Bash\ncommand  cargo test -p brachio-auth\ncwd      ~/code/brachio.worktrees/rate-limit-7f2a\nreason   Run the auth crate tests after adding the limiter";
+const EDIT_REQUEST = "tool     Edit\nfile     crates/brachio-auth/src/login.rs\nchange   - let user = find_user(&body.email)?;\n         + if !limiter.allow(ip) {\n         +     return Err(TooMany::retry_after(60));\n         + }";
 const LONG_REQUEST = Array.from({ length: 14 }, (_, line) => `edit     crates/auth/src/limiter/window_${line}.rs`).join("\n");
 const TITLE_BAR = { repo: "brachio", view: "tasks" as const, onView: () => {}, needsYou: 2, onActivity: () => {}, onQuickOpen: () => {},
   onSettings: () => {}, sidebarOpen: true, inspectorOpen: true, onToggleSidebar: () => {}, onToggleInspector: () => {} };
@@ -254,6 +255,17 @@ function Catalog() {
             action={{ label: t("updates.download"), onClick: () => {} }} onDismiss={() => {}} />
           <Toast tone="error" title={t("error.title")} message="Push rejected. Pull first, then push again."
             action={{ label: t("error.report"), onClick: () => {} }} onDismiss={() => {}} />
+        </Row>
+        <Row cap="events">
+          <Toast tone="success" message={`${t("git.prCreated")} https://github.com/4n5rud/brachio/pull/242`}
+            action={{ label: t("task.open"), onClick: () => {} }} onDismiss={() => {}} />
+          <Toast tone="success" message={t("task.promptDrafted")} onDismiss={() => {}} />
+          <Toast tone="success" message={t("git.completed")} onDismiss={() => {}} />
+          <Toast tone="info" message={t("updates.available").replace("{version}", "0.5.0")}
+            action={{ label: t("updates.download"), onClick: () => {} }} dismissLabel={t("updates.later")} onDismiss={() => {}} />
+          <Toast tone="info" message={t("updates.checking")} onDismiss={() => {}} />
+          <Toast tone="success" message={t("updates.current")} onDismiss={() => {}} />
+          <Toast tone="error" message={t("updates.unavailable")} onDismiss={() => {}} />
         </Row>
         <Row cap="live">
           <Button onClick={() => pushToast({ tone: "success", message: "Pull request opened" })}>Confirmation (3 s)</Button>
@@ -444,6 +456,7 @@ function Catalog() {
       <Section title="ApprovalBar">
         <div class="catalog-stack" style={{ width: "100%" }}>
           <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" onAllow={() => {}} onAllowAlways={() => {}} onDeny={() => {}} /></div>
+          <div class="catalog-frame"><ApprovalBar review={EDIT_REQUEST} agent="Claude Code" onAllow={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" sending onAllow={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame">
             <ApprovalBar title={t("setup.title")} agent="brachio.toml" body={t("setup.body")}

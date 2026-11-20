@@ -2,6 +2,8 @@ import { Input, TextArea } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { pushToast } from "../lib/toasts";
+import { openExternalLink } from "../lib/pr-status";
 import { runTaskGitAction, type TaskGitAction } from "../lib/workspace";
 
 export function TaskGitActions(props: {
@@ -15,18 +17,18 @@ export function TaskGitActions(props: {
   const [prTitle, setPrTitle] = createSignal("");
   const [prBody, setPrBody] = createSignal("");
   const [busy, setBusy] = createSignal(false);
-  const [feedback, setFeedback] = createSignal<{ error: boolean; text: string }>();
+  const fail = (error: unknown) => pushToast({ tone: "error", title: t("error.title"), message: String(error) });
   const [requesting, setRequesting] = createSignal(false);
 
   const askAgent = async (kind: "commit" | "pr") => {
     if (busy() || requesting()) return;
     setRequesting(true);
-    setFeedback(undefined);
     try {
       const accepted = await props.onDraft(t(kind === "commit" ? "git.agentCommitPrompt" : "git.agentPrPrompt"));
-      setFeedback({ error: !accepted, text: t(accepted ? "git.agentDraftReady" : "diff.notReady") });
+      if (accepted) pushToast({ tone: "success", message: t("git.agentDraftReady") });
+      else pushToast({ tone: "error", message: t("diff.notReady") });
     } catch (error) {
-      setFeedback({ error: true, text: String(error) });
+      fail(error);
     } finally {
       setRequesting(false);
     }
@@ -35,7 +37,6 @@ export function TaskGitActions(props: {
   const run = async (request: TaskGitAction) => {
     if (busy()) return;
     setBusy(true);
-    setFeedback(undefined);
     try {
       const address = await runTaskGitAction(props.taskId, request);
       if (request.action === "commit") setMessage("");
@@ -43,13 +44,16 @@ export function TaskGitActions(props: {
         setPrTitle("");
         setPrBody("");
       }
-      setFeedback({
-        error: false,
-        text: address ? `${t("git.prCreated")}: ${address}` : t("git.completed"),
-      });
+      if (address) {
+        pushToast({
+          tone: "success",
+          message: `${t("git.prCreated")} ${address}`,
+          action: { label: t("task.open"), onClick: () => void openExternalLink(address).catch(fail) },
+        });
+      } else pushToast({ tone: "success", message: t("git.completed") });
       await props.onChanged();
     } catch (error) {
-      setFeedback({ error: true, text: String(error) });
+      fail(error);
     } finally {
       setBusy(false);
     }
@@ -111,9 +115,6 @@ export function TaskGitActions(props: {
           {t("git.createPr")}
         </Button>
       </form>
-      <Show when={feedback()}>
-        {(result) => <p role={result().error ? "alert" : "status"}>{result().text}</p>}
-      </Show>
     </div>
   );
 }
