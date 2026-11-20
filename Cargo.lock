@@ -390,6 +390,7 @@ dependencies = [
  "brachio-agent",
  "brachio-core",
  "brachio-git",
+ "brachio-process",
  "brachio-pty",
  "brachio-runtime",
  "brachio-store",

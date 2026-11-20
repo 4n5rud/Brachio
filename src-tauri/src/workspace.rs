@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
 use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
@@ -1131,23 +1131,21 @@ pub async fn task_pr_feedback(
         return Err(NOT_GIT.to_owned());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let output = github_command()
-            .current_dir(&task.worktree_path)
-            .args([
-                "pr",
-                "view",
-                "--json",
-                "url,statusCheckRollup,reviews,comments",
-                "--",
-            ])
-            .arg(&task.branch)
-            .output()
-            .map_err(to_text)?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
-        let mut feedback: serde_json::Value =
-            serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        let stdout = run_github(
+            github_command()
+                .current_dir(&task.worktree_path)
+                .args([
+                    "pr",
+                    "view",
+                    "--json",
+                    "url,statusCheckRollup,reviews,comments",
+                    "--",
+                ])
+                .arg(&task.branch),
+            PR_VIEW_MAX_BYTES,
+            "the pull request",
+        )?;
+        let mut feedback: serde_json::Value = serde_json::from_slice(&stdout).map_err(to_text)?;
         let (inline_comments, inline_error) =
             match read_inline_reviews(&task.worktree_path, &feedback) {
                 Ok(comments) => (comments, None),
@@ -1159,6 +1157,49 @@ pub async fn task_pr_feedback(
     })
     .await
     .map_err(to_text)?
+}
+
+const GH_TIME_LIMIT: Duration = Duration::from_secs(60);
+const PR_VIEW_MAX_BYTES: usize = 8 * 1024 * 1024;
+const INLINE_REVIEWS_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Runs `gh` with a deadline and a stdout cap; an over-large or slow answer is an error, never a cut-off JSON.
+fn run_github(
+    command: &mut std::process::Command,
+    max_stdout: usize,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    github_output(
+        brachio_process::output_capped(command, GH_TIME_LIMIT, max_stdout),
+        max_stdout,
+        what,
+    )
+}
+
+fn github_output(
+    result: std::io::Result<brachio_process::Capped>,
+    max_stdout: usize,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    let capped = result.map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            "The GitHub CLI (gh) is not installed or not on PATH.".to_owned()
+        }
+        std::io::ErrorKind::TimedOut => format!("Loading {what} from GitHub {error}."),
+        _ => error.to_string(),
+    })?;
+    if capped.truncated {
+        return Err(format!(
+            "{what} is larger than {} MiB, so it was not loaded.",
+            max_stdout / (1024 * 1024)
+        ));
+    }
+    if !capped.output.status.success() {
+        return Err(String::from_utf8_lossy(&capped.output.stderr)
+            .trim()
+            .to_owned());
+    }
+    Ok(capped.output.stdout)
 }
 
 fn github_command() -> std::process::Command {
@@ -1187,23 +1228,19 @@ fn read_inline_reviews(
         return Err("Could not identify the repository for inline reviews.".to_owned());
     };
     let endpoint = format!("repos/{owner}/{repo}/pulls/{number}/comments");
-    let output = github_command()
-        .current_dir(worktree)
-        .args([
+    let stdout = run_github(
+        github_command().current_dir(worktree).args([
             "api",
             "--hostname",
             host,
             "--paginate",
             "--slurp",
             &endpoint,
-        ])
-        .output()
-        .map_err(to_text)?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-    }
-    let pages: Vec<Vec<serde_json::Value>> =
-        serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        ]),
+        INLINE_REVIEWS_MAX_BYTES,
+        "the inline review comments",
+    )?;
+    let pages: Vec<Vec<serde_json::Value>> = serde_json::from_slice(&stdout).map_err(to_text)?;
     Ok(pages
         .into_iter()
         .flatten()
@@ -1381,6 +1418,73 @@ mod terminal_guard_tests {
         assert_eq!(
             refusal,
             "could not verify that the task's terminals are stopped"
+        );
+    }
+}
+
+#[cfg(test)]
+mod github_output_tests {
+    use std::io::{Error, ErrorKind};
+    use std::process::{ExitStatus, Output};
+
+    use super::github_output;
+
+    fn exit(code: u32) -> ExitStatus {
+        #[cfg(windows)]
+        {
+            std::os::windows::process::ExitStatusExt::from_raw(code)
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::process::ExitStatusExt::from_raw(i32::try_from(code).unwrap() << 8)
+        }
+    }
+
+    fn capped(code: u32, stdout: &str, stderr: &str, truncated: bool) -> brachio_process::Capped {
+        brachio_process::Capped {
+            output: Output {
+                status: exit(code),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            },
+            truncated,
+        }
+    }
+
+    #[test]
+    fn a_truncated_answer_is_an_error_not_cut_off_json() {
+        let error = github_output(Ok(capped(0, "[[{\"a\"", "", true)), 2 << 20, "the reviews")
+            .expect_err("fails");
+        assert_eq!(
+            error,
+            "the reviews is larger than 2 MiB, so it was not loaded."
+        );
+    }
+
+    #[test]
+    fn a_timeout_a_missing_cli_and_a_failed_login_are_told_apart() {
+        let timed_out = Error::new(ErrorKind::TimedOut, "timed out after 60 seconds");
+        assert_eq!(
+            github_output(Err(timed_out), 1, "the pull request").expect_err("fails"),
+            "Loading the pull request from GitHub timed out after 60 seconds."
+        );
+        let missing = Error::new(ErrorKind::NotFound, "program not found");
+        assert_eq!(
+            github_output(Err(missing), 1, "x").expect_err("fails"),
+            "The GitHub CLI (gh) is not installed or not on PATH."
+        );
+        assert_eq!(
+            github_output(Ok(capped(1, "", "gh auth login required\n", false)), 1, "x")
+                .expect_err("fails"),
+            "gh auth login required"
+        );
+    }
+
+    #[test]
+    fn a_normal_answer_is_returned_whole() {
+        assert_eq!(
+            github_output(Ok(capped(0, "[]", "", false)), 1024, "x").expect("loads"),
+            b"[]"
         );
     }
 }
