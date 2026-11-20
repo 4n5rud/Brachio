@@ -6,25 +6,10 @@ export interface ApprovalQuestion {
   id: number;
   /** The terminal the agent runs in, including a secondary tab ID when present. */
   key: string;
-  toolName: string;
-  toolInput: unknown;
+  review: string;
 }
-
-const LONGEST_SUMMARY = 300;
 
 export const taskIdOf = (key: string): string => key.split(":")[0] ?? key;
-
-/** One line that says what the agent wants to do. */
-export function summarize(question: Pick<ApprovalQuestion, "toolName" | "toolInput">): string {
-  const input = question.toolInput;
-  if (input !== null && typeof input === "object") {
-    const fields = input as Record<string, unknown>;
-    if (typeof fields.command === "string") return fields.command;
-    if (typeof fields.file_path === "string") return `${question.toolName}: ${fields.file_path}`;
-  }
-  const text = `${question.toolName} ${JSON.stringify(input ?? {})}`;
-  return text.length > LONGEST_SUMMARY ? `${text.slice(0, LONGEST_SUMMARY)}…` : text;
-}
 
 /** Resolves to false when the question was already over, for example answered in the terminal. */
 export const answerApproval = (id: number, allow: boolean) => invoke<boolean>("approval_answer", { id, allow });
