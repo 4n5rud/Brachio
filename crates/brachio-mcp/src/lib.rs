@@ -1,4 +1,8 @@
-//! Brachio's read-only MCP server over newline-delimited JSON-RPC on stdio.
+//! Brachio's MCP server over newline-delimited JSON-RPC on stdio.
+//!
+//! Every tool goes through the [`Backend`], which the CLI wires to the same hook socket, identity
+//! and approval flow as the `brachio` commands. Nothing here can create a task without the user's
+//! approval; the app still enforces the child and depth limits.
 
 use std::collections::HashSet;
 use std::io::{self, BufRead, Read, Write};
@@ -8,8 +12,18 @@ use serde_json::{json, Value};
 
 const MAX_LINE: usize = 64 * 1024;
 const MAX_REQUEST_IDS: usize = 65_536;
-const TOOL: &str = "list_child_tasks";
 const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const BAD_ARGUMENTS: &str = "Invalid tool arguments";
+
+/// Same limits the app enforces for `brachio task create` and `brachio send`.
+pub const MAX_TITLE_CHARS: usize = 200;
+/// Longest prompt or body, in bytes.
+pub const MAX_TEXT_BYTES: usize = 8 * 1024;
+/// Longest review subject, in characters.
+pub const MAX_SUBJECT_CHARS: usize = 200;
+const MAX_BASE_BYTES: usize = 256;
+/// Longest `get_task_result` wait, below what MCP clients commonly allow a tool call (60 s).
+pub const MAX_WAIT_SECS: u64 = 30;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,16 +39,73 @@ struct ClientInfo {
     version: String,
 }
 
+/// What a tool call reaches. An `Err` becomes an MCP tool error the agent can read.
+pub trait Backend {
+    /// The caller's child tasks.
+    ///
+    /// # Errors
+    /// A message for the agent when the app cannot be reached or refuses.
+    fn list_children(&mut self) -> Result<Value, String>;
+
+    /// Ask the user to create a child task.
+    ///
+    /// # Errors
+    /// A message for the agent, including when the user refuses.
+    fn spawn_task(&mut self, request: SpawnTask) -> Result<Value, String>;
+
+    /// The children, after waiting up to `wait_secs` (0 means do not wait) for one to report.
+    ///
+    /// # Errors
+    /// A message for the agent when the app cannot be reached or refuses.
+    fn task_result(&mut self, wait_secs: u64) -> Result<Value, String>;
+
+    /// Send a `merge_ready` message to the lead task.
+    ///
+    /// # Errors
+    /// A message for the agent when the app cannot be reached or refuses.
+    fn request_review(&mut self, request: ReviewRequest) -> Result<Value, String>;
+}
+
+/// Validated input of `spawn_task`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnTask {
+    /// Task title.
+    pub title: String,
+    /// What the child agent starts with.
+    pub prompt: String,
+    /// `claude` or `codex`.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Commit-ish to branch from.
+    #[serde(default)]
+    pub base: Option<String>,
+}
+
+/// Validated input of `request_review`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewRequest {
+    /// One line saying what this is about.
+    pub subject: String,
+    /// Details.
+    #[serde(default)]
+    pub body: String,
+}
+
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ToolArguments {}
+struct ResultArguments {
+    #[serde(default)]
+    wait_secs: u64,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ToolCall {
     name: String,
     #[serde(default)]
-    arguments: ToolArguments,
+    arguments: Value,
     #[serde(default, rename = "_meta")]
     _meta: Option<serde_json::Map<String, Value>>,
 }
@@ -50,12 +121,121 @@ fn error(id: &Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
 }
 
+fn tools() -> Value {
+    json!([
+        {
+            "name":"list_child_tasks",
+            "description":"List the child tasks and their report status for this terminal.",
+            "inputSchema":{"type":"object","properties":{},"additionalProperties":false},
+            "annotations":{"readOnlyHint":true,"openWorldHint":false}
+        },
+        {
+            "name":"spawn_task",
+            "description":"Ask the user to start a child task with its own worktree and branch. The user must approve first; this call waits for their answer (up to 5 minutes) and fails if they refuse. At most 4 open children, one level deep.",
+            "inputSchema":{
+                "type":"object",
+                "properties":{
+                    "title":{"type":"string","minLength":1,"maxLength":MAX_TITLE_CHARS,"description":"Task title; the branch name derives from it."},
+                    "prompt":{"type":"string","description":"What the child's agent should do, at most 8 KiB."},
+                    "agent":{"type":"string","enum":["claude","codex"]},
+                    "base":{"type":"string","minLength":1,"maxLength":MAX_BASE_BYTES,"description":"Commit-ish to branch from; defaults to this task's branch."}
+                },
+                "required":["title","prompt"],
+                "additionalProperties":false
+            },
+            "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}
+        },
+        {
+            "name":"get_task_result",
+            "description":"Show the child tasks and which have reported done. With wait_secs, first waits that long (at most 30) for a child to report; it never blocks longer.",
+            "inputSchema":{
+                "type":"object",
+                "properties":{"wait_secs":{"type":"integer","minimum":0,"maximum":MAX_WAIT_SECS}},
+                "additionalProperties":false
+            },
+            "annotations":{"readOnlyHint":true,"openWorldHint":false}
+        },
+        {
+            "name":"request_review",
+            "description":"Tell the lead task this branch is ready for review. Sends a merge_ready message to the lead.",
+            "inputSchema":{
+                "type":"object",
+                "properties":{
+                    "subject":{"type":"string","minLength":1,"maxLength":MAX_SUBJECT_CHARS},
+                    "body":{"type":"string","description":"Details, at most 8 KiB; put long text in a file and send its path."}
+                },
+                "required":["subject"],
+                "additionalProperties":false
+            },
+            "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}
+        }
+    ])
+}
+
+/// `Err` is a protocol error (unknown tool or invalid arguments); `Ok(Err)` is a tool error.
+fn call_tool(
+    name: &str,
+    arguments: Value,
+    backend: &mut impl Backend,
+) -> Result<Result<Value, String>, &'static str> {
+    let arguments = if arguments.is_null() {
+        json!({})
+    } else {
+        arguments
+    };
+    Ok(match name {
+        "list_child_tasks" => {
+            if arguments.as_object().is_none_or(|map| !map.is_empty()) {
+                return Err(BAD_ARGUMENTS);
+            }
+            backend.list_children()
+        }
+        "spawn_task" => {
+            let request: SpawnTask =
+                serde_json::from_value(arguments).map_err(|_| BAD_ARGUMENTS)?;
+            let agent_ok = request
+                .agent
+                .as_deref()
+                .is_none_or(|agent| agent == "claude" || agent == "codex");
+            let base_ok = request
+                .base
+                .as_deref()
+                .is_none_or(|base| !base.is_empty() && base.len() <= MAX_BASE_BYTES);
+            if request.title.trim().is_empty()
+                || request.title.chars().count() > MAX_TITLE_CHARS
+                || request.prompt.len() > MAX_TEXT_BYTES
+                || !agent_ok
+                || !base_ok
+            {
+                return Err(BAD_ARGUMENTS);
+            }
+            backend.spawn_task(request)
+        }
+        "get_task_result" => {
+            let ResultArguments { wait_secs } =
+                serde_json::from_value(arguments).map_err(|_| BAD_ARGUMENTS)?;
+            if wait_secs > MAX_WAIT_SECS {
+                return Err(BAD_ARGUMENTS);
+            }
+            backend.task_result(wait_secs)
+        }
+        "request_review" => {
+            let request: ReviewRequest =
+                serde_json::from_value(arguments).map_err(|_| BAD_ARGUMENTS)?;
+            if request.subject.trim().is_empty()
+                || request.subject.chars().count() > MAX_SUBJECT_CHARS
+                || request.body.len() > MAX_TEXT_BYTES
+            {
+                return Err(BAD_ARGUMENTS);
+            }
+            backend.request_review(request)
+        }
+        _ => return Err("Unknown tool"),
+    })
+}
+
 impl Session {
-    fn respond(
-        &mut self,
-        request: &Value,
-        list: &mut impl FnMut() -> Result<Value, String>,
-    ) -> Option<Value> {
+    fn respond(&mut self, request: &Value, backend: &mut impl Backend) -> Option<Value> {
         let id = request.get("id");
         let method = request.get("method").and_then(Value::as_str);
         if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") || method.is_none() {
@@ -98,26 +278,17 @@ impl Session {
             }
             "initialize" => return Some(error(id, -32600, "Already initialized")),
             _ if !self.ready => return Some(error(id, -32002, "Server not initialized")),
-            "tools/list" => json!({"tools":[{
-                "name":TOOL, "description":"List the child tasks and their report status for this terminal.",
-                "inputSchema":{"type":"object","properties":{},"additionalProperties":false},
-                "annotations":{"readOnlyHint":true,"openWorldHint":false}
-            }]}),
+            "tools/list" => json!({"tools":tools()}),
             "tools/call" => {
                 let Ok(call) = serde_json::from_value::<ToolCall>(params.clone()) else {
-                    return Some(error(id, -32602, "Invalid tool arguments"));
+                    return Some(error(id, -32602, BAD_ARGUMENTS));
                 };
-                if call.name != TOOL {
-                    return Some(error(id, -32602, "Unknown tool"));
-                }
-                let ToolArguments {} = call.arguments;
-                match list() {
-                    Ok(children) => {
-                        json!({"content":[{"type":"text","text":children.to_string()}]})
-                    }
-                    Err(message) => {
+                match call_tool(&call.name, call.arguments, backend) {
+                    Ok(Ok(value)) => json!({"content":[{"type":"text","text":value.to_string()}]}),
+                    Ok(Err(message)) => {
                         json!({"isError":true,"content":[{"type":"text","text":message}]})
                     }
+                    Err(message) => return Some(error(id, -32602, message)),
                 }
             }
             _ => return Some(error(id, -32601, "Method not found")),
@@ -126,15 +297,15 @@ impl Session {
     }
 }
 
-/// Serve MCP requests until EOF, reading child state through the caller's existing identity.
-/// Stdout is reserved for protocol messages.
+/// Serve MCP requests until EOF, calling tools through the caller's existing identity and
+/// approval flow. Stdout is reserved for protocol messages.
 ///
 /// # Errors
 /// Returns an I/O error if stdin or stdout fails.
 pub fn serve(
     mut input: impl BufRead,
     mut output: impl Write,
-    mut list: impl FnMut() -> Result<Value, String>,
+    mut backend: impl Backend,
 ) -> io::Result<()> {
     let mut session = Session::default();
     let mut line = Vec::new();
@@ -155,7 +326,7 @@ pub fn serve(
             return Ok(());
         }
         let reply = match serde_json::from_slice(&line) {
-            Ok(request) => session.respond(&request, &mut list),
+            Ok(request) => session.respond(&request, &mut backend),
             Err(_) => Some(error(&Value::Null, -32700, "Parse error")),
         };
         if let Some(reply) = reply {
@@ -174,64 +345,151 @@ fn write_response(output: &mut impl Write, reply: &Value) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn lists_only_the_read_only_tool_and_rejects_invalid_calls() {
-        let input = concat!(
-            "invalid\n",
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_child_tasks","arguments":{"key":"other"}}}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"spawn_task"}}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_child_tasks"}}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_child_tasks"}}"#,
-            "\n",
-        );
-        let mut output = Vec::new();
-        let mut calls = 0;
-        serve(input.as_bytes(), &mut output, || {
-            calls += 1;
+    #[derive(Default)]
+    struct Recorder {
+        calls: Vec<String>,
+    }
+
+    impl Backend for Recorder {
+        fn list_children(&mut self) -> Result<Value, String> {
+            self.calls.push("list".into());
             Ok(json!([{"key":"child:agent","reported":true}]))
-        })
-        .expect("serve");
-        assert_eq!(calls, 1);
-        let replies: Vec<Value> = output
+        }
+        fn spawn_task(&mut self, request: SpawnTask) -> Result<Value, String> {
+            self.calls.push(format!("spawn {}", request.title));
+            Err("The user refused.".into())
+        }
+        fn task_result(&mut self, wait_secs: u64) -> Result<Value, String> {
+            self.calls.push(format!("result {wait_secs}"));
+            Ok(json!({}))
+        }
+        fn request_review(&mut self, request: ReviewRequest) -> Result<Value, String> {
+            self.calls.push(format!("review {}", request.subject));
+            Ok(json!({}))
+        }
+    }
+
+    const HANDSHAKE: &str = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+    );
+
+    fn run(requests: &str) -> (Vec<Value>, Recorder) {
+        let input = format!("{HANDSHAKE}{requests}");
+        let mut output = Vec::new();
+        let mut recorder = Recorder::default();
+        serve(input.as_bytes(), &mut output, &mut recorder).expect("serve");
+        let replies = output
             .lines()
             .map(|line| serde_json::from_str(&line.expect("read reply")).expect("JSON reply"))
+            .collect::<Vec<Value>>();
+        (replies[1..].to_vec(), recorder)
+    }
+
+    impl Backend for &mut Recorder {
+        fn list_children(&mut self) -> Result<Value, String> {
+            (**self).list_children()
+        }
+        fn spawn_task(&mut self, request: SpawnTask) -> Result<Value, String> {
+            (**self).spawn_task(request)
+        }
+        fn task_result(&mut self, wait_secs: u64) -> Result<Value, String> {
+            (**self).task_result(wait_secs)
+        }
+        fn request_review(&mut self, request: ReviewRequest) -> Result<Value, String> {
+            (**self).request_review(request)
+        }
+    }
+
+    fn call(id: u32, name: &str, arguments: &Value) -> String {
+        format!(
+            "{}\n",
+            json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}})
+        )
+    }
+
+    #[test]
+    fn lists_exactly_the_served_tools_without_run_qa() {
+        let (replies, _) = run(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+        let names: Vec<&str> = replies[0]["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("name"))
             .collect();
-        assert_eq!(replies[0]["error"]["code"], -32700);
-        assert_eq!(replies[1]["result"]["protocolVersion"], "2025-11-25");
         assert_eq!(
-            replies[2]["result"]["tools"]
-                .as_array()
-                .expect("tools")
-                .len(),
-            1
+            names,
+            [
+                "list_child_tasks",
+                "spawn_task",
+                "get_task_result",
+                "request_review"
+            ]
         );
-        assert_eq!(replies[3]["error"]["code"], -32602);
-        assert_eq!(replies[4]["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn invalid_or_oversize_input_never_reaches_the_backend() {
+        let long_title = "t".repeat(201);
+        let big = "x".repeat(MAX_TEXT_BYTES + 1);
+        let requests = [
+            call(2, "list_child_tasks", &json!({"key":"other"})),
+            call(3, "run_qa", &json!({})),
+            call(4, "spawn_task", &json!({"title":long_title,"prompt":"p"})),
+            call(5, "spawn_task", &json!({"title":"t","prompt":big})),
+            call(
+                6,
+                "spawn_task",
+                &json!({"title":"t","prompt":"p","agent":"gpt"}),
+            ),
+            call(
+                7,
+                "spawn_task",
+                &json!({"title":"t","prompt":"p","extra":1}),
+            ),
+            call(8, "get_task_result", &json!({"wait_secs":31})),
+            call(9, "request_review", &json!({"subject":"s","body":big})),
+            call(10, "request_review", &json!({"subject":" "})),
+        ]
+        .concat();
+        let (replies, recorder) = run(&requests);
+        assert_eq!(replies.len(), 9);
+        assert!(replies.iter().all(|reply| reply["error"]["code"] == -32602));
+        assert!(recorder.calls.is_empty());
+    }
+
+    #[test]
+    fn tools_reach_the_backend_and_a_refusal_is_a_tool_error() {
+        let requests = [
+            call(2, "list_child_tasks", &json!({})),
+            call(3, "spawn_task", &json!({"title":"Docs","prompt":"Write"})),
+            call(4, "get_task_result", &json!({"wait_secs":5})),
+            call(5, "request_review", &json!({"subject":"Ready"})),
+        ]
+        .concat();
+        let (replies, recorder) = run(&requests);
         assert_eq!(
-            replies[5]["result"]["content"][0]["text"],
-            r#"[{"key":"child:agent","reported":true}]"#
+            recorder.calls,
+            ["list", "spawn Docs", "result 5", "review Ready"]
         );
-        assert_eq!(replies[6]["error"]["code"], -32600);
+        assert_eq!(replies[1]["result"]["isError"], true);
+        assert_eq!(
+            replies[1]["result"]["content"][0]["text"],
+            "The user refused."
+        );
+        assert!(replies[2]["result"].get("isError").is_none());
     }
 
     #[test]
     fn oversized_input_is_rejected_without_dispatch() {
         let input = vec![b'x'; MAX_LINE + 1];
         let mut output = Vec::new();
-        serve(input.as_slice(), &mut output, || {
-            panic!("oversized frame reached tool")
-        })
-        .expect("serve");
+        let mut recorder = Recorder::default();
+        serve(input.as_slice(), &mut output, &mut recorder).expect("serve");
         let reply: Value = serde_json::from_slice(&output).expect("JSON reply");
         assert_eq!(reply["error"]["code"], -32600);
+        assert!(recorder.calls.is_empty());
     }
 }
