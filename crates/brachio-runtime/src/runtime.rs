@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU16;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use anyhow::{bail, Context, Result};
 use brachio_pty::{SessionManager, SpawnSpec};
@@ -20,6 +20,8 @@ pub(crate) struct Runtime {
     pub(crate) instance: String,
     pub(crate) manager: Arc<SessionManager>,
     pub(crate) sessions: Mutex<HashMap<String, Session>>,
+    pub(crate) pending_launches: Mutex<HashSet<String>>,
+    pub(crate) launch_finished: Condvar,
     pub(crate) draining: AtomicBool,
     pub(crate) journal: Option<Journal>,
     /// Shells that are gone but whose last screen can still be read.
@@ -37,6 +39,8 @@ impl Runtime {
             instance: Uuid::new_v4().to_string(),
             manager: Arc::new(SessionManager::default()),
             sessions: Mutex::default(),
+            pending_launches: Mutex::default(),
+            launch_finished: Condvar::new(),
             draining: AtomicBool::new(false),
             journal,
             lost: Mutex::new(lost),
@@ -47,7 +51,10 @@ impl Runtime {
 
     /// A draining runtime with no shells left has nothing more to serve.
     pub(crate) fn finished(&self) -> bool {
-        self.draining.load(Ordering::SeqCst) && self.manager.ids().is_ok_and(|ids| ids.is_empty())
+        self.draining.load(Ordering::SeqCst)
+            && self.pending_launches.lock().is_ok_and(|launches| {
+                launches.is_empty() && self.manager.ids().is_ok_and(|ids| ids.is_empty())
+            })
     }
 
     pub(crate) fn hello(&self) -> ResponseResult {
@@ -62,18 +69,10 @@ impl Runtime {
     }
 
     pub(crate) fn execute(&self, request: Request) -> Result<ResponseResult> {
-        let mut sessions = lock(&self.sessions)?;
-        self.keep_ended_programs(&mut sessions)?;
         match request.action {
             Action::Hello => Ok(self.hello()),
             Action::Drain => {
                 self.draining.store(true, Ordering::SeqCst);
-                Ok(self.hello())
-            }
-            Action::Lost => self.list_lost(),
-            Action::Recover { key } => self.recover(&key),
-            Action::Forget { key } => {
-                self.forget(&key)?;
                 Ok(self.hello())
             }
             Action::Ensure { key, cwd } => {
@@ -86,7 +85,7 @@ impl Runtime {
                     rows: ROWS.get(),
                     cols: COLS.get(),
                 };
-                self.launch(&mut sessions, key, spec)
+                self.launch(key, spec)
             }
             Action::Launch {
                 key,
@@ -105,9 +104,21 @@ impl Runtime {
                     rows: rows.max(1),
                     cols: cols.max(1),
                 };
-                self.launch(&mut sessions, key, spec)
+                self.launch(key, spec)
             }
-            action => self.act_on_session(&sessions, action),
+            action => {
+                let mut sessions = lock(&self.sessions)?;
+                self.keep_ended_programs(&mut sessions)?;
+                match action {
+                    Action::Lost => self.list_lost(),
+                    Action::Recover { key } => self.recover(&key),
+                    Action::Forget { key } => {
+                        self.forget(&key)?;
+                        Ok(self.hello())
+                    }
+                    action => self.act_on_session(&sessions, action),
+                }
+            }
         }
     }
 

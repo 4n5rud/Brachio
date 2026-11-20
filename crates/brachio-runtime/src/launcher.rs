@@ -1,6 +1,5 @@
 //! Starting programs: the command line they get, and the PTY events they produce.
 
-use std::collections::HashMap;
 use std::env;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, Weak};
@@ -16,12 +15,7 @@ use crate::session::{lock, Session, StartupOutput};
 
 impl Runtime {
     /// Start the program for `key` unless it already runs, in which case describe that one.
-    pub(crate) fn launch(
-        &self,
-        sessions: &mut HashMap<String, Session>,
-        key: String,
-        mut spec: SpawnSpec,
-    ) -> Result<ResponseResult> {
+    pub(crate) fn launch(&self, key: String, mut spec: SpawnSpec) -> Result<ResponseResult> {
         spec.cwd = spec
             .cwd
             .canonicalize()
@@ -29,20 +23,43 @@ impl Runtime {
         if !spec.cwd.is_dir() || key.is_empty() || spec.program.is_empty() {
             bail!("a session key, a program and a working directory are required");
         }
-        if let Some(existing) = sessions.get(&key) {
-            if existing.cwd != spec.cwd {
-                bail!("session key already belongs to a different working directory");
+        let _reservation = self.reserve_launch(&key)?;
+        {
+            let mut sessions = lock(&self.sessions)?;
+            self.keep_ended_programs(&mut sessions)?;
+            if let Some(existing) = sessions.get(&key) {
+                if existing.cwd != spec.cwd {
+                    bail!("session key already belongs to a different working directory");
+                }
+                return existing.describe(None);
             }
-            return existing.describe(None);
-        }
-        if self.draining.load(Ordering::SeqCst) {
-            bail!("runtime is draining and takes no new terminals");
+            if self.draining.load(Ordering::SeqCst) {
+                bail!("runtime is draining and takes no new terminals");
+            }
         }
         let session = self.start_program(&spec)?;
-        self.forget(&key)?;
-        let info = session.describe(None)?;
-        sessions.insert(key, session);
-        Ok(info)
+        let id = session.id;
+        let result = (|| {
+            let mut sessions = lock(&self.sessions)?;
+            self.forget(&key)?;
+            let info = session.describe(None)?;
+            sessions.insert(key.clone(), session);
+            Ok(info)
+        })();
+        if result.is_err() {
+            let _ = self.manager.kill(id);
+        }
+        result
+    }
+
+    fn reserve_launch<'a>(&'a self, key: &'a str) -> Result<LaunchReservation<'a>> {
+        let pending = lock(&self.pending_launches)?;
+        let mut pending = self
+            .launch_finished
+            .wait_while(pending, |pending| pending.contains(key))
+            .map_err(|_| anyhow::anyhow!("runtime launch lock poisoned"))?;
+        pending.insert(key.to_owned());
+        Ok(LaunchReservation { runtime: self, key })
     }
 
     fn start_program(&self, spec: &SpawnSpec) -> Result<Session> {
@@ -50,6 +67,20 @@ impl Runtime {
         let (updates, receiver) = watch::channel(());
         let sink = program_events(&output, updates, Arc::downgrade(&self.manager));
         let id = self.manager.spawn(spec, sink)?;
+        let result = self.finish_start(spec, output, receiver, id);
+        if result.is_err() {
+            let _ = self.manager.kill(id);
+        }
+        result
+    }
+
+    fn finish_start(
+        &self,
+        spec: &SpawnSpec,
+        output: Arc<Mutex<StartupOutput>>,
+        receiver: watch::Receiver<()>,
+        id: brachio_pty::SessionId,
+    ) -> Result<Session> {
         let reply = {
             let mut state = lock(&output)?;
             state.id = Some(id);
@@ -66,6 +97,20 @@ impl Runtime {
             output,
             updates: receiver,
         })
+    }
+}
+
+struct LaunchReservation<'a> {
+    runtime: &'a Runtime,
+    key: &'a str,
+}
+
+impl Drop for LaunchReservation<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut pending) = lock(&self.runtime.pending_launches) {
+            pending.remove(self.key);
+            self.runtime.launch_finished.notify_all();
+        }
     }
 }
 
@@ -129,4 +174,41 @@ pub(crate) fn shell_command() -> (String, Vec<String>) {
 pub(crate) fn shell_command() -> (String, Vec<String>) {
     let program = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
     (program, Vec::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn a_pending_launch_only_serializes_its_own_key_and_keeps_a_draining_runtime_alive() {
+        let runtime = Runtime::new(None);
+        let first = runtime.reserve_launch("first").expect("reserve first");
+        let other = runtime
+            .reserve_launch("other")
+            .expect("reserve independent key");
+        runtime.draining.store(true, Ordering::SeqCst);
+        assert!(!runtime.finished());
+        drop(other);
+        std::thread::scope(|scope| {
+            let (locked, notification) = mpsc::channel();
+            let runtime = &runtime;
+            scope.spawn(move || {
+                let _next = runtime.reserve_launch("first").expect("reserve same key");
+                locked.send(()).expect("send acquisition");
+            });
+            assert_eq!(
+                notification.recv_timeout(Duration::from_millis(25)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            );
+            drop(first);
+            notification
+                .recv_timeout(Duration::from_secs(2))
+                .expect("same key unblocked");
+        });
+        assert!(runtime.finished());
+    }
 }
