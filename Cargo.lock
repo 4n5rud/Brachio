@@ -510,8 +510,10 @@ dependencies = [
 name = "brachio-store"
 version = "0.0.1"
 dependencies = [
+ "brachio-core",
  "rusqlite",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

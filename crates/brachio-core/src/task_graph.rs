@@ -218,6 +218,17 @@ impl TaskGraph {
         Ok(self.nodes[self.lookup(id)?].state)
     }
 
+    /// Sets a task's state without checking the table, for rebuilding a graph
+    /// from storage where the saved state is the source of truth.
+    ///
+    /// # Errors
+    /// [`GraphError::UnknownTask`] if the id was never added.
+    pub fn restore_state(&mut self, id: &str, state: TaskState) -> Result<(), GraphError> {
+        let idx = self.lookup(id)?;
+        self.nodes[idx].state = state;
+        Ok(())
+    }
+
     /// Makes `task` depend on `depends_on`.
     ///
     /// # Errors
