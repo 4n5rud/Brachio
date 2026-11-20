@@ -336,9 +336,9 @@ function Catalog() {
 
       <Section title="StatusBar">
         <div class="catalog-stack" style={{ width: "100%" }}>
-          <div class="catalog-bar-frame"><StatusBarView agents={2} memory="148 MB" cpu="3%" branch="main" ahead={0} behind={2} /></div>
-          <div class="catalog-bar-frame"><StatusBarView agents={1} needsYou={2} memory="1.2 GB" cpu="41%" /></div>
-          <div class="catalog-bar-frame"><StatusBarView agents={0} /></div>
+          <div class="catalog-bar-frame"><StatusBarView sessions={7} memory="182 MB" memoryTitle="App and agents 151 MB, runtime 31 MB" cpu="3%" branch="main" ahead={0} behind={2} /></div>
+          <div class="catalog-bar-frame"><StatusBarView sessions={0} /></div>
+          <div class="catalog-bar-frame"><StatusBarView sessions={7} coreStopped memory="88 MB" cpu="0%" /></div>
         </div>
       </Section>
 

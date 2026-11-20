@@ -15,15 +15,13 @@
 .titlebar-windows {
   padding-right: 0;
 }
-.repo-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: var(--size-row);
-  padding: 0 var(--space-2);
+.app-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
 .active-project {
+  padding: 0 var(--space-1);
   max-width: 18vw;
   overflow: hidden;
   text-overflow: ellipsis;

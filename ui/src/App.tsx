@@ -58,6 +58,12 @@ export function App() {
   const [now, setNow] = createSignal(Date.now());
   const [sidebarOpen, setSidebarOpen] = createSignal(loadSidebarOpen());
   const [inspectorOpen, setInspectorOpen] = createSignal(loadInspectorOpen());
+  // Below this width the inspector closes on its own; opening it by hand still works.
+  const narrowQuery = window.matchMedia("(max-width: 1099px)");
+  if (narrowQuery.matches) setInspectorOpen(false);
+  const closeWhenNarrow = (event: MediaQueryListEvent) => { if (event.matches) setInspectorOpen(false); };
+  narrowQuery.addEventListener("change", closeWhenNarrow);
+  onCleanup(() => narrowQuery.removeEventListener("change", closeWhenNarrow));
   const toggleSidebar = () => setSidebarOpen((open) => { saveSidebarOpen(!open); return !open; });
   const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
@@ -241,6 +247,10 @@ export function App() {
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
   const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
+  createEffect(() => {
+    if (!inTauri) return;
+    void getCurrentWindow().setBadgeCount(needsYou() || undefined).catch(() => {});
+  });
 
   // First prompts of tasks created in this run. Each is handed to the
   // task's terminal once, then dropped.
@@ -773,7 +783,7 @@ export function App() {
           )}
         </Show>
       </main>
-      <StatusBar sessions={inTauri ? openIds().length : tasks().length} needsYou={needsYou()} />
+      <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}

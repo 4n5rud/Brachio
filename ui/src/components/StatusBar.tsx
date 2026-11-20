@@ -21,10 +21,11 @@ export function formatMemory(bytes: number): string {
 
 /** What the bar shows. A missing number prints as a dash. */
 export function StatusBarView(props: {
-  agents: number;
-  /** Agents waiting on the person; the dot becomes the Needs you diamond with this count. */
-  needsYou?: number;
+  sessions: number;
+  coreStopped?: boolean;
   memory?: string;
+  /** Tooltip that splits the memory figure into its parts. */
+  memoryTitle?: string;
   cpu?: string;
   /** Current branch of the repository and its distance from the remote. */
   branch?: string;
@@ -34,28 +35,26 @@ export function StatusBarView(props: {
   return (
     <footer class="statusbar">
       <span>
-        <Show when={props.needsYou} fallback={<i class="dot" />}>
-          {(count) => (
-            <span class="statusbar-needs" title={t("group.needs")} aria-label={`${t("group.needs")} ${count()}`}>
-              <StatusGlyph tone="blocked" />
-              <b>{count()}</b>
-            </span>
-          )}
+        <Show when={props.coreStopped} fallback={<i class="dot" />}>
+          <StatusGlyph tone="error" />
         </Show>
-        {t(props.agents === 1 ? "statusbar.agentOne" : "statusbar.agentMany").replace("{count}", String(props.agents))}
+        {t(props.coreStopped ? "statusbar.coreStopped" : "statusbar.coreOk")}
       </span>
       <span>
-        <Icon name="memory" class="icon-sm" />
+        {t("statusbar.sessions")} <b>{props.sessions}</b>
+      </span>
+      <span title={props.memoryTitle}>
+        <Icon name="memory" class="icon-xs" />
         {t("statusbar.memory")} <b>{props.memory ?? "–"}</b>
       </span>
       <span>
-        <Icon name="cpu" class="icon-sm" />
+        <Icon name="cpu" class="icon-xs" />
         {t("statusbar.cpu")} <b>{props.cpu ?? "–"}</b>
       </span>
       <Show when={props.branch}>
         {(branch) => (
           <span class="statusbar-end">
-            <Icon name="branch" class="icon-sm" />
+            <Icon name="branch" class="icon-xs" />
             {branch()} <b>↑{props.ahead ?? 0} ↓{props.behind ?? 0}</b>
           </span>
         )}
@@ -65,23 +64,35 @@ export function StatusBarView(props: {
 }
 
 /** Bottom bar. Memory and CPU cover the app and every process it started, plus the terminal runtime. */
-export function StatusBar(props: { sessions: number; needsYou?: number }) {
+export function StatusBar(props: { sessions: number }) {
   const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
+  const [coreStopped, setCoreStopped] = createSignal(false);
 
   onMount(() => {
     if (!inTauri) return;
     const refresh = () =>
-      void invoke<ResourceUsage>("resource_usage").then(setUsage, () => setUsage(null));
+      void invoke<ResourceUsage>("resource_usage").then(
+        (next) => { setUsage(next); setCoreStopped(false); },
+        () => setCoreStopped(true),
+      );
     refresh();
     const timer = window.setInterval(refresh, REFRESH_MS);
     onCleanup(() => window.clearInterval(timer));
   });
+  const memoryTitle = () => {
+    const current = usage();
+    if (!current) return undefined;
+    return t("statusbar.memoryParts")
+      .replace("{app}", formatMemory(current.memoryBytes - current.runtimeMemoryBytes))
+      .replace("{runtime}", formatMemory(current.runtimeMemoryBytes));
+  };
 
   return (
     <StatusBarView
-      agents={props.sessions}
-      needsYou={props.needsYou}
+      sessions={props.sessions}
+      coreStopped={coreStopped()}
       memory={usage() ? formatMemory(usage()!.memoryBytes) : undefined}
+      memoryTitle={memoryTitle()}
       cpu={usage() ? `${Math.round(usage()!.cpuPercent)}%` : undefined}
     />
   );
