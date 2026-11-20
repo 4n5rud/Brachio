@@ -91,7 +91,22 @@ mod platform {
             .recursive(true)
             .mode(0o700)
             .create(&directory)?;
-        // Changing the mode fails unless this user owns the directory.
+        // Never follow a pre-existing symlink in a shared temporary directory.
+        // Refuse insecure existing directories instead of silently changing their mode.
+        let metadata = fs::symlink_metadata(&directory)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "runtime socket directory must be a real directory",
+            ));
+        }
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "runtime socket directory must be owner-only",
+            ));
+        }
+        // Setting permissions also fails when this user does not own the directory.
         fs::set_permissions(&directory, Permissions::from_mode(0o700))?;
         let path = directory.join(format!("{endpoint}.sock"));
         if path.as_os_str().len() > LONGEST_PATH {
@@ -114,5 +129,34 @@ mod platform {
             Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
             _ => Ok(()),
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{connect, listen, reclaim};
+    use std::io;
+
+    #[test]
+    fn rejects_unsafe_unix_endpoint_names() {
+        for endpoint in ["", "../escape", "nested/path", r"nested\\path"] {
+            assert_eq!(
+                listen(endpoint).err().map(|error| error.kind()),
+                Some(io::ErrorKind::InvalidInput),
+                "endpoint: {endpoint}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unix_socket_smoke_connects_and_reclaims() {
+        let endpoint = format!("brachio-smoke-{}", uuid::Uuid::new_v4());
+        let listener = listen(&endpoint).expect("listen on owner-only socket");
+        let client = connect(&endpoint).await.expect("connect to runtime");
+        let server = listener.accept().await.expect("accept connection");
+        drop(client);
+        drop(server);
+        drop(listener);
+        reclaim(&endpoint).expect("reclaim socket");
     }
 }

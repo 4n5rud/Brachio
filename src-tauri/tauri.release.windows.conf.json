@@ -1,0 +1,1 @@
+{"bundle": {"resources": {"sidecars/conpty/conpty.dll": "conpty/conpty.dll", "sidecars/conpty/OpenConsole.exe": "conpty/OpenConsole.exe"}}}
