@@ -163,6 +163,7 @@ impl ChildTasks for AppChildTasks {
                     prompt: request.prompt,
                     agent,
                     base: request.base,
+                    max_open_children: Some(MAX_OPEN_CHILDREN),
                 },
             )
             .await?;
