@@ -20,6 +20,8 @@ export interface TaskRow {
   deletions?: number;
   /** UTC milliseconds of the last status change. */
   updatedAt: number;
+  /** UTC milliseconds the task was archived; only set on archived tasks. */
+  archivedAt?: number;
   /** One line under the title: what the agent is waiting on, or a result. */
   note?: string;
   qa?: QaSummary;

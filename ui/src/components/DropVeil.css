@@ -1,0 +1,28 @@
+.drop-veil {
+  position: fixed;
+  inset: calc(var(--size-titlebar) + var(--space-3)) var(--space-3) calc(var(--size-statusbar) + var(--space-3));
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  border: 2px dashed var(--color-accent-text);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-canvas) 84%, transparent);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  pointer-events: none;
+}
+.drop-veil-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--color-accent-text);
+}
+.drop-veil strong {
+  display: block;
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.drop-veil span {
+  color: var(--color-text-3);
+}

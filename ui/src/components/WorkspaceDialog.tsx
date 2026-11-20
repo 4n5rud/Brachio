@@ -3,7 +3,7 @@ import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
 import { locale, setLocale, t, type MessageKey } from "../i18n";
 import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
 import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
-import type { TaskRow } from "../lib/tasks";
+import { shortBranch, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
 import type { ColorTheme, ThemeMode } from "../lib/theme";
 import { ThemePicker } from "./ui/ThemePicker";
@@ -125,9 +125,16 @@ export function WorkspaceDialog(props: {
       setRestoring(undefined);
     }
   };
+  const archivedAgo = (task: TaskRow) => {
+    if (task.archivedAt === undefined) return "";
+    const age = formatAge(task.archivedAt, props.now);
+    return age === t("time.now") ? t("task.archivedNow") : t("task.archivedAgo").replace("{age}", age);
+  };
   const title = () => {
     if (props.panel === "quickOpen") return t("quickOpen.title");
-    if (props.panel === "archived") return t("task.archived");
+    if (props.panel === "archived") {
+      return <>{t("task.archived")} <span class="archive-count">{props.archived.length}</span></>;
+    }
     if (props.panel === "activity") return t("activity.title");
     return t("titlebar.settings");
   };
@@ -241,11 +248,16 @@ export function WorkspaceDialog(props: {
               <ul class="quick-open-results">
                 <For each={props.archived}>{(task) => (
                   <li class="archive-row">
-                    <span>{task.title} · {task.branch}</span>
+                    <div class="archive-text">
+                      <strong title={task.title}>{task.title}</strong>
+                      <small title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>
+                        {[repoName(task), shortBranch(task.branch), archivedAgo(task)].filter(Boolean).join("  ")}
+                      </small>
+                    </div>
                     <Button size="sm" disabled={!!restoring()}
                       onClick={() => void restore(task.id)}>{t("task.restore")}</Button>
-                    <Button size="sm" disabled={!!restoring()}
-                      onClick={() => void remove(task)}>{t("task.delete")}</Button>
+                    <Button variant="ghost" size="sm" disabled={!!restoring()}
+                      onClick={() => void remove(task)}>{t("task.deleteForGood")}</Button>
                   </li>
                 )}</For>
               </ul>

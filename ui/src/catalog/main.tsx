@@ -9,6 +9,8 @@ import { ApprovalBar } from "../components/ApprovalBar";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
 import { TaskHeader } from "../components/TaskHeader";
+import { DropVeil } from "../components/DropVeil";
+import { TaskList } from "../components/TaskList";
 import { TaskRowItem } from "../components/TaskRow";
 import { TitleBar } from "../components/TitleBar";
 import type { PrChip as PrChipState } from "../lib/pr-status";
@@ -60,6 +62,18 @@ const PR_CHIPS: readonly PrChipState[] = [
   { key: "prChip.closed", number: 239, tone: "neutral", stale: false },
   { key: "prChip.passed", number: 239, tone: "ready", stale: true },
 ];
+const SIDEBAR_REPOS = [
+  { id: "r1", name: "brachio" }, { id: "r2", name: "web-shop" }, { id: "r3", name: "Empty project" },
+  { id: "r4", name: "notes", isGit: false },
+];
+const SIDEBAR_TASKS: readonly TaskRow[] = [
+  { ...BLOCKED, repoId: "r1" },
+  { ...WORKING, repoId: "r1", id: "w1", title: "Worker: reader tests", parentTaskId: "a" },
+  { ...CRASHED, repoId: "r1" }, { ...READY, repoId: "r1" },
+  { ...KOREAN, repoId: "r2", id: "k1" },
+  { ...NO_CHANGES, repoId: "r4", id: "n1", branch: "" },
+];
+const SIDEBAR_PR: Record<string, PrChipState | null> = { a: PR_CHIPS[4] ?? null, c: PR_CHIPS[1] ?? null, d: PR_CHIPS[2] ?? null };
 const STATES: readonly AgentState[] = [
   { state: "working" }, { state: "blocked", reason: "permission" }, { state: "idle" },
   { state: "error" }, { state: "exited", code: 101 }, { state: "exited", code: 0 }, { state: "unknown" },
@@ -93,6 +107,7 @@ function Catalog() {
   const [theme, setTheme] = createSignal("mint-dark");
   const [mode, setMode] = createSignal<"tasks" | "board">("tasks");
   const [notify, setNotify] = createSignal(true);
+  const [veil, setVeil] = createSignal(false);
   const [dialog, setDialog] = createSignal<"plain" | "confirm" | undefined>();
   const applyTheme = (value: string) => {
     setTheme(value);
@@ -288,6 +303,29 @@ function Catalog() {
         <Row cap="long, Korean, no changes">
           <div class="catalog-list"><TaskRowItem task={KOREAN} child={false} selected={false} now={NOW} unread={0} pr={null} onSelect={() => {}} /></div>
           <div class="catalog-list"><TaskRowItem task={NO_CHANGES} child={false} selected={false} now={NOW} unread={0} pr={null} onSelect={() => {}} /></div>
+        </Row>
+      </Section>
+
+      <Section title="Sidebar">
+        <Row cap="projects, collapsed (hover the heading), empty, folder workspace">
+          <div class="catalog-frame" style={{ width: "288px", height: "560px", display: "flex" }}>
+            <TaskList tasks={SIDEBAR_TASKS} repos={SIDEBAR_REPOS} selectedId="a" onSelect={() => {}} onNewTask={() => {}}
+              onAddRepo={() => {}} onOpenArchived={() => {}} onAddFolderRepo={() => Promise.resolve()}
+              initialCollapsed={new Set(["r2"])} prFor={(id) => SIDEBAR_PR[id] ?? null}
+              needsYou={2} now={NOW} unreadForTask={(id) => (id === "b" ? 2 : 0)} />
+          </div>
+        </Row>
+        <Row cap="folder dropped on the window">
+          <Button onClick={() => { setVeil(true); setTimeout(() => setVeil(false), 2500); }}>Show drop veil (2.5 s)</Button>
+          <Show when={veil()}><DropVeil /></Show>
+        </Row>
+        <Row cap="toasts">
+          <Toast tone="info" message={t("project.alreadyAdded").replace("{name}", "brachio")}
+            action={{ label: t("project.show"), onClick: () => {} }} onDismiss={() => {}} />
+          <Toast tone="info" message={t("task.childCreated").replace("{title}", "Write tests for the limiter")}
+            action={{ label: t("task.open"), onClick: () => {} }} onDismiss={() => {}} />
+          <Toast tone="error" title={t("task.archiveFailed")} message="The shell tab did not close. Close it, then try again."
+            action={{ label: t("task.tryAgain"), onClick: () => {} }} onDismiss={() => {}} />
         </Row>
       </Section>
 
