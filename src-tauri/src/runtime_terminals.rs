@@ -111,16 +111,32 @@ impl RuntimeTerminals {
                 .await?
         };
         let pump = spawn(pump(first, following, channel, agent));
-        let id = self.new_handle();
-        let previous = self
+        let id = self.register_attachment(key, client, pump)?;
+        Ok(Some((id, attached)))
+    }
+
+    fn register_attachment(
+        &self,
+        key: String,
+        client: Client,
+        pump: JoinHandle<()>,
+    ) -> Result<SessionId> {
+        let mut attached = self
             .attached
             .lock()
-            .map_err(|_| anyhow!("terminal list lock poisoned"))?
-            .insert(id, Attached { key, client, pump });
-        if let Some(previous) = previous {
-            previous.pump.abort();
-        }
-        Ok(Some((id, attached)))
+            .map_err(|_| anyhow!("terminal list lock poisoned"))?;
+        // A replacement for the same tab owns both its output pump and its input route.
+        attached.retain(|_, previous| {
+            if previous.key == key {
+                previous.pump.abort();
+                false
+            } else {
+                true
+            }
+        });
+        let id = self.new_handle();
+        attached.insert(id, Attached { key, client, pump });
+        Ok(id)
     }
 
     /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
@@ -377,5 +393,31 @@ mod handle_tests {
         assert_ne!(first, second, "two runtimes can both have a session 1");
         assert!(first > SessionId::from_raw(HOSTED_HANDLE_BASE - 1));
         assert!(first > SessionId::from_raw(1_000_000));
+    }
+
+    #[tokio::test]
+    async fn reattaching_a_tab_revokes_only_its_previous_input_route() {
+        let terminals = RuntimeTerminals::default();
+        let register = |key: &str| {
+            terminals
+                .register_attachment(
+                    key.into(),
+                    super::Client::new("runtime"),
+                    super::spawn(async {}),
+                )
+                .expect("register attachment")
+        };
+        let previous = register("same:agent");
+        let other = register("other:agent");
+        let replacement = register("same:agent");
+        assert!(terminals.target(previous).await.is_none());
+        assert_eq!(
+            terminals.target(replacement).await.expect("new route").1,
+            "same:agent"
+        );
+        assert_eq!(
+            terminals.target(other).await.expect("independent route").1,
+            "other:agent"
+        );
     }
 }
