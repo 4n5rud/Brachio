@@ -157,7 +157,7 @@ fn the_fingerprint_changes_when_work_appears_after_the_preview() {
     let repo = temp_dir();
     let trees = temp_dir();
     let git = init_repo(repo.path());
-    fs::write(repo.path().join(".gitignore"), "*.log\n").expect("write ignore");
+    fs::write(repo.path().join(".gitignore"), "*.log\nbuild/\n").expect("write ignore");
     run(&git, &["add", ".gitignore"]);
     run(&git, &["commit", "-q", "-m", "ignore logs"]);
     let tree = trees.path().join("f");
@@ -179,13 +179,30 @@ fn the_fingerprint_changes_when_work_appears_after_the_preview() {
     let untracked = fingerprint();
     assert_ne!(first, untracked);
 
+    fs::write(tree.join("note.txt"), "NEW\n").expect("edit untracked in place");
+    let edited_untracked = fingerprint();
+    assert_ne!(untracked, edited_untracked);
+
     fs::write(tree.join("run.log"), "log\n").expect("write ignored");
     let ignored = fingerprint();
-    assert_ne!(untracked, ignored);
+    assert_ne!(edited_untracked, ignored);
+    fs::write(tree.join("run.log"), "LOG\n").expect("edit ignored in place");
+    let edited_ignored = fingerprint();
+    assert_ne!(ignored, edited_ignored);
+
+    fs::create_dir(tree.join("build")).expect("create ignored directory");
+    fs::write(tree.join("build/out"), "one").expect("write ignored output");
+    let ignored_directory = fingerprint();
+    fs::write(tree.join("build/out"), "two").expect("edit ignored output in place");
+    let edited_directory = fingerprint();
+    assert_ne!(ignored_directory, edited_directory);
+    fs::write(tree.join("build/another"), "new").expect("add ignored output");
+    let expanded_directory = fingerprint();
+    assert_ne!(edited_directory, expanded_directory);
 
     fs::write(tree.join("a.txt"), "edited\n").expect("edit tracked");
     let modified = fingerprint();
-    assert_ne!(ignored, modified);
+    assert_ne!(expanded_directory, modified);
     fs::write(tree.join("a.txt"), "edited again\n").expect("edit tracked again");
     assert_ne!(
         modified,
@@ -195,6 +212,23 @@ fn the_fingerprint_changes_when_work_appears_after_the_preview() {
 
     commit_in(&tree, "committed\n");
     assert_ne!(modified, fingerprint());
+}
+
+#[test]
+fn untracked_contents_over_the_scan_limit_block_delete_confirmation() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    let tree = trees.path().join("large");
+    let branch = "brachio/large";
+    add(&git, branch, &tree);
+    fs::File::create(tree.join("large-output"))
+        .expect("create large untracked output")
+        .set_len(257 * 1024 * 1024)
+        .expect("resize output");
+
+    let error = brachio_git::unsaved_work(&git, &tree, branch).expect_err("scan must be bounded");
+    assert!(error.to_string().contains("exceed the scan limits"));
 }
 
 #[test]

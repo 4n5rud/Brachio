@@ -1,6 +1,26 @@
 import { expect, test } from "vitest";
 import { diffRows, diffTotals, splitDiffRows } from "./diff";
 
+test("decodes Git C-quoted paths and drops locations for malformed ones", () => {
+  const quoted = String.raw`"tab\tname \"q\" \\ \355\225\234.txt"`;
+  const patch = [
+    `--- "a/${quoted.slice(1)}`,
+    `+++ "b/${quoted.slice(1)}`,
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    "--- /dev/null",
+    String.raw`+++ "b/bad\q.txt"`,
+    "@@ -0,0 +1 @@",
+    "+x",
+  ].join("\n");
+
+  expect(diffRows(patch).flatMap((row) => row.location ?? [])).toEqual([
+    { path: 'tab\tname "q" \\ 한.txt', line: 1, side: "old" },
+    { path: 'tab\tname "q" \\ 한.txt', line: 1, side: "new" },
+  ]);
+});
+
 test("tracks old and new hunk lines and ignores headers", () => {
   const patch = [
     "diff --git a/old name b/새 이름",

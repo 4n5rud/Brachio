@@ -19,6 +19,21 @@ pub const MAX_RESPONSE: u64 = 256 * 1024;
 /// How long one request or response may take to cross the connection.
 pub const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Wait for an outcome, keeping a deadline when a caller can handle an uncertain result.
+///
+/// # Errors
+/// An operation with a deadline returns a timeout when the deadline expires.
+pub async fn await_outcome<T>(
+    wait_for_completion: bool,
+    operation: impl std::future::Future<Output = T>,
+) -> Result<T, tokio::time::error::Elapsed> {
+    if wait_for_completion {
+        Ok(operation.await)
+    } else {
+        tokio::time::timeout(IO_TIMEOUT, operation).await
+    }
+}
+
 /// One thing a client asks a runtime to do.
 #[derive(Subcommand, Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -131,6 +146,31 @@ pub enum Action {
 }
 
 impl Action {
+    /// Whether an action can change runtime state after its caller stops waiting.
+    #[must_use]
+    pub fn changes_state(&self) -> bool {
+        matches!(
+            self,
+            Self::Ensure { .. }
+                | Self::Launch { .. }
+                | Self::Forget { .. }
+                | Self::Drain
+                | Self::Resize { .. }
+                | Self::Write { .. }
+                | Self::Stop { .. }
+        )
+    }
+
+    /// Lifecycle changes wait for a definitive result because a delayed launch or stop
+    /// cannot be safely inferred from a client-side timeout.
+    #[must_use]
+    pub fn is_session_lifecycle(&self) -> bool {
+        matches!(
+            self,
+            Self::Ensure { .. } | Self::Launch { .. } | Self::Stop { .. }
+        )
+    }
+
     /// The first protocol version that defines this action, and a name for error messages.
     #[must_use]
     pub fn since(&self) -> (u8, &'static str) {
@@ -379,5 +419,30 @@ mod tests {
             serde_json::from_str(r#"{"oldest_version":1,"current_version":4,"draining":false}"#)
                 .expect("runtime info without pid parses");
         assert_eq!(info.pid, 0);
+    }
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn mutations_wait_past_the_read_only_deadline() {
+        let delay = IO_TIMEOUT + Duration::from_secs(1);
+        let launch = Action::Ensure {
+            key: "key".into(),
+            cwd: PathBuf::new(),
+        };
+        let query = Action::Inspect { key: "key".into() };
+        assert!(
+            await_outcome(launch.changes_state(), tokio::time::sleep(delay))
+                .await
+                .is_ok()
+        );
+        assert!(
+            await_outcome(query.changes_state(), tokio::time::sleep(delay))
+                .await
+                .is_err()
+        );
     }
 }

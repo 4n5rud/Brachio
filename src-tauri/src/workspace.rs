@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
 use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::runtime_terminals::RuntimeTerminals;
+use crate::terminal::Terminals;
 
 /// App state that owns the database connection.
 pub struct Database(pub Mutex<Connection>);
@@ -661,27 +662,47 @@ fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), Str
     ))
 }
 
-/// Terminals of the task that are still running, or why that could not be told.
+/// Terminals of the task that are still running, in the runtime or in the app, or why that could
+/// not be told. Second agent tabs the task has since replaced are asked for too.
 async fn live_task_terminals(
     database: &Database,
     terminals: &RuntimeTerminals,
+    in_app: &Terminals,
     task_id: &str,
 ) -> Result<Vec<String>, String> {
-    let second_tab: Option<String> = {
+    let (current, retired) = {
         let connection = database.lock()?;
-        connection
+        let current: Option<String> = connection
             .query_row(
                 "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
                 [task_id],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(to_text)?
+            .map_err(to_text)?;
+        let retired =
+            brachio_store::retired_secondary_tabs(&connection, task_id).map_err(to_text)?;
+        (current, retired)
     };
-    terminals
-        .live_keys_for_task(task_id, second_tab.as_deref())
+    let tabs: Vec<String> = current.into_iter().chain(retired.iter().cloned()).collect();
+    let mut live = terminals
+        .live_keys_for_task(task_id, &tabs)
         .await
-        .map_err(to_text)
+        .map_err(to_text)?;
+    live.extend(
+        in_app
+            .1
+            .live_for_task(&in_app.0, task_id)
+            .map_err(to_text)?,
+    );
+    let connection = database.lock()?;
+    for tab in retired {
+        if !live.contains(&format!("{task_id}:agent-{tab}")) {
+            // A failed cleanup only keeps the id for the next check.
+            let _ = brachio_store::forget_retired_secondary_tab(&connection, task_id, &tab);
+        }
+    }
+    Ok(live)
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -704,6 +725,7 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
 pub async fn task_delete_preview(
     database: State<'_, Database>,
     terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
     id: String,
 ) -> Result<TaskLoss, String> {
     let (task, repo) = archived_task(&database, &id)?;
@@ -717,7 +739,7 @@ pub async fn task_delete_preview(
             running_terminals: 0,
         });
     }
-    let running_terminals = live_task_terminals(&database, &terminals, &id)
+    let running_terminals = live_task_terminals(&database, &terminals, &in_app, &id)
         .await
         .map_or(0, |keys| keys.len());
     let work = tauri::async_runtime::spawn_blocking(move || {
@@ -743,6 +765,7 @@ pub async fn task_delete(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
     terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
     id: String,
     expected_fingerprint: String,
 ) -> Result<(), String> {
@@ -753,7 +776,7 @@ pub async fn task_delete(
     let (task, repo) = archived_task(&database, &id)?;
     // A folder project's task runs in the user's own folder, which must never be removed.
     if repo.is_git {
-        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &id).await)?;
+        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &in_app, &id).await)?;
         tauri::async_runtime::spawn_blocking(move || {
             let git = Git::new(&repo.path);
             let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
@@ -1131,23 +1154,21 @@ pub async fn task_pr_feedback(
         return Err(NOT_GIT.to_owned());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let output = github_command()
-            .current_dir(&task.worktree_path)
-            .args([
-                "pr",
-                "view",
-                "--json",
-                "url,statusCheckRollup,reviews,comments",
-                "--",
-            ])
-            .arg(&task.branch)
-            .output()
-            .map_err(to_text)?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
-        let mut feedback: serde_json::Value =
-            serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        let stdout = run_github(
+            github_command()
+                .current_dir(&task.worktree_path)
+                .args([
+                    "pr",
+                    "view",
+                    "--json",
+                    "url,statusCheckRollup,reviews,comments",
+                    "--",
+                ])
+                .arg(&task.branch),
+            PR_VIEW_MAX_BYTES,
+            "the pull request",
+        )?;
+        let mut feedback: serde_json::Value = serde_json::from_slice(&stdout).map_err(to_text)?;
         let (inline_comments, inline_error) =
             match read_inline_reviews(&task.worktree_path, &feedback) {
                 Ok(comments) => (comments, None),
@@ -1159,6 +1180,49 @@ pub async fn task_pr_feedback(
     })
     .await
     .map_err(to_text)?
+}
+
+const GH_TIME_LIMIT: Duration = Duration::from_secs(60);
+const PR_VIEW_MAX_BYTES: usize = 8 * 1024 * 1024;
+const INLINE_REVIEWS_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Runs `gh` with a deadline and a stdout cap; an over-large or slow answer is an error, never a cut-off JSON.
+fn run_github(
+    command: &mut std::process::Command,
+    max_stdout: usize,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    github_output(
+        brachio_process::output_capped(command, GH_TIME_LIMIT, max_stdout),
+        max_stdout,
+        what,
+    )
+}
+
+fn github_output(
+    result: std::io::Result<brachio_process::Capped>,
+    max_stdout: usize,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    let capped = result.map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            "The GitHub CLI (gh) is not installed or not on PATH.".to_owned()
+        }
+        std::io::ErrorKind::TimedOut => format!("Loading {what} from GitHub {error}."),
+        _ => error.to_string(),
+    })?;
+    if capped.truncated {
+        return Err(format!(
+            "{what} is larger than {} MiB, so it was not loaded.",
+            max_stdout / (1024 * 1024)
+        ));
+    }
+    if !capped.output.status.success() {
+        return Err(String::from_utf8_lossy(&capped.output.stderr)
+            .trim()
+            .to_owned());
+    }
+    Ok(capped.output.stdout)
 }
 
 fn github_command() -> std::process::Command {
@@ -1187,23 +1251,19 @@ fn read_inline_reviews(
         return Err("Could not identify the repository for inline reviews.".to_owned());
     };
     let endpoint = format!("repos/{owner}/{repo}/pulls/{number}/comments");
-    let output = github_command()
-        .current_dir(worktree)
-        .args([
+    let stdout = run_github(
+        github_command().current_dir(worktree).args([
             "api",
             "--hostname",
             host,
             "--paginate",
             "--slurp",
             &endpoint,
-        ])
-        .output()
-        .map_err(to_text)?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-    }
-    let pages: Vec<Vec<serde_json::Value>> =
-        serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        ]),
+        INLINE_REVIEWS_MAX_BYTES,
+        "the inline review comments",
+    )?;
+    let pages: Vec<Vec<serde_json::Value>> = serde_json::from_slice(&stdout).map_err(to_text)?;
     Ok(pages
         .into_iter()
         .flatten()
@@ -1381,6 +1441,73 @@ mod terminal_guard_tests {
         assert_eq!(
             refusal,
             "could not verify that the task's terminals are stopped"
+        );
+    }
+}
+
+#[cfg(test)]
+mod github_output_tests {
+    use std::io::{Error, ErrorKind};
+    use std::process::{ExitStatus, Output};
+
+    use super::github_output;
+
+    fn exit(code: u32) -> ExitStatus {
+        #[cfg(windows)]
+        {
+            std::os::windows::process::ExitStatusExt::from_raw(code)
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::process::ExitStatusExt::from_raw(i32::try_from(code).unwrap() << 8)
+        }
+    }
+
+    fn capped(code: u32, stdout: &str, stderr: &str, truncated: bool) -> brachio_process::Capped {
+        brachio_process::Capped {
+            output: Output {
+                status: exit(code),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            },
+            truncated,
+        }
+    }
+
+    #[test]
+    fn a_truncated_answer_is_an_error_not_cut_off_json() {
+        let error = github_output(Ok(capped(0, "[[{\"a\"", "", true)), 2 << 20, "the reviews")
+            .expect_err("fails");
+        assert_eq!(
+            error,
+            "the reviews is larger than 2 MiB, so it was not loaded."
+        );
+    }
+
+    #[test]
+    fn a_timeout_a_missing_cli_and_a_failed_login_are_told_apart() {
+        let timed_out = Error::new(ErrorKind::TimedOut, "timed out after 60 seconds");
+        assert_eq!(
+            github_output(Err(timed_out), 1, "the pull request").expect_err("fails"),
+            "Loading the pull request from GitHub timed out after 60 seconds."
+        );
+        let missing = Error::new(ErrorKind::NotFound, "program not found");
+        assert_eq!(
+            github_output(Err(missing), 1, "x").expect_err("fails"),
+            "The GitHub CLI (gh) is not installed or not on PATH."
+        );
+        assert_eq!(
+            github_output(Ok(capped(1, "", "gh auth login required\n", false)), 1, "x")
+                .expect_err("fails"),
+            "gh auth login required"
+        );
+    }
+
+    #[test]
+    fn a_normal_answer_is_returned_whole() {
+        assert_eq!(
+            github_output(Ok(capped(0, "[]", "", false)), 1024, "x").expect("loads"),
+            b"[]"
         );
     }
 }
