@@ -65,9 +65,9 @@ export const ko: Messages = {
   "task.split": "나누기",
   "task.more": "더 보기",
 
-  "approval.title": "이 명령을 실행할까요?",
+  "approval.title": "이 도구 요청을 허용할까요?",
   "approval.openTab": "승인 대기 중인 탭 열기",
-  "approval.inWorktree": "worktree 안에서 실행",
+  "approval.details": "전체 도구 요청",
   "approval.allowOnce": "한 번 허용",
   "approval.allowAlways": "이 작업에서는 항상 허용",
   "approval.deny": "거부",
