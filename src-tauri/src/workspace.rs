@@ -815,14 +815,34 @@ pub async fn task_delete(
     id: String,
     expected_fingerprint: String,
 ) -> Result<(), String> {
-    let repo_id = TaskRecord::get(&*database.lock()?, &id)
+    delete_task(
+        &database,
+        &worktrees,
+        &terminals,
+        &in_app,
+        &id,
+        &expected_fingerprint,
+    )
+    .await
+}
+
+async fn delete_task(
+    database: &Database,
+    worktrees: &TaskWorktreeLocks,
+    terminals: &RuntimeTerminals,
+    in_app: &Terminals,
+    id: &str,
+    expected_fingerprint: &str,
+) -> Result<(), String> {
+    let repo_id = TaskRecord::get(&*database.lock()?, id)
         .map_err(to_text)?
         .repo_id;
     let _guard = worktrees.acquire(&repo_id).await?;
-    let (task, repo) = archived_task(&database, &id)?;
+    let (task, repo) = archived_task(database, id)?;
+    ensure_no_live_terminals(live_task_terminals(database, terminals, in_app, id).await)?;
     // A folder project's task runs in the user's own folder, which must never be removed.
     if repo.is_git {
-        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &in_app, &id).await)?;
+        let expected_fingerprint = expected_fingerprint.to_owned();
         tauri::async_runtime::spawn_blocking(move || {
             let git = Git::new(&repo.path);
             let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
@@ -835,8 +855,8 @@ pub async fn task_delete(
     }
     let connection = database.lock()?;
     // Its messages go with it, so a later task cannot be sent mail meant for this one.
-    brachio_store::forget_task_messages(&connection, &id).map_err(to_text)?;
-    TaskRecord::delete(&connection, &id).map_err(to_text)
+    brachio_store::forget_task_messages(&connection, id).map_err(to_text)?;
+    TaskRecord::delete(&connection, id).map_err(to_text)
 }
 
 /// Changes in a task worktree relative to its base.
@@ -1680,5 +1700,79 @@ mod github_output_tests {
             github_output(Ok(capped(0, "[]", "", false)), 1024, "x").expect("loads"),
             b"[]"
         );
+    }
+}
+
+#[cfg(test)]
+mod folder_task_deletion_tests {
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    use brachio_pty::{EventSink, SessionManager, SpawnSpec};
+    use brachio_store::{open_in_memory, NewRepo, RepoRecord, TaskRecord};
+
+    use super::{delete_task, Database, TaskWorktreeLocks};
+    use crate::runtime_terminals::RuntimeTerminals;
+    use crate::terminal::{SessionKeys, Terminals};
+
+    fn folder_task_database() -> Database {
+        let connection = open_in_memory().expect("open database");
+        let repo = NewRepo {
+            id: "f",
+            name: "f",
+            path: Path::new("/folder"),
+            default_branch: "",
+            added_at_ms: 0,
+            is_git: false,
+        };
+        RepoRecord::insert(&connection, &repo).expect("insert repo");
+        connection
+            .execute_batch(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, archived_at_ms)
+                 VALUES ('t1', 'f', 'T', '', '', '/folder', 'active', 0, 1);",
+            )
+            .expect("insert task");
+        Database(Mutex::new(connection))
+    }
+
+    fn long_running() -> SpawnSpec {
+        let (program, args) = if cfg!(windows) {
+            ("cmd.exe", vec!["/c", "ping", "-n", "60", "127.0.0.1"])
+        } else {
+            ("sleep", vec!["60"])
+        };
+        SpawnSpec {
+            program: program.to_owned(),
+            args: args.into_iter().map(str::to_owned).collect(),
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        }
+    }
+
+    #[test]
+    fn a_folder_task_with_a_running_terminal_is_kept_until_it_stops() {
+        let database = folder_task_database();
+        let locks = TaskWorktreeLocks::default();
+        let runtime = RuntimeTerminals::default();
+        let manager = Arc::new(SessionManager::default());
+        let in_app = Terminals(manager.clone(), SessionKeys::default());
+        let sink: EventSink = Arc::new(|_| {});
+        let live = manager.spawn(&long_running(), sink).expect("spawn");
+        in_app.1.record(live, "t1:agent".to_owned());
+
+        let refusal = tauri::async_runtime::block_on(delete_task(
+            &database, &locks, &runtime, &in_app, "t1", "",
+        ))
+        .expect_err("refused");
+        assert!(refusal.starts_with("terminal still running:"), "{refusal}");
+        assert!(TaskRecord::get(&database.lock().expect("lock"), "t1").is_ok());
+
+        manager.kill(live).expect("kill");
+        let in_app = Terminals(Arc::new(SessionManager::default()), SessionKeys::default());
+        tauri::async_runtime::block_on(delete_task(&database, &locks, &runtime, &in_app, "t1", ""))
+            .expect("deleted once stopped");
+        assert!(TaskRecord::get(&database.lock().expect("lock"), "t1").is_err());
     }
 }
