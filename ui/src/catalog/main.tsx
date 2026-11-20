@@ -5,6 +5,19 @@ import "./catalog.css";
 import { locale, setLocale, t } from "../i18n";
 import { COLOR_THEMES } from "../lib/theme";
 import { pushToast } from "../lib/toasts";
+import { ApprovalBar } from "../components/ApprovalBar";
+import { BoardTile } from "../components/BoardTile";
+import { StatusBarView } from "../components/StatusBar";
+import { TaskHeader } from "../components/TaskHeader";
+import { TaskRowItem } from "../components/TaskRow";
+import { TitleBar } from "../components/TitleBar";
+import type { PrChip as PrChipState } from "../lib/pr-status";
+import type { AgentState } from "../lib/status";
+import type { TaskRow } from "../lib/tasks";
+import { AgentChip } from "../components/ui/AgentChip";
+import { DiffStat } from "../components/ui/DiffStat";
+import { PrChip } from "../components/ui/PrChip";
+import { StatusBadge } from "../components/ui/StatusBadge";
 import { Button } from "../components/ui/Button";
 import { ConfirmHost, confirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
@@ -19,6 +32,42 @@ import { Toggle } from "../components/ui/Toggle";
 
 // Dev only: open /catalog.html on the Vite dev server. It is not an input of `vite build`.
 if (!import.meta.env.DEV) throw new Error("The component catalog runs only on the dev server.");
+
+const NOW = Date.now();
+const task = (over: Partial<TaskRow> & { id: string; title: string; status: AgentState }): TaskRow => ({
+  agent: "claude", branch: "brachio/rate-limit-7f2a", additions: 128, deletions: 14, updatedAt: NOW - 60_000, ...over,
+});
+const BLOCKED = task({ id: "a", title: "Add rate limit to the login endpoint", status: { state: "blocked", reason: "permission" },
+  updatedAt: NOW, note: "Wants to run cargo test -p auth" });
+const CRASHED = task({ id: "b", title: "Migrate settings to TOML", agent: "codex", branch: "brachio/settings-toml-1c9e", additions: 42, deletions: 40,
+  status: { state: "exited", code: 101 }, updatedAt: NOW - 12 * 60_000, note: "Crashed with exit code 101" });
+const WORKING = task({ id: "c", title: "Split the PTY reader into its own task", branch: "brachio/pty-reader-a01b", additions: 310, deletions: 96,
+  status: { state: "working" }, updatedAt: NOW - 3 * 60_000 });
+const READY = task({ id: "d", title: "Fix scrollback lost on resize", agent: "codex", branch: "brachio/scrollback-55d0", additions: 18, deletions: 3,
+  status: { state: "idle" }, updatedAt: NOW - 3_600_000 });
+const KOREAN = task({ id: "e", title: "로그인 엔드포인트에 요청 횟수 제한을 추가하고 오래 걸리는 조회도 함께 정리하기", branch: "brachio/task-e",
+  status: { state: "working" }, additions: 12400, deletions: 3 });
+const NO_CHANGES = task({ id: "f", title: "Read the failing build log", status: { state: "unknown" }, additions: 0, deletions: 0 });
+const DONE = task({ id: "g", title: "Bump the Tauri plugins", status: { state: "exited", code: 0 }, additions: undefined, deletions: undefined });
+const PR_CHIPS: readonly PrChipState[] = [
+  { key: "prChip.open", number: 239, tone: "neutral", stale: false },
+  { key: "prChip.running", number: 239, tone: "working", stale: false },
+  { key: "prChip.passed", number: 239, tone: "ready", stale: false },
+  { key: "prChip.failed", number: 239, tone: "error", stale: false },
+  { key: "prChip.changes", number: 239, tone: "blocked", stale: false },
+  { key: "prChip.conflict", number: 239, tone: "error", stale: false },
+  { key: "prChip.merged", number: 239, tone: "neutral", stale: false },
+  { key: "prChip.closed", number: 239, tone: "neutral", stale: false },
+  { key: "prChip.passed", number: 239, tone: "ready", stale: true },
+];
+const STATES: readonly AgentState[] = [
+  { state: "working" }, { state: "blocked", reason: "permission" }, { state: "idle" },
+  { state: "error" }, { state: "exited", code: 101 }, { state: "exited", code: 0 }, { state: "unknown" },
+];
+const REQUEST = "tool     Bash\ncommand  cargo test -p brachio-auth\ncwd      ~/code/brachio.worktrees/rate-limit-7f2a\nreason   Run the auth crate tests after adding the limiter";
+const LONG_REQUEST = Array.from({ length: 14 }, (_, line) => `edit     crates/auth/src/limiter/window_${line}.rs`).join("\n");
+const TITLE_BAR = { repo: "brachio", view: "tasks" as const, onView: () => {}, needsYou: 2, onActivity: () => {}, onQuickOpen: () => {},
+  onSettings: () => {}, sidebarOpen: true, inspectorOpen: true, onToggleSidebar: () => {}, onToggleInspector: () => {} };
 
 const THEMES = COLOR_THEMES.flatMap((color) => (["dark", "light"] as const).map((mode) => `${color}-${mode}`));
 
@@ -197,6 +246,107 @@ function Catalog() {
           <Button variant="primary" icon="folder">{t("empty.repo.add")}</Button>
         </EmptyState>
         <EmptyState title={t("empty.task.title")} body={t("empty.task.body")} />
+      </Section>
+
+      <Section title="StatusBadge">
+        <Row cap="glyph and word">
+          <For each={STATES}>{(status) => <StatusBadge status={status} />}</For>
+        </Row>
+        <Row cap="glyph only">
+          <For each={STATES}>{(status) => <StatusBadge status={status} glyphOnly />}</For>
+        </Row>
+      </Section>
+
+      <Section title="AgentChip, DiffStat">
+        <Row cap="agents"><AgentChip agent="claude" /><AgentChip agent="codex" /></Row>
+        <Row cap="diff stat">
+          <DiffStat additions={128} deletions={14} />
+          <DiffStat additions={3} deletions={0} />
+          <DiffStat additions={12400} deletions={9999} />
+          <DiffStat additions={0} deletions={0} />
+          <DiffStat />
+        </Row>
+      </Section>
+
+      <Section title="PrChip">
+        <Row cap="states"><For each={PR_CHIPS}>{(chip) => <PrChip chip={chip} />}</For></Row>
+      </Section>
+
+      <Section title="TaskRow">
+        <div class="catalog-list">
+          <TaskRowItem task={BLOCKED} child={false} selected now={NOW} unread={0} pr={PR_CHIPS[3]} onSelect={() => {}} />
+          <TaskRowItem task={CRASHED} child={false} selected={false} now={NOW} unread={2} pr={null} onSelect={() => {}} />
+          <TaskRowItem task={WORKING} child={false} selected={false} now={NOW} unread={0} pr={PR_CHIPS[1]} onSelect={() => {}} />
+          <TaskRowItem task={task({ ...WORKING, id: "w1", title: "Worker: reader tests" })} child selected={false} now={NOW} unread={0} pr={null} onSelect={() => {}} />
+          <TaskRowItem task={READY} child={false} selected={false} now={NOW} unread={0} pr={PR_CHIPS[8]} onSelect={() => {}} />
+          <TaskRowItem task={DONE} child={false} selected={false} now={NOW} unread={0} pr={PR_CHIPS[6]} onSelect={() => {}} />
+        </div>
+        <Row cap="hover, focus">
+          <div class="catalog-list"><button class="task-item is-hover" type="button"><span class="task-title">Hover is a color-hover fill</span></button></div>
+          <div class="catalog-list"><button class="task-item is-focus" type="button"><span class="task-title">Focus is a 2px ring</span></button></div>
+        </Row>
+        <Row cap="long, Korean, no changes">
+          <div class="catalog-list"><TaskRowItem task={KOREAN} child={false} selected={false} now={NOW} unread={0} pr={null} onSelect={() => {}} /></div>
+          <div class="catalog-list"><TaskRowItem task={NO_CHANGES} child={false} selected={false} now={NOW} unread={0} pr={null} onSelect={() => {}} /></div>
+        </Row>
+      </Section>
+
+      <Section title="TaskHeader">
+        <div class="catalog-stack" style={{ width: "100%" }}>
+          <div class="catalog-frame">
+            <TaskHeader title={BLOCKED.title} status={BLOCKED.status} agent="claude" branch={BLOCKED.branch}
+              additions={128} deletions={14}
+              actions={<Button size="sm">{t("task.reviewChanges")}</Button>} />
+            <div class="tabs" role="tablist">
+              <button class="tab" role="tab" aria-selected="true" type="button"><StatusBadge status={BLOCKED.status} glyphOnly />Claude Code</button>
+              <button class="tab" role="tab" aria-selected="false" type="button"><StatusBadge status={WORKING.status} glyphOnly />Codex</button>
+              <button class="tab" role="tab" aria-selected="false" type="button">{t("task.shell")}</button>
+            </div>
+          </div>
+          <div class="catalog-frame">
+            <TaskHeader title={KOREAN.title} status={READY.status} agent="codex" branch="brachio/task-e" additions={12400} deletions={3}
+              actions={<Button size="sm" variant="primary">Open PR</Button>} />
+          </div>
+          <div class="catalog-frame">
+            <TaskHeader title={CRASHED.title} status={CRASHED.status} agent="codex" branch={CRASHED.branch} additions={0} deletions={0} />
+          </div>
+        </div>
+      </Section>
+
+      <Section title="ApprovalBar">
+        <div class="catalog-stack" style={{ width: "100%" }}>
+          <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" onAllow={() => {}} onAllowAlways={() => {}} onDeny={() => {}} /></div>
+          <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" sending onAllow={() => {}} onDeny={() => {}} /></div>
+          <div class="catalog-frame"><ApprovalBar review={LONG_REQUEST} agent="Claude Code" onAllow={() => {}} onDeny={() => {}} /></div>
+          <div class="catalog-frame">
+            <Notice tone="blocked" actions={<Button size="sm">{t("approval.openTab")}</Button>}>{t("group.needs")}</Notice>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="BoardTile">
+        <div class="catalog-tiles">
+          <BoardTile task={task({ ...BLOCKED, note: "? Allow cargo test -p auth\n  (y) yes  (n) no" })} now={NOW} onOpen={() => {}} />
+          <BoardTile task={task({ ...WORKING, agent: "codex", note: "Compiling brachio-core v0.1.0\nrunning 42 tests" })} now={NOW} onOpen={() => {}} />
+          <BoardTile task={{ ...CRASHED, note: "thread main panicked at src/settings.rs:88" }} now={NOW} onOpen={() => {}} />
+          <BoardTile task={{ ...READY, note: "test result: ok. 61 passed" }} now={NOW} onOpen={() => {}} />
+          <BoardTile task={KOREAN} now={NOW} onOpen={() => {}} />
+        </div>
+      </Section>
+
+      <Section title="StatusBar">
+        <div class="catalog-stack" style={{ width: "100%" }}>
+          <div class="catalog-bar-frame"><StatusBarView agents={2} memory="148 MB" cpu="3%" branch="main" ahead={0} behind={2} /></div>
+          <div class="catalog-bar-frame"><StatusBarView agents={1} needsYou={2} memory="1.2 GB" cpu="41%" /></div>
+          <div class="catalog-bar-frame"><StatusBarView agents={0} /></div>
+        </div>
+      </Section>
+
+      <Section title="TitleBar">
+        <div class="catalog-stack" style={{ width: "100%" }}>
+          <div class="catalog-title-frame"><TitleBar {...TITLE_BAR} platform="macos" /></div>
+          <div class="catalog-title-frame"><TitleBar {...TITLE_BAR} platform="windows" view="board" needsYou={0} sidebarOpen={false} /></div>
+        </div>
       </Section>
 
       <ConfirmHost />

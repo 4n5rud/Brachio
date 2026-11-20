@@ -8,11 +8,9 @@ export const ko: Messages = {
   "status.blocked.question": "답변 대기",
   "status.blocked.auth": "로그인 필요",
   "status.blocked.other": "입력 기다림",
-  "status.idle": "입력 대기",
   "status.error": "오류",
-  "status.exited": "종료",
   "status.crashed": "비정상 종료",
-  "status.unknown": "상태 정보 없음",
+  "status.unknown": "알 수 없음",
 
   "group.needs": "확인이 필요해요",
   "group.working": "작업 중",
@@ -319,9 +317,10 @@ export const ko: Messages = {
   "board.title": "보드",
   "board.all": "전체",
   "board.open": "열기",
+  "board.reviewRequest": "요청 검토",
 
-  "statusbar.core": "코어 정상",
-  "statusbar.sessions": "세션",
+  "statusbar.agentOne": "에이전트 {count}개 실행 중",
+  "statusbar.agentMany": "에이전트 {count}개 실행 중",
   "statusbar.memory": "메모리",
   "statusbar.cpu": "CPU",
 

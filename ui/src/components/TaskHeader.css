@@ -1,0 +1,74 @@
+.task-header {
+  height: var(--size-task-header);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 14px 0 18px;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-line);
+}
+.task-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.task-header h1 {
+  font: var(--text-heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: var(--text-meta);
+  color: var(--color-text-3);
+  white-space: nowrap;
+  min-width: 0;
+}
+.task-header-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.task-header-meta .status {
+  font: var(--text-label);
+}
+.task-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tabs {
+  height: var(--size-tabs);
+  display: flex;
+  overflow: hidden;
+  padding-left: 6px;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-line);
+}
+.tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-3);
+  font: var(--text-label);
+  white-space: nowrap;
+}
+.tab .glyph {
+  width: 11px;
+  height: 11px;
+}
+.tab[aria-selected="true"] {
+  color: var(--color-text);
+  background: var(--color-term-bg);
+  box-shadow: 1px 0 0 var(--color-line), -1px 0 0 var(--color-line);
+}

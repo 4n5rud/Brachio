@@ -52,7 +52,7 @@ const FAILURE_FLOOR = 30 * SECOND;
 export type ChipTone = "error" | "blocked" | "working" | "ready" | "neutral";
 
 export interface PrChip {
-  /** Message key of the state word; the row writes `PR #n` before it. */
+  /** Message key of the state word; the chip writes `#n` before it. */
   key:
     | "prChip.conflict"
     | "prChip.failed"
@@ -74,7 +74,7 @@ export function chipOf(report: PrStatusReport | undefined): PrChip | null {
   if (!report || !snapshot) return null;
   const stale = report.error !== null;
   const chip = (key: PrChip["key"], tone: ChipTone): PrChip => ({ key, number: snapshot.number, tone, stale });
-  if (snapshot.state === "merged") return chip("prChip.merged", "ready");
+  if (snapshot.state === "merged") return chip("prChip.merged", "neutral");
   if (snapshot.state === "closed") return chip("prChip.closed", "neutral");
   if (snapshot.conflict === "conflicting") return chip("prChip.conflict", "error");
   if (snapshot.checks.overall === "failure") return chip("prChip.failed", "error");

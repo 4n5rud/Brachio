@@ -1,0 +1,41 @@
+.glyph {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.glyph-spin {
+  animation: spin 1.1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glyph-spin {
+    animation: none;
+  }
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--text-label);
+  white-space: nowrap;
+}
+.status-working {
+  color: var(--color-status-working);
+}
+.status-blocked {
+  color: var(--color-status-blocked);
+}
+.status-ready {
+  color: var(--color-status-ready);
+}
+.status-error {
+  color: var(--color-status-error);
+}
+.status-done,
+.status-unknown {
+  color: var(--color-status-neutral);
+}

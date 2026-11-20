@@ -2,6 +2,7 @@ import { Button } from "./ui/Button";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import {
+  chipOf,
   openExternalLink,
   shortSha,
   type PrStatusReport,
@@ -9,6 +10,7 @@ import {
 } from "../lib/pr-status";
 import { prFailure, prRefreshing, prReport, refreshPrStatus } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
+import { PrChip } from "./ui/PrChip";
 
 const REVIEW_LABEL = {
   approved: "prStatus.reviewApproved",
@@ -100,10 +102,12 @@ function Snapshot(props: {
   link: (url: string, label: string) => unknown;
 }) {
   const checks = () => props.snapshot.checks;
+  const chip = () => chipOf(props.report);
   return (
     <div class="pr-status-body">
       <p>
         {props.link(props.snapshot.url, `${props.snapshot.repository} #${props.snapshot.number}`) as never}{" "}
+        <Show when={chip()}>{(current) => <><PrChip chip={current()} />{" "}</>}</Show>
         <span class="pr-state">
           {t(STATE_LABEL[props.snapshot.state])}
           <Show when={props.snapshot.draft}> · {t("prStatus.draft")}</Show>

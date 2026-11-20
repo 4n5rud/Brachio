@@ -1,0 +1,63 @@
+.tile {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tile-needs {
+  border-color: color-mix(in srgb, var(--color-status-blocked) 50%, var(--color-line));
+}
+.tile-error {
+  border-color: color-mix(in srgb, var(--color-status-error) 50%, var(--color-line));
+}
+.tile-head {
+  padding: 10px var(--space-3) var(--space-2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-2);
+}
+.tile-head h2 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
+}
+.tile-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font: var(--text-meta);
+  color: var(--color-text-3);
+}
+.tile-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tile-note {
+  min-height: 64px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-term-bg);
+  border-block: 1px solid var(--color-line);
+  font: var(--text-terminal);
+  color: var(--color-term-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tile-foot {
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font: var(--text-meta);
+  color: var(--color-text-3);
+}
+.tile-foot .button {
+  margin-left: auto;
+}

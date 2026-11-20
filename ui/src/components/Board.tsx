@@ -1,11 +1,7 @@
-import { Button } from "./ui/Button";
 import { For, createMemo } from "solid-js";
 import { t } from "../i18n";
-import { AGENT_NAME, GROUP_ORDER, groupTasks, shortBranch, type TaskRow } from "../lib/tasks";
-import { AgentIcon } from "./AgentIcon";
-import { formatAge } from "../lib/time";
-import { DiffStat } from "./DiffStat";
-import { StatusBadge } from "./StatusBadge";
+import { GROUP_ORDER, groupTasks, type TaskRow } from "../lib/tasks";
+import { BoardTile } from "./BoardTile";
 
 /** Every task on one screen, in the same need-first order as the sidebar. */
 export function Board(props: { tasks: readonly TaskRow[]; now: number; onOpen: (id: string) => void }) {
@@ -21,30 +17,7 @@ export function Board(props: { tasks: readonly TaskRow[]; now: number; onOpen: (
       <div class="board-grid">
         <For each={ordered()}>
           {(task) => (
-            <article
-              class="tile"
-              classList={{
-                "tile-needs": task.status.state === "blocked",
-                "tile-error": task.status.state === "error",
-              }}
-            >
-              <header class="tile-head">
-                <h2>{task.title}</h2>
-                <StatusBadge status={task.status} />
-                <div class="tile-meta">
-                  <span class="agent-chip"><AgentIcon agent={task.agent} />{AGENT_NAME[task.agent]}</span>
-                  <span>{shortBranch(task.branch)}</span>
-                </div>
-              </header>
-              <p class="tile-note">{task.note ?? ""}</p>
-              <footer class="tile-foot">
-                <DiffStat additions={task.additions} deletions={task.deletions} />
-                <span>{formatAge(task.updatedAt, props.now)}</span>
-                <Button variant="ghost" size="sm" onClick={() => props.onOpen(task.id)}>
-                  {t("board.open")}
-                </Button>
-              </footer>
-            </article>
+            <BoardTile task={task} now={props.now} onOpen={props.onOpen} />
           )}
         </For>
       </div>
