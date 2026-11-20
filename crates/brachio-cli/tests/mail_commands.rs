@@ -96,6 +96,44 @@ async fn send_puts_the_sender_the_receiver_and_the_text_in_one_request() {
 }
 
 #[tokio::test]
+async fn ask_and_reply_send_one_request_each() {
+    for (args, expected_kind, expected_to, expected_parent) in [
+        (
+            &["ask", "--to", "task2:agent", "--subject", "Ready?"][..],
+            "question",
+            "task2:agent",
+            None,
+        ),
+        (
+            &["reply", "m1", "--subject", "Ready"][..],
+            "status",
+            "",
+            Some("m1"),
+        ),
+    ] {
+        let endpoint = name();
+        let served = app(
+            &endpoint,
+            MailResponse::Sent {
+                id: "m2".into(),
+                thread_id: "m1".into(),
+                to: "task2:agent".into(),
+                duplicate: false,
+            },
+        );
+        let (out, err, code) = brachio(Some(&endpoint), args).await;
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(out, "sent m2 to task2:agent");
+        let MailRequest::Send(sent) = served.await.expect("app task") else {
+            panic!("expected a send request");
+        };
+        assert_eq!(sent.kind, expected_kind);
+        assert_eq!(sent.to, expected_to);
+        assert_eq!(sent.reply_to.as_deref(), expected_parent);
+    }
+}
+
+#[tokio::test]
 async fn check_prints_one_line_per_message_and_what_is_left() {
     let endpoint = name();
     let served = app(

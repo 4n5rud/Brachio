@@ -27,7 +27,7 @@ pub const MAX_BATCH: usize = 20;
 pub struct SendMail {
     /// Sender's terminal key.
     pub from: String,
-    /// Receiver: a terminal key, a task id (or its start), or a task title.
+    /// Receiver: a terminal key, task id or title. Empty for replies inferred from the parent.
     pub to: String,
     /// Message type, such as `status` or `question`.
     pub kind: String,

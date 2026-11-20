@@ -109,6 +109,29 @@ fn message_from(row: &Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
+/// Finds the other participant of an existing message visible to `sender`.
+///
+/// # Errors
+/// Fails if the sender is outside the conversation or the message does not exist.
+pub fn reply_recipient(
+    connection: &Connection,
+    id: &str,
+    sender: &str,
+) -> Result<String, StoreError> {
+    connection
+        .query_row(
+            "SELECT CASE WHEN from_key = ?2 THEN to_key ELSE from_key END
+             FROM messages WHERE id = ?1 AND (from_key = ?2 OR to_key = ?2)",
+            params![id, sender],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::NotFound {
+            table: "messages",
+            id: id.to_owned(),
+        })
+}
+
 /// Stores a message and returns it. A repeated request id returns the message stored the first
 /// time, with `true` as the second value.
 ///
