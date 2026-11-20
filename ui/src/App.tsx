@@ -1,12 +1,16 @@
 import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { confirm, open as openFolder } from "@tauri-apps/plugin-dialog";
+import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
 import { answerApproval, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
+import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { EmptyRepo } from "./components/EmptyRepo";
+import { EmptyState } from "./components/ui/EmptyState";
+import { ToastHost } from "./components/ui/Toast";
+import { pushToast } from "./lib/toasts";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
@@ -159,7 +163,6 @@ export function App() {
     localStorage.setItem("brachio.notifications", notifications() ? "on" : "off");
     document.documentElement.lang = locale();
   });
-  const [error, setError] = createSignal<string | null>(null);
   const [issueReport, setIssueReport] = createSignal<string>();
   const [automaticUpdates, setAutomaticUpdates] = createSignal(localStorage.getItem("brachio.updateChecks") !== "off");
   const [updateVersion, setUpdateVersion] = createSignal<string | null>(null);
@@ -310,15 +313,39 @@ export function App() {
       t("draft.review"),
       draft,
     ].join("\n\n");
-    const agreed = await confirm(body, {
+    const agreed = await confirmDialog({
       title: t("draft.title"),
-      okLabel: t("draft.insert"),
+      body,
+      confirmLabel: t("draft.insert"),
       cancelLabel: t("workspace.close"),
+      tone: "primary",
     });
     return agreed && stillAvailable() && await insert();
   };
 
-  const report = (failure: unknown) => setError(String(failure));
+  const report = (failure: unknown) => {
+    const message = String(failure);
+    pushToast({
+      tone: "error",
+      title: t("error.title"),
+      message,
+      action: inTauri ? { label: t("error.report"), onClick: () => setIssueReport(message) } : undefined,
+    });
+  };
+
+  let announcedVersion: string | undefined;
+  createEffect(() => {
+    const version = updateVersion();
+    if (!version || version === announcedVersion || version === dismissedVersion()) return;
+    announcedVersion = version;
+    pushToast({
+      tone: "info",
+      message: t("updates.available").replace("{version}", version),
+      action: { label: t("updates.download"), onClick: () => void openRelease().catch(report) },
+      dismissLabel: t("updates.later"),
+      onDismiss: () => setDismissedVersion(version),
+    });
+  });
 
   const recordActivity = (task: TaskRow, sessionKey: string, key: TaskActivity["key"], detail: string | null, at: number) => {
     setActivity((items) => [
@@ -391,10 +418,12 @@ export function App() {
     const entry = [repoId, ...commands].join("\n");
     const approved = loadApprovedSetups();
     if (approved.includes(entry)) return true;
-    const agreed = await confirm([t("setup.body"), ...commands].join("\n\n"), {
+    const agreed = await confirmDialog({
       title: t("setup.title"),
-      okLabel: t("setup.run"),
+      body: [t("setup.body"), ...commands].join("\n\n"),
+      confirmLabel: t("setup.run"),
       cancelLabel: t("workspace.close"),
+      tone: "primary",
     });
     if (agreed) saveApprovedSetups([...approved, entry]);
     return agreed;
@@ -456,10 +485,12 @@ export function App() {
     if (archiving()) return;
     setArchiving(true);
     try {
-      if (!await confirm(t("task.archiveBody"), {
+      if (!await confirmDialog({
         title: `${t("task.archive")} · ${task.title}`,
-        okLabel: t("task.archive"),
+        body: t("task.archiveBody"),
+        confirmLabel: t("task.archive"),
         cancelLabel: t("workspace.close"),
+        tone: "primary",
       })) return;
       await archiveTask(task.id);
       batch(() => {
@@ -518,10 +549,12 @@ export function App() {
     const body = folderProject
       ? t("task.deleteFolderBody").replace("{path}", task.worktreePath ?? "")
       : gitBody;
-    const agreed = await confirm(body, {
+    const agreed = await confirmDialog({
       title: `${t("task.delete")} · ${task.title}`,
-      okLabel: t("task.delete"),
+      body,
+      confirmLabel: t("task.delete"),
       cancelLabel: t("workspace.close"),
+      tone: "danger",
     });
     if (!agreed) return;
     try {
@@ -646,10 +679,7 @@ export function App() {
 
   const noTask = () => (
     <Show when={!inTauri || repo()} fallback={<EmptyRepo onAdd={() => void chooseRepo().catch(report)} />}>
-      <section class="empty-state">
-        <h1>{t("empty.task.title")}</h1>
-        <p>{t("empty.task.body")}</p>
-      </section>
+      <EmptyState title={t("empty.task.title")} body={t("empty.task.body")} />
     </Show>
   );
 
@@ -668,36 +698,6 @@ export function App() {
         onToggleSidebar={toggleSidebar}
         onToggleInspector={toggleInspector}
       />
-      <Show when={error()}>
-        {(message) => (
-          <div class="error-banner" role="alert">
-            <strong>{t("error.title")}</strong>
-            <span>{message()}</span>
-            <Show when={inTauri}>
-              <button class="button button-sm" type="button"
-                onClick={() => { setIssueReport(message()); setError(null); }}>
-                {t("error.report")}
-              </button>
-            </Show>
-            <button class="button button-ghost button-sm" type="button" onClick={() => setError(null)}>
-              {t("error.dismiss")}
-            </button>
-          </div>
-        )}
-      </Show>
-      <Show when={!error() && updateVersion() !== dismissedVersion() && updateVersion()}>
-        {(version) => (
-          <div class="update-banner">
-            <strong role="status">{t("updates.available").replace("{version}", version())}</strong>
-            <button class="button button-sm" type="button" onClick={() => void openRelease().catch(report)}>
-              {t("updates.download")}
-            </button>
-            <button class="button button-ghost button-sm" type="button" onClick={() => setDismissedVersion(version())}>
-              {t("updates.later")}
-            </button>
-          </div>
-        )}
-      </Show>
       <Show when={view() === "board"}>
         <main class="layout layout-full">
           <Board tasks={repoRows()} now={now()} onOpen={open} />
@@ -805,6 +805,8 @@ export function App() {
           />
         )}
       </Show>
+      <ConfirmHost />
+      <ToastHost />
     </div>
   );
 }

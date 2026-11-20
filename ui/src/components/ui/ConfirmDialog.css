@@ -1,0 +1,33 @@
+.confirm-text {
+  font: var(--text-label);
+  color: var(--color-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.loss {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+  list-style: none;
+  font: var(--text-label);
+}
+.loss li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+}
+.loss b {
+  font: 500 var(--text-sm) var(--font-mono);
+  color: var(--color-text);
+}
+.loss .zero b {
+  color: var(--color-text-3);
+  font-weight: 400;
+}
+.loss .hot b {
+  color: var(--color-status-error);
+}

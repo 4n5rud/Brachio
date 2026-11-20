@@ -1,3 +1,5 @@
+import { Input } from "./ui/Input";
+import { Button } from "./ui/Button";
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
@@ -67,41 +69,38 @@ export function TaskPorts(props: { taskId: string }) {
       <Show when={assignment()?.port}>{(port) => (
         <div>
           <p><code>BRACHIO_PORT={port()}</code> · {t("ports.assigned")}</p>
-          <button class="button button-sm" type="button"
-            onClick={() => void openPort({ port: port(), secure: false })}>http://127.0.0.1:{port()}</button>
+          <Button size="sm"
+            onClick={() => void openPort({ port: port(), secure: false })}>http://127.0.0.1:{port()}</Button>
         </div>
       )}</Show>
       <Show when={assignment()?.error}>{(message) => (
         <div>
           <p role="status">{message()}</p>
-          <button class="button button-sm" type="button" disabled={assignment.loading}
-            onClick={() => void retryAssignment()}>{t("ports.retryAssignment")}</button>
+          <Button size="sm" disabled={assignment.loading}
+            onClick={() => void retryAssignment()}>{t("ports.retryAssignment")}</Button>
         </div>
       )}</Show>
       <ul>
         <For each={ports()}>{(entry) => (
           <li>
-            <button class="button button-sm" type="button" onClick={() => void openPort(entry)}>
+            <Button size="sm" onClick={() => void openPort(entry)}>
               {entry.secure ? "https" : "http"}://127.0.0.1:{entry.port}
-            </button>
-            <button class="button button-sm" type="button"
+            </Button>
+            <Button size="sm"
               aria-label={`${t("ports.remove")} ${entry.port}`}
-              onClick={() => update(ports().filter((item) => item !== entry))}>{t("ports.remove")}</button>
+              onClick={() => update(ports().filter((item) => item !== entry))}>{t("ports.remove")}</Button>
           </li>
         )}</For>
       </ul>
       <Show when={ports().length < MAX_PORTS}>
         <form onSubmit={(event) => { event.preventDefault(); add(); }}>
-          <label class="form-field">
-            <span>{t("ports.number")}</span>
-            <input class="input" type="number" min="1" max="65535" step="1" required
-              value={input()} onInput={(event) => setInput(event.currentTarget.value)} />
-          </label>
+          <Input label={t("ports.number")} type="number" min="1" max="65535" step="1" required
+            value={input()} onInput={(event) => setInput(event.currentTarget.value)} />
           <label><input type="checkbox" checked={secure()}
             onChange={(event) => setSecure(event.currentTarget.checked)} /> HTTPS</label>
-          <button class="button button-sm" type="submit" disabled={!validPort(Number(input()))}>
+          <Button size="sm" type="submit" disabled={!validPort(Number(input()))}>
             {t("ports.add")}
-          </button>
+          </Button>
         </form>
       </Show>
       <Show when={error()}><p role="alert">{error()}</p></Show>

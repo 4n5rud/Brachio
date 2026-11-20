@@ -1,3 +1,4 @@
+import { Button } from "./ui/Button";
 import { Show, createResource, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { formatDuration, readLastTaskQa, runTaskQa, shortSha, type QaOutcome, type QaReport } from "../lib/qa-run";
@@ -36,9 +37,9 @@ export function TaskQaRun(props: { taskId: string }) {
   const current = (): QaReport | null | undefined => last();
   return (
     <div class="qa-run">
-      <button type="button" disabled={running()} onClick={() => void run()}>
-        {running() ? t("inspector.qa.waiting") : t("inspector.qa.run")}
-      </button>
+      <Button loading={running()} loadingLabel={t("inspector.qa.waiting")} onClick={() => void run()}>
+        {t("inspector.qa.run")}
+      </Button>
       <p class="muted">{t("inspector.qa.approvalNote")}</p>
       <Show when={message()}>{(text) => <p role="alert">{text()}</p>}</Show>
       <Show when={current()}>

@@ -1,4 +1,5 @@
-import { For, Match, Show, Switch, createMemo, createSignal, onMount } from "solid-js";
+import { Button } from "./ui/Button";
+import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
 import { locale, setLocale, t, type MessageKey } from "../i18n";
 import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
 import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
@@ -6,6 +7,10 @@ import type { TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
 import type { ColorTheme, ThemeMode } from "../lib/theme";
 import { ThemePicker } from "./ui/ThemePicker";
+import { Dialog } from "./ui/Dialog";
+import { Input, Select } from "./ui/Input";
+import { Kbd } from "./ui/Kbd";
+import { Toggle } from "./ui/Toggle";
 import { AgentSettings } from "./settings/AgentSettings";
 import { TerminalSettings } from "./settings/TerminalSettings";
 
@@ -79,12 +84,11 @@ export function WorkspaceDialog(props: {
       : [];
     return [...tasks, ...commands, ...files];
   });
-  let dialog!: HTMLDialogElement;
-  onMount(() => dialog.showModal());
+  let searchBox: HTMLInputElement | undefined;
 
   const choose = (id: string, sessionKey?: string) => {
     props.onOpen(id, sessionKey);
-    dialog.close();
+    props.onClose();
   };
   const activate = (entry: QuickEntry) => {
     if (entry.kind === "task") {
@@ -94,7 +98,7 @@ export function WorkspaceDialog(props: {
       props.onCommand?.(entry.id);
     } else {
       props.onInsertFile?.(entry.path);
-      dialog.close();
+      props.onClose();
     }
   };
   const restore = async (id: string) => {
@@ -128,15 +132,9 @@ export function WorkspaceDialog(props: {
     return t("titlebar.settings");
   };
   return (
-    <dialog ref={dialog} class="modal workspace-dialog" aria-labelledby="workspace-dialog-title"
-      onClose={props.onClose}>
-      <div class="modal-head">
-        <h2 id="workspace-dialog-title">
-          {title()}
-        </h2>
-        <button class="button button-sm" type="button" onClick={() => dialog.close()}>{t("workspace.close")}</button>
-      </div>
-      <div class="modal-body">
+    <Dialog title={title()} size={props.panel === "settings" ? "settings" : props.panel === "quickOpen" ? "quick" : "sheet"}
+      onClose={props.onClose} closeOnScrim initialFocus={() => searchBox}
+      headEnd={<Button size="sm" onClick={() => props.onClose()}>{t("workspace.close")}</Button>}>
         <Switch>
           <Match when={props.panel === "activity"}>
             <Show when={props.activity.length > 0} fallback={<p class="muted">{t("activity.empty")}</p>}>
@@ -156,7 +154,7 @@ export function WorkspaceDialog(props: {
             </Show>
           </Match>
           <Match when={props.panel === "quickOpen"}>
-            <input autofocus class="input" aria-label={t("titlebar.search")}
+            <Input ref={searchBox} aria-label={t("titlebar.search")}
               placeholder={t("quickOpen.placeholder")} value={query()}
               onInput={(event) => { setQuery(event.currentTarget.value); setHighlight(0); }}
               onKeyDown={(event) => {
@@ -172,7 +170,7 @@ export function WorkspaceDialog(props: {
                   const step = event.key === "ArrowDown" ? 1 : -1;
                   const next = (highlight() + count + step) % count;
                   setHighlight(next);
-                  dialog.querySelectorAll(".quick-open-result")[next]?.scrollIntoView({ block: "nearest" });
+                  document.querySelectorAll(".modal .quick-open-result")[next]?.scrollIntoView({ block: "nearest" });
                 }
               }} />
             <Show when={entries().length > 0} fallback={<p class="muted">{t("quickOpen.empty")}</p>}>
@@ -193,57 +191,48 @@ export function WorkspaceDialog(props: {
               <span class="form-label">{t("settings.theme")}</span>
               <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
             </div>
-            <label class="form-field">
-              <span class="form-label">{t("settings.language")}</span>
-              <select class="input" value={locale()} onChange={(event) =>
-                setLocale(event.currentTarget.value === "ko" ? "ko" : "en")}>
-                <option value="en">English</option>
-                <option value="ko">한국어</option>
-              </select>
-            </label>
-            <label>
-              <input type="checkbox" checked={props.notifications}
-                onChange={(event) => props.onNotifications(event.currentTarget.checked)} />
-              {" "}{t("settings.notifications")}
-            </label>
+            <Select label={t("settings.language")} value={locale()} onChange={(event) =>
+              setLocale(event.currentTarget.value === "ko" ? "ko" : "en")}>
+              <option value="en">English</option>
+              <option value="ko">한국어</option>
+            </Select>
+            <Toggle checked={props.notifications} label={t("settings.notifications")}
+              onChange={props.onNotifications} />
             <div class="workspace-shortcuts">
-              <span>{t("quickOpen.title")}</span><kbd>{QUICK_OPEN_KEYS}</kbd>
-              <span>{t("newTask.title")}</span><kbd>{NEW_TASK_KEYS}</kbd>
+              <span>{t("quickOpen.title")}</span><Kbd>{QUICK_OPEN_KEYS}</Kbd>
+              <span>{t("newTask.title")}</span><Kbd>{NEW_TASK_KEYS}</Kbd>
             </div>
             <TerminalSettings />
             <Show when={props.updates}>{(updates) => (
               <section class="settings-group" aria-labelledby="settings-updates">
                 <h3 id="settings-updates">{t("updates.title")}</h3>
-                <label>
-                  <input type="checkbox" checked={updates().enabled}
-                    onChange={(event) => updates().onEnabled(event.currentTarget.checked)} />
-                  {" "}{t("updates.auto")}
-                </label>
-                <button class="button button-sm" type="button" disabled={updates().status === "checking"}
-                  onClick={() => updates().onCheck()}>{t("updates.check")}</button>
+                <Toggle checked={updates().enabled} label={t("updates.auto")}
+                  onChange={(enabled) => updates().onEnabled(enabled)} />
+                <Button size="sm" disabled={updates().status === "checking"}
+                  onClick={() => updates().onCheck()}>{t("updates.check")}</Button>
                 <Show when={updates().status !== "idle"}>
                   <p role="status">{t(`updates.${updates().status}` as "updates.checking" | "updates.current" | "updates.unavailable")}</p>
                 </Show>
                 <Show when={updates().version}>{(version) => (
                   <div>
                     <p role="status">{t("updates.available").replace("{version}", version())}</p>
-                    <button class="button button-sm" type="button" onClick={() => updates().onDownload()}>
+                    <Button size="sm" onClick={() => updates().onDownload()}>
                       {t("updates.download")}
-                    </button>
+                    </Button>
                   </div>
                 )}</Show>
               </section>
             )}</Show>
             <Show when={props.onOpenArchived}>
               <AgentSettings />
-              <button type="button" class="button button-sm" onClick={() => props.onOpenArchived?.()}>
+              <Button size="sm" onClick={() => props.onOpenArchived?.()}>
                 {t("task.archived")}
-              </button>
+              </Button>
             </Show>
             <Show when={props.onReportProblem}>
-              <button type="button" class="button button-sm" onClick={() => props.onReportProblem?.()}>
+              <Button size="sm" onClick={() => props.onReportProblem?.()}>
                 {t("settings.reportProblem")}
-              </button>
+              </Button>
             </Show>
           </Match>
           <Match when={props.panel === "archived"}>
@@ -253,10 +242,10 @@ export function WorkspaceDialog(props: {
                 <For each={props.archived}>{(task) => (
                   <li class="archive-row">
                     <span>{task.title} · {task.branch}</span>
-                    <button type="button" class="button button-sm" disabled={!!restoring()}
-                      onClick={() => void restore(task.id)}>{t("task.restore")}</button>
-                    <button type="button" class="button button-sm" disabled={!!restoring()}
-                      onClick={() => void remove(task)}>{t("task.delete")}</button>
+                    <Button size="sm" disabled={!!restoring()}
+                      onClick={() => void restore(task.id)}>{t("task.restore")}</Button>
+                    <Button size="sm" disabled={!!restoring()}
+                      onClick={() => void remove(task)}>{t("task.delete")}</Button>
                   </li>
                 )}</For>
               </ul>
@@ -264,7 +253,6 @@ export function WorkspaceDialog(props: {
             <Show when={restoreError()}><p role="alert">{restoreError()}</p></Show>
           </Match>
         </Switch>
-      </div>
-    </dialog>
+    </Dialog>
   );
 }

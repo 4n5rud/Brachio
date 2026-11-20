@@ -336,6 +336,8 @@ export const en = {
   "newTask.noParent": "No parent",
   "newTask.agent": "Agent",
   "newTask.cancel": "Cancel",
+  "confirm.cancel": "Cancel",
+  "confirm.discard": "Discard",
   "newTask.create": "Create task",
   "newTask.creating": "Creating...",
   "empty.task.title": "No task selected",

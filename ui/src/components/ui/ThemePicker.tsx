@@ -2,6 +2,7 @@ import { For } from "solid-js";
 import { t, type MessageKey } from "../../i18n";
 import { COLOR_THEMES, THEME_MODES, type ColorTheme, type ThemeMode } from "../../lib/theme";
 import { Icon } from "../Icon";
+import { SegmentedControl } from "./SegmentedControl";
 
 const MODE_LABEL: Record<ThemeMode, MessageKey> = {
   system: "settings.system",
@@ -32,13 +33,8 @@ export function ThemePicker(props: {
 }) {
   return (
     <div class="theme-picker">
-      <div class="segmented" role="group" aria-label={t("settings.mode")}>
-        <For each={THEME_MODES}>{(mode) => (
-          <button type="button" aria-pressed={props.mode === mode} onClick={() => props.onMode(mode)}>
-            {t(MODE_LABEL[mode])}
-          </button>
-        )}</For>
-      </div>
+      <SegmentedControl label={t("settings.mode")} value={props.mode} onChange={props.onMode}
+        options={THEME_MODES.map((mode) => ({ value: mode, label: t(MODE_LABEL[mode]) }))} />
       <div class="swatches" role="radiogroup" aria-label={t("settings.colorTheme")}>
         <For each={COLOR_THEMES}>{(theme) => (
           <button type="button" class="swatch" role="radio" aria-checked={props.theme === theme}

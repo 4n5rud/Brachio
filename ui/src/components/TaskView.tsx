@@ -1,3 +1,6 @@
+import { IconButton } from "./ui/IconButton";
+import { Select } from "./ui/Input";
+import { Button } from "./ui/Button";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
@@ -222,16 +225,16 @@ export function TaskView(props: {
         <StatusBadge status={props.task.status} />
         <div class="task-header-actions">
           <Show when={props.workspaceTasks.length > 1}>
-            <select class="input workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
+            <Select class="workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
               onChange={(event) => props.onOpenTask(event.currentTarget.value)}>
               <For each={props.workspaceTasks}>{(task) => (
                 <option value={task.id}>{task.title} · {task.branch}</option>
               )}</For>
-            </select>
+            </Select>
           </Show>
           <Show when={props.task.worktreePath}>
-            <button class="button button-sm" type="button" disabled={!props.onArchive}
-              onClick={() => props.onArchive?.()}>{t("task.archive")}</button>
+            <Button size="sm" disabled={!props.onArchive}
+              onClick={() => props.onArchive?.()}>{t("task.archive")}</Button>
           </Show>
         </div>
       </div>
@@ -254,8 +257,7 @@ export function TaskView(props: {
         </Show>
         <Show when={shells().has(props.task.id)} fallback={
           <Show when={props.task.worktreePath}>
-            <button class="icon-button icon-button-sm" type="button" aria-label={t("task.newTab")}
-              onClick={() => setLayout("shell")}><Icon name="plus" /></button>
+            <IconButton icon="plus" size="sm" label={t("task.newTab")} onClick={() => setLayout("shell")} />
           </Show>
         }>
           <button class="tab" role="tab" aria-selected={layout() === "shell"} type="button"
@@ -269,37 +271,35 @@ export function TaskView(props: {
             AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
           <div class="pane-actions">
             <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
-              {(key) => <button class="button button-sm" type="button"
+              {(key) => <Button size="sm"
                 aria-expanded={inboxTab() === key()}
-                onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())}>{t("mailbox.inbox")}</button>}
+                onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())}>{t("mailbox.inbox")}</Button>}
             </Show>
             <Show when={(props.unreadForTab?.(activeAgentTab()) ?? 0) > 0 && activeAgentTab()}>
-              {(key) => <button class="button button-sm" type="button"
-                onClick={() => props.onMailboxReminder?.(key())}>{t("mailbox.reminder")}</button>}
+              {(key) => <Button size="sm"
+                onClick={() => props.onMailboxReminder?.(key())}>{t("mailbox.reminder")}</Button>}
             </Show>
             <Show when={props.task.worktreePath && !secondary().has(props.task.id)}>
-              <button class="button button-sm" type="button" disabled={!tabsReady() || tabsSaving()}
+              <Button size="sm" disabled={!tabsReady() || tabsSaving()}
                 onClick={() => void changeSecondary(props.task.id, crypto.randomUUID())}>
                 {t("task.addAgent")} {AGENT_NAME[secondaryKind(props.task)]}
-              </button>
+              </Button>
             </Show>
             <Show when={layout() !== "shell" && isSecondarySelected(props.task.id)}>
-              <button class="button button-sm" type="button" disabled={tabsSaving()}
+              <Button size="sm" disabled={tabsSaving()}
                 onClick={() => void changeSecondary(props.task.id)}>
                 {t("task.closeAgent")}
-              </button>
+              </Button>
             </Show>
             <Show when={props.task.worktreePath}>
-              <button class="icon-button icon-button-sm" type="button" aria-label={t("task.split")}
+              <IconButton icon="split" size="sm" label={t("task.split")}
                 aria-pressed={layout() === "split"}
-                onClick={() => setLayout(layout() === "split" ? "agent" : "split")}>
-                <Icon name="split" />
-              </button>
+                onClick={() => setLayout(layout() === "split" ? "agent" : "split")} />
             </Show>
             <Show when={shells().has(props.task.id)}>
-              <button class="button button-sm" type="button" onClick={closeShell}>
+              <Button size="sm" onClick={closeShell}>
                 {t("task.closeShell")}
-              </button>
+              </Button>
             </Show>
           </div>
         </div>
@@ -308,7 +308,7 @@ export function TaskView(props: {
             <details class="terminal-recovery">
               <summary>{t("task.originalPrompt")}</summary>
               <pre class="inspector-patch">{prompt()}</pre>
-              <button class="button button-sm" type="button" onClick={async () => {
+              <Button size="sm" onClick={async () => {
                 const taskId = props.task.id;
                 try {
                   const drafted = await props.onDraftOriginal?.(prompt());
@@ -316,7 +316,7 @@ export function TaskView(props: {
                 } catch (error) {
                   setPromptFeedback({ taskId, message: String(error) });
                 }
-              }}>{t("task.draftOriginalPrompt")}</button>
+              }}>{t("task.draftOriginalPrompt")}</Button>
               <Show when={promptFeedback()?.taskId === props.task.id}>
                 <span role="status">{promptFeedback()?.message}</span>
               </Show>
@@ -328,8 +328,8 @@ export function TaskView(props: {
           {(message) => (
             <div class="terminal-recovery" role="alert">
               <span>{t("setup.copyFailed")} {message()}</span>
-              <button class="button button-sm" type="button" disabled={props.retryingSetup}
-                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</button>
+              <Button size="sm" disabled={props.retryingSetup}
+                onClick={() => props.onRetrySetup?.()}>{t("setup.retryCopy")}</Button>
             </div>
           )}
         </Show>
@@ -412,8 +412,8 @@ export function TaskView(props: {
           </For>
         </div>
         <Show when={otherApproval()}>
-          {(pending) => <button class="button button-sm" type="button"
-            onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</button>}
+          {(pending) => <Button size="sm"
+            onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}
         </Show>
         <Show when={props.onAnswer && approval()?.id} keyed>
           {(id) => (
@@ -435,14 +435,14 @@ function ApprovalBar(props: { review: string; onAllow?: () => void; onDeny?: () 
       <strong>{t("approval.title")}</strong>
       <pre class="approval-review" tabindex="0" aria-label={t("approval.details")}><code>{props.review}</code></pre>
       <div class="approval-actions">
-        <button class="button button-primary button-sm" type="button" disabled={!props.review || !props.onAllow}
+        <Button variant="primary" size="sm" disabled={!props.review || !props.onAllow}
           onClick={() => { if (props.review) props.onAllow?.(); }}>
           {t("approval.allowOnce")}
-        </button>
-        <button class="button button-ghost button-sm" type="button" disabled={!props.onDeny}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={!props.onDeny}
           onClick={() => props.onDeny?.()}>
           {t("approval.deny")}
-        </button>
+        </Button>
       </div>
       <p class="approval-hint">{t("approval.hint")}</p>
     </div>

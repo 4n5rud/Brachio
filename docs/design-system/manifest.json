@@ -1,0 +1,1144 @@
+{
+  "manifestVersion": 3,
+  "name": "Brachio",
+  "namespace": "Brachio",
+  "files": [
+    "Screens.md",
+    "assets/Icons/README.md",
+    "assets/Logos/README.md",
+    "components/AgentChip/README.md",
+    "components/ApprovalBar/README.md",
+    "components/BoardTile/README.md",
+    "components/Button/README.md",
+    "components/ConfirmDialog/README.md",
+    "components/Dialog/README.md",
+    "components/DiffStat/README.md",
+    "components/EmptyState/README.md",
+    "components/IconButton/README.md",
+    "components/Input/README.md",
+    "components/Kbd/README.md",
+    "components/Notice/README.md",
+    "components/PrChip/README.md",
+    "components/SegmentedControl/README.md",
+    "components/StatusBadge/README.md",
+    "components/StatusBar/README.md",
+    "components/TaskHeader/README.md",
+    "components/TaskRow/README.md",
+    "components/ThemePicker/README.md",
+    "components/TitleBar/README.md",
+    "components/Toast/README.md",
+    "components/Toggle/README.md",
+    "components/bundle.css",
+    "tokens.css"
+  ],
+  "libraries": [],
+  "components": [
+    {
+      "name": "AgentChip",
+      "group": "Status",
+      "summary": "A small outlined tag naming the agent that runs a task."
+    },
+    {
+      "name": "ApprovalBar",
+      "group": "Tasks",
+      "summary": "The request an agent is waiting on, docked under its terminal with the full request visible, so the person answers where the context is."
+    },
+    {
+      "name": "BoardTile",
+      "group": "Tasks",
+      "summary": "A task as a tile in the board view, with the last lines of its terminal, so the person can scan many agents at once."
+    },
+    {
+      "name": "Button",
+      "group": "Actions",
+      "summary": "A text button for one clear action; primary marks the single most likely next step in a view."
+    },
+    {
+      "name": "ConfirmDialog",
+      "group": "Overlays",
+      "summary": "A centered dialog before a step that loses something: delete a task for good, discard a draft, sign out of Codex, forget an unknown launch."
+    },
+    {
+      "name": "Coverage",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "Dialog",
+      "group": "Feedback",
+      "summary": "A modal that asks for confirmation before a step that cannot be undone."
+    },
+    {
+      "name": "DiffStat",
+      "group": "Status",
+      "summary": "Added and removed line counts for a task's branch."
+    },
+    {
+      "name": "EmptyState",
+      "group": "Feedback",
+      "summary": "What a region shows when it has nothing yet, with the one step that fills it."
+    },
+    {
+      "name": "IconButton",
+      "group": "Actions",
+      "summary": "A square button holding one icon, for chrome actions people repeat often."
+    },
+    {
+      "name": "Input",
+      "group": "Inputs",
+      "summary": "A text field with its label above it, for the new task sheet and settings."
+    },
+    {
+      "name": "Kbd",
+      "group": "Actions",
+      "summary": "A key cap that shows a keyboard shortcut."
+    },
+    {
+      "name": "LaterConvenience",
+      "group": "Later",
+      "page": true
+    },
+    {
+      "name": "Notice",
+      "group": "Tasks",
+      "summary": "One line at the top of a terminal pane that says what happened to that terminal and offers at most two fixes."
+    },
+    {
+      "name": "PrChip",
+      "group": "Tasks",
+      "summary": "The pull request of a task in one small chip: number in mono, then the one fact that decides what to do next."
+    },
+    {
+      "name": "ScreenActivity",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenActivityEmpty",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenActivityTab",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenAddProjectMenu",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenAddTabMenu",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenApprovalEdit",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenApprovalSending",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenArchiveConfirm",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenArchivedList",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenBoard",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenBoardEmpty",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenChangesEmpty",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenChangesLoading",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenChildCreated",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenCloseShell",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenCodexResume",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenCommentInserted",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenCommitDraft",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenCrashed",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenCreatePr",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenDelete",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenDesktopMac",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenDesktopWindows",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenDiffUnified",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenDiscardDraft",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenDraftPaste",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenDropFolder",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorAgentMissing",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorAgentsList",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorAlreadyAdded",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorArchive",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorBaseBranch",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorChanges",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorCodexCheck",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorCommentInsert",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorCommit",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorConfigCopy",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorConflicts",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorCoreStopped",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorCreatePr",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorDelete",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorDifferentCommit",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorDraftPaste",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorExited",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorFolderAccess",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorInbox",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorInputFailed",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorNotGit",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorOffline",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorPorts",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorPrFeedback",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorPromptHeld",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorPushDenied",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorPushRejected",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorQaDenied",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorQaFailed",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorQaOutput",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorQaStale",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorQaStart",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorQaTimeout",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorRebaseStopped",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorReport",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorRuntimeLost",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorSettingsValue",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorSetupFailed",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorSignIn",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorStartFailed",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorUpdate",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenErrorWorktree",
+      "group": "Errors",
+      "page": true
+    },
+    {
+      "name": "ScreenFileDrop",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenFileDropped",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenFilesBinary",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenFilesNoMatch",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenFilesPreview",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenFirstRun",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenFlow",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenFocus",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenInbox",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenKorean",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenMain",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenMainWindows",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenManyTabs",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenMergeClean",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenMinWindow",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenNewTask",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenNewTaskBranch",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenNewTaskCodex",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenNewTaskCreating",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenNewTaskParent",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenNoTask",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenOriginalPrompt",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenOtherTabWaiting",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenPlan",
+      "group": "Later",
+      "page": true
+    },
+    {
+      "name": "ScreenPorts",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenPrCreated",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenPrFeedback",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenQaApprove",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenQaPassed",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenQaRunning",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenQuickOpen",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenQuickOpenEmpty",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenQuickOpenEmptyQuery",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenReattached",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenReport",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenRestore",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenRestored",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenReview",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenSettings",
+      "group": "Screens",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsAgents",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsAgentsSignIn",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsArchived",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsGeneral",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsNotifications",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsShortcuts",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsTerminal",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsUpdates",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSettingsUpdatesChecking",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSetupApproval",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSetupDone",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSidebarCollapsed",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSidebarHidden",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSignOutCodex",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenSplitMac",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenStageCommit",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenTaskMenu",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenTooltips",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "ScreenUnknownLaunchConfirm",
+      "group": "Interactions",
+      "page": true
+    },
+    {
+      "name": "SegmentedControl",
+      "group": "Actions",
+      "summary": "A row of two to four mutually exclusive options shown at once."
+    },
+    {
+      "name": "StatesApproval",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesChanges",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesChrome",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesDialogs",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesDiff",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesFilesQA",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesNewTask",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesPullRequest",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesSettings",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesSidebar",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesSystem",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesTerminal",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatesToasts",
+      "group": "States",
+      "page": true
+    },
+    {
+      "name": "StatusBadge",
+      "group": "Status",
+      "summary": "A task's agent state shown as a glyph, a color and a word together, so it reads without color."
+    },
+    {
+      "name": "StatusBar",
+      "group": "Shell",
+      "summary": "The 24px bottom bar that shows what Brachio itself costs."
+    },
+    {
+      "name": "TaskHeader",
+      "group": "Tasks",
+      "summary": "The two-line header above a task's terminals, with its tab strip."
+    },
+    {
+      "name": "TaskRow",
+      "group": "Tasks",
+      "summary": "One task in the sidebar list: status, title and age, then agent, branch and diff stat, with an optional note line."
+    },
+    {
+      "name": "ThemePicker",
+      "group": "Settings",
+      "summary": "Mode and color theme in Settings, Appearance: a segmented control for System, Light, Dark and a row of four theme swatches."
+    },
+    {
+      "name": "TitleBar",
+      "group": "Shell",
+      "summary": "The 40px top bar, which is also the window's drag region."
+    },
+    {
+      "name": "Toast",
+      "group": "Feedback",
+      "summary": "A short message that confirms an action finished or failed, shown bottom center above the status bar."
+    },
+    {
+      "name": "Toggle",
+      "group": "Inputs",
+      "summary": "A switch for a setting that takes effect at once."
+    }
+  ],
+  "assetGroups": [
+    {
+      "name": "Logos",
+      "tile": "l",
+      "order": [
+        "brachio-app-icon.svg",
+        "brachio-mark.svg"
+      ],
+      "files": [
+        {
+          "path": "assets/Logos/brachio-app-icon.svg",
+          "id": "8dafb49db4a35f639120159bb722f571"
+        },
+        {
+          "path": "assets/Logos/brachio-mark.svg",
+          "id": "178869a16cc1983f8ed654fce40b60f6"
+        }
+      ]
+    },
+    {
+      "name": "Icons",
+      "tile": "xs",
+      "order": [
+        "bell.svg",
+        "board.svg",
+        "bot.svg",
+        "branch.svg",
+        "check.svg",
+        "chevron-down.svg",
+        "chevron-right.svg",
+        "cpu.svg",
+        "diff.svg",
+        "external.svg",
+        "folder.svg",
+        "globe.svg",
+        "list.svg",
+        "memory.svg",
+        "more.svg",
+        "plus.svg",
+        "pr.svg",
+        "search.svg",
+        "sliders.svg",
+        "split.svg",
+        "terminal.svg",
+        "x.svg"
+      ],
+      "files": [
+        {
+          "path": "assets/Icons/bell.svg",
+          "id": "db7caae4d5b92ae33321e53424c9db1c"
+        },
+        {
+          "path": "assets/Icons/board.svg",
+          "id": "f91e4532a1a117d0d964aafc113c6239"
+        },
+        {
+          "path": "assets/Icons/bot.svg",
+          "id": "8a7bfba59b204710dd000de891742cb0"
+        },
+        {
+          "path": "assets/Icons/branch.svg",
+          "id": "ec132fdc300e03a52baaa81ff5336549"
+        },
+        {
+          "path": "assets/Icons/check.svg",
+          "id": "5d02c2a1400f23f26a2bf56098b01c48"
+        },
+        {
+          "path": "assets/Icons/chevron-down.svg",
+          "id": "7d550db5169081ef51473136696b1791"
+        },
+        {
+          "path": "assets/Icons/chevron-right.svg",
+          "id": "d662f0e24f290f8c4fb780c52000bb61"
+        },
+        {
+          "path": "assets/Icons/cpu.svg",
+          "id": "d70ae5fd4b11aeeec4be6459611bf768"
+        },
+        {
+          "path": "assets/Icons/diff.svg",
+          "id": "9431a4a80b57266c83d83fc4dbeab942"
+        },
+        {
+          "path": "assets/Icons/external.svg",
+          "id": "a4f070c2672b4b890e05e6c01df30c7a"
+        },
+        {
+          "path": "assets/Icons/folder.svg",
+          "id": "7e05df6eb844490649930eb7a657e605"
+        },
+        {
+          "path": "assets/Icons/globe.svg",
+          "id": "9047e0e66578573ba70e131e4eb5c384"
+        },
+        {
+          "path": "assets/Icons/list.svg",
+          "id": "72085e9f1cb19e79045785a8b5d3fac3"
+        },
+        {
+          "path": "assets/Icons/memory.svg",
+          "id": "092e1a05858fc98e6d07a8541eece6f2"
+        },
+        {
+          "path": "assets/Icons/more.svg",
+          "id": "3c49f7ad894220d5f1d8c5e0d863a24f"
+        },
+        {
+          "path": "assets/Icons/plus.svg",
+          "id": "2fe93975724e7edfe3b5edd44bdde48d"
+        },
+        {
+          "path": "assets/Icons/pr.svg",
+          "id": "902b2e6d17c0476ee2421942cd5b1c13"
+        },
+        {
+          "path": "assets/Icons/search.svg",
+          "id": "70b5f8b9dfd911ce3514cea52e7b6a33"
+        },
+        {
+          "path": "assets/Icons/sliders.svg",
+          "id": "9f0483e6889a671335b82dfa0052ea20"
+        },
+        {
+          "path": "assets/Icons/split.svg",
+          "id": "c546dd61410b16b6b29fc8e14b0f7e70"
+        },
+        {
+          "path": "assets/Icons/terminal.svg",
+          "id": "fcb10b04e739796268710f28ca28b836"
+        },
+        {
+          "path": "assets/Icons/x.svg",
+          "id": "23700a5619e0fa9af3202d53b2dfef63"
+        }
+      ]
+    }
+  ],
+  "storage": {
+    "files": {
+      "assets/Icons/bell.svg": {
+        "store": "blob",
+        "id": "db7caae4d5b92ae33321e53424c9db1c",
+        "bytes": 272,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/board.svg": {
+        "store": "blob",
+        "id": "f91e4532a1a117d0d964aafc113c6239",
+        "bytes": 420,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/bot.svg": {
+        "store": "blob",
+        "id": "8a7bfba59b204710dd000de891742cb0",
+        "bytes": 281,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/branch.svg": {
+        "store": "blob",
+        "id": "ec132fdc300e03a52baaa81ff5336549",
+        "bytes": 364,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/check.svg": {
+        "store": "blob",
+        "id": "5d02c2a1400f23f26a2bf56098b01c48",
+        "bytes": 218,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/chevron-down.svg": {
+        "store": "blob",
+        "id": "7d550db5169081ef51473136696b1791",
+        "bytes": 214,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/chevron-right.svg": {
+        "store": "blob",
+        "id": "d662f0e24f290f8c4fb780c52000bb61",
+        "bytes": 214,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/cpu.svg": {
+        "store": "blob",
+        "id": "d70ae5fd4b11aeeec4be6459611bf768",
+        "bytes": 327,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/diff.svg": {
+        "store": "blob",
+        "id": "9431a4a80b57266c83d83fc4dbeab942",
+        "bytes": 272,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/external.svg": {
+        "store": "blob",
+        "id": "a4f070c2672b4b890e05e6c01df30c7a",
+        "bytes": 246,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/folder.svg": {
+        "store": "blob",
+        "id": "7e05df6eb844490649930eb7a657e605",
+        "bytes": 228,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/globe.svg": {
+        "store": "blob",
+        "id": "9047e0e66578573ba70e131e4eb5c384",
+        "bytes": 301,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/list.svg": {
+        "store": "blob",
+        "id": "72085e9f1cb19e79045785a8b5d3fac3",
+        "bytes": 393,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/memory.svg": {
+        "store": "blob",
+        "id": "092e1a05858fc98e6d07a8541eece6f2",
+        "bytes": 286,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/more.svg": {
+        "store": "blob",
+        "id": "3c49f7ad894220d5f1d8c5e0d863a24f",
+        "bytes": 348,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/plus.svg": {
+        "store": "blob",
+        "id": "2fe93975724e7edfe3b5edd44bdde48d",
+        "bytes": 216,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/pr.svg": {
+        "store": "blob",
+        "id": "902b2e6d17c0476ee2421942cd5b1c13",
+        "bytes": 396,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/search.svg": {
+        "store": "blob",
+        "id": "70b5f8b9dfd911ce3514cea52e7b6a33",
+        "bytes": 257,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/sliders.svg": {
+        "store": "blob",
+        "id": "9f0483e6889a671335b82dfa0052ea20",
+        "bytes": 395,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/split.svg": {
+        "store": "blob",
+        "id": "c546dd61410b16b6b29fc8e14b0f7e70",
+        "bytes": 266,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/terminal.svg": {
+        "store": "blob",
+        "id": "fcb10b04e739796268710f28ca28b836",
+        "bytes": 289,
+        "type": "image/svg+xml"
+      },
+      "assets/Icons/x.svg": {
+        "store": "blob",
+        "id": "23700a5619e0fa9af3202d53b2dfef63",
+        "bytes": 220,
+        "type": "image/svg+xml"
+      },
+      "assets/Logos/brachio-app-icon.svg": {
+        "store": "blob",
+        "id": "8dafb49db4a35f639120159bb722f571",
+        "bytes": 538,
+        "type": "image/svg+xml"
+      },
+      "assets/Logos/brachio-mark.svg": {
+        "store": "blob",
+        "id": "178869a16cc1983f8ed654fce40b60f6",
+        "bytes": 519,
+        "type": "image/svg+xml"
+      }
+    },
+    "blobBytesUsed": 7480
+  }
+}

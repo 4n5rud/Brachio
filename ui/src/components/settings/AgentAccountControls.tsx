@@ -1,5 +1,6 @@
+import { Button } from "../ui/Button";
 import { invoke } from "@tauri-apps/api/core";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { locale, t } from "../../i18n";
 import type { AgentKind } from "../../lib/terminal";
@@ -50,7 +51,11 @@ export function AgentAccountControls(props: { kind: AgentKind }) {
   };
 
   const changeAuth = (signedIn: boolean) => run(async () => {
-    if (signedIn && !(await confirm(t("settings.agentSignOutConfirm"), { kind: "warning" }))) return;
+    if (signedIn && !(await confirmDialog({
+      title: t("settings.agentSignOutConfirm"),
+      confirmLabel: t("settings.agentSignOut"),
+      tone: "danger",
+    }))) return;
     setSigningIn(!signedIn);
     try {
       await invoke("codex_auth_action", { action: signedIn ? "sign_out" : "sign_in" });
@@ -80,23 +85,23 @@ export function AgentAccountControls(props: { kind: AgentKind }) {
         }>{t("settings.agentChecking")}</Show>
       </p>
       <Show when={account()?.error}>{(message) => <p class="muted">{message()}</p>}</Show>
-      <button class="button button-sm" type="button" disabled={busy() || account.loading}
-        onClick={() => { setWindows(undefined); void refetch(); }}>{t("settings.agentRefresh")}</button>
+      <Button size="sm" disabled={busy() || account.loading}
+        onClick={() => { setWindows(undefined); void refetch(); }}>{t("settings.agentRefresh")}</Button>
       <Show when={props.kind === "codex"} fallback={
         <>
-          <button class="button button-sm" type="button" disabled={busy()}
-            onClick={() => void run(() => invoke("open_claude_usage"))}>{t("settings.claudeUsage")}</button>
+          <Button size="sm" disabled={busy()}
+            onClick={() => void run(() => invoke("open_claude_usage"))}>{t("settings.claudeUsage")}</Button>
           <p class="muted">{t("settings.claudeSwitchAccount")}</p>
         </>
       }>
         <Show when={account()?.status}>{(status) => (
-          <button class="button button-sm" type="button" disabled={busy() || account.loading}
+          <Button size="sm" disabled={busy() || account.loading}
             onClick={() => void changeAuth(status().signedIn)}>
             {t(status().signedIn ? "settings.agentSignOut" : "settings.agentSignIn")}
-          </button>
+          </Button>
         )}</Show>
-        <button class="button button-sm" type="button" disabled={busy() || !account()?.status?.signedIn}
-          onClick={() => void readUsage()}>{t("settings.agentUsage")}</button>
+        <Button size="sm" disabled={busy() || !account()?.status?.signedIn}
+          onClick={() => void readUsage()}>{t("settings.agentUsage")}</Button>
         <Show when={signingIn()}><p role="status">{t("settings.agentLoginPending")}</p></Show>
         <Show when={windows()}>{(limits) => (
           <Show when={limits().length} fallback={<p class="muted">{t("settings.agentUsageUnavailable")}</p>}>

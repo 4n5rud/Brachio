@@ -1,3 +1,5 @@
+import { SegmentedControl, type SegmentOption } from "./ui/SegmentedControl";
+import { Button } from "./ui/Button";
 import { For, Match, Show, Switch, createEffect, createResource, createSignal, on } from "solid-js";
 import { t } from "../i18n";
 import { TaskPorts } from "./TaskPorts";
@@ -49,21 +51,17 @@ export function Inspector(props: {
     const data = result.data;
     props.onDiffTotals(result.id, data && !data.truncated ? diffTotals(data.patch) : undefined);
   }));
-  const tab = (id: Pane, label: string) => (
-    <button type="button" aria-pressed={pane() === id} onClick={() => setPane(id)}>
-      {label}
-    </button>
-  );
+  const tabs = (): SegmentOption<Pane>[] => [
+    ...(isGit() ? [{ value: "changes" as const, label: t("inspector.changes") }] : []),
+    { value: "files", label: t("files.title") },
+    { value: "qa", label: t("inspector.qa") },
+    ...(isLead() ? [{ value: "tasks" as const, label: t("inspector.tasks") }] : []),
+    { value: "activity", label: t("inspector.activity") },
+  ];
   return (
     <aside class="inspector">
       <div class="inspector-head">
-        <div class="segmented" role="group">
-          <Show when={isGit()}>{tab("changes", t("inspector.changes"))}</Show>
-          {tab("files", t("files.title"))}
-          {tab("qa", t("inspector.qa"))}
-          <Show when={isLead()}>{tab("tasks", t("inspector.tasks"))}</Show>
-          {tab("activity", t("inspector.activity"))}
-        </div>
+        <SegmentedControl options={tabs()} value={pane()} onChange={setPane} />
       </div>
       <Switch>
         <Match when={pane() === "files"}>
@@ -80,9 +78,9 @@ export function Inspector(props: {
               {t("inspector.changedFiles")}
               <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
               <Show when={props.task.worktreePath}>
-                <button type="button" disabled={changes.loading} onClick={() => void refetch()}>
+                <Button size="sm" disabled={changes.loading} onClick={() => void refetch()}>
                   {t("inspector.refresh")}
-                </button>
+                </Button>
               </Show>
             </h3>
             <Show when={props.task.worktreePath}>

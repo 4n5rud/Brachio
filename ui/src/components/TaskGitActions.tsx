@@ -1,3 +1,5 @@
+import { Input, TextArea } from "./ui/Input";
+import { Button } from "./ui/Button";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { runTaskGitAction, type TaskGitAction } from "../lib/workspace";
@@ -61,22 +63,22 @@ export function TaskGitActions(props: {
           <For each={props.untracked}>{(path) => (
             <li>
               {path}{" "}
-              <button type="button" class="button button-sm" disabled={busy()}
-                onClick={() => void run({ action: "stageFile", path })}>{t("git.stageFile")}</button>
+              <Button size="sm" disabled={busy()}
+                onClick={() => void run({ action: "stageFile", path })}>{t("git.stageFile")}</Button>
             </li>
           )}</For>
         </ul>
       </Show>
-      <button type="button" class="button button-sm" disabled={busy()}
-        onClick={() => void run({ action: "stageTracked" })}>{t("git.stageTracked")}</button>
+      <Button size="sm" disabled={busy()}
+        onClick={() => void run({ action: "stageTracked" })}>{t("git.stageTracked")}</Button>
       <Show when={props.staged.length > 0}>
         <h4>{t("git.staged")}</h4>
         <ul>
           <For each={props.staged}>{(path) => (
             <li>
               {path}{" "}
-              <button type="button" class="button button-sm" disabled={busy()}
-                onClick={() => void run({ action: "unstageFile", path })}>{t("git.unstageFile")}</button>
+              <Button size="sm" disabled={busy()}
+                onClick={() => void run({ action: "unstageFile", path })}>{t("git.unstageFile")}</Button>
             </li>
           )}</For>
         </ul>
@@ -84,39 +86,30 @@ export function TaskGitActions(props: {
           event.preventDefault();
           if (message().trim()) void run({ action: "commit", message: message() });
         }}>
-          <button type="button" class="button button-sm" disabled={busy() || requesting()}
-            onClick={() => void askAgent("commit")}>{t("git.askCommit")}</button>
-          <label>
-            {t("git.message")}
-            <textarea rows={2} disabled={busy()} value={message()}
-              onInput={(event) => setMessage(event.currentTarget.value)} />
-          </label>
-          <button type="submit" class="button button-sm" disabled={busy() || !message().trim()}>
+          <Button size="sm" disabled={busy() || requesting()}
+            onClick={() => void askAgent("commit")}>{t("git.askCommit")}</Button>
+          <TextArea label={t("git.message")} rows={2} disabled={busy()} value={message()}
+            onInput={(event) => setMessage(event.currentTarget.value)} />
+          <Button size="sm" type="submit" disabled={busy() || !message().trim()}>
             {t("git.commit")}
-          </button>
+          </Button>
         </form>
       </Show>
-      <button type="button" class="button button-sm" disabled={busy()}
-        onClick={() => void run({ action: "push" })}>{t("git.push")}</button>
+      <Button size="sm" disabled={busy()}
+        onClick={() => void run({ action: "push" })}>{t("git.push")}</Button>
       <form onSubmit={(event) => {
         event.preventDefault();
         if (prTitle().trim()) void run({ action: "createPr", title: prTitle(), body: prBody() });
       }}>
-        <button type="button" class="button button-sm" disabled={busy() || requesting()}
-          onClick={() => void askAgent("pr")}>{t("git.askPr")}</button>
-        <label>
-          {t("git.prTitle")}
-          <input type="text" disabled={busy()} value={prTitle()}
-            onInput={(event) => setPrTitle(event.currentTarget.value)} />
-        </label>
-        <label>
-          {t("git.prBody")}
-          <textarea rows={3} disabled={busy()} value={prBody()}
-            onInput={(event) => setPrBody(event.currentTarget.value)} />
-        </label>
-        <button type="submit" class="button button-sm" disabled={busy() || !prTitle().trim()}>
+        <Button size="sm" disabled={busy() || requesting()}
+          onClick={() => void askAgent("pr")}>{t("git.askPr")}</Button>
+        <Input label={t("git.prTitle")} type="text" disabled={busy()} value={prTitle()}
+          onInput={(event) => setPrTitle(event.currentTarget.value)} />
+        <TextArea label={t("git.prBody")} rows={3} disabled={busy()} value={prBody()}
+          onInput={(event) => setPrBody(event.currentTarget.value)} />
+        <Button size="sm" type="submit" disabled={busy() || !prTitle().trim()}>
           {t("git.createPr")}
-        </button>
+        </Button>
       </form>
       <Show when={feedback()}>
         {(result) => <p role={result().error ? "alert" : "status"}>{result().text}</p>}
