@@ -91,6 +91,24 @@ impl Runtime {
                 };
                 self.launch(key, spec)
             }
+            Action::LaunchOutcome {
+                instance,
+                operation_id,
+            } => {
+                if instance != self.instance {
+                    bail!("runtime instance changed; launch outcome is unknown");
+                }
+                let operations = lock(&self.operations)?;
+                match operations.get(&operation_id) {
+                    Some((_, Some(result))) => Ok(ResponseResult::LaunchCompleted {
+                        launch_outcome: Box::new(result.clone()),
+                    }),
+                    Some((_, None)) => Ok(ResponseResult::LaunchPending {
+                        launch_pending: true,
+                    }),
+                    None => bail!("launch operation was not observed by this runtime"),
+                }
+            }
             Action::LaunchOnce {
                 instance,
                 operation_id,
@@ -355,5 +373,38 @@ mod operation_tests {
             );
         });
         assert_eq!(runtime.operations.lock().expect("history").len(), 1);
+    }
+    #[test]
+    fn launch_outcome_returns_completed_pending_and_unknown_without_starting_a_process() {
+        let runtime = Runtime::new(None);
+        let query = |id: &str| Request {
+            version: 6,
+            action: Action::LaunchOutcome {
+                instance: runtime.instance.clone(),
+                operation_id: id.to_owned(),
+            },
+        };
+        assert!(runtime.execute(query("absent")).is_err());
+        {
+            let mut operations = runtime.operations.lock().expect("operations");
+            operations.insert("pending".into(), (String::new(), None));
+        }
+        assert!(matches!(
+            runtime.execute(query("pending")).expect("pending"),
+            ResponseResult::LaunchPending {
+                launch_pending: true
+            }
+        ));
+        let request = launch(runtime.instance.clone(), "finished", "");
+        let original = runtime.execute(request).expect("stored outcome");
+        let replay = runtime.execute(query("finished")).expect("read outcome");
+        let ResponseResult::LaunchCompleted { launch_outcome } = replay else {
+            panic!("expected completed outcome");
+        };
+        assert_eq!(
+            serde_json::to_string(&original).expect("json"),
+            serde_json::to_string(&launch_outcome).expect("json")
+        );
+        assert!(runtime.manager.ids().expect("sessions").is_empty());
     }
 }

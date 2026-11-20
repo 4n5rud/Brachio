@@ -1,7 +1,9 @@
 //! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -11,9 +13,11 @@ use brachio_core::status::AgentState;
 use brachio_pty::SessionId;
 use brachio_runtime::client::{Client, ClientError, Following};
 use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
+use serde::{Deserialize, Serialize};
 use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tokio::sync::{Mutex as AsyncMutex, OnceCell};
+use uuid::Uuid;
 
 use crate::runtime_client;
 use crate::terminal::{send, send_message, ChannelMessage};
@@ -60,6 +64,7 @@ struct Attached {
 pub struct RuntimeTerminals {
     client: OnceCell<Client>,
     restart: AsyncMutex<()>,
+    launch_lock: AsyncMutex<()>,
     attached: Mutex<HashMap<SessionId, Attached>>,
     handles: AtomicU64,
 }
@@ -128,15 +133,88 @@ impl RuntimeTerminals {
         let Some(current) = self.client().await? else {
             return Ok(None);
         };
-        let (client, existing) = self.locate_with_restart(&current, &key).await?;
-        let attached = existing.is_some();
+        let _launch_guard = self.launch_lock.lock().await;
+        let pending = pending_launch(&key)?;
+        let (client, existing, attached) = if pending.is_some() {
+            (current.clone(), None, false)
+        } else {
+            let (client, existing) = self.locate_with_restart(&current, &key).await?;
+            let attached = existing.is_some();
+            (client, existing, attached)
+        };
         if !attached {
             show_last_screen(&client, &key, &channel).await;
         }
         let reply = match existing {
             Some(reply) => reply,
-            None => client.call(launch_action(&key, launch)).await?,
+            None => {
+                let record = match pending {
+                    Some(record) => record,
+                    None => {
+                        let hello = client.call(Action::Hello).await?;
+                        let ResponseResult::Hello { runtime } = hello.result else {
+                            bail!("runtime did not provide its protocol version");
+                        };
+                        if runtime.current_version < 6 {
+                            bail!("the running terminal runtime cannot safely start a new session; update or restart the runtime");
+                        }
+                        let record = PendingLaunch {
+                            key: key.clone(),
+                            instance: hello.instance,
+                            operation_id: Uuid::new_v4().to_string(),
+                        };
+                        save_pending_launch(&record)?;
+                        let action = launch_action(&key, launch, &record);
+                        let result = client.call(action).await?;
+                        let attached = self
+                            .attach_launch_reply(key, client, result, channel, agent, false)
+                            .await?;
+                        remove_pending_launch(&record)?;
+                        return Ok(attached);
+                    }
+                };
+                let result_reply_placeholder = client
+                    .call(Action::LaunchOutcome {
+                        instance: record.instance.clone(),
+                        operation_id: record.operation_id.clone(),
+                    })
+                    .await?;
+                let result = match result_reply_placeholder.result {
+                    ResponseResult::LaunchPending { .. } => {
+                        bail!("terminal launch is still in progress")
+                    }
+                    ResponseResult::LaunchCompleted { launch_outcome } => *launch_outcome,
+                    _ => bail!("terminal runtime sent an unexpected launch outcome"),
+                };
+                if let ResponseResult::Error { error } = result {
+                    remove_pending_launch(&record)?;
+                    bail!("terminal launch failed: {error}");
+                }
+                let result = Reply {
+                    result,
+                    ..result_reply_placeholder
+                };
+                let attached = self
+                    .attach_launch_reply(key, client, result, channel, agent, false)
+                    .await?;
+                remove_pending_launch(&record)?;
+                return Ok(attached);
+            }
         };
+        drop(_launch_guard);
+        self.attach_launch_reply(key, client, reply, channel, agent, attached)
+            .await
+    }
+
+    async fn attach_launch_reply(
+        &self,
+        key: String,
+        client: Client,
+        reply: Reply,
+        channel: Channel<InvokeResponseBody>,
+        agent: bool,
+        attached: bool,
+    ) -> Result<Option<(SessionId, bool)>> {
         let ResponseResult::Success { session, .. } = reply.result else {
             bail!("the terminal runtime sent an unexpected reply");
         };
@@ -312,8 +390,10 @@ async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>), 
     Ok((current.clone(), None))
 }
 
-fn launch_action(key: &str, launch: Launch) -> Action {
-    Action::Launch {
+fn launch_action(key: &str, launch: Launch, pending: &PendingLaunch) -> Action {
+    Action::LaunchOnce {
+        instance: pending.instance.clone(),
+        operation_id: pending.operation_id.clone(),
         key: key.to_owned(),
         cwd: launch.cwd,
         program: launch.program,
@@ -322,6 +402,70 @@ fn launch_action(key: &str, launch: Launch) -> Action {
         rows: launch.rows,
         cols: launch.cols,
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingLaunch {
+    key: String,
+    instance: String,
+    operation_id: String,
+}
+
+fn pending_dir() -> Result<PathBuf> {
+    Ok(brachio_runtime::paths::state_directory()?.join("pending-launches"))
+}
+
+fn pending_launch(key: &str) -> Result<Option<PendingLaunch>> {
+    pending_launch_in(&pending_dir()?, key)
+}
+
+fn pending_launch_in(folder: &Path, key: &str) -> Result<Option<PendingLaunch>> {
+    if !folder.exists() {
+        return Ok(None);
+    }
+    let mut found = None;
+    for entry in fs::read_dir(folder)? {
+        let path = entry?.path();
+        let bytes = fs::read(&path)?;
+        if bytes.len() > 16 * 1024 {
+            bail!("pending launch record is too large");
+        }
+        let record: PendingLaunch = serde_json::from_slice(&bytes)?;
+        if record_path(folder, &record)? != path {
+            bail!("pending launch record name does not match its operation");
+        }
+        if record.key == key {
+            if found.is_some() {
+                bail!("multiple pending launches for the same terminal");
+            }
+            found = Some(record);
+        }
+    }
+    Ok(found)
+}
+
+fn record_path(folder: &Path, record: &PendingLaunch) -> Result<PathBuf> {
+    Uuid::parse_str(&record.operation_id)?;
+    Ok(folder.join(format!("{}.json", record.operation_id)))
+}
+
+fn save_pending_launch(record: &PendingLaunch) -> Result<()> {
+    save_pending_launch_in(&pending_dir()?, record)
+}
+
+fn save_pending_launch_in(folder: &Path, record: &PendingLaunch) -> Result<()> {
+    fs::create_dir_all(folder)?;
+    let path = record_path(folder, record)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    serde_json::to_writer(&mut file, record)?;
+    file.flush()?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn remove_pending_launch(record: &PendingLaunch) -> Result<()> {
+    fs::remove_file(record_path(&pending_dir()?, record)?)?;
+    Ok(())
 }
 
 /// Show what a shell that is gone last displayed, so a restart does not look like a blank slate.
@@ -521,5 +665,41 @@ mod tests {
             ["t1:agent", "t1:shell", "t1:agent-abc"]
         );
         assert_eq!(task_terminal_keys("t1", None), ["t1:agent", "t1:shell"]);
+    }
+}
+
+#[cfg(test)]
+mod pending_launch_tests {
+    use super::*;
+
+    #[test]
+    fn pending_record_survives_reopen_and_contains_no_command_data() {
+        let folder = tempfile::tempdir().expect("tempdir");
+        let pending = PendingLaunch {
+            key: "task:agent".into(),
+            instance: Uuid::new_v4().to_string(),
+            operation_id: Uuid::new_v4().to_string(),
+        };
+        save_pending_launch_in(folder.path(), &pending).expect("save");
+        let loaded = pending_launch_in(folder.path(), "task:agent")
+            .expect("read")
+            .expect("pending");
+        assert_eq!(loaded.instance, pending.instance);
+        assert_eq!(loaded.operation_id, pending.operation_id);
+        assert!(pending_launch_in(folder.path(), "other")
+            .expect("read")
+            .is_none());
+        let contents = fs::read_to_string(record_path(folder.path(), &pending).expect("path"))
+            .expect("record");
+        assert!(!contents.contains("program"));
+        assert!(!contents.contains("env"));
+        assert!(save_pending_launch_in(folder.path(), &pending).is_err());
+    }
+
+    #[test]
+    fn corrupted_pending_records_fail_closed() {
+        let folder = tempfile::tempdir().expect("tempdir");
+        fs::write(folder.path().join("broken.json"), b"{").expect("write");
+        assert!(pending_launch_in(folder.path(), "task:agent").is_err());
     }
 }
