@@ -11,6 +11,8 @@ use crate::session::{lock, lost_info, ScreenMark, Session};
 
 #[cfg(test)]
 mod stop_tests;
+#[cfg(test)]
+mod tests;
 
 impl Journal {
     /// Records left by runtimes that are gone. Unreadable files are reported and set aside.
@@ -69,6 +71,19 @@ impl Runtime {
                 saved.insert(record.key, mark);
             }
         }
+    }
+
+    /// One idle-tick pass: reclaim ended programs, then save changed screens.
+    pub(crate) fn maintain(&self) {
+        match lock(&self.sessions) {
+            Ok(mut sessions) => {
+                if let Err(error) = self.keep_ended_programs(&mut sessions) {
+                    eprintln!("cannot reap ended programs: {error:#}");
+                }
+            }
+            Err(error) => eprintln!("cannot reap ended programs: {error:#}"),
+        }
+        self.persist();
     }
 
     /// Move every program that ended by itself out of the live set, keeping its last screen.

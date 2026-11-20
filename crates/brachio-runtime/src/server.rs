@@ -55,7 +55,7 @@ pub(crate) async fn serve(pipe: &str, state_dir: Option<PathBuf>) -> Result<()> 
                 }
             },
             _ = check.tick() => {
-                runtime.persist();
+                runtime.maintain();
                 if runtime.finished() {
                     return Ok(());
                 }
