@@ -67,14 +67,18 @@ pub fn run(command: TaskCommand) -> Result<()> {
     }
 }
 
-fn list() -> Result<()> {
+pub(crate) fn children() -> Result<Vec<ChildTaskInfo>> {
     let (endpoint, key) = mail::endpoint_and_key()?;
     let MailResponse::TaskList { children } =
         mail::call_within(&endpoint, &MailRequest::ListTasks { key }, CALL_TIMEOUT)?
     else {
         bail!("Brachio answered with something unexpected.");
     };
-    print!("{}", format_children(&children));
+    Ok(children)
+}
+
+fn list() -> Result<()> {
+    print!("{}", format_children(&children()?));
     Ok(())
 }
 
