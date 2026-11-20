@@ -34,6 +34,8 @@ pub struct OpenRequest {
     pub resume: bool,
     /// The task's conversation id, for agents that take one.
     pub session_id: Option<String>,
+    /// A Codex conversation picked explicitly from the worktree's history.
+    pub codex_conversation_id: Option<String>,
     /// Working directory.
     pub cwd: PathBuf,
     /// Initial height in rows.
@@ -92,6 +94,34 @@ pub async fn agents_detect() -> Vec<Installed> {
         .unwrap_or_default()
 }
 
+/// Returns Codex resume choices for a task tab that has no live runtime session.
+#[tauri::command]
+pub async fn terminal_codex_conversations(
+    database: State<'_, Database>,
+    hosted: State<'_, RuntimeTerminals>,
+    key: String,
+) -> CommandResult<Vec<brachio_agent::CodexConversation>> {
+    let owner = terminal_authorization::resolve(&*database.lock()?, &key)?;
+    if owner.agent != Some(AgentKind::Codex) {
+        return Err("This terminal is not a Codex tab.".to_owned());
+    }
+    if hosted
+        .has_session(&key)
+        .await
+        .map_err(|error| to_message(&error))?
+    {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        brachio_agent::codex_conversations(&owner.task.worktree_path)
+            .into_iter()
+            .filter(|candidate| uuid::Uuid::parse_str(&candidate.id).is_ok())
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
 /// Opens a terminal and streams its events to `on_event`.
 #[tauri::command]
 pub async fn terminal_open(
@@ -121,6 +151,11 @@ pub async fn terminal_open(
     }
     request.cwd = owner.task.worktree_path;
     request.session_id = owner.conversation;
+    if request.codex_conversation_id.is_some()
+        && (!request.resume || request.agent != Some(AgentKind::Codex))
+    {
+        return Err("A Codex conversation can only be resumed in a Codex tab.".to_owned());
+    }
     // Claude Code can ask the app instead of the terminal when a hook is available.
     let mut environment = terminal_env();
     if let Some(key) = request.key.as_deref() {
@@ -259,7 +294,19 @@ fn agent_command(
     mut options: Vec<String>,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let installed = installed(kind)?;
-    let earlier = if request.resume {
+    let earlier = if let Some(chosen) = &request.codex_conversation_id {
+        if uuid::Uuid::parse_str(chosen).is_err()
+            || !brachio_agent::codex_conversations(&request.cwd)
+                .iter()
+                .any(|candidate| candidate.id == *chosen)
+        {
+            return Err(
+                "The chosen Codex conversation is no longer available for this worktree."
+                    .to_owned(),
+            );
+        }
+        Some(chosen.clone())
+    } else if request.resume {
         earlier_conversation(kind, request.session_id.as_deref())
     } else {
         None

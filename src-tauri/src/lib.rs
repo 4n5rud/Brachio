@@ -189,6 +189,7 @@ pub fn run() {
             terminal::agents_detect,
             update_release::open_update_release,
             terminal::terminal_open,
+            terminal::terminal_codex_conversations,
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
