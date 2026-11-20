@@ -1,8 +1,9 @@
 //! `brachio` helper binary that agents run. `brachio hook permission-request` forwards an
-//! agent's permission question to the app; `brachio mcp` serves read-only task tools.
+//! agent's permission question to the app; `brachio mcp` serves the task tools.
 
 mod mail;
 mod mail_hook;
+mod mcp_tools;
 mod task;
 
 use std::io::Read;
@@ -87,11 +88,11 @@ fn main() -> Result<()> {
         Command::Task { command } => task::run(command),
         Command::Notify { event } => bail!("notify is not implemented yet (event {event}); M1"),
         Command::Mcp => {
-            brachio_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), || {
-                task::children()
-                    .and_then(|children| Ok(serde_json::to_value(children)?))
-                    .map_err(|error| error.to_string())
-            })?;
+            brachio_mcp::serve(
+                std::io::stdin().lock(),
+                std::io::stdout().lock(),
+                mcp_tools::McpTools,
+            )?;
             Ok(())
         }
     }
