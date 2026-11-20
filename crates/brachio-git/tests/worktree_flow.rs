@@ -326,3 +326,31 @@ fn the_merge_target_is_the_remote_copy_of_the_default_branch_when_the_local_one_
         "refs/remotes/origin/main"
     );
 }
+
+#[test]
+fn repositories_inside_a_folder_are_found_two_levels_down_and_their_own_folders_are_not_searched() {
+    let folder = temp_dir();
+    for repo in [
+        "one",
+        "group/two",
+        "group/deep/three",
+        "node_modules/pkg",
+        ".hidden/four",
+    ] {
+        let path = folder.path().join(repo);
+        fs::create_dir_all(path.join(".git")).expect("make repo marker");
+    }
+    fs::create_dir_all(folder.path().join("plain")).expect("make plain folder");
+    fs::create_dir_all(folder.path().join("one/inner/.git")).expect("make nested repo");
+
+    let found: Vec<String> = brachio_git::find_repositories(folder.path())
+        .iter()
+        .map(|path| {
+            path.strip_prefix(folder.path())
+                .expect("inside the folder")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert_eq!(found, ["group/two", "one"]);
+}
