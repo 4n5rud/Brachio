@@ -10,6 +10,8 @@ export interface RepoRecord {
   path: string;
   defaultBranch: string;
   addedAtMs: number;
+  /** False for a plain folder: its tasks run in the folder, with no branch or worktree. */
+  isGit: boolean;
 }
 
 /** A task as the core stores it. */
@@ -40,6 +42,15 @@ export interface CreateTaskRequest {
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
 export const addRepo = (path: string) => invoke<RepoRecord>("repo_add", { path });
+
+/** A git repository found inside a folder project. */
+export interface FolderRepo {
+  path: string;
+  name: string;
+  /** Already a project of its own. */
+  added: boolean;
+}
+export const listFolderRepos = (id: string) => invoke<FolderRepo[]>("folder_source_repos", { id });
 export const listTasks = () => invoke<TaskRecord[]>("task_list");
 /** A task that was just created, with the setup commands its repository asks to run. */
 export type CreatedTask = TaskRecord & { setupCommands: string[]; setupCopyError?: string | null };

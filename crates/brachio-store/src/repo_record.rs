@@ -1,4 +1,4 @@
-//! Registered git repositories.
+//! Registered projects: git repositories and plain folders.
 
 use std::path::{Path, PathBuf};
 
@@ -17,10 +17,12 @@ pub struct RepoRecord {
     pub name: String,
     /// Absolute path of the repository root.
     pub path: PathBuf,
-    /// Branch new tasks start from, for example `main`.
+    /// Branch new tasks start from, for example `main`. Empty for a plain folder.
     pub default_branch: String,
     /// When the repository was added.
     pub added_at_ms: i64,
+    /// False for a plain folder: its tasks run in the folder itself, with no branch or worktree.
+    pub is_git: bool,
 }
 
 /// Fields for a new repository row.
@@ -36,9 +38,11 @@ pub struct NewRepo<'a> {
     pub default_branch: &'a str,
     /// Creation time.
     pub added_at_ms: i64,
+    /// False for a plain folder.
+    pub is_git: bool,
 }
 
-const COLUMNS: &str = "id, name, path, default_branch, added_at_ms";
+const COLUMNS: &str = "id, name, path, default_branch, added_at_ms, is_git";
 
 impl RepoRecord {
     /// Adds a repository.
@@ -47,14 +51,15 @@ impl RepoRecord {
     /// Fails when the path or id is already registered.
     pub fn insert(connection: &Connection, repo: &NewRepo<'_>) -> Result<Self, StoreError> {
         connection.execute(
-            "INSERT INTO repos (id, name, path, default_branch, added_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO repos (id, name, path, default_branch, added_at_ms, is_git)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 repo.id,
                 repo.name,
                 repo.path.to_string_lossy(),
                 repo.default_branch,
-                repo.added_at_ms
+                repo.added_at_ms,
+                repo.is_git
             ],
         )?;
         Self::get(connection, repo.id)
@@ -117,6 +122,7 @@ impl RepoRecord {
             path: PathBuf::from(path),
             default_branch: row.get(3)?,
             added_at_ms: row.get(4)?,
+            is_git: row.get(5)?,
         })
     }
 }
@@ -133,6 +139,7 @@ mod tests {
             path,
             default_branch: "main",
             added_at_ms: 1,
+            is_git: true,
         }
     }
 
