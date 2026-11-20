@@ -9,9 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use brachio_agent::AgentKind;
 use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
 use brachio_store::{ChildInsertError, NewRepo, NewTask, RepoRecord, TaskRecord};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+use crate::runtime_terminals::RuntimeTerminals;
 
 /// App state that owns the database connection.
 pub struct Database(pub Mutex<Connection>);
@@ -623,6 +625,50 @@ pub struct TaskLoss {
     unpushed_commits: u32,
     ignored_entries: u32,
     ignored_examples: Vec<String>,
+    running_terminals: usize,
+}
+
+/// Stable start of the refusal, so the UI can recognise it.
+const TERMINAL_RUNNING_PREFIX: &str = "terminal still running:";
+
+/// Refuses deletion while a terminal of the task runs, or when that could not be checked.
+fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), String> {
+    let keys =
+        live.map_err(|_| "could not verify that the task's terminals are stopped".to_owned())?;
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let panes: Vec<&str> = keys
+        .iter()
+        .map(|key| key.split_once(':').map_or(key.as_str(), |(_, pane)| pane))
+        .collect();
+    Err(format!(
+        "{TERMINAL_RUNNING_PREFIX} This task still has a running terminal ({}). Stop it, then delete the task.",
+        panes.join(", ")
+    ))
+}
+
+/// Terminals of the task that are still running, or why that could not be told.
+async fn live_task_terminals(
+    database: &Database,
+    terminals: &RuntimeTerminals,
+    task_id: &str,
+) -> Result<Vec<String>, String> {
+    let second_tab: Option<String> = {
+        let connection = database.lock()?;
+        connection
+            .query_row(
+                "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(to_text)?
+    };
+    terminals
+        .live_keys_for_task(task_id, second_tab.as_deref())
+        .await
+        .map_err(to_text)
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -644,6 +690,7 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
 #[tauri::command]
 pub async fn task_delete_preview(
     database: State<'_, Database>,
+    terminals: State<'_, RuntimeTerminals>,
     id: String,
 ) -> Result<TaskLoss, String> {
     let (task, repo) = archived_task(&database, &id)?;
@@ -653,8 +700,12 @@ pub async fn task_delete_preview(
             unpushed_commits: 0,
             ignored_entries: 0,
             ignored_examples: Vec::new(),
+            running_terminals: 0,
         });
     }
+    let running_terminals = live_task_terminals(&database, &terminals, &id)
+        .await
+        .map_or(0, |keys| keys.len());
     let work = tauri::async_runtime::spawn_blocking(move || {
         brachio_git::unsaved_work(&Git::new(&repo.path), &task.worktree_path, &task.branch)
     })
@@ -666,6 +717,7 @@ pub async fn task_delete_preview(
         unpushed_commits: work.unpushed_commits,
         ignored_entries: work.ignored_entries,
         ignored_examples: work.ignored_examples,
+        running_terminals,
     })
 }
 
@@ -675,6 +727,7 @@ pub async fn task_delete_preview(
 pub async fn task_delete(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
+    terminals: State<'_, RuntimeTerminals>,
     id: String,
 ) -> Result<(), String> {
     let repo_id = TaskRecord::get(&*database.lock()?, &id)
@@ -684,6 +737,7 @@ pub async fn task_delete(
     let (task, repo) = archived_task(&database, &id)?;
     // A folder project's task runs in the user's own folder, which must never be removed.
     if repo.is_git {
+        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &id).await)?;
         tauri::async_runtime::spawn_blocking(move || {
             brachio_git::discard_worktree(&Git::new(&repo.path), &task.worktree_path, &task.branch)
         })
@@ -1268,5 +1322,34 @@ mod agent_child_limit_tests {
         assert_eq!(listed.matches("worktree ").count(), 2, "{listed}");
         let branches = git_output(&repo_path, &["branch", "--format=%(refname:short)"]);
         assert_eq!(branches.lines().count(), 2, "{branches}");
+    }
+}
+
+#[cfg(test)]
+mod terminal_guard_tests {
+    use super::ensure_no_live_terminals;
+
+    #[test]
+    fn no_live_terminal_allows_deletion() {
+        assert_eq!(ensure_no_live_terminals(Ok(Vec::new())), Ok(()));
+    }
+
+    #[test]
+    fn a_live_terminal_refuses_with_the_stable_prefix() {
+        let refusal =
+            ensure_no_live_terminals(Ok(vec!["t1:agent".to_owned()])).expect_err("refused");
+        assert_eq!(
+            refusal,
+            "terminal still running: This task still has a running terminal (agent). Stop it, then delete the task."
+        );
+    }
+
+    #[test]
+    fn an_unanswered_runtime_refuses() {
+        let refusal = ensure_no_live_terminals(Err("boom".to_owned())).expect_err("refused");
+        assert_eq!(
+            refusal,
+            "could not verify that the task's terminals are stopped"
+        );
     }
 }

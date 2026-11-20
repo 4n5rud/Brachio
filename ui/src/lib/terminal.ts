@@ -84,7 +84,10 @@ export interface TerminalHandle {
   attached: boolean;
   write(data: string): Promise<void>;
   resize(rows: number, cols: number): Promise<void>;
+  /** Stops the program. */
   close(): Promise<void>;
+  /** Only stops watching; a runtime-hosted program keeps running. Rejects for an in-app terminal. */
+  detach(): Promise<void>;
 }
 
 export async function openTerminal(
@@ -106,6 +109,7 @@ export async function openTerminal(
     write: terminalInputWriter((data) => invoke("terminal_write", { id, data })),
     resize: (rows, cols) => invoke("terminal_resize", { id, rows, cols }),
     close: () => invoke("terminal_close", { id }),
+    detach: () => invoke("terminal_detach", { id }),
   };
 }
 

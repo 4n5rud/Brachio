@@ -3,6 +3,7 @@
 use std::io::{self, Read};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -10,6 +11,8 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const POLL_EVERY: Duration = Duration::from_millis(10);
+/// Extra time to read the pipes when the deadline already passed as the child exited.
+const DRAIN_GRACE: Duration = Duration::from_millis(200);
 /// How much standard error is kept. A program that prints more still runs on; the rest is read
 /// and dropped, so it cannot fill the pipe and stall or fill memory.
 const KEPT_STDERR: usize = 1024 * 1024;
@@ -64,7 +67,8 @@ pub fn output_capped(
         .stderr
         .take()
         .map(|pipe| drain_keeping(pipe, KEPT_STDERR));
-    let deadline = Instant::now() + limit;
+    let started = Instant::now();
+    let deadline = started + limit;
     let status = loop {
         if over.load(Ordering::Acquire) {
             let _ = child.kill();
@@ -84,11 +88,19 @@ pub fn output_capped(
         }
         thread::sleep(POLL_EVERY);
     };
+    let now = Instant::now();
+    let drain_until = if now >= deadline {
+        now + DRAIN_GRACE
+    } else {
+        deadline
+    };
+    let stdout = collect(stdout, drain_until, limit)?;
+    let stderr = collect(stderr, drain_until, limit)?;
     Ok(Capped {
         output: Output {
             status,
-            stdout: collect(stdout),
-            stderr: collect(stderr),
+            stdout,
+            stderr,
         },
         truncated: over.load(Ordering::Acquire),
     })
@@ -98,7 +110,8 @@ fn drain(
     mut pipe: impl Read + Send + 'static,
     cap: usize,
     over: Option<Arc<AtomicBool>>,
-) -> thread::JoinHandle<Vec<u8>> {
+) -> Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut bytes = Vec::new();
         let mut chunk = [0u8; 16 * 1024];
@@ -115,11 +128,13 @@ fn drain(
                 break;
             }
         }
-        bytes
-    })
+        let _ = sender.send(bytes);
+    });
+    receiver
 }
 
-fn drain_keeping(mut pipe: impl Read + Send + 'static, keep: usize) -> thread::JoinHandle<Vec<u8>> {
+fn drain_keeping(mut pipe: impl Read + Send + 'static, keep: usize) -> Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut bytes = Vec::new();
         let mut chunk = [0u8; 16 * 1024];
@@ -132,14 +147,33 @@ fn drain_keeping(mut pipe: impl Read + Send + 'static, keep: usize) -> thread::J
                 }
             }
         }
-        bytes
-    })
+        let _ = sender.send(bytes);
+    });
+    receiver
 }
 
-fn collect(reader: Option<thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
-    reader
-        .and_then(|reader| reader.join().ok())
-        .unwrap_or_default()
+/// Waits for a reader only until `until`. A descendant that inherited the pipe keeps it open
+/// after the child exits, so the reader is abandoned instead of joined; it ends by itself when
+/// the pipe finally closes and its send then goes nowhere.
+fn collect(
+    reader: Option<Receiver<Vec<u8>>>,
+    until: Instant,
+    limit: Duration,
+) -> io::Result<Vec<u8>> {
+    let Some(reader) = reader else {
+        return Ok(Vec::new());
+    };
+    match reader.recv_timeout(until.saturating_duration_since(Instant::now())) {
+        Ok(bytes) => Ok(bytes),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "timed out after {} seconds: a background process kept the output open",
+                limit.as_secs()
+            ),
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Ok(Vec::new()),
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +212,21 @@ mod tests {
             .expect_err("must time out");
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn returns_in_time_when_a_descendant_keeps_the_pipes_open() {
+        let script = if cfg!(windows) {
+            "start /b ping -n 4 127.0.0.1 >nul & echo hi"
+        } else {
+            "sleep 3 & echo hi"
+        };
+        let started = Instant::now();
+        let result = output_within(&mut shell(script), Duration::from_millis(500));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        if let Err(error) = result {
+            assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        }
     }
 
     #[test]

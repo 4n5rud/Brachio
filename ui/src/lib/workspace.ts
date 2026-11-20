@@ -67,6 +67,7 @@ export interface TaskLoss {
   /** Files git ignores, never committed, such as `.env.local`. */
   ignoredEntries: number;
   ignoredExamples: string[];
+  runningTerminals: number;
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
 export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });

@@ -47,6 +47,8 @@ pub enum Notice {
     Closed(u64),
 }
 
+type Delivered = Box<dyn Fn(&[String]) + Send + Sync>;
+
 /// The open questions, and who to tell about changes.
 pub struct Approvals {
     pending: Mutex<HashMap<u64, oneshot::Sender<Decision>>>,
@@ -54,6 +56,7 @@ pub struct Approvals {
     knows: Box<dyn Fn(&str) -> bool + Send + Sync>,
     notify: Box<dyn Fn(Notice) + Send + Sync>,
     mail: Box<dyn Fn(MailRequest) -> MailResponse + Send + Sync>,
+    delivered: Delivered,
     children: Box<dyn ChildTasks>,
 }
 
@@ -78,13 +81,30 @@ impl Approvals {
     /// Like [`Approvals::new`], and `mail` answers the message requests that arrive on the same
     /// socket. `children` checks and carries out requests to create tasks, which wait for the
     /// user like a permission question.
+    #[cfg(test)]
     pub fn with_mail(
         knows: impl Fn(&str) -> bool + Send + Sync + 'static,
         notify: impl Fn(Notice) + Send + Sync + 'static,
         mail: impl Fn(MailRequest) -> MailResponse + Send + Sync + 'static,
         children: impl ChildTasks + 'static,
     ) -> Arc<Self> {
+        Self::with_delivery(knows, notify, mail, |_| {}, children)
+    }
+
+    /// Like [`Approvals::with_mail`], and `delivered` is given the ids of the messages a `check`
+    /// answer carried once that answer was written to the client, so the caller marks them
+    /// read. A write that succeeds only means the bytes were handed to the operating system:
+    /// delivery is at least once, so a client that dies right after may see them again, but they
+    /// are never lost to a client that had already gone.
+    pub fn with_delivery(
+        knows: impl Fn(&str) -> bool + Send + Sync + 'static,
+        notify: impl Fn(Notice) + Send + Sync + 'static,
+        mail: impl Fn(MailRequest) -> MailResponse + Send + Sync + 'static,
+        delivered: impl Fn(&[String]) + Send + Sync + 'static,
+        children: impl ChildTasks + 'static,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            delivered: Box::new(delivered),
             pending: Mutex::default(),
             next: AtomicU64::new(1),
             knows: Box::new(knows),
@@ -120,6 +140,7 @@ impl Approvals {
         let value: Value = serde_json::from_slice(&message)?;
         if mailbox::is_mail(&value) {
             let request: MailRequest = serde_json::from_value(value)?;
+            let consuming = matches!(request, MailRequest::Check { peek: false, .. });
             let response = match request {
                 MailRequest::CreateTask {
                     key,
@@ -166,6 +187,12 @@ impl Approvals {
                 other => (self.mail)(other),
             };
             write_message(reader.get_mut(), &response, MAX_RESPONSE).await?;
+            if let (true, MailResponse::Messages { messages, .. }) = (consuming, &response) {
+                let ids: Vec<String> = messages.iter().map(|message| message.id.clone()).collect();
+                if !ids.is_empty() {
+                    (self.delivered)(&ids);
+                }
+            }
             return Ok(());
         }
         let request: ApprovalRequest = serde_json::from_value(value)?;
@@ -432,6 +459,131 @@ mod tests {
                     message: "asked by t:agent".to_owned()
                 }
             );
+        });
+    }
+
+    fn check_request() -> brachio_runtime::mailbox::MailRequest {
+        brachio_runtime::mailbox::MailRequest::Check {
+            key: "t:agent".to_owned(),
+            limit: None,
+            peek: false,
+        }
+    }
+
+    type Store = Arc<Mutex<rusqlite::Connection>>;
+
+    /// A socket over a real store holding two unread messages. The first answer is slow, so a
+    /// client can leave before it is written.
+    fn mailbox_over_store(name: &str) -> Store {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use brachio_runtime::mailbox::{MailMessage, MailRequest, MailResponse};
+
+        let store = Arc::new(Mutex::new(brachio_store::open_in_memory().expect("open")));
+        {
+            let connection = store.lock().expect("lock");
+            for (id, at) in [("m1", 1), ("m2", 2)] {
+                brachio_store::send_message(
+                    &connection,
+                    &brachio_store::NewMessage {
+                        id,
+                        from_key: "s:agent",
+                        to_key: "t:agent",
+                        kind: "status",
+                        priority: "normal",
+                        subject: "hi",
+                        body: "",
+                        payload_json: None,
+                        reply_to: None,
+                        request_id: None,
+                        created_at_ms: at,
+                    },
+                )
+                .expect("send");
+            }
+        }
+        let reading = Arc::clone(&store);
+        let marking = Arc::clone(&store);
+        let slow = AtomicBool::new(true);
+        let approvals = Approvals::with_delivery(
+            |_| false,
+            |_| {},
+            move |request| {
+                let MailRequest::Check { key, .. } = request else {
+                    unreachable!("only check is used");
+                };
+                let messages = {
+                    let connection = reading.lock().expect("lock");
+                    brachio_store::peek_next_batch(&connection, &key, 10).expect("peek")
+                };
+                if slow.swap(false, Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(400));
+                }
+                MailResponse::Messages {
+                    messages: messages
+                        .into_iter()
+                        .map(|message| MailMessage {
+                            id: message.id,
+                            thread_id: message.thread_id,
+                            from: message.from_key,
+                            to: message.to_key,
+                            from_title: None,
+                            kind: message.kind,
+                            priority: message.priority,
+                            subject: message.subject,
+                            body: message.body,
+                            payload: None,
+                            created_at_ms: message.created_at_ms,
+                            read: false,
+                        })
+                        .collect(),
+                    unread_left: 0,
+                }
+            },
+            move |ids| {
+                let mut connection = marking.lock().expect("lock");
+                brachio_store::mark_read(&mut connection, ids, 50).expect("mark");
+            },
+            super::NoChildTasks,
+        );
+        let listener = transport::listen(name).expect("listen");
+        tauri::async_runtime::spawn(approvals.serve(listener));
+        store
+    }
+
+    fn unread_ids(store: &Store) -> Vec<String> {
+        let connection = store.lock().expect("lock");
+        brachio_store::peek_unread(&connection, "t:agent", 10)
+            .expect("peek")
+            .into_iter()
+            .map(|message| message.id)
+            .collect()
+    }
+
+    #[test]
+    fn messages_stay_unread_when_the_client_leaves_before_the_answer() {
+        tauri::async_runtime::block_on(async {
+            use brachio_runtime::mailbox::MailResponse;
+            use brachio_runtime::wire::{write_message, MAX_MESSAGE};
+
+            let name = format!("ack-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+            let store = mailbox_over_store(&name);
+
+            let mut stream = transport::connect(&name).await.expect("connect");
+            write_message(&mut stream, &check_request(), MAX_MESSAGE)
+                .await
+                .expect("send");
+            drop(stream);
+            tokio::time::sleep(Duration::from_millis(900)).await;
+            assert_eq!(unread_ids(&store), ["m1", "m2"]);
+
+            let answer = brachio_runtime::mailbox::call(&name, &check_request())
+                .await
+                .expect("answer");
+            assert!(
+                matches!(answer, MailResponse::Messages { ref messages, .. } if messages.len() == 2)
+            );
+            assert!(unread_ids(&store).is_empty());
         });
     }
 
