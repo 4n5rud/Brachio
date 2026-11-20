@@ -7,7 +7,8 @@ use brachio_runtime::endpoint::{self, Liveness};
 use brachio_runtime::protocol;
 use brachio_runtime::transport;
 use brachio_runtime::wire::{
-    read_message, write_message, Action, Request, IO_TIMEOUT, MAX_MESSAGE, MAX_RESPONSE,
+    await_outcome, read_message, write_message, Action, Request, IO_TIMEOUT, MAX_MESSAGE,
+    MAX_RESPONSE,
 };
 use clap::{Parser, Subcommand};
 use interprocess::local_socket::tokio::Stream;
@@ -58,6 +59,8 @@ pub(crate) async fn run() -> Result<()> {
 }
 
 pub(crate) async fn request(mut stream: Stream, protocol: u8, action: Action) -> Result<()> {
+    let changes_state = action.changes_state();
+    let wait_for_completion = action.is_session_lifecycle();
     let following = matches!(action, Action::Follow { .. } | Action::FollowFrame { .. });
     tokio::time::timeout(
         IO_TIMEOUT,
@@ -72,9 +75,16 @@ pub(crate) async fn request(mut stream: Stream, protocol: u8, action: Action) ->
     )
     .await??;
     let mut reader = BufReader::new(stream);
-    let first = tokio::time::timeout(IO_TIMEOUT, read_message(&mut reader, MAX_RESPONSE))
-        .await??
-        .context("runtime closed before responding")?;
+    let reason = if changes_state {
+        "runtime disconnected before confirming the operation outcome"
+    } else {
+        "runtime closed before responding"
+    };
+    let first = await_outcome(wait_for_completion, read_message(&mut reader, MAX_RESPONSE))
+        .await
+        .context(reason)?
+        .context(reason)?
+        .context(reason)?;
     let completed = print_response(&first, protocol)?;
     if following {
         if completed {

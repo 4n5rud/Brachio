@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PrStatusReport } from "./pr-status";
-import { delayAfter, pickDue } from "./pr-status-store";
+import { loadPrStatus } from "./pr-status";
+import { delayAfter, forgetPrStatusesExcept, pickDue, prReport, refreshPrStatus } from "./pr-status-store";
+
+vi.mock("./pr-status", async (original) => ({ ...(await original<typeof import("./pr-status")>()), loadPrStatus: vi.fn() }));
 
 const base: PrStatusReport = {
   snapshot: null,
@@ -28,5 +31,27 @@ describe("pull request status scheduler", () => {
     expect(delayAfter({ ...base, noPullRequest: true }, undefined)).toBe(300_000);
     expect(delayAfter(undefined, "backend failed")).toBe(60_000);
     expect(delayAfter({ ...base, error: "offline", retryInSeconds: 90 }, undefined)).toBe(91_000);
+  });
+});
+
+describe("pull request status retention", () => {
+  it("drops a removed task and ignores its lookup that finishes later", async () => {
+    let finish: (report: PrStatusReport) => void = () => {};
+    vi.mocked(loadPrStatus)
+      .mockResolvedValueOnce(base)
+      .mockResolvedValueOnce(base)
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await refreshPrStatus("kept");
+    await refreshPrStatus("gone");
+    expect(prReport("gone")).toBe(base);
+
+    const slow = refreshPrStatus("slow");
+    forgetPrStatusesExcept(new Set(["kept"]));
+    finish({ ...base, checkedAtMs: 2 });
+    await slow;
+
+    expect(prReport("kept")).toBe(base);
+    expect(prReport("gone")).toBeUndefined();
+    expect(prReport("slow")).toBeUndefined();
   });
 });
