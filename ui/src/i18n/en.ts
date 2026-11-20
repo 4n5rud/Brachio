@@ -63,9 +63,9 @@ export const en = {
   "task.split": "Split",
   "task.more": "More",
 
-  "approval.title": "Run this command?",
+  "approval.title": "Allow this tool request?",
   "approval.openTab": "Open the tab awaiting approval",
-  "approval.inWorktree": "runs inside the worktree",
+  "approval.details": "Full tool request",
   "approval.allowOnce": "Allow once",
   "approval.allowAlways": "Always allow in this task",
   "approval.deny": "Deny",

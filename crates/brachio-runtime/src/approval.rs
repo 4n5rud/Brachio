@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::value::RawValue;
 use tokio::io::BufReader;
 
 use crate::transport;
@@ -24,9 +24,8 @@ pub const WAIT_VARIABLE: &str = "BRACHIO_APPROVAL_WAIT_SECONDS";
 /// The wait when [`WAIT_VARIABLE`] is not set.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(300);
 
-/// Strings in a tool's input longer than this are cut before they cross the socket; the app only
-/// shows them.
-const LONGEST_SHOWN: usize = 2_000;
+/// Larger requests go to the agent's own permission prompt.
+const MAX_REVIEW_BYTES: usize = 2_000;
 
 /// One permission question from an agent.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -37,10 +36,33 @@ pub struct ApprovalRequest {
     pub session_id: String,
     /// The tool the agent wants to use, such as `Bash`.
     pub tool_name: String,
-    /// The tool's arguments, with long text shortened.
-    pub tool_input: Value,
+    /// The complete JSON input. The new wire field makes legacy previews fall back to the terminal.
+    pub review_input: String,
     /// Identifies this use of the tool.
     pub tool_use_id: String,
+}
+
+impl ApprovalRequest {
+    /// The complete tool name and input as displayable JSON, or `None` to defer to the terminal.
+    #[must_use]
+    pub fn review(&self) -> Option<String> {
+        let name = serde_json::to_string(&self.tool_name).ok()?;
+        let input = &self.review_input;
+        // Keep literal control and direction-changing characters out of the approval view.
+        // JSON escapes remain visible as text, and raw JSON preserves every argument exactly.
+        if name.len().saturating_add(input.len()) >= MAX_REVIEW_BYTES
+            || self.tool_name.is_empty()
+            || !input.starts_with('{')
+            || !name
+                .bytes()
+                .chain(input.bytes())
+                .all(|byte| matches!(byte, b' '..=b'~' | b'\n'))
+        {
+            return None;
+        }
+        serde_json::from_str::<&RawValue>(input).ok()?;
+        Some(format!("{name}\n{input}"))
+    }
 }
 
 /// The user's answer.
@@ -63,8 +85,7 @@ pub enum Decision {
 struct HookInput {
     session_id: String,
     tool_name: String,
-    #[serde(default)]
-    tool_input: Value,
+    tool_input: Box<RawValue>,
     #[serde(default)]
     tool_use_id: String,
 }
@@ -73,30 +94,15 @@ struct HookInput {
 #[must_use]
 pub fn request_from_hook_input(input: &str, key: &str) -> Option<ApprovalRequest> {
     let parsed: HookInput = serde_json::from_str(input).ok()?;
-    Some(ApprovalRequest {
+    let request = ApprovalRequest {
         key: key.to_owned(),
         session_id: parsed.session_id,
         tool_name: parsed.tool_name,
-        tool_input: shorten(parsed.tool_input),
+        review_input: parsed.tool_input.get().to_owned(),
         tool_use_id: parsed.tool_use_id,
-    })
-}
-
-fn shorten(value: Value) -> Value {
-    match value {
-        Value::String(text) if text.chars().count() > LONGEST_SHOWN => {
-            let cut: String = text.chars().take(LONGEST_SHOWN).collect();
-            Value::String(format!("{cut}…"))
-        }
-        Value::Array(items) => Value::Array(items.into_iter().map(shorten).collect()),
-        Value::Object(fields) => Value::Object(
-            fields
-                .into_iter()
-                .map(|(name, value)| (name, shorten(value)))
-                .collect(),
-        ),
-        other => other,
-    }
+    };
+    request.review()?;
+    Some(request)
 }
 
 /// The text the hook prints for an agent. `None` prints nothing, which leaves the question to
@@ -136,7 +142,7 @@ pub async fn ask(endpoint: &str, request: &ApprovalRequest, wait: Duration) -> O
 
 #[cfg(test)]
 mod tests {
-    use super::{hook_output, request_from_hook_input, Decision};
+    use super::{hook_output, request_from_hook_input, ApprovalRequest, Decision};
 
     #[test]
     fn a_permission_question_becomes_a_request_with_the_terminal_key() {
@@ -144,7 +150,10 @@ mod tests {
         let request = request_from_hook_input(input, "task1:agent").expect("request");
         assert_eq!(request.key, "task1:agent");
         assert_eq!(request.tool_name, "Bash");
-        assert_eq!(request.tool_input["command"], "pnpm add zod");
+        assert_eq!(
+            request.review().as_deref(),
+            Some("\"Bash\"\n{\"command\":\"pnpm add zod\"}")
+        );
     }
 
     #[test]
@@ -154,15 +163,42 @@ mod tests {
     }
 
     #[test]
-    fn long_text_is_cut_before_it_is_sent() {
+    fn long_nested_input_goes_to_the_terminal() {
         let long = "x".repeat(5_000);
         let input = format!(
-            r#"{{"session_id":"s","tool_name":"Write","tool_input":{{"content":"{long}"}}}}"#
+            r#"{{"session_id":"s","tool_name":"Write","tool_input":{{"files":[{{"content":"{long}"}}]}}}}"#
         );
-        let request = request_from_hook_input(&input, "k").expect("request");
-        let content = request.tool_input["content"].as_str().expect("text");
-        assert_eq!(content.chars().count(), 2_001);
-        assert!(content.ends_with('…'));
+        assert!(request_from_hook_input(&input, "k").is_none());
+    }
+
+    #[test]
+    fn review_keeps_all_fields_and_the_original_json_text() {
+        let input = r#"{"session_id":"s","tool_name":"Edit","tool_input":{"file_path":"src/a.ts","old_string":"x","new_string":"y\nz","offset":9007199254740993}}"#;
+        let request = request_from_hook_input(input, "k").expect("request");
+        assert_eq!(
+            request.review().expect("review"),
+            concat!(
+                "\"Edit\"\n",
+                r#"{"file_path":"src/a.ts","old_string":"x","new_string":"y\nz","offset":9007199254740993}"#
+            )
+        );
+    }
+
+    #[test]
+    fn missing_input_and_unsafe_display_text_go_to_the_terminal() {
+        assert!(request_from_hook_input(r#"{"session_id":"s","tool_name":"Edit"}"#, "k").is_none());
+        let input = format!(
+            r#"{{"session_id":"s","tool_name":"Edit","tool_input":{{"content":"abc{}def"}}}}"#,
+            '\u{202e}',
+        );
+        assert!(request_from_hook_input(&input, "k").is_none());
+    }
+
+    #[test]
+    fn legacy_hook_messages_cannot_open_an_app_approval() {
+        let old =
+            r#"{"key":"k","session_id":"s","tool_name":"Edit","tool_input":{},"tool_use_id":"t"}"#;
+        assert!(serde_json::from_str::<ApprovalRequest>(old).is_err());
     }
 
     #[test]
