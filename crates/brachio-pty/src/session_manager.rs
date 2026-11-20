@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -104,7 +104,7 @@ impl SessionManager {
         reader: Box<dyn Read + Send>,
         sink: EventSink,
     ) -> Result<()> {
-        let (chunk_sender, chunk_receiver) = mpsc::channel();
+        let (chunk_sender, chunk_receiver) = mpsc::sync_channel(OUTPUT_QUEUE_CHUNKS);
         let status = StatusWatch {
             session: Arc::downgrade(shared),
             sink: Arc::clone(&sink),
@@ -233,9 +233,12 @@ impl StatusWatch {
     }
 }
 
+/// Bounds queued PTY output (64 x 16 KiB) so a slow consumer blocks the child instead of growing memory.
+const OUTPUT_QUEUE_CHUNKS: usize = 64;
+
 fn read_until_closed(
     mut reader: Box<dyn Read + Send>,
-    chunks: &Sender<Vec<u8>>,
+    chunks: &SyncSender<Vec<u8>>,
     mut status: StatusWatch,
 ) {
     let mut buffer = vec![0u8; 16 * 1024];
@@ -325,6 +328,72 @@ mod drain_tests {
         let mut batcher = OutputBatcher::new(BatchConfig::default());
         drain_remaining(&receiver, &mut batcher, &|| 0, &sink);
         assert_eq!(*received.lock().expect("lock"), expected);
+    }
+}
+
+#[cfg(test)]
+mod bounded_queue_tests {
+    use std::io::Read;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc, Weak};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use brachio_core::status::OscScanner;
+
+    use super::{read_until_closed, StatusWatch, OUTPUT_QUEUE_CHUNKS};
+
+    const TOTAL_CHUNKS: usize = OUTPUT_QUEUE_CHUNKS * 4;
+    const CHUNK_BYTES: usize = 16 * 1024;
+
+    struct CountingReader {
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl Read for CountingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let index = self.reads.fetch_add(1, Ordering::SeqCst);
+            if index >= TOTAL_CHUNKS {
+                return Ok(0);
+            }
+            buffer[..CHUNK_BYTES].fill((index % 251) as u8);
+            Ok(CHUNK_BYTES)
+        }
+    }
+
+    #[test]
+    fn a_consumer_that_does_not_receive_stops_the_reader_at_the_queue_bound() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let reader = CountingReader {
+            reads: Arc::clone(&reads),
+        };
+        let status = StatusWatch {
+            session: Weak::new(),
+            sink: Arc::new(|_| {}),
+            scanner: OscScanner::new(),
+        };
+        let (sender, receiver) = mpsc::sync_channel(OUTPUT_QUEUE_CHUNKS);
+        let handle = thread::spawn(move || read_until_closed(Box::new(reader), &sender, status));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while reads.load(Ordering::SeqCst) < OUTPUT_QUEUE_CHUNKS + 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let settle = Instant::now() + Duration::from_millis(200);
+        while Instant::now() < settle {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(reads.load(Ordering::SeqCst) <= OUTPUT_QUEUE_CHUNKS + 1);
+
+        let mut received = Vec::new();
+        while let Ok(chunk) = receiver.recv_timeout(Duration::from_secs(5)) {
+            received.extend_from_slice(&chunk);
+        }
+        handle.join().expect("reader exits");
+        let expected: Vec<u8> = (0..TOTAL_CHUNKS)
+            .flat_map(|index| std::iter::repeat_n((index % 251) as u8, CHUNK_BYTES))
+            .collect();
+        assert!(received == expected);
     }
 }
 
