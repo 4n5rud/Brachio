@@ -390,6 +390,7 @@ dependencies = [
  "brachio-agent",
  "brachio-core",
  "brachio-git",
+ "brachio-process",
  "brachio-pty",
  "brachio-runtime",
  "brachio-store",
@@ -397,6 +398,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sysinfo",
  "tauri",
  "tauri-build",
@@ -415,6 +417,7 @@ name = "brachio-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "brachio-mcp",
  "brachio-runtime",
  "clap",
  "interprocess",
@@ -450,6 +453,10 @@ dependencies = [
 [[package]]
 name = "brachio-mcp"
 version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "brachio-process"
@@ -469,6 +476,12 @@ dependencies = [
 [[package]]
 name = "brachio-qa"
 version = "0.0.1"
+dependencies = [
+ "brachio-git",
+ "brachio-process",
+ "tempfile",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "brachio-runtime"

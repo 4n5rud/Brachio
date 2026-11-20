@@ -1,4 +1,3 @@
-import { confirm } from "@tauri-apps/plugin-dialog";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -66,6 +65,8 @@ export function TerminalPane(props: {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
   const [uncertainOperation, setUncertainOperation] = createSignal<string>();
+  const [confirmingReset, setConfirmingReset] = createSignal(false);
+  const [resetError, setResetError] = createSignal<string>();
   const [restoredFrame, setRestoredFrame] = createSignal(false);
   const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation">();
   let reopen: () => void;
@@ -442,16 +443,26 @@ export function TerminalPane(props: {
         {(operation) => (
           <div class="terminal-recovery" role="alert">
             <span>{t("terminal.launchUncertain")}</span>
-            <button type="button" class="button button-sm" onClick={async () => {
-              if (!props.session?.key || !await confirm(t("terminal.launchResetConfirm"), { kind: "warning" })) return;
-              try {
-                await forgetUncertainLaunch(props.session.key, operation());
-                setUncertainOperation(undefined);
-                reopen();
-              } catch (error) {
-                window.alert(String(error));
-              }
-            }}>{t("terminal.launchReset")}</button>
+            <Show
+              when={confirmingReset()}
+              fallback={<button type="button" class="button button-sm" onClick={() => setConfirmingReset(true)}>{t("terminal.launchReset")}</button>}
+            >
+              <span>{t("terminal.launchResetConfirm")}</span>
+              <button type="button" class="button button-sm" onClick={async () => {
+                if (!props.session?.key) return;
+                try {
+                  await forgetUncertainLaunch(props.session.key, operation());
+                  setUncertainOperation(undefined);
+                  setConfirmingReset(false);
+                  setResetError(undefined);
+                  reopen();
+                } catch (error) {
+                  setResetError(String(error));
+                }
+              }}>{t("terminal.launchResetAnyway")}</button>
+              <button type="button" class="button button-sm" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</button>
+            </Show>
+            <Show when={resetError()}>{(message) => <span>{message()}</span>}</Show>
           </div>
         )}
       </Show>

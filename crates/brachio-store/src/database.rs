@@ -12,6 +12,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_task_pr_status.sql"),
     include_str!("../migrations/0006_messages.sql"),
     include_str!("../migrations/0007_repo_is_git.sql"),
+    include_str!("../migrations/0008_retired_secondary_tabs.sql"),
+    include_str!("../migrations/0009_worker_report_generation.sql"),
 ];
 
 /// Why a storage call failed.

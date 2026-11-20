@@ -106,6 +106,88 @@ pub fn output_capped(
     })
 }
 
+/// How a program run by [`stream_stdout`] ended.
+pub struct Streamed {
+    /// The exit status.
+    pub status: std::process::ExitStatus,
+    /// The start of what it printed on standard error.
+    pub stderr: Vec<u8>,
+}
+
+/// Runs `command` and hands its standard output to `on_chunk` piece by piece, so a huge result
+/// is never held in memory. The program is killed once `limit` passes.
+///
+/// # Errors
+/// Fails when the program cannot start, or with `ErrorKind::TimedOut` after the child was killed
+/// for running longer than `limit`.
+pub fn stream_stdout(
+    command: &mut Command,
+    limit: Duration,
+    mut on_chunk: impl FnMut(&[u8]),
+) -> io::Result<Streamed> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stderr = child
+        .stderr
+        .take()
+        .map(|pipe| drain_keeping(pipe, KEPT_STDERR));
+    let deadline = Instant::now() + limit;
+    let timed_out = || {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("timed out after {} seconds", limit.as_secs()),
+        )
+    };
+    if let Some(mut pipe) = child.stdout.take() {
+        // A small queue keeps the reader at most a few chunks ahead of the consumer. The reader
+        // is abandoned on timeout: it ends once the pipe closes and its send finds no receiver.
+        let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(4);
+        thread::spawn(move || {
+            let mut chunk = [0u8; 64 * 1024];
+            while let Ok(read) = pipe.read(&mut chunk) {
+                if read == 0 || sender.send(chunk[..read].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+        loop {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(chunk) => on_chunk(&chunk),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(timed_out());
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    }
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(timed_out());
+        }
+        thread::sleep(POLL_EVERY);
+    };
+    let drain_until = Instant::now().max(deadline) + DRAIN_GRACE;
+    Ok(Streamed {
+        status,
+        stderr: collect(stderr, drain_until, limit)?,
+    })
+}
+
 fn drain(
     mut pipe: impl Read + Send + 'static,
     cap: usize,
@@ -254,6 +336,40 @@ mod tests {
         let output = output_within(&mut shell(script), Duration::from_secs(60)).expect("finishes");
         assert!(output.status.success());
         assert_eq!(output.stderr.len(), KEPT_STDERR);
+    }
+
+    #[test]
+    fn streams_a_large_output_in_pieces_without_losing_any_of_it() {
+        let script = if cfg!(windows) {
+            "for /L %i in (1,1,30000) do @echo line %i"
+        } else {
+            "i=1; while [ $i -le 30000 ]; do echo line $i; i=$((i+1)); done"
+        };
+        let mut seen = Vec::new();
+        let mut largest = 0;
+        let streamed = stream_stdout(&mut shell(script), Duration::from_secs(60), |chunk| {
+            largest = largest.max(chunk.len());
+            seen.extend_from_slice(chunk);
+        })
+        .expect("command runs");
+        assert!(streamed.status.success());
+        assert!(largest <= 64 * 1024);
+        let text = String::from_utf8_lossy(&seen);
+        assert_eq!(text.lines().count(), 30000);
+        assert!(text.contains("line 30000"));
+    }
+
+    #[test]
+    fn a_streamed_command_that_runs_too_long_is_stopped() {
+        let script = if cfg!(windows) {
+            "ping -n 30 127.0.0.1 >nul"
+        } else {
+            "sleep 30"
+        };
+        let error = stream_stdout(&mut shell(script), Duration::from_millis(300), |_| {})
+            .err()
+            .expect("must time out");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]

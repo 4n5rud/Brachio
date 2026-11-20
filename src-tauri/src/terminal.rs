@@ -2,9 +2,10 @@
 //! input, resize, and stop. Output goes back over a per-session channel as
 //! raw bytes, so the web view gets an `ArrayBuffer` with no JSON encoding.
 
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use brachio_agent::{AgentKind, Installed, PromptDelivery, ResolvedCommand};
 use brachio_core::status::AgentState;
@@ -19,7 +20,44 @@ use crate::terminal_status::TerminalStatus;
 use crate::{task_ports, terminal_authorization, workspace::Database};
 
 /// App state that owns every terminal.
-pub struct Terminals(pub Arc<SessionManager>);
+pub struct Terminals(pub Arc<SessionManager>, pub SessionKeys);
+
+/// Which task terminal key each in-app session was opened for; the manager only knows handles.
+#[derive(Default)]
+pub struct SessionKeys(Mutex<HashMap<SessionId, String>>);
+
+impl SessionKeys {
+    pub(crate) fn record(&self, id: SessionId, key: String) {
+        if let Ok(mut keys) = self.0.lock() {
+            keys.insert(id, key);
+        }
+    }
+
+    /// Keys of the task's in-app terminals whose program is still running.
+    ///
+    /// # Errors
+    /// Fails when the session table cannot be read, so the caller can refuse rather than guess.
+    pub fn live_for_task(
+        &self,
+        manager: &SessionManager,
+        task_id: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let live = manager.ids()?;
+        let mut keys = self
+            .0
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terminal key list lock poisoned"))?;
+        keys.retain(|id, _| live.contains(id));
+        let prefix = format!("{task_id}:");
+        let mut found: Vec<String> = keys
+            .values()
+            .filter(|key| key.starts_with(&prefix))
+            .cloned()
+            .collect();
+        found.sort();
+        Ok(found)
+    }
+}
 
 /// What to run in a new terminal.
 #[derive(Debug, Deserialize)]
@@ -122,7 +160,6 @@ pub async fn terminal_codex_conversations(
     .map_err(|error| error.to_string())
 }
 
-/// Opens a terminal and streams its events to `on_event`.
 /// Clear a specific uncertain launch after the user has confirmed the risk.
 #[tauri::command]
 pub async fn terminal_forget_uncertain_launch(
@@ -138,6 +175,7 @@ pub async fn terminal_forget_uncertain_launch(
         .map_err(|error| error.to_string())
 }
 
+/// Opens a terminal and streams its events to `on_event`.
 #[tauri::command]
 pub async fn terminal_open(
     terminals: State<'_, Terminals>,
@@ -246,6 +284,9 @@ pub async fn terminal_open(
         .await
         .map_err(|error| error.to_string())?;
     let id = spawned.map_err(|error| to_message(&error))?;
+    if let Some(key) = request.key.clone() {
+        terminals.1.record(id, key);
+    }
     Ok(Opened {
         id,
         prompt_delivery,
@@ -451,5 +492,48 @@ mod tests {
         })
         .expect("serialize status");
         assert_eq!(status, r#"{"status":{"state":"working"},"message":null}"#);
+    }
+}
+
+#[cfg(test)]
+mod session_key_tests {
+    use std::sync::Arc;
+
+    use brachio_pty::{EventSink, SessionId, SessionManager, SpawnSpec};
+
+    use super::SessionKeys;
+
+    fn long_running() -> SpawnSpec {
+        let (program, args) = if cfg!(windows) {
+            ("cmd.exe", vec!["/c", "ping", "-n", "60", "127.0.0.1"])
+        } else {
+            ("sleep", vec!["60"])
+        };
+        SpawnSpec {
+            program: program.to_owned(),
+            args: args.into_iter().map(str::to_owned).collect(),
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        }
+    }
+
+    #[test]
+    fn a_running_in_app_session_is_found_by_its_task_and_a_gone_one_is_not() {
+        let manager = Arc::new(SessionManager::default());
+        let sink: EventSink = Arc::new(|_| {});
+        let live = manager.spawn(&long_running(), sink).expect("spawn");
+        let keys = SessionKeys::default();
+        keys.record(live, "t1:agent".to_owned());
+        keys.record(SessionId::from_raw(999), "t1:shell".to_owned());
+        keys.record(live, "t1:agent".to_owned());
+
+        assert_eq!(
+            keys.live_for_task(&manager, "t1").expect("live"),
+            ["t1:agent"]
+        );
+        assert!(keys.live_for_task(&manager, "t2").expect("live").is_empty());
+        manager.kill(live).expect("kill");
     }
 }

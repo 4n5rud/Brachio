@@ -212,7 +212,7 @@ impl TaskRecord {
         Ok(rows.collect::<rusqlite::Result<Vec<Self>>>()?)
     }
 
-    /// Returns an archived task to the open list.
+    /// Returns an archived task to the open list and invalidates its previous worker report.
     ///
     /// # Errors
     /// Fails when the record cannot be updated or does not exist.
@@ -227,7 +227,11 @@ impl TaskRecord {
         archived_at_ms: Option<i64>,
     ) -> Result<(), StoreError> {
         let changed = connection.execute(
-            "UPDATE tasks SET archived_at_ms = ?2 WHERE id = ?1",
+            "UPDATE tasks
+                SET archived_at_ms = ?2,
+                    worker_report_generation = worker_report_generation
+                        + (archived_at_ms IS NOT NULL AND ?2 IS NULL)
+              WHERE id = ?1",
             params![id, archived_at_ms],
         )?;
         if changed == 0 {

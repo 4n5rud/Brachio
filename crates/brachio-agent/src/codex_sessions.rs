@@ -4,7 +4,10 @@
 //! `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`. The first
 //! line is a `session_meta` record with the id and the working directory.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::env;
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -94,22 +97,13 @@ fn collect(
     limit: usize,
     found: &mut Vec<CodexConversation>,
 ) {
-    let Ok(directory) = fs::read_dir(folder) else {
-        return;
-    };
-    let mut entries: Vec<_> = directory.flatten().collect();
-    entries.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.file_name()));
-    for entry in entries {
+    for (path, is_folder) in newest_entries(folder, depth, *budget) {
         if *budget == 0 || found.len() >= limit {
             break;
         }
-        let path = entry.path();
-        let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
         if is_folder {
-            if depth < 3 {
-                collect(&path, depth + 1, wanted, budget, limit, found);
-            }
-        } else if is_rollout(&path) {
+            collect(&path, depth + 1, wanted, budget, limit, found);
+        } else {
             *budget -= 1;
             if let Some(meta) = read_meta(&path) {
                 if normalize(Path::new(&meta.cwd)) == wanted
@@ -123,6 +117,33 @@ fn collect(
             }
         }
     }
+}
+
+/// The `cap` newest rollout files and subfolders of `folder`, newest first, each with whether it is
+/// a folder. The listing is streamed and only `cap` names are ever held, so a huge folder costs
+/// time but not memory. Anything else in the folder is skipped without using a slot. At most
+/// `cap` files can be opened anyway; only more than `cap` newer subfolders hide an older one.
+fn newest_entries(folder: &Path, depth: usize, cap: usize) -> Vec<(PathBuf, bool)> {
+    let Ok(directory) = fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut newest: BinaryHeap<Reverse<(OsString, bool)>> = BinaryHeap::with_capacity(cap + 1);
+    for entry in directory.flatten() {
+        let name = entry.file_name();
+        let rollout = is_rollout(Path::new(&name));
+        let is_folder = !rollout && depth < 3 && entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if rollout || is_folder {
+            newest.push(Reverse((name, is_folder)));
+            if newest.len() > cap {
+                newest.pop();
+            }
+        }
+    }
+    newest
+        .into_sorted_vec()
+        .into_iter()
+        .map(|Reverse((name, is_folder))| (folder.join(name), is_folder))
+        .collect()
 }
 
 fn is_rollout(path: &Path) -> bool {
@@ -223,6 +244,71 @@ mod tests {
                     timestamp: None
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn a_huge_folder_keeps_only_the_newest_names_and_skips_unrelated_entries() {
+        let folder = tempfile::tempdir().expect("folder");
+        for minute in 0..30 {
+            fs::write(
+                folder.path().join(format!("rollout-t{minute:02}.jsonl")),
+                "",
+            )
+            .expect("file");
+        }
+        fs::write(folder.path().join("zzz-notes.txt"), "").expect("unrelated");
+
+        let names: Vec<_> = newest_entries(folder.path(), 3, 5)
+            .into_iter()
+            .map(|(path, is_folder)| (path.file_name().expect("name").to_owned(), is_folder))
+            .collect();
+
+        let expected: Vec<_> = (25..30)
+            .rev()
+            .map(|minute| (format!("rollout-t{minute:02}.jsonl").into(), false))
+            .collect();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn a_crowded_day_is_scanned_only_up_to_the_budget_newest_first() {
+        let sessions = tempfile::tempdir().expect("sessions dir");
+        let task = tempfile::tempdir().expect("task dir");
+        let other = tempfile::tempdir().expect("other dir");
+        let root = sessions.path();
+        write_rollout(
+            root,
+            "2026/11/17",
+            "rollout-2026-11-17T01-mine.jsonl",
+            task.path(),
+            "",
+        );
+        for number in 0..MAX_FILES_CHECKED + 100 {
+            write_rollout(
+                root,
+                "2026/11/18",
+                &format!("rollout-2026-11-18T{number:04}-x.jsonl"),
+                other.path(),
+                "",
+            );
+        }
+
+        assert_eq!(
+            latest_session_in(root, task.path()),
+            None,
+            "past the scan budget"
+        );
+        write_rollout(
+            root,
+            "2026/11/18",
+            "rollout-2026-11-18T9999-new.jsonl",
+            task.path(),
+            "",
+        );
+        assert_eq!(
+            latest_session_in(root, task.path()).as_deref(),
+            Some("2026-11-18T9999-new")
         );
     }
 

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use brachio_agent::AgentKind;
 use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::runtime_terminals::RuntimeTerminals;
+use crate::terminal::Terminals;
 
 /// App state that owns the database connection.
 pub struct Database(pub Mutex<Connection>);
@@ -170,6 +171,27 @@ fn is_folder_task(database: &Database, task: &TaskRecord) -> Result<bool, String
     Ok(!RepoRecord::get(&connection, &task.repo_id)
         .map_err(to_text)?
         .is_git)
+}
+
+/// Takes the repository's worktree lock, then loads a task that is still open in a git project.
+/// The task is read again after the wait because a deletion may have run in between.
+async fn lock_open_git_task(
+    database: &Database,
+    worktrees: &TaskWorktreeLocks,
+    id: &str,
+) -> Result<(TaskRecord, tokio::sync::OwnedMutexGuard<()>), String> {
+    let repo_id = TaskRecord::get(&*database.lock()?, id)
+        .map_err(to_text)?
+        .repo_id;
+    let guard = worktrees.acquire(&repo_id).await?;
+    let task = TaskRecord::get(&*database.lock()?, id).map_err(to_text)?;
+    if task.archived_at_ms.is_some() {
+        return Err("This task is archived. Restore it before running Git actions.".to_owned());
+    }
+    if is_folder_task(database, &task)? {
+        return Err(NOT_GIT.to_owned());
+    }
+    Ok((task, guard))
 }
 
 const NOT_GIT: &str = "This project is a plain folder, so this needs git, which it does not use.";
@@ -389,7 +411,32 @@ pub async fn task_retry_setup_copy(
 /// Hides a task from the list. The worktree and branch stay on disk.
 #[tauri::command]
 pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), String> {
-    TaskRecord::archive(&*database.lock()?, &id, now_ms()).map_err(to_text)
+    archive_unless_children_open(&*database.lock()?, &id, now_ms())
+}
+
+/// Stable start of the refusal, so the UI can recognise it.
+const OPEN_CHILDREN_PREFIX: &str = "has open children:";
+
+/// Archives the task, but not a lead whose child tasks are still open: they could no longer reach
+/// their parent with `send --to parent`, and nothing would show that they lost their supervisor.
+fn archive_unless_children_open(
+    connection: &Connection,
+    id: &str,
+    now_ms: i64,
+) -> Result<(), String> {
+    let children: Vec<String> = TaskRecord::list_open(connection)
+        .map_err(to_text)?
+        .into_iter()
+        .filter(|task| task.parent_task_id.as_deref() == Some(id))
+        .map(|task| task.title)
+        .collect();
+    if !children.is_empty() {
+        return Err(format!(
+            "{OPEN_CHILDREN_PREFIX} {}. Archive or finish these child tasks first, then archive the lead.",
+            children.join(", ")
+        ));
+    }
+    TaskRecord::archive(connection, id, now_ms).map_err(to_text)
 }
 
 /// Lists archived task records.
@@ -661,27 +708,47 @@ fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), Str
     ))
 }
 
-/// Terminals of the task that are still running, or why that could not be told.
+/// Terminals of the task that are still running, in the runtime or in the app, or why that could
+/// not be told. Second agent tabs the task has since replaced are asked for too.
 async fn live_task_terminals(
     database: &Database,
     terminals: &RuntimeTerminals,
+    in_app: &Terminals,
     task_id: &str,
 ) -> Result<Vec<String>, String> {
-    let second_tab: Option<String> = {
+    let (current, retired) = {
         let connection = database.lock()?;
-        connection
+        let current: Option<String> = connection
             .query_row(
                 "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
                 [task_id],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(to_text)?
+            .map_err(to_text)?;
+        let retired =
+            brachio_store::retired_secondary_tabs(&connection, task_id).map_err(to_text)?;
+        (current, retired)
     };
-    terminals
-        .live_keys_for_task(task_id, second_tab.as_deref())
+    let tabs: Vec<String> = current.into_iter().chain(retired.iter().cloned()).collect();
+    let mut live = terminals
+        .live_keys_for_task(task_id, &tabs)
         .await
-        .map_err(to_text)
+        .map_err(to_text)?;
+    live.extend(
+        in_app
+            .1
+            .live_for_task(&in_app.0, task_id)
+            .map_err(to_text)?,
+    );
+    let connection = database.lock()?;
+    for tab in retired {
+        if !live.contains(&format!("{task_id}:agent-{tab}")) {
+            // A failed cleanup only keeps the id for the next check.
+            let _ = brachio_store::forget_retired_secondary_tab(&connection, task_id, &tab);
+        }
+    }
+    Ok(live)
 }
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
@@ -704,6 +771,7 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
 pub async fn task_delete_preview(
     database: State<'_, Database>,
     terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
     id: String,
 ) -> Result<TaskLoss, String> {
     let (task, repo) = archived_task(&database, &id)?;
@@ -717,7 +785,7 @@ pub async fn task_delete_preview(
             running_terminals: 0,
         });
     }
-    let running_terminals = live_task_terminals(&database, &terminals, &id)
+    let running_terminals = live_task_terminals(&database, &terminals, &in_app, &id)
         .await
         .map_or(0, |keys| keys.len());
     let work = tauri::async_runtime::spawn_blocking(move || {
@@ -743,17 +811,38 @@ pub async fn task_delete(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
     terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
     id: String,
     expected_fingerprint: String,
 ) -> Result<(), String> {
-    let repo_id = TaskRecord::get(&*database.lock()?, &id)
+    delete_task(
+        &database,
+        &worktrees,
+        &terminals,
+        &in_app,
+        &id,
+        &expected_fingerprint,
+    )
+    .await
+}
+
+async fn delete_task(
+    database: &Database,
+    worktrees: &TaskWorktreeLocks,
+    terminals: &RuntimeTerminals,
+    in_app: &Terminals,
+    id: &str,
+    expected_fingerprint: &str,
+) -> Result<(), String> {
+    let repo_id = TaskRecord::get(&*database.lock()?, id)
         .map_err(to_text)?
         .repo_id;
     let _guard = worktrees.acquire(&repo_id).await?;
-    let (task, repo) = archived_task(&database, &id)?;
+    let (task, repo) = archived_task(database, id)?;
+    ensure_no_live_terminals(live_task_terminals(database, terminals, in_app, id).await)?;
     // A folder project's task runs in the user's own folder, which must never be removed.
     if repo.is_git {
-        ensure_no_live_terminals(live_task_terminals(&database, &terminals, &id).await)?;
+        let expected_fingerprint = expected_fingerprint.to_owned();
         tauri::async_runtime::spawn_blocking(move || {
             let git = Git::new(&repo.path);
             let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
@@ -764,10 +853,14 @@ pub async fn task_delete(
         .await
         .map_err(to_text)??;
     }
-    let connection = database.lock()?;
-    // Its messages go with it, so a later task cannot be sent mail meant for this one.
-    brachio_store::forget_task_messages(&connection, &id).map_err(to_text)?;
-    TaskRecord::delete(&connection, &id).map_err(to_text)
+    {
+        let connection = database.lock()?;
+        // Its messages go with it, so a later task cannot be sent mail meant for this one.
+        brachio_store::forget_task_messages(&connection, id).map_err(to_text)?;
+        TaskRecord::delete(&connection, id).map_err(to_text)?;
+    }
+    crate::runtime_terminals::forget_task_screens(id).await;
+    Ok(())
 }
 
 /// Changes in a task worktree relative to its base.
@@ -986,6 +1079,8 @@ fn git_paths(git: &Git, args: &[&str]) -> Result<Vec<String>, String> {
 pub struct TaskMergePreview {
     base_branch: String,
     conflicts: Vec<String>,
+    /// False when the comparison used the local branch because no remote copy exists.
+    remote_tracking: bool,
 }
 
 /// Checks how the task's committed HEAD would merge into the default branch, as the remote has it.
@@ -1004,15 +1099,17 @@ pub async fn task_merge_preview(
         return Ok(TaskMergePreview {
             base_branch,
             conflicts: Vec::new(),
+            remote_tracking: true,
         });
     }
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&worktree_path);
-        let base_ref = brachio_git::merge_target_ref(&git, &base_branch);
-        let report = predict_conflict(&git, &base_ref, "HEAD").map_err(to_text)?;
+        let target = brachio_git::merge_target(&git, &base_branch);
+        let report = predict_conflict(&git, &target.reference, "HEAD").map_err(to_text)?;
         Ok(TaskMergePreview {
             base_branch,
             conflicts: report.conflicted_files,
+            remote_tracking: target.remote_tracking,
         })
     })
     .await
@@ -1055,13 +1152,12 @@ pub enum TaskGitAction {
 #[tauri::command]
 pub async fn task_git_action(
     database: State<'_, Database>,
+    worktrees: State<'_, TaskWorktreeLocks>,
     id: String,
     request: TaskGitAction,
 ) -> Result<Option<String>, String> {
-    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
-    if is_folder_task(&database, &task)? {
-        return Err(NOT_GIT.to_owned());
-    }
+    // Held until the action ends so a deletion cannot remove the worktree underneath it.
+    let (task, _guard) = lock_open_git_task(&database, &worktrees, &id).await?;
     tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&task.worktree_path);
         let branch_ref = format!("refs/heads/{}", task.branch);
@@ -1131,23 +1227,21 @@ pub async fn task_pr_feedback(
         return Err(NOT_GIT.to_owned());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let output = github_command()
-            .current_dir(&task.worktree_path)
-            .args([
-                "pr",
-                "view",
-                "--json",
-                "url,statusCheckRollup,reviews,comments",
-                "--",
-            ])
-            .arg(&task.branch)
-            .output()
-            .map_err(to_text)?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
-        let mut feedback: serde_json::Value =
-            serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        let stdout = run_github(
+            github_command()
+                .current_dir(&task.worktree_path)
+                .args([
+                    "pr",
+                    "view",
+                    "--json",
+                    "url,statusCheckRollup,reviews,comments",
+                    "--",
+                ])
+                .arg(&task.branch),
+            PR_VIEW_MAX_BYTES,
+            "the pull request",
+        )?;
+        let mut feedback: serde_json::Value = serde_json::from_slice(&stdout).map_err(to_text)?;
         let (inline_comments, inline_error) =
             match read_inline_reviews(&task.worktree_path, &feedback) {
                 Ok(comments) => (comments, None),
@@ -1159,6 +1253,49 @@ pub async fn task_pr_feedback(
     })
     .await
     .map_err(to_text)?
+}
+
+const GH_TIME_LIMIT: Duration = Duration::from_secs(60);
+const PR_VIEW_MAX_BYTES: usize = 8 * 1024 * 1024;
+const INLINE_REVIEWS_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Runs `gh` with a deadline and a stdout cap; an over-large or slow answer is an error, never a cut-off JSON.
+fn run_github(
+    command: &mut std::process::Command,
+    max_stdout: usize,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    github_output(
+        brachio_process::output_capped(command, GH_TIME_LIMIT, max_stdout),
+        max_stdout,
+        what,
+    )
+}
+
+fn github_output(
+    result: std::io::Result<brachio_process::Capped>,
+    max_stdout: usize,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    let capped = result.map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            "The GitHub CLI (gh) is not installed or not on PATH.".to_owned()
+        }
+        std::io::ErrorKind::TimedOut => format!("Loading {what} from GitHub {error}."),
+        _ => error.to_string(),
+    })?;
+    if capped.truncated {
+        return Err(format!(
+            "{what} is larger than {} MiB, so it was not loaded.",
+            max_stdout / (1024 * 1024)
+        ));
+    }
+    if !capped.output.status.success() {
+        return Err(String::from_utf8_lossy(&capped.output.stderr)
+            .trim()
+            .to_owned());
+    }
+    Ok(capped.output.stdout)
 }
 
 fn github_command() -> std::process::Command {
@@ -1187,23 +1324,19 @@ fn read_inline_reviews(
         return Err("Could not identify the repository for inline reviews.".to_owned());
     };
     let endpoint = format!("repos/{owner}/{repo}/pulls/{number}/comments");
-    let output = github_command()
-        .current_dir(worktree)
-        .args([
+    let stdout = run_github(
+        github_command().current_dir(worktree).args([
             "api",
             "--hostname",
             host,
             "--paginate",
             "--slurp",
             &endpoint,
-        ])
-        .output()
-        .map_err(to_text)?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-    }
-    let pages: Vec<Vec<serde_json::Value>> =
-        serde_json::from_slice(&output.stdout).map_err(to_text)?;
+        ]),
+        INLINE_REVIEWS_MAX_BYTES,
+        "the inline review comments",
+    )?;
+    let pages: Vec<Vec<serde_json::Value>> = serde_json::from_slice(&stdout).map_err(to_text)?;
     Ok(pages
         .into_iter()
         .flatten()
@@ -1382,5 +1515,272 @@ mod terminal_guard_tests {
             refusal,
             "could not verify that the task's terminals are stopped"
         );
+    }
+}
+
+#[cfg(test)]
+mod git_action_guard_tests {
+    use std::future::Future;
+    use std::path::Path;
+    use std::pin::pin;
+    use std::sync::Mutex;
+    use std::task::{Context, Poll, Waker};
+
+    use brachio_store::{open_in_memory, NewRepo, RepoRecord};
+
+    use super::{lock_open_git_task, Database, TaskWorktreeLocks};
+
+    fn database() -> Database {
+        let connection = open_in_memory().expect("open database");
+        for id in ["r", "s"] {
+            let repo = NewRepo {
+                id,
+                name: id,
+                path: Path::new(if id == "r" { "/repo-r" } else { "/repo-s" }),
+                default_branch: "main",
+                added_at_ms: 0,
+                is_git: true,
+            };
+            RepoRecord::insert(&connection, &repo).expect("insert repo");
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, archived_at_ms)
+                 VALUES ('open', 'r', 'T', '', 'b1', '/w1', 'active', 0, NULL),
+                        ('old', 'r', 'T', '', 'b2', '/w2', 'active', 0, 1),
+                        ('other', 's', 'T', '', 'b3', '/w3', 'active', 0, NULL);",
+            )
+            .expect("insert tasks");
+        Database(Mutex::new(connection))
+    }
+
+    #[test]
+    fn an_archived_task_is_refused_before_any_git_runs() {
+        let database = database();
+        let locks = TaskWorktreeLocks::default();
+        let refusal = tauri::async_runtime::block_on(lock_open_git_task(&database, &locks, "old"))
+            .map(|_| ())
+            .expect_err("archived");
+        assert_eq!(
+            refusal,
+            "This task is archived. Restore it before running Git actions."
+        );
+        let opened = tauri::async_runtime::block_on(lock_open_git_task(&database, &locks, "open"));
+        assert!(opened.is_ok());
+    }
+
+    #[test]
+    fn a_git_action_waits_for_a_deletion_in_the_same_repository_only() {
+        let database = database();
+        let locks = TaskWorktreeLocks::default();
+        let deletion = tauri::async_runtime::block_on(locks.acquire("r")).expect("lock");
+        let mut context = Context::from_waker(Waker::noop());
+
+        let mut same = pin!(lock_open_git_task(&database, &locks, "open"));
+        assert!(same.as_mut().poll(&mut context).is_pending());
+        let mut independent = pin!(lock_open_git_task(&database, &locks, "other"));
+        assert!(matches!(
+            independent.as_mut().poll(&mut context),
+            Poll::Ready(Ok(_))
+        ));
+
+        drop(deletion);
+        assert!(matches!(
+            same.as_mut().poll(&mut context),
+            Poll::Ready(Ok(_))
+        ));
+    }
+}
+
+#[cfg(test)]
+mod archive_children_tests {
+    use std::path::Path;
+
+    use brachio_store::{open_in_memory, NewRepo, NewTask, RepoRecord, TaskRecord};
+
+    use super::archive_unless_children_open;
+
+    fn task<'a>(id: &'a str, parent: Option<&'a str>) -> NewTask<'a> {
+        NewTask {
+            id,
+            repo_id: "r",
+            parent_task_id: parent,
+            title: id,
+            prompt: "",
+            branch: id,
+            worktree_path: Path::new("/w"),
+            agent_kind: None,
+            agent_session_id: None,
+            created_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_lead_with_an_open_child_is_refused_until_the_child_is_archived() {
+        let connection = open_in_memory().expect("open");
+        let repo = NewRepo {
+            id: "r",
+            name: "r",
+            path: Path::new("/r"),
+            default_branch: "main",
+            added_at_ms: 0,
+            is_git: true,
+        };
+        RepoRecord::insert(&connection, &repo).expect("repo");
+        TaskRecord::insert(&connection, &task("lead", None)).expect("lead");
+        TaskRecord::insert(&connection, &task("c1", Some("lead"))).expect("c1");
+        TaskRecord::insert(&connection, &task("c2", Some("lead"))).expect("c2");
+        TaskRecord::archive(&connection, "c2", 1).expect("archive c2");
+
+        let refusal = archive_unless_children_open(&connection, "lead", 2).expect_err("refused");
+        assert!(refusal.starts_with("has open children: c1."), "{refusal}");
+        assert!(TaskRecord::get(&connection, "lead")
+            .expect("lead")
+            .archived_at_ms
+            .is_none());
+
+        archive_unless_children_open(&connection, "c1", 3).expect("a child archives");
+        archive_unless_children_open(&connection, "lead", 4).expect("lead now archives");
+    }
+}
+
+#[cfg(test)]
+mod github_output_tests {
+    use std::io::{Error, ErrorKind};
+    use std::process::{ExitStatus, Output};
+
+    use super::github_output;
+
+    fn exit(code: u32) -> ExitStatus {
+        #[cfg(windows)]
+        {
+            std::os::windows::process::ExitStatusExt::from_raw(code)
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::process::ExitStatusExt::from_raw(i32::try_from(code).unwrap() << 8)
+        }
+    }
+
+    fn capped(code: u32, stdout: &str, stderr: &str, truncated: bool) -> brachio_process::Capped {
+        brachio_process::Capped {
+            output: Output {
+                status: exit(code),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            },
+            truncated,
+        }
+    }
+
+    #[test]
+    fn a_truncated_answer_is_an_error_not_cut_off_json() {
+        let error = github_output(Ok(capped(0, "[[{\"a\"", "", true)), 2 << 20, "the reviews")
+            .expect_err("fails");
+        assert_eq!(
+            error,
+            "the reviews is larger than 2 MiB, so it was not loaded."
+        );
+    }
+
+    #[test]
+    fn a_timeout_a_missing_cli_and_a_failed_login_are_told_apart() {
+        let timed_out = Error::new(ErrorKind::TimedOut, "timed out after 60 seconds");
+        assert_eq!(
+            github_output(Err(timed_out), 1, "the pull request").expect_err("fails"),
+            "Loading the pull request from GitHub timed out after 60 seconds."
+        );
+        let missing = Error::new(ErrorKind::NotFound, "program not found");
+        assert_eq!(
+            github_output(Err(missing), 1, "x").expect_err("fails"),
+            "The GitHub CLI (gh) is not installed or not on PATH."
+        );
+        assert_eq!(
+            github_output(Ok(capped(1, "", "gh auth login required\n", false)), 1, "x")
+                .expect_err("fails"),
+            "gh auth login required"
+        );
+    }
+
+    #[test]
+    fn a_normal_answer_is_returned_whole() {
+        assert_eq!(
+            github_output(Ok(capped(0, "[]", "", false)), 1024, "x").expect("loads"),
+            b"[]"
+        );
+    }
+}
+
+#[cfg(test)]
+mod folder_task_deletion_tests {
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    use brachio_pty::{EventSink, SessionManager, SpawnSpec};
+    use brachio_store::{open_in_memory, NewRepo, RepoRecord, TaskRecord};
+
+    use super::{delete_task, Database, TaskWorktreeLocks};
+    use crate::runtime_terminals::RuntimeTerminals;
+    use crate::terminal::{SessionKeys, Terminals};
+
+    fn folder_task_database() -> Database {
+        let connection = open_in_memory().expect("open database");
+        let repo = NewRepo {
+            id: "f",
+            name: "f",
+            path: Path::new("/folder"),
+            default_branch: "",
+            added_at_ms: 0,
+            is_git: false,
+        };
+        RepoRecord::insert(&connection, &repo).expect("insert repo");
+        connection
+            .execute_batch(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, archived_at_ms)
+                 VALUES ('t1', 'f', 'T', '', '', '/folder', 'active', 0, 1);",
+            )
+            .expect("insert task");
+        Database(Mutex::new(connection))
+    }
+
+    fn long_running() -> SpawnSpec {
+        let (program, args) = if cfg!(windows) {
+            ("cmd.exe", vec!["/c", "ping", "-n", "60", "127.0.0.1"])
+        } else {
+            ("sleep", vec!["60"])
+        };
+        SpawnSpec {
+            program: program.to_owned(),
+            args: args.into_iter().map(str::to_owned).collect(),
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        }
+    }
+
+    #[test]
+    fn a_folder_task_with_a_running_terminal_is_kept_until_it_stops() {
+        let database = folder_task_database();
+        let locks = TaskWorktreeLocks::default();
+        let runtime = RuntimeTerminals::default();
+        let manager = Arc::new(SessionManager::default());
+        let in_app = Terminals(manager.clone(), SessionKeys::default());
+        let sink: EventSink = Arc::new(|_| {});
+        let live = manager.spawn(&long_running(), sink).expect("spawn");
+        in_app.1.record(live, "t1:agent".to_owned());
+
+        let refusal = tauri::async_runtime::block_on(delete_task(
+            &database, &locks, &runtime, &in_app, "t1", "",
+        ))
+        .expect_err("refused");
+        assert!(refusal.starts_with("terminal still running:"), "{refusal}");
+        assert!(TaskRecord::get(&database.lock().expect("lock"), "t1").is_ok());
+
+        manager.kill(live).expect("kill");
+        let in_app = Terminals(Arc::new(SessionManager::default()), SessionKeys::default());
+        tauri::async_runtime::block_on(delete_task(&database, &locks, &runtime, &in_app, "t1", ""))
+            .expect("deleted once stopped");
+        assert!(TaskRecord::get(&database.lock().expect("lock"), "t1").is_err());
     }
 }

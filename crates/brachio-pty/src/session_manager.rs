@@ -123,7 +123,9 @@ impl SessionManager {
             .name(format!("pty-flush-{id}"))
             .spawn(move || {
                 let mut exit_watch = ExitWatch::new(shared, forget);
-                flush_until_done(&chunk_receiver, batch_config, &sink, &mut exit_watch);
+                flush_until_done(&chunk_receiver, batch_config, &sink, &mut || {
+                    exit_watch.should_stop()
+                });
                 exit_watch.release();
                 sink(PtyEvent::Exit(exit_watch.finish()));
             })
@@ -260,7 +262,7 @@ fn flush_until_done(
     chunks: &Receiver<Vec<u8>>,
     config: BatchConfig,
     sink: &EventSink,
-    exit_watch: &mut ExitWatch,
+    should_stop: &mut dyn FnMut() -> bool,
 ) {
     let start = Instant::now();
     let now_ms = || u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -268,10 +270,16 @@ fn flush_until_done(
     let wait = Duration::from_millis(config.max_delay_ms.max(1));
     loop {
         let frame = match chunks.recv_timeout(wait) {
-            Ok(chunk) => batcher
-                .push(&chunk, now_ms())
-                .or_else(|| batcher.tick(now_ms())),
-            Err(RecvTimeoutError::Timeout) if exit_watch.should_stop() => break,
+            Ok(chunk) => {
+                // Continuous output never times out, so the exit poll must also run here.
+                if should_stop() {
+                    break;
+                }
+                batcher
+                    .push(&chunk, now_ms())
+                    .or_else(|| batcher.tick(now_ms()))
+            }
+            Err(RecvTimeoutError::Timeout) if should_stop() => break,
             Err(RecvTimeoutError::Timeout) => batcher.tick(now_ms()),
             Err(RecvTimeoutError::Disconnected) => break,
         };
@@ -296,6 +304,40 @@ fn drain_remaining(
     }
     if let Some(frame) = batcher.tick(u64::MAX) {
         sink(PtyEvent::Output(frame));
+    }
+}
+
+#[cfg(test)]
+mod continuous_output_tests {
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use super::flush_until_done;
+    use crate::BatchConfig;
+
+    #[test]
+    fn exit_poll_runs_while_output_never_goes_quiet() {
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let producer = thread::spawn(move || while sender.send(vec![b'x'; 64]).is_ok() {});
+        let (done, finished) = mpsc::channel();
+        let flusher = thread::spawn(move || {
+            let sink: crate::EventSink = Arc::new(|_| {});
+            let mut polls = 0;
+            flush_until_done(&receiver, BatchConfig::default(), &sink, &mut || {
+                polls += 1;
+                polls >= 3
+            });
+            done.send(()).expect("report finish");
+        });
+        let result = finished.recv_timeout(Duration::from_secs(10));
+        assert!(
+            result.is_ok(),
+            "flusher kept waiting despite a stop request"
+        );
+        flusher.join().expect("flusher");
+        producer.join().expect("producer");
     }
 }
 

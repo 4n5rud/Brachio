@@ -175,7 +175,10 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(terminal::Terminals(Arc::new(SessionManager::default())))
+        .manage(terminal::Terminals(
+            Arc::new(SessionManager::default()),
+            terminal::SessionKeys::default(),
+        ))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
         .manage(resource_usage::ResourceMonitor::default())

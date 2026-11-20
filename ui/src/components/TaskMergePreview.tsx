@@ -31,6 +31,7 @@ export function TaskMergePreview(props: { taskId: string }) {
             <p>{t(preview.conflicts.length ? "mergePreview.conflicts" : "mergePreview.clean")}{" "}
               <code>{preview.baseBranch}</code>
             </p>
+            <Show when={!preview.remoteTracking}><p>{t("mergePreview.localOnly")}</p></Show>
             <Show when={preview.conflicts.length > 0}>
               <ul><For each={preview.conflicts}>{(path) => <li><code>{path}</code></li>}</For></ul>
             </Show>
