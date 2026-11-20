@@ -19,6 +19,7 @@ Brachio runs several Claude Code and Codex sessions side by side, each in its ow
 - Shows each task's changes, lets you comment on lines and send the comments to the agent, and stages, commits, and pushes.
 - Shows each task's pull request status as a chip in the task list and a panel in the Inspector, and remembers it across restarts.
 - Asks you in the app to approve Claude Code's permission requests.
+- Suggests a development port per task through `BRACHIO_PORT`. Two tasks in the same Brachio database never get the same port. The port is a preference, not a reservation: Brachio checks it is free on `127.0.0.1` when it assigns it, but another program (or another Brachio) can take it before your dev server starts, and IPv6 `localhost` is not checked. If the bind fails, pick another port.
 - Lets agent sessions send each other messages (see below).
 - Keeps terminals running when the window closes, through the independent runtime (see below).
 - Shows the Claude Code and Codex marks beside agent names, and uses one title bar on Windows.
