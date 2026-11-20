@@ -129,6 +129,15 @@ pub enum Action {
         /// Text to send, including any line ending.
         text: String,
     },
+    /// Stop only the specific runtime session observed by the caller.
+    StopGuarded {
+        /// Name the caller chose for the shell.
+        key: String,
+        /// Runtime instance that returned the session.
+        instance: String,
+        /// Runtime-local session identifier.
+        session_id: u64,
+    },
     /// Stop one shell explicitly.
     Stop {
         /// Name the caller chose for the shell.
@@ -171,6 +180,7 @@ impl Action {
             Action::Resize { .. } => (2, "resize"),
             Action::Lost | Action::Recover { .. } | Action::Forget { .. } => (3, "recovery"),
             Action::Launch { .. } => (4, "launch"),
+            Action::StopGuarded { .. } => (5, "guarded stop"),
             _ => (1, "this action"),
         }
     }

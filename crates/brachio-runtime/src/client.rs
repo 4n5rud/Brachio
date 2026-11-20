@@ -75,6 +75,27 @@ impl Client {
     }
 
     async fn open(&self, action: Action) -> Result<(Reply, Following), ClientError> {
+        let version = if matches!(action, Action::Hello) {
+            2
+        } else {
+            let (hello, _) = Box::pin(self.open(Action::Hello)).await?;
+            let ResponseResult::Hello { runtime } = hello.result else {
+                return Err(ClientError::Unexpected(
+                    "runtime did not provide its protocol range".to_owned(),
+                ));
+            };
+            let version = runtime.current_version.min(protocol::CURRENT);
+            if version < runtime.oldest_version || version < action.since().0 {
+                return Err(ClientError::Refused(format!(
+                    "{} requires protocol {}, runtime supports {} through {}",
+                    action.since().1,
+                    action.since().0,
+                    runtime.oldest_version,
+                    runtime.current_version
+                )));
+            }
+            version
+        };
         let connected = transport::connect(&self.endpoint).await;
         let mut stream = match (endpoint::classify(&connected), connected) {
             (_, Ok(stream)) => stream,
@@ -83,10 +104,7 @@ impl Client {
         };
         let changes_state = action.changes_state();
         let wait_for_completion = action.is_session_lifecycle();
-        let request = Request {
-            version: protocol::CURRENT,
-            action,
-        };
+        let request = Request { version, action };
         timed(write_message(&mut stream, &request, MAX_MESSAGE)).await?;
         let mut reader = BufReader::new(stream);
         let reply = read_reply(&mut reader, wait_for_completion, changes_state).await?;

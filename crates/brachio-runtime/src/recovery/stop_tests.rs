@@ -48,3 +48,53 @@ fn a_stopped_terminal_is_not_written_back_to_the_journal_by_a_later_save() {
     assert!(journal.load().expect("load").records.is_empty());
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[test]
+fn guarded_stop_rejects_a_different_runtime_or_session() {
+    let runtime = Runtime::new(None);
+    let key = "guarded-stop".to_owned();
+    let launch = || Action::Ensure {
+        key: key.clone(),
+        cwd: std::env::temp_dir(),
+    };
+    let reply = runtime
+        .execute(Request {
+            version: protocol::CURRENT,
+            action: launch(),
+        })
+        .expect("launch");
+    let ResponseResult::Success { session, .. } = reply else {
+        panic!("expected session")
+    };
+    for (instance, session_id) in [
+        (
+            "old-runtime".to_owned(),
+            session.session_id.to_string().parse().expect("id"),
+        ),
+        (runtime.instance.clone(), u64::MAX),
+    ] {
+        let result = runtime.execute(Request {
+            version: protocol::CURRENT,
+            action: Action::StopGuarded {
+                key: key.clone(),
+                instance,
+                session_id,
+            },
+        });
+        assert!(result.is_err());
+        assert!(runtime
+            .execute(Request {
+                version: protocol::CURRENT,
+                action: Action::Inspect { key: key.clone() },
+            })
+            .is_ok());
+    }
+    call(
+        &runtime,
+        Action::StopGuarded {
+            key,
+            instance: runtime.instance.clone(),
+            session_id: session.session_id.to_string().parse().expect("id"),
+        },
+    );
+}

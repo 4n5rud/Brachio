@@ -138,6 +138,19 @@ impl Runtime {
                 self.manager.write(session.id, text.as_bytes())?;
                 session.describe(None)
             }
+            Action::StopGuarded {
+                key,
+                instance,
+                session_id,
+            } => {
+                let session = get(sessions, &key)?;
+                if instance != self.instance
+                    || session.id != brachio_pty::SessionId::from_raw(session_id)
+                {
+                    bail!("terminal session changed before stop");
+                }
+                self.act_on_session(sessions, Action::Stop { key })
+            }
             Action::Stop { key } => {
                 let session = get(sessions, &key)?;
                 lock(&self.stopped)?.insert(key.clone());
