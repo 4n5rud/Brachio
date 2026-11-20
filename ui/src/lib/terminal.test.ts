@@ -3,7 +3,7 @@ import { decodeMessage } from "./terminal";
 
 const invoke = vi.hoisted(() =>
   vi.fn(async (command: string) =>
-    command === "terminal_open" ? { id: 7, promptDelivery: "none", resumed: false, attached: false } : undefined,
+    command === "terminal_open" ? { id: 7, promptDelivery: "none", resumed: false, attached: false, hosted: true } : undefined,
   ),
 );
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: class {} }));
@@ -16,6 +16,13 @@ describe("terminal handle", () => {
     expect(invoke).toHaveBeenLastCalledWith("terminal_detach", { id: 7 });
     await handle.close();
     expect(invoke).toHaveBeenLastCalledWith("terminal_close", { id: 7 });
+  });
+
+  it("park asks the app to keep only the status flowing, not to stop the program", async () => {
+    const { openTerminal } = await import("./terminal");
+    const handle = await openTerminal({} as never, () => {});
+    await handle.park(() => {});
+    expect(invoke).toHaveBeenLastCalledWith("terminal_park", { id: 7 });
   });
 });
 

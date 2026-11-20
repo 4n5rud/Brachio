@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
@@ -12,6 +12,7 @@ import { MailboxInbox } from "./MailboxInbox";
 import { StatusBadge } from "./StatusBadge";
 import { StatusGlyph } from "./StatusGlyph";
 import { CORE_AGENT } from "../lib/terminal";
+import { MAX_MOUNTED_TERMINALS, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
 import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
   saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
@@ -175,16 +176,32 @@ export function TaskView(props: {
       return next;
     });
   };
+  // A task with an in-app terminal never parks: unmounting would stop its program.
+  const [unhosted, setUnhosted] = createSignal<ReadonlySet<string>>(new Set());
+  const noteHosted = (id: string, hosted: boolean) => {
+    if (hosted) return;
+    setUnhosted((current) => (current.has(id) ? current : new Set(current).add(id)));
+  };
+  const [recent, setRecent] = createSignal<readonly string[]>([]);
+  createEffect(() => {
+    const id = props.task.id;
+    setRecent((history) => touchRecent(history, id));
+  });
+  const mounted = createMemo(() => mountedTaskIds(props.openIds, recent(), unhosted(), MAX_MOUNTED_TERMINALS));
+  const mountedBefore = new Set<string>();
   // Called once per terminal: the first prompt goes only to the first session.
   const sessionFor = (id: string): TerminalSession | undefined => {
     const task = props.findTask(id);
     const cwd = task?.worktreePath;
     if (task === undefined || cwd === undefined) return undefined;
+    const resume = props.shouldResume?.(task.id) || mountedBefore.has(task.id);
+    mountedBefore.add(task.id);
     return {
       agent: CORE_AGENT[task.agent],
       cwd,
       prompt: props.takePrompt?.(task.id),
-      resume: props.shouldResume?.(task.id),
+      // A pane mounted again after parking continues the conversation instead of starting one.
+      resume,
       sessionId: task.agentSessionId,
       key: terminalKey(task.id, "agent"),
     };
@@ -321,7 +338,7 @@ export function TaskView(props: {
             onClose={() => setInboxTab(undefined)} />}
         </Show>
         <div class="pane-body">
-          <For each={props.openIds}>
+          <For each={mounted()}>
             {(id) => {
               const primarySession = sessionFor(id);
               const selected = () => props.visible && id === props.task.id;
@@ -334,6 +351,8 @@ export function TaskView(props: {
                     <div class="terminal-cell" hidden={extraSelected()}>
                       <TerminalPane
                         session={primarySession}
+                        leave="park"
+                        onHosted={(hosted) => noteHosted(id, hosted)}
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
@@ -361,6 +380,8 @@ export function TaskView(props: {
                               session={{ agent: CORE_AGENT[secondaryKind(task)], cwd: task.worktreePath,
                                 key: extraKey(id, sessionId), sessionId, resume: restoredAgents.get(id) === sessionId }}
                               active={selected() && mode() !== "shell" && extraSelected()}
+                              leave="park"
+                              onHosted={(hosted) => noteHosted(id, hosted)}
                               theme={props.theme}
                               onStatus={(status, message) => props.onStatus?.(id, extraKey(id, sessionId), status, message)}
                               registerDraftWriter={(prepare) => {
@@ -380,7 +401,8 @@ export function TaskView(props: {
                     {(cwd) => (
                       <div class="terminal-cell" hidden={mode() === "agent"}>
                         <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell"), initialInput: props.takeSetupInput?.(id) }} theme={props.theme}
-                          active={selected() && mode() !== "agent"} focus={mode() === "shell"} />
+                          active={selected() && mode() !== "agent"} focus={mode() === "shell"}
+                          leave="park" onHosted={(hosted) => noteHosted(id, hosted)} />
                       </div>
                     )}
                   </Show>
