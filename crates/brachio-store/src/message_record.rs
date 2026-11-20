@@ -215,10 +215,17 @@ pub fn send_message(
             })?,
         None => message.id.to_owned(),
     };
+    // Capture the generation in the INSERT so restore and send have a single database ordering.
+    let report_task = if message.kind == "worker_done" {
+        message.from_key.strip_suffix(":agent")
+    } else {
+        None
+    };
     connection.execute(
         "INSERT INTO messages (id, thread_id, reply_to, from_key, to_key, kind, priority, subject, \
-                               body, payload_json, request_id, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                               body, payload_json, request_id, created_at_ms, worker_report_generation)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                 COALESCE((SELECT worker_report_generation FROM tasks WHERE id = ?13), 0))",
         params![
             message.id,
             thread_id,
@@ -232,6 +239,7 @@ pub fn send_message(
             message.payload_json,
             message.request_id,
             message.created_at_ms,
+            report_task,
         ],
     )?;
     let stored = connection.query_row(
