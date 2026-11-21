@@ -77,12 +77,25 @@ export function App() {
   createEffect(() => {
     if (!trayReady()) return;
     const names = new Map(repos().map((repo) => [repo.id, repo.name]));
-    const entries = tasks().map((task) => {
+    const entry = (task: TaskRow) => {
       const repo = task.repoId && names.get(task.repoId);
       return { id: task.id, label: repo ? `${repo} · ${task.title}` : task.title };
-    });
-    void invoke("tray_update_tasks", { tasks: entries, label: t("tray.openTasks") })
-      .catch((error) => console.warn("Could not update tray tasks", error));
+    };
+    const needs = rows().filter((task) => taskGroup(task.status) === "needs").map(entry);
+    const working = rows().filter((task) => taskGroup(task.status) === "working").map(entry);
+    const labels = {
+      needs: t("group.needs"),
+      working: t("group.working"),
+      new_task: t("tray.newTask"),
+      show: t("tray.show"),
+      quit: t("tray.quit"),
+    };
+    // Status changes arrive in bursts; rebuild once they settle.
+    const timer = setTimeout(() => {
+      void invoke("tray_update", { needs, working, labels })
+        .catch((error) => console.warn("Could not update the tray", error));
+    }, 300);
+    onCleanup(() => clearTimeout(timer));
   });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
   const [diffByTask, setDiffByTask] = createSignal<ReadonlyMap<string, DiffTotals>>(new Map());
@@ -694,6 +707,8 @@ export function App() {
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
       });
+      const newTaskListener = listen("tray-new-task", () => { if (canCreate()) openNewTask(); });
+      onCleanup(() => { void newTaskListener.then((unlisten) => unlisten(), () => {}); });
       void trayListener.then(() => {
         if (!disposed) setTrayReady(true);
       }).catch((error) => console.warn("Could not listen for tray tasks", error));
