@@ -1,6 +1,7 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
 mod agent_accounts;
+mod always_allow;
 mod child_task_request;
 mod external_link;
 mod file_in_use;
@@ -278,6 +279,9 @@ pub fn run() {
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
             hook_socket::approval_answer,
+            hook_socket::approval_answer_always,
+            hook_socket::always_allow_list,
+            hook_socket::always_allow_revoke,
             hook_socket::pending_approvals,
             mailbox::mailbox_unread,
             mailbox::mailbox_inbox,
@@ -345,6 +349,11 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
             let sent = match notice {
                 hook_socket::Notice::Asked(question) => notify.emit("approval-asked", question),
                 hook_socket::Notice::Closed(id) => notify.emit("approval-closed", id),
+                hook_socket::Notice::HungUp(id) => notify.emit("approval-hung-up", id),
+                hook_socket::Notice::AutoAllowed { key, summary } => {
+                    record_auto_allowed(&notify, &key, &summary);
+                    Ok(())
+                }
             };
             if let Err(error) = sent {
                 tracing::debug!(%error, "could not tell the window about a permission question");
@@ -362,6 +371,32 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     Ok(())
+}
+
+/// Writes a request that a remembered rule allowed into the task's Activity history.
+fn record_auto_allowed(app: &tauri::AppHandle, key: &str, summary: &str) {
+    let task_id = always_allow::task_of(key);
+    let detail: String = brachio_qa::redact_secrets(summary, false)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(brachio_store::MAX_ACTIVITY_DETAIL_CHARS)
+        .collect();
+    let database = app.state::<workspace::Database>();
+    let Ok(connection) = database.lock() else {
+        return;
+    };
+    let now = pr_status::now_ms();
+    if let Err(error) = brachio_store::record_activity(
+        &connection,
+        task_id,
+        "approval_auto_allowed",
+        Some(&detail),
+        now,
+    ) {
+        tracing::warn!(%error, "could not record an automatically allowed request");
+    }
 }
 
 /// Whether the primary or secondary terminal belongs to an open task.

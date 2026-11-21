@@ -58,6 +58,11 @@ export function TaskView(props: {
   onSecondaryKeys?: (keys: ReadonlyMap<string, string>) => void;
   onSecondaryClosed?: (taskId: string, key: string) => void;
   onAnswer?: (id: number, allow: boolean) => void;
+  /** Allows the request and remembers it for this task for the app session. */
+  onAnswerAlways?: (id: number) => void;
+  /** Tabs whose question closed without an answer from here. */
+  closedElsewhere?: readonly string[];
+  onDismissClosedElsewhere?: (key: string) => void;
   /** Setup commands waiting to be typed into the task's shell, which opens beside the agent. */
   hasSetupInput?: (taskId: string) => boolean;
   takeSetupInput?: (taskId: string) => string | undefined;
@@ -190,6 +195,14 @@ export function TaskView(props: {
   const answer = (id: number, allow: boolean) => {
     setSending(id);
     props.onAnswer?.(id, allow);
+  };
+  const answerAlways = (id: number) => {
+    setSending(id);
+    props.onAnswerAlways?.(id);
+  };
+  const closedHere = () => {
+    const key = activeAgentTab();
+    return key && !approval() && props.closedElsewhere?.includes(key) ? key : undefined;
   };
   const otherApproval = () => props.questions?.find((question) => question.key !== approval()?.key);
   const tabTone = (key: string | undefined) => {
@@ -473,12 +486,29 @@ export function TaskView(props: {
               onAllow={() => request().answer(true)} onDeny={() => request().answer(false)} />
           )}
         </Show>
+        <Show when={closedHere()} keyed>
+          {(key) => (
+            <Notice tone="info" lead={t("approval.closedElsewhere")}
+              actions={<Button size="sm" onClick={() => props.onDismissClosedElsewhere?.(key)}>{t("approval.dismiss")}</Button>}>
+              {t("approval.closedElsewhereNote")}
+            </Notice>
+          )}
+        </Show>
         <Show when={props.onAnswer && approval()?.id} keyed>
           {(id) => (
-            <ApprovalBar review={approval()?.review ?? ""} agent={AGENT_NAME[props.task.agent]}
-              sending={sending() === id}
-              onAllow={() => answer(id, true)}
-              onDeny={() => answer(id, false)} />
+            <Show when={approval()?.kind === "qa_run"}
+              fallback={
+                <ApprovalBar review={approval()?.review ?? ""} agent={AGENT_NAME[props.task.agent]}
+                  sending={sending() === id}
+                  onAllow={() => answer(id, true)}
+                  onAllowAlways={approval()?.canAlwaysAllow && props.onAnswerAlways ? () => answerAlways(id) : undefined}
+                  onDeny={() => answer(id, false)} />
+              }>
+              <ApprovalBar title={t("approval.qa.title")} agent="brachio.toml" body={t("approval.qa.body")}
+                review={approval()?.review ?? ""} allowLabel={t("approval.qa.run")} denyLabel={t("approval.qa.deny")}
+                hint={t("approval.qa.hint")} sending={sending() === id}
+                onAllow={() => answer(id, true)} onDeny={() => answer(id, false)} />
+            </Show>
           )}
         </Show>
       </div>

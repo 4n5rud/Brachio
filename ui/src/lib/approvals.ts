@@ -7,12 +7,31 @@ export interface ApprovalQuestion {
   /** The terminal the agent runs in, including a secondary tab ID when present. */
   key: string;
   review: string;
+  /** Who asked: an agent's tool request, a QA run Brachio would start, or a task an agent wants created. */
+  kind: "tool" | "qa_run" | "create_task";
+  /** "Always allow in this task" can remember this exact request. */
+  canAlwaysAllow: boolean;
+}
+
+/** A remembered "always allow" of one task: one tool and its exact command or file path. */
+export interface AlwaysAllowRule {
+  id: number;
+  tool: string;
+  target: string;
 }
 
 export const taskIdOf = (key: string): string => key.split(":")[0] ?? key;
 
 /** Resolves to false when the question was already over, for example answered in the terminal. */
 export const answerApproval = (id: number, allow: boolean) => invoke<boolean>("approval_answer", { id, allow });
+
+/** Allows the request and remembers it for the task until the app closes. */
+export const answerApprovalAlways = (id: number) => invoke<boolean>("approval_answer_always", { id });
+
+export const listAlwaysAllow = (taskId: string) => invoke<AlwaysAllowRule[]>("always_allow_list", { taskId });
+
+export const revokeAlwaysAllow = (taskId: string, ruleId: number) =>
+  invoke<boolean>("always_allow_revoke", { taskId, ruleId });
 
 export const pendingApprovals = () => invoke<ApprovalQuestion[]>("pending_approvals");
 
@@ -21,6 +40,8 @@ export function watchApprovals(
   onAsked: (question: ApprovalQuestion) => void,
   onClosed: (id: number) => void,
   onError: (error: unknown) => void = (error) => console.warn("Could not subscribe to approvals", error),
+  /** The hook hung up before an answer from the app; `onClosed` follows for the same question. */
+  onHungUp?: (id: number) => void,
 ): () => void {
   let disposed = false;
   const shown = new Set<number>();
@@ -37,14 +58,18 @@ export function watchApprovals(
     shown.delete(event.payload);
     onClosed(event.payload);
   });
+  const hungUp = onHungUp
+    ? listen<number>("approval-hung-up", (event) => { if (!disposed) onHungUp(event.payload); })
+    : undefined;
   const release = (subscription: Promise<() => void>) => void subscription.then((unlisten) => unlisten(), () => {});
   // Questions asked before the listeners existed, or while the page was reloaded, come from the host.
-  Promise.all([asked, closed]).then(
+  Promise.all([asked, closed, hungUp]).then(
     () => pendingApprovals().then((open) => open.forEach(show), onError),
     (error) => {
       disposed = true;
       release(asked);
       release(closed);
+      if (hungUp) release(hungUp);
       onError(error);
     },
   );
@@ -52,5 +77,6 @@ export function watchApprovals(
     disposed = true;
     release(asked);
     release(closed);
+    if (hungUp) release(hungUp);
   };
 }

@@ -49,6 +49,8 @@ const STATE_TONE: Record<string, StatusTone> = {
 const SIMPLE: Record<string, { key: MessageKey; tone: StatusTone }> = {
   permission_asked: { key: "notify.permission", tone: "blocked" },
   approval_answered: { key: "activity.approvalAnswered", tone: "ready" },
+  approval_auto_allowed: { key: "activity.approvalAutoAllowed", tone: "ready" },
+  approval_closed_elsewhere: { key: "activity.approvalClosedElsewhere", tone: "unknown" },
   question_asked: { key: "notify.question", tone: "blocked" },
   auth_needed: { key: "notify.auth", tone: "blocked" },
   agent_error: { key: "notify.error", tone: "error" },

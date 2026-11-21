@@ -5,7 +5,7 @@ import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
-import { answerApproval, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
+import { answerApproval, answerApprovalAlways, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { EmptyState } from "./components/ui/EmptyState";
@@ -289,16 +289,20 @@ export function App() {
   const createdThisRun = new Set<string>();
   const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
   // Questions that agents' hooks have asked and the user has not answered.
-  const answer = async (id: number, allow: boolean) => {
+  const answer = async (id: number, allow: boolean, always = false) => {
     const pending = questions().find((question) => question.id === id);
     if (!pending || !activeAgentKey(taskIdOf(pending.key), pending.key)) return;
     setQuestions((open) => open.filter((question) => question.id !== id));
     try {
-      await answerApproval(id, allow);
+      if (always && pending.canAlwaysAllow) await answerApprovalAlways(id);
+      else await answerApproval(id, allow);
     } catch (failure) {
       report(failure);
     }
   };
+  // Questions the hook dropped before the user answered here: answered in the terminal, or the agent gave up.
+  const hungUp = new Set<number>();
+  const [closedElsewhere, setClosedElsewhere] = createSignal<readonly string[]>([]);
   // Setup commands of tasks created in this run, typed into the task's shell once.
   const setupInputs = new Map<string, string>();
   const [setupRevision, setSetupRevision] = createSignal(0);
@@ -801,10 +805,16 @@ export function App() {
         (id) => {
           const answered = questions().find((question) => question.id === id);
           const task = answered && findTask(taskIdOf(answered.key));
-          if (task) recordTaskActivity(task.id, "approval_answered", null, Date.now()).catch(report);
+          const elsewhere = hungUp.delete(id);
+          if (task) {
+            recordTaskActivity(task.id, elsewhere ? "approval_closed_elsewhere" : "approval_answered", null, Date.now())
+              .catch(report);
+          }
+          if (answered && elsewhere) setClosedElsewhere((keys) => [...keys.filter((key) => key !== answered.key), answered.key]);
           setQuestions((open) => open.filter((question) => question.id !== id));
         },
         report,
+        (id) => { hungUp.add(id); },
       );
       onCleanup(stopApprovals);
     }
@@ -926,6 +936,9 @@ export function App() {
               onSecondaryKeys={setSecondaryKeys}
               onSecondaryClosed={closeSecondarySession}
               onAnswer={(id, allow) => void answer(id, allow)}
+              onAnswerAlways={(id) => void answer(id, true, true)}
+              closedElsewhere={closedElsewhere().filter((key) => taskIdOf(key) === task().id)}
+              onDismissClosedElsewhere={(key) => setClosedElsewhere((keys) => keys.filter((open) => open !== key))}
               hasSetupInput={hasSetupInput}
               takeSetupInput={takeSetupInput}
               shouldResume={shouldResume}

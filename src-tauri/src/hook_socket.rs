@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
+use crate::always_allow::{self, AlwaysAllow, Candidate, Rule};
 use crate::child_task_request::{ChildRequest, ChildTasks};
 
 /// How long a hook may take to send its question once connected.
@@ -47,10 +48,22 @@ async fn acknowledged(reader: &mut BufReader<Stream>, ids: &[String]) -> bool {
     acked == expected
 }
 
+/// Who raised a question. Only a tool request can be remembered with "always allow".
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionKind {
+    Tool,
+    QaRun,
+    CreateTask,
+}
+
 /// A question the user is being asked.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Question {
+    pub kind: QuestionKind,
+    /// "Always allow in this task" is offered for this question.
+    pub can_always_allow: bool,
     /// Identifies the question in [`Approvals::answer`].
     pub id: u64,
     /// The terminal the agent runs in, such as `<task id>:agent`.
@@ -66,13 +79,25 @@ pub enum Notice {
     Asked(Question),
     /// A question is over, answered or not, and its bar should go away.
     Closed(u64),
+    /// The hook hung up before the user answered in the app, sent before `Closed`. The user
+    /// answered in the terminal, or the agent stopped waiting: the hook cannot say which.
+    HungUp(u64),
+    /// A remembered rule allowed a request without asking.
+    AutoAllowed { key: String, summary: String },
+}
+
+struct Pending {
+    question: Question,
+    sender: oneshot::Sender<Decision>,
+    remember: Option<Candidate>,
 }
 
 type Delivered = Box<dyn Fn(&[String]) + Send + Sync>;
 
 /// The open questions, and who to tell about changes.
 pub struct Approvals {
-    pending: Mutex<HashMap<u64, (Question, oneshot::Sender<Decision>)>>,
+    pending: Mutex<HashMap<u64, Pending>>,
+    always: AlwaysAllow,
     next: AtomicU64,
     knows: Box<dyn Fn(&str) -> bool + Send + Sync>,
     notify: Box<dyn Fn(Notice) + Send + Sync>,
@@ -127,6 +152,7 @@ impl Approvals {
         Arc::new(Self {
             delivered: Box::new(delivered),
             pending: Mutex::default(),
+            always: AlwaysAllow::default(),
             next: AtomicU64::new(1),
             knows: Box::new(knows),
             notify: Box::new(notify),
@@ -138,7 +164,38 @@ impl Approvals {
     /// Passes the user's choice to the waiting hook. `false` when the question is already over.
     pub fn answer(&self, id: u64, decision: Decision) -> bool {
         let sender = self.pending.lock().ok().and_then(|mut map| map.remove(&id));
-        sender.is_some_and(|(_, sender)| sender.send(decision).is_ok())
+        sender.is_some_and(|pending| pending.sender.send(decision).is_ok())
+    }
+
+    /// Allows an open tool request and remembers it for its task. `false` when the question is
+    /// already over or cannot be remembered, in which case nothing is answered.
+    pub fn answer_always(&self, id: u64) -> bool {
+        let Ok(mut map) = self.pending.lock() else {
+            return false;
+        };
+        if map
+            .get(&id)
+            .is_none_or(|pending| pending.remember.is_none())
+        {
+            return false;
+        }
+        let Some(pending) = map.remove(&id) else {
+            return false;
+        };
+        drop(map);
+        if let Some(candidate) = &pending.remember {
+            self.always
+                .add(always_allow::task_of(&pending.question.key), candidate);
+        }
+        pending.sender.send(Decision::Allow).is_ok()
+    }
+
+    pub fn always_rules(&self, task_id: &str) -> Vec<Rule> {
+        self.always.list(task_id)
+    }
+
+    pub fn revoke_always(&self, task_id: &str, rule_id: u64) -> bool {
+        self.always.revoke(task_id, rule_id)
     }
 
     /// The questions still waiting, oldest first, for an interface that missed their `Asked`
@@ -147,7 +204,11 @@ impl Approvals {
         let mut questions: Vec<Question> = self
             .pending
             .lock()
-            .map(|map| map.values().map(|(question, _)| question.clone()).collect())
+            .map(|map| {
+                map.values()
+                    .map(|pending| pending.question.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         questions.sort_by_key(|question| question.id);
         questions
@@ -156,20 +217,44 @@ impl Approvals {
     /// Shows the user a question raised by the app itself and blocks until they answer. Call it
     /// off the async runtime. `None` when the question could not be shown.
     pub fn ask_blocking(&self, key: String, review: String) -> Option<Decision> {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = oneshot::channel();
-        let question = Question { id, key, review };
-        self.pending
-            .lock()
-            .ok()?
-            .insert(id, (question.clone(), sender));
-        (self.notify)(Notice::Asked(question));
+        let (id, receiver) = self.open(key, review, QuestionKind::QaRun, None).ok()?;
         let decision = receiver.blocking_recv().ok();
         if let Ok(mut map) = self.pending.lock() {
             map.remove(&id);
         }
         (self.notify)(Notice::Closed(id));
         decision
+    }
+
+    fn open(
+        &self,
+        key: String,
+        review: String,
+        kind: QuestionKind,
+        remember: Option<Candidate>,
+    ) -> Result<(u64, oneshot::Receiver<Decision>)> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        let question = Question {
+            kind,
+            can_always_allow: remember.is_some(),
+            id,
+            key,
+            review,
+        };
+        self.pending
+            .lock()
+            .map_err(|_| anyhow!("approval list lock poisoned"))?
+            .insert(
+                id,
+                Pending {
+                    question: question.clone(),
+                    sender,
+                    remember,
+                },
+            );
+        (self.notify)(Notice::Asked(question));
+        Ok((id, receiver))
     }
 
     /// Serves hooks until the listener fails.
@@ -256,7 +341,32 @@ impl Approvals {
         let Some(review) = request.review() else {
             return Ok(());
         };
-        if let Some(decision) = self.ask_user(&mut reader, request.key, review).await? {
+        let candidate = serde_json::from_str::<Value>(&request.review_input)
+            .ok()
+            .and_then(|input| always_allow::candidate(&request.tool_name, &input));
+        if let Some(candidate) = &candidate {
+            if self
+                .always
+                .allows(always_allow::task_of(&request.key), candidate)
+            {
+                (self.notify)(Notice::AutoAllowed {
+                    key: request.key,
+                    summary: format!("{}: {}", candidate.tool, candidate.target),
+                });
+                write_message(reader.get_mut(), &Decision::Allow, MAX_RESPONSE).await?;
+                return Ok(());
+            }
+        }
+        let asked = self
+            .ask_user(
+                &mut reader,
+                request.key,
+                review,
+                QuestionKind::Tool,
+                candidate,
+            )
+            .await?;
+        if let Some(decision) = asked {
             write_message(reader.get_mut(), &decision, MAX_RESPONSE).await?;
         }
         Ok(())
@@ -268,22 +378,27 @@ impl Approvals {
         reader: &mut BufReader<Stream>,
         key: String,
         review: String,
+        kind: QuestionKind,
+        remember: Option<Candidate>,
     ) -> Result<Option<Decision>> {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = oneshot::channel();
-        let question = Question { id, key, review };
-        self.pending
-            .lock()
-            .map_err(|_| anyhow!("approval list lock poisoned"))?
-            .insert(id, (question.clone(), sender));
-        (self.notify)(Notice::Asked(question));
+        let (id, receiver) = self.open(key, review, kind, remember)?;
+        let mut hung_up = false;
         let outcome = tokio::select! {
             decision = receiver => decision.ok(),
             // The hook closed its end: answered in the terminal, or it gave up waiting.
-            _ = reader.fill_buf() => None,
+            _ = reader.fill_buf() => {
+                hung_up = true;
+                None
+            }
         };
-        if let Ok(mut map) = self.pending.lock() {
-            map.remove(&id);
+        let still_open = self
+            .pending
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(&id))
+            .is_some();
+        if hung_up && still_open {
+            (self.notify)(Notice::HungUp(id));
         }
         (self.notify)(Notice::Closed(id));
         Ok(outcome)
@@ -310,7 +425,10 @@ impl Approvals {
             .unwrap_or_default()
         );
         let key = request.key.clone();
-        match self.ask_user(reader, key, review).await {
+        match self
+            .ask_user(reader, key, review, QuestionKind::CreateTask, None)
+            .await
+        {
             Ok(Some(Decision::Allow)) => {}
             Ok(_) | Err(_) => {
                 return MailResponse::Error {
@@ -348,6 +466,31 @@ impl ChildTasks for NoChildTasks {
 #[tauri::command]
 pub fn pending_approvals(approvals: tauri::State<'_, Arc<Approvals>>) -> Vec<Question> {
     approvals.pending_questions()
+}
+
+/// Allows an open tool request and remembers it for the task until the app closes.
+#[tauri::command]
+pub fn approval_answer_always(approvals: tauri::State<'_, Arc<Approvals>>, id: u64) -> bool {
+    approvals.answer_always(id)
+}
+
+/// The remembered answers of a task, for its Inspector.
+#[tauri::command]
+pub fn always_allow_list(
+    approvals: tauri::State<'_, Arc<Approvals>>,
+    task_id: String,
+) -> Vec<Rule> {
+    approvals.always_rules(&task_id)
+}
+
+/// Forgets one remembered answer, so the request is asked again.
+#[tauri::command]
+pub fn always_allow_revoke(
+    approvals: tauri::State<'_, Arc<Approvals>>,
+    task_id: String,
+    rule_id: u64,
+) -> bool {
+    approvals.revoke_always(&task_id, rule_id)
 }
 
 /// The user's choice for an open question. Nothing else can answer one.
@@ -409,7 +552,7 @@ mod tests {
                 .iter()
                 .find_map(|notice| match notice {
                     Notice::Asked(question) => Some(question.id),
-                    Notice::Closed(_) => None,
+                    _ => None,
                 });
             if let Some(id) = asked {
                 return id;
@@ -475,6 +618,144 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             assert!(!approvals.answer(id, Decision::Allow));
+        });
+    }
+
+    fn bash(key: &str, command: &str) -> ApprovalRequest {
+        let mut question = request(key);
+        question.review_input = serde_json::json!({ "command": command }).to_string();
+        question
+    }
+
+    fn asked_count(notices: &Arc<Mutex<Vec<Notice>>>) -> usize {
+        notices
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter(|notice| matches!(notice, Notice::Asked(_)))
+            .count()
+    }
+
+    #[test]
+    fn an_always_allowed_command_is_allowed_by_the_app_and_logged_but_others_are_asked() {
+        tauri::async_runtime::block_on(async {
+            let (name, approvals, notices) = start("task1:agent");
+            let first = tokio::spawn({
+                let name = name.clone();
+                async move {
+                    approval::ask(
+                        &name,
+                        &bash("task1:agent", "cargo test"),
+                        Duration::from_secs(10),
+                    )
+                    .await
+                }
+            });
+            let id = first_question(&notices).await;
+            assert!(approvals.answer_always(id));
+            assert_eq!(first.await.expect("hook task"), Some(Decision::Allow));
+
+            let again = approval::ask(
+                &name,
+                &bash("task1:agent", "cargo test"),
+                Duration::from_secs(5),
+            )
+            .await;
+            assert_eq!(again, Some(Decision::Allow));
+            assert_eq!(asked_count(&notices), 1, "the repeat was not asked");
+            assert!(notices
+                .lock()
+                .expect("lock")
+                .contains(&Notice::AutoAllowed {
+                    key: "task1:agent".to_owned(),
+                    summary: "Bash: cargo test".to_owned(),
+                }));
+
+            let other = approval::ask(
+                &name,
+                &bash("task1:agent", "cargo test --all"),
+                Duration::from_millis(300),
+            )
+            .await;
+            assert_eq!(other, None);
+            assert_eq!(asked_count(&notices), 2, "another command is asked");
+        });
+    }
+
+    #[test]
+    fn a_rule_of_one_task_does_not_allow_another_task_and_revoking_asks_again() {
+        tauri::async_runtime::block_on(async {
+            let name = format!(
+                "approvals-{}",
+                &uuid::Uuid::new_v4().simple().to_string()[..10]
+            );
+            let notices = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&notices);
+            let approvals = Approvals::new(
+                |_| true,
+                move |notice| sink.lock().expect("lock").push(notice),
+            );
+            let listener = transport::listen(&name).expect("listen");
+            tauri::async_runtime::spawn(Arc::clone(&approvals).serve(listener));
+            let first = tokio::spawn({
+                let name = name.clone();
+                async move {
+                    approval::ask(&name, &bash("a:agent", "ls"), Duration::from_secs(10)).await
+                }
+            });
+            let id = first_question(&notices).await;
+            assert!(approvals.answer_always(id));
+            first.await.expect("hook task");
+
+            let other_task =
+                approval::ask(&name, &bash("b:agent", "ls"), Duration::from_millis(300)).await;
+            assert_eq!(other_task, None, "task b has no rule");
+            let rules = approvals.always_rules("a");
+            assert_eq!(rules.len(), 1);
+            assert!(approvals.revoke_always("a", rules[0].id));
+            let revoked =
+                approval::ask(&name, &bash("a:agent", "ls"), Duration::from_millis(300)).await;
+            assert_eq!(revoked, None, "a revoked rule asks again");
+        });
+    }
+
+    #[test]
+    fn qa_runs_and_task_creation_can_never_be_remembered() {
+        let approvals = Approvals::new(|_| true, |_| {});
+        let asking = Arc::clone(&approvals);
+        let thread =
+            std::thread::spawn(move || asking.ask_blocking("t:agent".into(), "npm test".into()));
+        let id = loop {
+            if let Some(question) = approvals.pending_questions().first() {
+                assert_eq!(question.kind, super::QuestionKind::QaRun);
+                assert!(!question.can_always_allow);
+                break question.id;
+            }
+            std::thread::yield_now();
+        };
+        assert!(!approvals.answer_always(id));
+        assert!(approvals.always_rules("t").is_empty());
+        assert!(approvals.answer(id, Decision::Allow));
+        thread.join().expect("join");
+    }
+
+    #[test]
+    fn a_hook_that_hangs_up_is_reported_before_its_question_closes() {
+        tauri::async_runtime::block_on(async {
+            let (name, _approvals, notices) = start("task1:agent");
+            let question = request("task1:agent");
+            let waiting = approval::ask(&name, &question, Duration::from_millis(300));
+            assert_eq!(waiting.await, None);
+            let id = first_question(&notices).await;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !notices.lock().expect("lock").contains(&Notice::Closed(id)) {
+                assert!(Instant::now() < deadline, "question stayed open");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let seen = notices.lock().expect("lock").clone();
+            let hung = seen.iter().position(|n| *n == Notice::HungUp(id));
+            let closed = seen.iter().position(|n| *n == Notice::Closed(id));
+            assert!(hung.is_some() && hung < closed);
         });
     }
 
@@ -854,7 +1135,7 @@ mod tests {
             .iter()
             .find_map(|notice| match notice {
                 Notice::Asked(question) => Some(question.review.clone()),
-                Notice::Closed(_) => None,
+                _ => None,
             })
             .expect("question");
         (id, review)

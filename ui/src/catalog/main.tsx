@@ -10,6 +10,7 @@ import { DialogsStates } from "./dialogs-states";
 import { FilesQaStates } from "./files-qa-states";
 import { SettingsStates } from "./settings-states";
 import { ApprovalBar } from "../components/ApprovalBar";
+import { AlwaysAllowList } from "../components/TaskAlwaysAllow";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
 import { TaskHeader } from "../components/TaskHeader";
@@ -474,6 +475,21 @@ function Catalog() {
               actions={<Button size="sm" variant="primary">{t("setup.retryCopy")}</Button>}>
               .env.local: permission denied. {t("setup.copyFailedNote")}
             </Notice>
+          </div>
+          <div class="catalog-frame">
+            <ApprovalBar title={t("approval.qa.title")} agent="brachio.toml" body={t("approval.qa.body")}
+              review="pnpm test -- --run" allowLabel={t("approval.qa.run")} denyLabel={t("approval.qa.deny")}
+              hint={t("approval.qa.hint")} onAllow={() => {}} onDeny={() => {}} />
+          </div>
+          <div class="catalog-frame">
+            <Notice tone="info" lead={t("approval.closedElsewhere")}
+              actions={<Button size="sm">{t("approval.dismiss")}</Button>}>{t("approval.closedElsewhereNote")}</Notice>
+          </div>
+          <div class="catalog-frame">
+            <AlwaysAllowList onRevoke={() => {}} rules={[
+              { id: 1, tool: "Bash", target: "cargo test -p brachio-auth" },
+              { id: 2, tool: "Edit", target: "crates/brachio-auth/src/login.rs" },
+            ]} />
           </div>
           <div class="catalog-frame"><ApprovalBar review={LONG_REQUEST} agent="Claude Code" onAllow={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame">
