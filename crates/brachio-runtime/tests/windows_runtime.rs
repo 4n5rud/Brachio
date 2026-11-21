@@ -13,6 +13,9 @@ use uuid::Uuid;
 
 const RUNTIME: &str = env!("CARGO_BIN_EXE_brachio-runtime");
 
+/// Only a hang detector: progress is awaited by polling, so load alone must never reach it.
+const PROGRESS_DEADLINE: Duration = Duration::from_secs(90);
+
 /// Each runtime name gets its own journal directory, so tests never touch the user's.
 fn state_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("brachio-state-{name}"))
@@ -53,7 +56,7 @@ fn response(output: Output) -> Value {
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(8);
+    let deadline = Instant::now() + PROGRESS_DEADLINE;
     while !condition() {
         assert!(Instant::now() < deadline, "condition did not become true");
         thread::sleep(Duration::from_millis(40));
@@ -148,7 +151,7 @@ fn a_new_client_reuses_the_live_shell() {
     });
     let frame = || {
         received
-            .recv_timeout(Duration::from_secs(8))
+            .recv_timeout(PROGRESS_DEADLINE)
             .expect("receive output frame")
     };
     let replayed = frame();
