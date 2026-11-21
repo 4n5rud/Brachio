@@ -18,6 +18,8 @@ pub struct HookSetup {
     helper_folder: Option<PathBuf>,
     /// A plugin folder that teaches Claude Code the Brachio skills, added per session.
     plugin: Option<PathBuf>,
+    /// The skills as one file that Codex is told to read.
+    codex_instructions: Option<PathBuf>,
 }
 
 const SEND_SKILL: &str = include_str!("../skills/brachio-send/SKILL.md");
@@ -45,11 +47,17 @@ impl HookSetup {
                 .map_err(|error| tracing::info!(%error, "the Brachio skills are off"))
                 .ok()
         });
+        let codex_instructions = helper_folder.as_ref().and_then(|_| {
+            write_codex_instructions(folder)
+                .map_err(|error| tracing::info!(%error, "the Brachio skills for Codex are off"))
+                .ok()
+        });
         Self {
             endpoint,
             settings,
             helper_folder,
             plugin,
+            codex_instructions,
         }
     }
 
@@ -88,22 +96,24 @@ impl HookSetup {
         arguments
     }
 
-    /// Arguments that give a Codex session the same skills as developer instructions. Codex has
-    /// no plugin folder, and a project `AGENTS.md` would change the user's repository. Empty when
-    /// the helper is not installed.
+    /// Arguments that point a Codex session at the skills file. `model_instructions_file` would
+    /// replace Codex's own base instructions, so a one-line `developer_instructions` that names
+    /// the file is used instead: it adds to them, needs no multi-line argument and passes through
+    /// `cmd.exe` for npm shims. The value is not valid TOML on purpose, so Codex takes it as a
+    /// literal. Empty when the helper is not installed or the path is unsafe for `cmd.exe`.
     pub fn codex_arguments(&self) -> Vec<String> {
-        if self.helper_folder.is_none() {
+        let Some(path) = &self.codex_instructions else {
+            return Vec::new();
+        };
+        let path = path.to_string_lossy().replace('\\', "/");
+        if !brachio_agent::is_safe_for_cmd(&path) {
             return Vec::new();
         }
-        let text = SKILLS
-            .iter()
-            .map(|(_, skill)| skill_body(skill))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        // Codex reads the value as TOML; a JSON string is a valid TOML basic string.
         vec![
             "-c".to_owned(),
-            format!("developer_instructions={}", serde_json::Value::from(text)),
+            format!(
+                "developer_instructions=Before using Brachio, read and follow the instructions in {path}"
+            ),
         ]
     }
 
@@ -129,6 +139,19 @@ fn skill_body(skill: &str) -> String {
         Some((_, body)) => body.trim().to_owned(),
         None => text.trim().to_owned(),
     }
+}
+
+/// Writes the skills for Codex as one file and returns its path.
+fn write_codex_instructions(folder: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(folder).with_context(|| format!("create {}", folder.display()))?;
+    let path = folder.join("codex-instructions.md");
+    let text = SKILLS
+        .iter()
+        .map(|(_, skill)| skill_body(skill))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
+    Ok(path)
 }
 
 /// Writes the plugin that carries the Brachio skills and returns its folder.
@@ -235,26 +258,37 @@ mod tests {
     }
 
     #[test]
-    fn codex_gets_both_skills_as_one_toml_string_of_developer_instructions() {
+    fn codex_gets_a_single_line_argument_naming_a_file_with_both_skills() {
+        let folder = tempfile::tempdir().expect("tempdir");
+        let file = super::write_codex_instructions(folder.path()).expect("write");
         let setup = HookSetup {
             endpoint: String::new(),
             settings: None,
             helper_folder: Some(Path::new("helper").to_path_buf()),
             plugin: None,
+            codex_instructions: Some(file.clone()),
         };
         let arguments = setup.codex_arguments();
         assert_eq!(arguments[0], "-c");
-        let value = arguments[1]
-            .strip_prefix("developer_instructions=")
+        assert!(!arguments[1].contains('\n'));
+        let named = arguments[1]
+            .strip_prefix(
+                "developer_instructions=Before using Brachio, read and follow the instructions in ",
+            )
             .expect("key");
-        let text: String = serde_json::from_str(value).expect("a quoted string");
+        assert_eq!(named, file.to_string_lossy().replace('\\', "/"));
+        let text = std::fs::read_to_string(&file).expect("file");
         assert!(text.contains("brachio task create") && text.contains("brachio peers"));
         assert!(!text.contains("name: brachio-"), "front matter is left out");
-        let without_helper = HookSetup {
-            helper_folder: None,
+        for program in ["C:/npm/codex.cmd", "C:/bin/codex.exe"] {
+            brachio_agent::ResolvedCommand::new(Path::new(program), &arguments)
+                .unwrap_or_else(|error| panic!("{program}: {error}"));
+        }
+        let unsafe_path = HookSetup {
+            codex_instructions: Some(Path::new("C:/100%/x.md").to_path_buf()),
             ..setup
         };
-        assert!(without_helper.codex_arguments().is_empty());
+        assert!(unsafe_path.codex_arguments().is_empty());
     }
 
     #[test]
