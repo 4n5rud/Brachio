@@ -181,7 +181,7 @@ describe("QA run", () => {
 });
 
 describe("approval re-fetch after the listener was lost", () => {
-  const question = { id: 5, key: "t1:agent", review: "Bash" };
+  const question: ApprovalQuestion = { id: 5, key: "t1:agent", review: "Bash", kind: "tool", canAlwaysAllow: true };
 
   it("shows a question asked while the window had no listener", async () => {
     host.handle("pending_approvals", () => [question]);
