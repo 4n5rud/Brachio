@@ -475,6 +475,27 @@ pub(crate) fn send(channel: &Channel<InvokeResponseBody>, body: InvokeResponseBo
     }
 }
 
+/// Which command language the shell that new shell tabs start speaks, so setup commands can
+/// report how they ended in that shell's own syntax.
+#[tauri::command]
+pub fn terminal_shell_kind() -> &'static str {
+    shell_kind(&default_shell())
+}
+
+fn shell_kind(program: &std::path::Path) -> &'static str {
+    let name = program
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match name.as_str() {
+        "bash" | "zsh" | "sh" | "dash" | "ksh" => "posix",
+        "powershell" | "pwsh" => "powershell",
+        "cmd" => "cmd",
+        _ => "none",
+    }
+}
+
 fn default_shell() -> PathBuf {
     let (variable, fallback) = if cfg!(windows) {
         ("COMSPEC", "cmd.exe")
@@ -497,6 +518,16 @@ fn terminal_env() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shells_are_told_apart_by_program_name() {
+        let kind = |path: &str| shell_kind(std::path::Path::new(path));
+        assert_eq!(kind("/bin/zsh"), "posix");
+        assert_eq!(kind("/usr/bin/bash"), "posix");
+        assert_eq!(kind("cmd.exe"), "cmd");
+        assert_eq!(kind("pwsh.exe"), "powershell");
+        assert_eq!(kind("/usr/bin/fish"), "none");
+    }
 
     #[test]
     fn channel_messages_use_camel_case_json() {

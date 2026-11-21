@@ -15,6 +15,7 @@ import { ApprovalBar } from "./ApprovalBar";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
+import type { SetupOutcome, SetupResult } from "../lib/setup-signal";
 import { onShellRequest } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
@@ -65,6 +66,10 @@ export function TaskView(props: {
   /** Commands from brachio.toml waiting for the user's yes or no. */
   setupRequest?: { commands: readonly string[]; answer: (run: boolean) => void };
   setupFailure?: string;
+  /** How the setup commands typed into the shell ended, once they have. */
+  setupOutcome?: SetupOutcome;
+  onSetupResult?: (taskId: string, result: SetupResult) => void;
+  onRerunSetup?: () => void;
   retryingSetup?: boolean;
   onRetrySetup?: () => void;
   /** Whether the task's agent should continue its last conversation. */
@@ -85,6 +90,10 @@ export function TaskView(props: {
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [tabsReady, setTabsReady] = createSignal(false);
   const [tabsSaving, setTabsSaving] = createSignal(false);
+  const failedSetup = () => {
+    const outcome = props.setupOutcome;
+    return outcome?.state === "failed" ? outcome : undefined;
+  };
   const [tabError, setTabError] = createSignal("");
   let disposed = false;
   onCleanup(() => { disposed = true; });
@@ -340,6 +349,17 @@ export function TaskView(props: {
           )}
         </Show>
         <Show when={tabError()}>{(message) => <Notice tone="error" lead={t("error.title")}>{message()}</Notice>}</Show>
+        <Show when={props.setupOutcome?.state === "done"}>
+          <Notice tone="success">{t("setup.done")}</Notice>
+        </Show>
+        <Show when={failedSetup()}>
+          {(failed) => (
+            <Notice tone="error" lead={t("setup.failed")}
+              actions={<Button size="sm" variant="primary" onClick={() => props.onRerunSetup?.()}>{t("setup.rerun")}</Button>}>
+              {t("setup.failedCode").replace("{command}", failed().command).replace("{code}", String(failed().code))} {t("setup.failedNote")}
+            </Notice>
+          )}
+        </Show>
         <Show when={props.setupFailure}>
           {(message) => (
             <Notice tone="error" lead={t("setup.copyFailed")}
@@ -418,7 +438,7 @@ export function TaskView(props: {
                   <Show when={mode() && props.findTask(id)?.worktreePath}>
                     {(cwd) => (
                       <div class="terminal-cell" hidden={mode() === "agent"}>
-                        <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell"), initialInput: props.takeSetupInput?.(id) }} theme={props.theme}
+                        <TerminalPane session={{ agent: null, cwd: cwd(), key: terminalKey(id, "shell"), initialInput: props.takeSetupInput?.(id), onSetupResult: (result) => props.onSetupResult?.(id, result) }} theme={props.theme}
                           active={selected() && mode() !== "agent"} focus={mode() === "shell"}
                           leave="park" onHosted={(hosted) => noteHosted(id, hosted)} onReport={props.onReportProblem} />
                       </div>

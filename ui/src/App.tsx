@@ -32,7 +32,11 @@ import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
-import { CORE_AGENT } from "./lib/terminal";
+import { CORE_AGENT, shellKind } from "./lib/terminal";
+import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
+import { sendShellInput } from "./lib/shell-input";
+import { requestShell } from "./lib/shell-request";
+import { terminalKey } from "./lib/terminal-layout";
 import type { DiffTotals } from "./lib/diff";
 import { pasteText } from "./lib/terminal-paste";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
@@ -491,9 +495,47 @@ export function App() {
       setSetupRequests((items) => new Map(items).set(taskId, { commands, answer }));
     });
   };
+  // Each setup run's marker nonce, commands and results; a rerun replaces it.
+  const setupRuns = new Map<string, { nonce: string; commands: readonly string[]; results: SetupResult[] }>();
+  const [setupOutcomes, setSetupOutcomes] = createSignal<ReadonlyMap<string, SetupOutcome>>(new Map());
+  const DONE_NOTICE_MS = 10_000;
+  const setOutcome = (taskId: string, outcome: SetupOutcome | undefined) => {
+    setSetupOutcomes((items) => {
+      const next = new Map(items);
+      if (outcome) next.set(taskId, outcome);
+      else next.delete(taskId);
+      return next;
+    });
+  };
+  const onSetupResult = (taskId: string, result: SetupResult) => {
+    const run = setupRuns.get(taskId);
+    // Output replayed from an earlier run carries another nonce.
+    if (!run || run.nonce !== result.nonce || run.results.some((seen) => seen.index === result.index)) return;
+    run.results.push(result);
+    const outcome = setupOutcome(run.commands, run.results);
+    setOutcome(taskId, outcome.state === "running" ? undefined : outcome);
+    if (outcome.state === "done") {
+      setTimeout(() => {
+        if (setupOutcomes().get(taskId)?.state === "done") setOutcome(taskId, undefined);
+      }, DONE_NOTICE_MS);
+    }
+  };
+  const startSetupRun = async (taskId: string, commands: readonly string[]) => {
+    const kind = await shellKind();
+    const nonce = newSetupNonce();
+    if (kind !== "none") setupRuns.set(taskId, { nonce, commands, results: [] });
+    return wrapSetupCommands(kind, commands, nonce);
+  };
+  const rerunSetup = async (taskId: string) => {
+    const run = setupRuns.get(taskId);
+    if (!run) return;
+    setOutcome(taskId, undefined);
+    requestShell(taskId);
+    sendShellInput(terminalKey(taskId, "shell"), await startSetupRun(taskId, run.commands));
+  };
   const requestSetup = async (taskId: string, repoId: string, commands: readonly string[]) => {
     if (commands.length === 0 || !await approveSetup(taskId, repoId, commands)) return;
-    setupInputs.set(taskId, commands.join("\r"));
+    setupInputs.set(taskId, await startSetupRun(taskId, commands));
     setSetupRevision((revision) => revision + 1);
   };
 
@@ -893,6 +935,9 @@ export function App() {
               onDraftOriginal={(text) => draftComment(task().id, text)}
               setupRequest={setupRequests().get(task().id)}
               setupFailure={setupFailures().get(task().id)}
+              setupOutcome={setupOutcomes().get(task().id)}
+              onSetupResult={onSetupResult}
+              onRerunSetup={() => void rerunSetup(task().id)}
               retryingSetup={retryingSetup()}
               onRetrySetup={() => void retrySetup(task().id)}
               registerDraftTarget={registerDraftTarget}

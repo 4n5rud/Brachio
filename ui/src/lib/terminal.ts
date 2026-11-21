@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import type { ShellKind } from "./setup-signal";
 
 import type { AgentState } from "./status";
 import type { AgentKind as TaskAgent } from "./tasks";
@@ -135,3 +136,11 @@ export async function openTerminal(
 }
 
 export const detectAgents = () => invoke<InstalledAgent[]>("agents_detect");
+
+let shellKindPromise: Promise<ShellKind> | undefined;
+
+/** The command language of new shell tabs; asked once. */
+export function shellKind(): Promise<ShellKind> {
+  shellKindPromise ??= invoke<ShellKind>("terminal_shell_kind").catch(() => "none");
+  return shellKindPromise;
+}
