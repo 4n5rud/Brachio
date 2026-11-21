@@ -20,9 +20,9 @@ pub use message_record::{
     MAX_UNREAD_FROM_ONE_SENDER,
 };
 pub use orchestration_record::{
-    add_dependency, apply_transition, decide_handoff, load_graph, mark_running, record_handoff,
-    review_handoff, submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff,
-    OrchestrationError,
+    add_dependency, apply_transition, decide_handoff, decide_handoff_then, load_graph,
+    mark_running, record_handoff, review_handoff, submit_handoff, Handoff, HandoffReview,
+    HandoffSource, NewHandoff, OrchestrationError,
 };
 pub use orchestration_schedule::{
     fail_lost, running_children, schedule_next, scheduled_leads, scheduler_enabled,
