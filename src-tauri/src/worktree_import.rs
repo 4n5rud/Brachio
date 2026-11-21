@@ -101,6 +101,7 @@ pub async fn worktree_import(
             worktree_path: &entry.path,
             agent_kind: Some(agent_name(brachio_agent::AgentKind::ClaudeCode)),
             agent_session_id: None,
+            compare_group: None,
             created_at_ms: now_ms(),
         };
         records.push(TaskRecord::insert(&transaction, &task).map_err(|error| error.to_string())?);
