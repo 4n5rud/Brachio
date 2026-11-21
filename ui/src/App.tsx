@@ -17,6 +17,7 @@ import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
+import type { SettingsPage } from "./components/settings/SettingsPanel";
 import { TaskList } from "./components/TaskList";
 import { listPinnedTasks, setTaskPinned } from "./lib/task-pins";
 import { detectKeepAwake, holdAwake, keepAwakeEnabled } from "./lib/keep-awake";
@@ -192,6 +193,8 @@ export function App() {
   const [folderOverWindow, setFolderOverWindow] = createSignal(false);
   const [filesOverTerminal, setFilesOverTerminal] = createSignal(false);
   const [workspacePanel, setWorkspacePanel] = createSignal<"quickOpen" | "settings" | "archived" | "activity">();
+  const [settingsPage, setSettingsPage] = createSignal<SettingsPage>();
+  const openSettings = (page?: SettingsPage) => { setSettingsPage(page); setWorkspacePanel("settings"); };
   const [activity, setActivity] = createSignal<readonly TaskActivity[]>([]);
   const activeTaskIds = createMemo(() => new Set(tasks().map((task) => task.id)));
   // Files of the selected task, read each time quick open opens so new files are found.
@@ -975,7 +978,7 @@ export function App() {
       if (isSettingsShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
-        setWorkspacePanel("settings");
+        openSettings();
         return;
       }
       const panel = panelToggleShortcut(event);
@@ -1037,7 +1040,6 @@ export function App() {
         needsYou={needsYou()}
         onActivity={() => setWorkspacePanel("activity")}
         onQuickOpen={() => setWorkspacePanel("quickOpen")}
-        onSettings={() => setWorkspacePanel("settings")}
         sidebarOpen={sidebarOpen()}
         inspectorOpen={inspectorOpen()}
         onToggleSidebar={toggleSidebar}
@@ -1070,6 +1072,7 @@ export function App() {
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
+          onSettings={() => openSettings()}
           reveal={revealed()}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
@@ -1140,7 +1143,7 @@ export function App() {
         </Show>
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
-      <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <StatusBar sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
       <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
       <Show when={switcher()} keyed>
         {(current) => (
@@ -1163,7 +1166,8 @@ export function App() {
           } : undefined}
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
           onCommand={runCommand}
-          onOpen={open} onClose={() => setWorkspacePanel(undefined)} />}
+          settingsPage={settingsPage()}
+          onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
       </Show>
       <Show when={issueReport() !== undefined}>
         <IssueReportDialog error={issueReport() ?? ""} onClose={() => setIssueReport(undefined)} />

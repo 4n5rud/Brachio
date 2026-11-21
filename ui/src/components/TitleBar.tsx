@@ -51,7 +51,6 @@ export function TitleBar(props: {
   needsYou: number;
   onActivity: () => void;
   onQuickOpen: () => void;
-  onSettings: () => void;
   sidebarOpen: boolean;
   inspectorOpen: boolean;
   onToggleSidebar: () => void;
@@ -84,7 +83,6 @@ export function TitleBar(props: {
           onClick={props.onToggleInspector} />
         <IconButton icon="bell" aria-haspopup="dialog" badge={props.needsYou}
           label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity} />
-        <IconButton icon="sliders" label={t("titlebar.settings")} onClick={props.onSettings} />
         {platform() === "windows" && <WindowButtons />}
       </div>
     </header>

@@ -15,6 +15,8 @@ import { PlanGraph } from "../components/PlanGraph";
 import type { ChildView } from "../lib/orchestration";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
+import { UsagePanel, UsageReadout } from "../components/AgentUsage";
+import type { AgentUsage } from "../lib/agent-usage";
 import { TaskHeader } from "../components/TaskHeader";
 import { DropVeil } from "../components/DropVeil";
 import { TaskList } from "../components/TaskList";
@@ -48,6 +50,15 @@ import { Toggle } from "../components/ui/Toggle";
 if (!import.meta.env.DEV) throw new Error("The component catalog runs only on the dev server.");
 
 const NOW = Date.now();
+const USAGE_NOW = Math.floor(NOW / 1000);
+const USAGE_OK: AgentUsage[] = [
+  { agent: "claude", state: "ok", plan: "Pro", session: { usedPercent: 15, resetsAt: USAGE_NOW + 2 * 3600 + 55 * 60 }, weekly: { usedPercent: 14, resetsAt: USAGE_NOW + 4 * 86_400 + 3600 } },
+  { agent: "codex", state: "ok", plan: "Plus", session: { usedPercent: 5, resetsAt: USAGE_NOW + 9 * 60 }, weekly: { usedPercent: 98, resetsAt: USAGE_NOW + 3 * 86_400 + 8 * 3600 } },
+];
+const USAGE_PARTIAL: AgentUsage[] = [
+  { agent: "claude", state: "unavailable" },
+  { agent: "codex", state: "ok", plan: null, session: null, weekly: { usedPercent: 40, resetsAt: null } },
+];
 const task = (over: Partial<TaskRow> & { id: string; title: string; status: AgentState }): TaskRow => ({
   agent: "claude", branch: "brachio/rate-limit-7f2a", additions: 128, deletions: 14, updatedAt: NOW - 60_000, ...over,
 });
@@ -94,7 +105,7 @@ const REQUEST = "tool     Bash\ncommand  cargo test -p brachio-auth\ncwd      ~/
 const EDIT_REQUEST = "tool     Edit\nfile     crates/brachio-auth/src/login.rs\nchange   - let user = find_user(&body.email)?;\n         + if !limiter.allow(ip) {\n         +     return Err(TooMany::retry_after(60));\n         + }";
 const LONG_REQUEST = Array.from({ length: 14 }, (_, line) => `edit     crates/auth/src/limiter/window_${line}.rs`).join("\n");
 const TITLE_BAR = { repo: "brachio", view: "tasks" as const, onView: () => {}, needsYou: 2, onActivity: () => {}, onQuickOpen: () => {},
-  onSettings: () => {}, sidebarOpen: true, inspectorOpen: true, onToggleSidebar: () => {}, onToggleInspector: () => {} };
+  sidebarOpen: true, inspectorOpen: true, onToggleSidebar: () => {}, onToggleInspector: () => {} };
 
 const THEMES = COLOR_THEMES.flatMap((color) => (["dark", "light"] as const).map((mode) => `${color}-${mode}`));
 
@@ -433,7 +444,7 @@ function Catalog() {
         <Row cap="projects, collapsed (hover the heading), empty, folder workspace">
           <div class="catalog-frame" style={{ width: "288px", height: "560px", display: "flex" }}>
             <TaskList tasks={SIDEBAR_TASKS} repos={SIDEBAR_REPOS} selectedId="a" onSelect={() => {}} onNewTask={() => {}}
-              onAddRepo={() => {}} onOpenArchived={() => {}} onAddFolderRepo={() => Promise.resolve()}
+              onAddRepo={() => {}} onOpenArchived={() => {}} onSettings={() => {}} onAddFolderRepo={() => Promise.resolve()}
               initialCollapsed={new Set(["r2"])} prFor={(id) => SIDEBAR_PR[id] ?? null}
               needsYou={2} now={NOW} unreadForTask={(id) => (id === "b" ? 2 : 0)} />
           </div>
@@ -549,7 +560,19 @@ function Catalog() {
           <div class="catalog-bar-frame"><StatusBarView sessions={7} memory="182 MB" memoryTitle="App and agents 151 MB, runtime 31 MB" cpu="3%" branch="main" ahead={0} behind={2} /></div>
           <div class="catalog-bar-frame"><StatusBarView sessions={0} /></div>
           <div class="catalog-bar-frame"><StatusBarView sessions={7} usageUnavailable memory="88 MB" cpu="0%" /></div>
+          <div class="catalog-bar-frame"><StatusBarView sessions={7} memory="182 MB" cpu="3%" branch="main" ahead={0} behind={2}
+            usage={<UsageReadout usages={USAGE_OK} now={USAGE_NOW} onRefresh={() => {}} />} /></div>
+          <div class="catalog-bar-frame"><StatusBarView sessions={7} memory="182 MB" cpu="3%"
+            usage={<UsageReadout usages={USAGE_PARTIAL} now={USAGE_NOW} refreshing onRefresh={() => {}} />} /></div>
         </div>
+      </Section>
+
+      <Section title="Agent usage popover">
+        <Row cap="detailed, compact, one agent unknown with a missing window">
+          <div class="popover" style={{ position: "static" }}><UsagePanel usages={USAGE_OK} now={USAGE_NOW} mode="detailed" onMode={() => {}} onRefresh={() => {}} onAccounts={() => {}} onDetails={() => {}} /></div>
+          <div class="popover" style={{ position: "static" }}><UsagePanel usages={USAGE_OK} now={USAGE_NOW} mode="compact" onMode={() => {}} onRefresh={() => {}} onAccounts={() => {}} onDetails={() => {}} /></div>
+          <div class="popover" style={{ position: "static" }}><UsagePanel usages={USAGE_PARTIAL} now={USAGE_NOW} mode="detailed" onMode={() => {}} onRefresh={() => {}} onAccounts={() => {}} /></div>
+        </Row>
       </Section>
 
       <Section title="TitleBar">

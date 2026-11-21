@@ -217,6 +217,8 @@ pub struct QuotaWindow {
 /// Usage windows for the active Codex account.
 #[derive(Serialize, Deserialize)]
 pub struct CodexQuota {
+    #[serde(default, rename = "planType")]
+    plan_type: Option<String>,
     primary: Option<QuotaWindow>,
     secondary: Option<QuotaWindow>,
 }

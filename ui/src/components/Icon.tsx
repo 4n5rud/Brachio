@@ -9,6 +9,7 @@ const PATHS = {
   plus: () => <path d="M8 3v10M3 8h10" />,
   bell: () => <><path d="M4 11V7.2a4 4 0 0 1 8 0V11l1.2 1.5H2.8z" /><path d="M6.6 14.2h2.8" /></>,
   sliders: () => <><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" /><circle cx="6" cy="4.5" r="1.4" fill="none" /><circle cx="10.5" cy="8" r="1.4" fill="none" /><circle cx="5" cy="11.5" r="1.4" fill="none" /></>,
+  gear: () => <><path d="M6.8 3.1 7 1.5h2l.2 1.6 1.4.6 1.3-1 1.4 1.4-1 1.3.6 1.4 1.6.2v2l-1.6.2-.6 1.4 1 1.3-1.4 1.4-1.3-1-1.4.6-.2 1.6H7l-.2-1.6-1.4-.6-1.3 1-1.4-1.4 1-1.3-.6-1.4-1.6-.2V7l1.6-.2.6-1.4-1-1.3 1.4-1.4 1.3 1z" /><circle cx="8" cy="8" r="2.2" /></>,
   branch: () => <><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="4.5" r="1.5" /><path d="M4.5 5v6M11.5 6c0 3.2-7 2.4-7 5" /></>,
   terminal: () => <><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="m5 6.8 2 1.6-2 1.6M8.5 10.5H11" /></>,
   board: () => <><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="9" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="2.5" y="9" width="4.5" height="4.5" rx="1" /><rect x="9" y="9" width="4.5" height="4.5" rx="1" /></>,

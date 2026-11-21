@@ -3,6 +3,7 @@ import { Button } from "./ui/Button";
 import { Menu, MenuItem } from "./ui/Menu";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
+import { SETTINGS_KEYS } from "../lib/shortcut";
 import { compareSiblings, orderWithChildren, orderWithCompare, pinnedFirst, taskGroup, type TaskRow } from "../lib/tasks";
 import type { PrChip } from "../lib/pr-status";
 import { FolderRepos } from "./FolderRepos";
@@ -34,6 +35,8 @@ export function TaskList(props: {
   onAddFolderRepo?: (path: string) => Promise<void>;
   onAddRepo?: (kind: "git" | "folder") => void;
   onOpenArchived?: () => void;
+  /** Opens Settings; its button sits at the foot of the sidebar. */
+  onSettings?: () => void;
   onArchiveTask?: (id: string) => void;
   /** Archives the other tasks of a comparison and keeps this one. */
   onKeepOnly?: (id: string) => void;
@@ -188,9 +191,15 @@ export function TaskList(props: {
           }}
         </For>
       </nav>
-      <Show when={props.onOpenArchived}>
+      <Show when={props.onSettings || props.onOpenArchived}>
         <div class="sidebar-foot">
-          <Button variant="ghost" size="sm" onClick={() => props.onOpenArchived?.()}>{t("task.archived")}</Button>
+          <Show when={props.onSettings}>
+            <IconButton icon="gear" label={t("titlebar.settings")} title={`${t("titlebar.settings")} (${SETTINGS_KEYS})`}
+              onClick={() => props.onSettings?.()} />
+          </Show>
+          <Show when={props.onOpenArchived}>
+            <Button class="sidebar-foot-end" variant="ghost" size="sm" onClick={() => props.onOpenArchived?.()}>{t("task.archived")}</Button>
+          </Show>
         </div>
       </Show>
     </aside>
