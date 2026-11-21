@@ -121,7 +121,11 @@ export function Inspector(props: {
                           <Show when={data().conflicts.length > 0}>
                             <InspectorSection title={t("inspector.conflicts")}>
                               <For each={data().conflicts}>{(path) => <FileRow mark="C" path={path} />}</For>
-                              <InspectorNote>{t("inspector.conflictsStopped")}</InspectorNote>
+                              <InspectorNote>
+                                {data().operation === "rebase" ? t("inspector.rebaseStopped")
+                                  : data().operation === "merge" ? t("inspector.mergeStopped")
+                                  : t("inspector.conflictsStopped")}
+                              </InspectorNote>
                             </InspectorSection>
                           </Show>
                           <TaskGitActions taskId={id} branch={props.task.branch} runner={runner}

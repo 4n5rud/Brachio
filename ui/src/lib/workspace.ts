@@ -41,7 +41,8 @@ export interface CreateTaskRequest {
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
-export const addRepo = (path: string) => invoke<RepoRecord>("repo_add", { path });
+/** With `gitOnly`, a folder that is not a Git repository is refused instead of added as a folder workspace. */
+export const addRepo = (path: string, gitOnly = false) => invoke<RepoRecord>("repo_add", { path, gitOnly });
 
 /** A git repository found inside a folder project. */
 export interface FolderRepo {
@@ -90,6 +91,8 @@ interface TaskChanges {
   untracked: string[];
   staged: string[];
   conflicts: string[];
+  /** A rebase or merge that Git stopped in the worktree. */
+  operation?: "rebase" | "merge" | null;
   truncated: boolean;
 }
 

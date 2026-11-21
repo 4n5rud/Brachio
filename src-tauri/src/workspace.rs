@@ -87,15 +87,26 @@ pub fn repo_list(database: State<'_, Database>) -> Result<Vec<RepoRecord>, Strin
 
 /// Adds the repository that contains `path`, or the folder itself when it is not in a git
 /// repository: a folder project runs its tasks in the folder, with no branch or worktree. Adding
-/// it twice returns the existing entry.
+/// it twice returns the existing entry. With `git_only`, a folder that is not in a git repository
+/// is refused instead of becoming a folder project.
 #[tauri::command]
-pub fn repo_add(database: State<'_, Database>, path: PathBuf) -> Result<RepoRecord, String> {
-    add_project(&database, &path)
+pub fn repo_add(
+    database: State<'_, Database>,
+    path: PathBuf,
+    git_only: Option<bool>,
+) -> Result<RepoRecord, String> {
+    add_project(&database, &path, git_only.unwrap_or(false))
 }
 
-fn add_project(database: &Database, path: &Path) -> Result<RepoRecord, String> {
+fn add_project(database: &Database, path: &Path, git_only: bool) -> Result<RepoRecord, String> {
     let (root, default_branch, is_git) = match brachio_git::inspect_repo(path) {
         Ok(info) => (info.root, info.default_branch, true),
+        Err(brachio_git::GitError::NotARepository { .. }) if git_only => {
+            return Err(format!(
+                "not a git repository: {}. Add it as a folder workspace instead.",
+                path.display()
+            ));
+        }
         Err(brachio_git::GitError::NotARepository { .. }) => {
             let folder = path.canonicalize().map_err(to_text)?;
             if !folder.is_dir() {
@@ -123,6 +134,46 @@ fn add_project(database: &Database, path: &Path) -> Result<RepoRecord, String> {
         is_git,
     };
     RepoRecord::insert(&connection, &repo).map_err(to_text)
+}
+
+/// Local and remote branches of a git project, for the base field of a new task. Folder projects
+/// have none.
+#[tauri::command]
+pub async fn repo_branches(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<Vec<BranchChoice>, String> {
+    let repo = RepoRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    if !repo.is_git {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        brachio_git::list_branches(&Git::new(&repo.path))
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|entry| BranchChoice {
+                        name: entry.name,
+                        value: entry.value,
+                        local: entry.local,
+                        remote: entry.remote,
+                    })
+                    .collect()
+            })
+            .map_err(to_text)
+    })
+    .await
+    .map_err(to_text)?
+}
+
+/// One branch offered as the base of a new task.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchChoice {
+    name: String,
+    value: String,
+    local: bool,
+    remote: Option<String>,
 }
 
 /// A git repository found inside a folder project.
@@ -945,6 +996,8 @@ pub struct TaskChanges {
     untracked: Vec<String>,
     staged: Vec<String>,
     conflicts: Vec<String>,
+    /// "rebase" or "merge" while git waits in the worktree, else null.
+    operation: Option<&'static str>,
     truncated: bool,
 }
 
@@ -966,6 +1019,7 @@ pub async fn task_changes(
             untracked: Vec::new(),
             staged: Vec::new(),
             conflicts: Vec::new(),
+            operation: None,
             truncated: false,
         });
     }
@@ -1017,6 +1071,8 @@ pub async fn task_changes(
             untracked,
             staged,
             conflicts,
+            operation: brachio_git::stopped_operation(&git)
+                .map(brachio_git::StoppedOperation::as_str),
             truncated,
         })
     })
@@ -1070,26 +1126,41 @@ mod folder_project_tests {
     }
 
     #[test]
+    fn git_only_refuses_a_plain_folder_and_adds_nothing() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let database = database();
+        let error = add_project(&database, folder.path(), true).expect_err("not a repository");
+        assert!(error.starts_with("not a git repository: "), "{error}");
+        assert!(
+            error.ends_with("Add it as a folder workspace instead."),
+            "{error}"
+        );
+        let listed =
+            brachio_store::RepoRecord::list(&database.lock().expect("lock")).expect("list");
+        assert!(listed.is_empty());
+    }
+
+    #[test]
     fn a_folder_that_is_not_a_repository_becomes_a_folder_project_once() {
         let folder = tempfile::tempdir().expect("temp dir");
         let database = database();
-        let project = add_project(&database, folder.path()).expect("add the folder");
+        let project = add_project(&database, folder.path(), false).expect("add the folder");
         assert!(!project.is_git);
         assert!(project.default_branch.is_empty());
         assert_eq!(
             brachio_pty::without_verbatim_prefix(&folder.path().canonicalize().expect("path")),
             project.path
         );
-        let again = add_project(&database, folder.path()).expect("add it again");
+        let again = add_project(&database, folder.path(), false).expect("add it again");
         assert_eq!(again.id, project.id);
-        assert!(add_project(&database, &folder.path().join("missing")).is_err());
+        assert!(add_project(&database, &folder.path().join("missing"), false).is_err());
     }
 
     #[test]
     fn a_task_in_a_folder_project_runs_in_the_folder_without_a_branch() {
         let folder = tempfile::tempdir().expect("temp dir");
         let database = database();
-        let project = add_project(&database, folder.path()).expect("add the folder");
+        let project = add_project(&database, folder.path(), false).expect("add the folder");
         let request = CreateTaskRequest {
             repo_id: project.id.clone(),
             parent_task_id: None,
