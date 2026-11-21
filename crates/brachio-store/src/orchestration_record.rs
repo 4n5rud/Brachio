@@ -352,6 +352,22 @@ pub fn decide_handoff(
     note: Option<&str>,
     now_ms: i64,
 ) -> Result<(), OrchestrationError> {
+    decide_handoff_then(connection, handoff_id, review, note, now_ms, |_| Ok(()))
+}
+
+/// Like [`decide_handoff`], and `then` runs in the same transaction after the decision is
+/// applied; if it fails, nothing is decided.
+///
+/// # Errors
+/// As [`decide_handoff`], or whatever `then` returns.
+pub fn decide_handoff_then(
+    connection: &mut Connection,
+    handoff_id: &str,
+    review: HandoffReview,
+    note: Option<&str>,
+    now_ms: i64,
+    then: impl FnOnce(&Connection) -> Result<(), OrchestrationError>,
+) -> Result<(), OrchestrationError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let handoff = Handoff::get(&transaction, handoff_id)?;
     let latest = Handoff::latest(&transaction, &handoff.task_id)?;
@@ -370,6 +386,7 @@ pub fn decide_handoff(
         HandoffReview::Rejected => TaskState::Running,
     };
     transition_in(&transaction, &handoff.task_id, to, now_ms)?;
+    then(&transaction)?;
     transaction.commit()?;
     Ok(())
 }

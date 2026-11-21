@@ -9,10 +9,10 @@ use brachio_core::task_graph::TaskState;
 use brachio_git::Git;
 use brachio_runtime::mailbox::MailResponse;
 use brachio_store::{
-    decide_handoff, fail_lost, fail_running, load_graph, qa_result_by_id, running_children,
-    schedule_next, scheduled_leads, scheduler_enabled, send_message, set_scheduler_enabled,
-    state_reason, submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff, NewMessage,
-    RepoRecord, TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
+    decide_handoff, decide_handoff_then, fail_lost, fail_running, load_graph, qa_result_by_id,
+    running_children, schedule_next, scheduled_leads, scheduler_enabled, send_message,
+    set_scheduler_enabled, state_reason, submit_handoff, Handoff, HandoffReview, HandoffSource,
+    NewHandoff, NewMessage, RepoRecord, TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -313,7 +313,8 @@ fn short(sha: &str) -> &str {
 }
 
 /// Applies the user's decision. Approving needs the branch to still be at the handed-off
-/// commit; rejecting needs a reason, which is also mailed to the child's agent.
+/// commit; rejecting needs a reason, which is mailed to the child's agent in the same
+/// transaction, so a rejection that cannot be delivered is not recorded.
 pub fn review_decision(
     connection: &mut Connection,
     handoff_id: &str,
@@ -344,36 +345,39 @@ pub fn review_decision(
         .map_err(|e| e.to_string());
     }
     let note = clean_text("The reason", note.unwrap_or(""), MAX_NOTE_CHARS)?;
-    decide_handoff(
+    let lead_id = task.parent_task_id.as_deref();
+    decide_handoff_then(
         connection,
         handoff_id,
         HandoffReview::Rejected,
         Some(&note),
         now_ms,
+        |transaction| {
+            let Some(lead_id) = lead_id else {
+                return Ok(());
+            };
+            send_message(
+                transaction,
+                &NewMessage {
+                    id: message_id,
+                    from_key: &format!("{lead_id}:agent"),
+                    to_key: &format!("{}:agent", task.id),
+                    kind: "status",
+                    priority: "high",
+                    subject: "Review rejected: rework needed",
+                    body: &note,
+                    payload_json: None,
+                    reply_to: None,
+                    request_id: None,
+                    created_at_ms: now_ms,
+                },
+            )?;
+            Ok(())
+        },
     )
-    .map_err(|e| e.to_string())?;
-    if let Some(lead_id) = task.parent_task_id.as_deref() {
-        let sent = send_message(
-            connection,
-            &NewMessage {
-                id: message_id,
-                from_key: &format!("{lead_id}:agent"),
-                to_key: &format!("{}:agent", task.id),
-                kind: "status",
-                priority: "high",
-                subject: "Review rejected: rework needed",
-                body: &note,
-                payload_json: None,
-                reply_to: None,
-                request_id: None,
-                created_at_ms: now_ms,
-            },
-        );
-        if let Err(error) = sent {
-            tracing::debug!(%error, "could not mail the rejection to the child");
-        }
-    }
-    Ok(())
+    .map_err(|e| {
+        format!("The rejection could not be delivered to the agent, so nothing was changed: {e}")
+    })
 }
 
 /// Starts what the schedulers allow and tells the window to open those tasks. Each child is
@@ -773,6 +777,46 @@ mod tests {
             "review_required"
         );
         drop(dir);
+    }
+
+    #[test]
+    fn a_rejection_that_cannot_be_mailed_is_not_recorded() {
+        let (_dir, mut db) = setup();
+        handoff_request(&mut db, "child:agent", "added b", &[], 5, "h1").unwrap();
+        for n in 0..brachio_store::MAX_UNREAD_FROM_ONE_SENDER {
+            brachio_store::send_message(
+                &db,
+                &brachio_store::NewMessage {
+                    id: &format!("fill{n}"),
+                    from_key: "lead:agent",
+                    to_key: "child:agent",
+                    kind: "status",
+                    priority: "normal",
+                    subject: "s",
+                    body: "b",
+                    payload_json: None,
+                    reply_to: None,
+                    request_id: None,
+                    created_at_ms: 6,
+                },
+            )
+            .unwrap();
+        }
+        let error = review_decision(
+            &mut db,
+            "h1",
+            false,
+            Some("fix it"),
+            worktree_head_of,
+            7,
+            "m1",
+        )
+        .unwrap_err();
+        assert!(error.contains("could not be delivered"), "{error}");
+        assert_eq!(
+            build_view(&db, "lead").unwrap().children[0].state,
+            "review_required"
+        );
     }
 
     #[test]
