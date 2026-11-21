@@ -2023,6 +2023,7 @@ mod folder_task_deletion_tests {
 
     #[test]
     fn a_folder_task_with_a_running_terminal_is_kept_until_it_stops() {
+        let _runtime_off = crate::runtime_client::RuntimeOff::hold();
         let database = folder_task_database();
         let locks = TaskWorktreeLocks::default();
         let runtime = RuntimeTerminals::default();

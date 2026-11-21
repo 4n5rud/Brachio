@@ -16,8 +16,7 @@ use super::{
     RuntimeTerminals, Uuid,
 };
 
-/// The runtime is chosen through process-wide environment variables, so one test at a time.
-static ENVIRONMENT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+use crate::runtime_client::TEST_ENVIRONMENT as ENVIRONMENT;
 
 const MARKER: &str = "brachio-flow-marker";
 

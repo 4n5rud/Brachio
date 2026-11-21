@@ -436,3 +436,39 @@ mod endpoint_tests {
             .to_owned()
     }
 }
+
+/// The runtime is chosen through process-wide environment variables, so tests that read or set
+/// them run one at a time.
+#[cfg(test)]
+pub(crate) static TEST_ENVIRONMENT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Keeps terminals in the app for a test that does not use the runtime, so it never meets another
+/// test's runtime settings or the real runtime of the machine.
+#[cfg(test)]
+pub(crate) struct RuntimeOff {
+    _lock: tokio::sync::MutexGuard<'static, ()>,
+    previous: Option<std::ffi::OsString>,
+}
+
+#[cfg(test)]
+impl RuntimeOff {
+    pub(crate) fn hold() -> Self {
+        let lock = TEST_ENVIRONMENT.blocking_lock();
+        let previous = env::var_os(OPT_IN_VARIABLE);
+        env::set_var(OPT_IN_VARIABLE, "0");
+        Self {
+            _lock: lock,
+            previous,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for RuntimeOff {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => env::set_var(OPT_IN_VARIABLE, value),
+            None => env::remove_var(OPT_IN_VARIABLE),
+        }
+    }
+}
