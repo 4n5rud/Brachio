@@ -280,6 +280,7 @@ fn redact_output(bytes: &[u8], redact: &[&str]) -> QaOutput {
         }
         text = text.replace(secret, "[redacted]");
     }
+    text = crate::redact_secrets(&text, truncated);
     if text.len() > OUTPUT_BYTES {
         let end = (0..=OUTPUT_BYTES)
             .rev()

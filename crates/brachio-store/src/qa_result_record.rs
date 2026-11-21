@@ -4,6 +4,9 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::StoreError;
 
+/// How many QA runs a task keeps. Storing another run deletes the oldest beyond this.
+pub const MAX_QA_RESULTS_PER_TASK: i64 = 20;
+
 /// A finished QA run to store.
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -102,6 +105,11 @@ pub fn save_qa_result(
         ],
     )?;
     let id = transaction.last_insert_rowid();
+    transaction.execute(
+        "DELETE FROM qa_results WHERE task_id = ?1
+         AND id NOT IN (SELECT id FROM qa_results WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2)",
+        params![result.task_id, MAX_QA_RESULTS_PER_TASK],
+    )?;
     if result.verified_by_brachio {
         transaction.execute(
             "UPDATE task_handoffs SET verified_qa_result_id = ?1
@@ -111,6 +119,14 @@ pub fn save_qa_result(
     }
     transaction.commit()?;
     Ok(id)
+}
+
+/// Deletes every stored QA run of a task, including its captured output. Returns how many.
+///
+/// # Errors
+/// Fails when the database does.
+pub fn delete_qa_results(connection: &Connection, task_id: &str) -> Result<usize, StoreError> {
+    Ok(connection.execute("DELETE FROM qa_results WHERE task_id = ?1", [task_id])?)
 }
 
 /// The newest QA run of a task, if any.
@@ -282,5 +298,54 @@ mod tests {
         let handoffs = Handoff::for_task(&db, "t").unwrap();
         assert_eq!(handoffs[0].verified_qa_result_id, None);
         assert!(!latest_qa_result(&db, "t").unwrap().unwrap().matches_handoff);
+    }
+
+    fn stored_count(db: &Connection) -> i64 {
+        db.query_row("SELECT COUNT(*) FROM qa_results", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn only_the_newest_results_of_a_task_are_kept() {
+        let mut db = db();
+        for index in 0..MAX_QA_RESULTS_PER_TASK + 3 {
+            save_qa_result(&mut db, &run(SHA_A, &format!("run {index}"))).unwrap();
+        }
+        assert_eq!(stored_count(&db), 20);
+        let latest = latest_qa_result(&db, "t").unwrap().unwrap();
+        assert_eq!(latest.stdout, "run 22");
+        let oldest: String = db
+            .query_row(
+                "SELECT stdout FROM qa_results ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(oldest, "run 3");
+    }
+
+    #[test]
+    fn deleting_a_tasks_output_leaves_other_tasks_alone() {
+        let mut db = db();
+        db.execute_batch(
+            "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+             VALUES ('u', 'r', 'U', 'p', 'b2', '/w2', 'new', 0);",
+        )
+        .unwrap();
+        save_qa_result(&mut db, &run(SHA_A, "mine")).unwrap();
+        let mut other = run(SHA_A, "theirs");
+        other.task_id = "u";
+        save_qa_result(&mut db, &other).unwrap();
+        assert_eq!(delete_qa_results(&db, "t").unwrap(), 1);
+        assert_eq!(latest_qa_result(&db, "t").unwrap(), None);
+        assert!(latest_qa_result(&db, "u").unwrap().is_some());
+    }
+
+    #[test]
+    fn deleting_a_task_deletes_its_stored_output() {
+        let mut db = db();
+        save_qa_result(&mut db, &run(SHA_A, "secret-ish")).unwrap();
+        crate::TaskRecord::delete(&db, "t").unwrap();
+        assert_eq!(stored_count(&db), 0);
     }
 }
