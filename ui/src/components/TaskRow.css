@@ -56,6 +56,19 @@
   vertical-align: -2px;
   color: var(--color-text-2);
 }
+.task-age-new {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+.task-new-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .task-meta,
 .task-extra {
   grid-column: 2 / 4;

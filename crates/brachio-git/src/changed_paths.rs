@@ -1,0 +1,55 @@
+//! The files a worktree changed against its base, and which of them two worktrees share.
+
+use std::collections::BTreeSet;
+
+use crate::git::{Git, GitError};
+
+/// Paths changed since `base`, committed or not, plus untracked files git does not ignore.
+/// Sorted, forward slashes, relative to the worktree.
+///
+/// # Errors
+/// Fails when git cannot read the worktree.
+pub fn changed_paths(git: &Git, base: &str) -> Result<Vec<String>, GitError> {
+    let tracked = git.run_text(&["diff", "--name-only", "--no-renames", "-z", base, "--"])?;
+    let untracked = git.run_text(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let paths: BTreeSet<String> = tracked
+        .split_terminator('\0')
+        .chain(untracked.split_terminator('\0'))
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok(paths.into_iter().collect())
+}
+
+/// Paths present in both lists, sorted.
+#[must_use]
+pub fn shared_paths(ours: &[String], theirs: &[String]) -> Vec<String> {
+    let theirs: BTreeSet<&String> = theirs.iter().collect();
+    let shared: BTreeSet<&String> = ours.iter().filter(|path| theirs.contains(path)).collect();
+    shared.into_iter().cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shared_paths;
+
+    fn paths(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn only_paths_in_both_lists_are_shared_and_come_back_sorted() {
+        let ours = paths(&["src/store/index.ts", "src/a.ts", "src/store/cart.ts"]);
+        let theirs = paths(&["src/store/cart.ts", "README.md", "src/store/index.ts"]);
+        assert_eq!(
+            shared_paths(&ours, &theirs),
+            paths(&["src/store/cart.ts", "src/store/index.ts"])
+        );
+    }
+
+    #[test]
+    fn disjoint_lists_share_nothing() {
+        assert!(shared_paths(&paths(&["a"]), &paths(&["b"])).is_empty());
+        assert!(shared_paths(&[], &paths(&["b"])).is_empty());
+    }
+}

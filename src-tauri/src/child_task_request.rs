@@ -8,7 +8,7 @@ use brachio_agent::AgentKind;
 use brachio_core::task_graph::TaskState;
 use brachio_store::{RepoRecord, TaskRecord};
 use rusqlite::Connection;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::mailbox::agent_owner;
 use crate::workspace::{self, CreateTaskRequest, Database, TaskWorktreeLocks};
@@ -186,9 +186,9 @@ fn after_task_id(key: &str) -> &str {
 }
 
 /// The app's implementation: the real database, worktrees and window.
-pub struct AppChildTasks(pub AppHandle);
+pub struct AppChildTasks<R: Runtime>(pub AppHandle<R>);
 
-impl ChildTasks for AppChildTasks {
+impl<R: Runtime> ChildTasks for AppChildTasks<R> {
     fn check(&self, request: &ChildRequest) -> Result<String, String> {
         let database = self.0.state::<Database>();
         let connection = database.lock()?;

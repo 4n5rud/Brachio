@@ -16,7 +16,7 @@ use brachio_store::{
 };
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::child_task_request::is_hidden_or_control;
 use crate::mailbox::agent_owner;
@@ -383,7 +383,7 @@ pub fn review_decision(
 /// Starts what the schedulers allow and tells the window to open those tasks. Each child is
 /// started by exactly one call, because the state change and the limit are checked in one
 /// transaction.
-pub fn schedule_all(app: &AppHandle) {
+pub fn schedule_all<R: Runtime>(app: &AppHandle<R>) {
     let database = app.state::<Database>();
     let started = match start_ready_children(&database) {
         Ok(started) => started,
