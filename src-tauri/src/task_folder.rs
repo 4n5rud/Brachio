@@ -16,9 +16,10 @@ fn task_folder(database: &Database, id: &str) -> Result<PathBuf, String> {
 }
 
 fn existing_folder(path: &Path) -> Result<PathBuf, String> {
-    let folder = path
-        .canonicalize()
-        .map_err(|_| format!("{} no longer exists.", path.display()))?;
+    let folder = path.canonicalize().map_err(|error| {
+        crate::folder_access::describe(path, &error.to_string())
+            .unwrap_or_else(|| format!("{} no longer exists.", path.display()))
+    })?;
     if !folder.is_dir() {
         return Err(format!("{} is not a folder.", path.display()));
     }

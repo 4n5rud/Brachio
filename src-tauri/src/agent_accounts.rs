@@ -2,11 +2,14 @@
 
 use std::env;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use brachio_agent::{find_on_path, AgentKind, ResolvedCommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -18,13 +21,17 @@ const PROTOCOL_LIMIT: u64 = 512 * 1024;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
+fn resolved_cli(kind: AgentKind, args: &[&str]) -> Result<ResolvedCommand, String> {
     let path = env::var_os("PATH");
     let extensions = env::var_os("PATHEXT");
     let executable = find_on_path(kind.program(), path.as_deref(), extensions.as_deref())
         .ok_or_else(|| format!("{} is not installed or not on PATH", kind.program()))?;
     let args: Vec<_> = args.iter().map(|arg| (*arg).to_owned()).collect();
-    let resolved = ResolvedCommand::new(&executable, &args).map_err(|error| error.to_string())?;
+    ResolvedCommand::new(&executable, &args).map_err(|error| error.to_string())
+}
+
+fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
+    let resolved = resolved_cli(kind, args)?;
     let mut command = Command::new(resolved.program);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -95,39 +102,107 @@ pub enum CodexAuthAction {
     SignOut,
 }
 
-/// Runs the explicitly selected vendor CLI command. Credentials stay with the CLI.
-#[tauri::command]
-pub async fn codex_auth_action(action: CodexAuthAction) -> Result<(), String> {
-    let signing_in = matches!(action, CodexAuthAction::SignIn);
-    let operation = if signing_in { "login" } else { "logout" };
-    let mut command = cli(AgentKind::Codex, &[operation])?;
-    #[cfg(windows)]
-    if signing_in {
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        command.creation_flags(CREATE_NEW_CONSOLE);
+/// The browser sign-in the app started, if one is running, so it can be cancelled. Only one runs
+/// at a time.
+#[derive(Default)]
+pub struct SignInRun(Mutex<Option<Arc<AtomicBool>>>);
+
+impl SignInRun {
+    fn begin(&self) -> Result<Arc<AtomicBool>, String> {
+        let mut running = self.0.lock().map_err(|error| error.to_string())?;
+        if running.is_some() {
+            return Err("A sign-in is already running.".to_owned());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        *running = Some(Arc::clone(&cancel));
+        Ok(cancel)
     }
-    // The CLI manages the browser sign-in. A Windows console lets the user also
-    // see the CLI's fallback instructions during sign-in.
-    if !cfg!(windows) || !signing_in {
+
+    fn finish(&self) {
+        if let Ok(mut running) = self.0.lock() {
+            *running = None;
+        }
+    }
+
+    /// Asks the running sign-in to stop; false when none is running.
+    fn cancel(&self) -> bool {
+        let running = self.0.lock().ok();
+        running
+            .as_ref()
+            .and_then(|slot| slot.as_ref())
+            .is_some_and(|cancel| {
+                cancel.store(true, Ordering::Release);
+                true
+            })
+    }
+}
+
+/// Runs the explicitly selected vendor CLI command. Credentials stay with the CLI.
+///
+/// Resolves to `false` when a sign-in was cancelled, `true` otherwise.
+#[tauri::command]
+pub async fn codex_auth_action(
+    action: CodexAuthAction,
+    run: State<'_, SignInRun>,
+) -> Result<bool, String> {
+    if matches!(action, CodexAuthAction::SignIn) {
+        return codex_sign_in(&run).await;
+    }
+    let status = timeout(
+        STATUS_TIMEOUT,
+        cli(AgentKind::Codex, &["logout"])?
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status(),
+    )
+    .await
+    .map_err(|_| "Agent authentication timed out. Retry from the agent CLI.".to_owned())?
+    .map_err(|_| "Could not start agent authentication.".to_owned())?;
+    if status.success() {
+        Ok(true)
+    } else {
+        Err("Agent authentication did not complete. Check the agent CLI.".to_owned())
+    }
+}
+
+/// `codex login` runs as a child of the app inside its own process tree, so cancelling can stop
+/// the CLI and anything it started.
+async fn codex_sign_in(run: &SignInRun) -> Result<bool, String> {
+    let resolved = resolved_cli(AgentKind::Codex, &["login"])?;
+    let mut command = std::process::Command::new(resolved.program);
+    command.args(resolved.args).envs(resolved.env);
+    // A Windows console lets the user also see the CLI's fallback instructions.
+    if !cfg!(windows) {
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
     }
-    let duration = if signing_in {
-        LOGIN_TIMEOUT
-    } else {
-        STATUS_TIMEOUT
-    };
-    let status = timeout(duration, command.status())
-        .await
-        .map_err(|_| "Agent authentication timed out. Retry from the agent CLI.".to_owned())?
-        .map_err(|_| "Could not start agent authentication.".to_owned())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Agent authentication did not complete. Check the agent CLI.".to_owned())
+    let cancel = run.begin()?;
+    let ended = tauri::async_runtime::spawn_blocking(move || {
+        brachio_process::run_tree_cancellable(command, true, LOGIN_TIMEOUT, &cancel)
+    })
+    .await;
+    run.finish();
+    match ended.map_err(|error| error.to_string())? {
+        Ok(brachio_process::Ended::Exited(status)) if status.success() => Ok(true),
+        Ok(brachio_process::Ended::Exited(_)) => {
+            Err("Agent authentication did not complete. Check the agent CLI.".to_owned())
+        }
+        Ok(brachio_process::Ended::Cancelled) => Ok(false),
+        Ok(brachio_process::Ended::TimedOut) => {
+            Err("Agent authentication timed out. Retry from the agent CLI.".to_owned())
+        }
+        Err(_) => Err("Could not start agent authentication.".to_owned()),
     }
+}
+
+/// Stops the browser sign-in the app started and its helper processes. The browser tab the CLI
+/// opened stays open; with the CLI gone, its sign-in page has nothing to finish.
+#[tauri::command]
+pub fn codex_auth_cancel(run: State<'_, SignInRun>) -> bool {
+    run.cancel()
 }
 
 /// One quota window reported by the Codex app server.

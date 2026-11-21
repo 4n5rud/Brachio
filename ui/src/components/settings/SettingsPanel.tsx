@@ -3,6 +3,7 @@ import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
 import { isMac } from "../../lib/shortcut";
+import { notificationSettings, updateNotificationSettings } from "../../lib/notification-settings";
 import { openLogFolder } from "../../lib/workspace";
 import { Icon, type IconName } from "../Icon";
 import { Button } from "../ui/Button";
@@ -202,6 +203,18 @@ export function SettingsPanel(props: {
           <Match when={page() === "notifications"}>
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
+            <Toggle checked={notificationSettings().needs} disabled={!props.notifications}
+              label={t("settings.notifyNeeds")} hint={t("settings.notifyNeedsHint")}
+              onChange={(needs) => updateNotificationSettings({ needs })} />
+            <Toggle checked={notificationSettings().finished} disabled={!props.notifications}
+              label={t("settings.notifyFinished")} onChange={(finished) => updateNotificationSettings({ finished })} />
+            <Toggle checked={notificationSettings().failed} disabled={!props.notifications}
+              label={t("settings.notifyFailed")} onChange={(failed) => updateNotificationSettings({ failed })} />
+            <Toggle checked={notificationSettings().sound} disabled={!props.notifications}
+              label={t("settings.notifySound")} hint={t("settings.notifySoundHint")}
+              onChange={(sound) => updateNotificationSettings({ sound })} />
+            <Toggle checked={notificationSettings().badge} label={t("settings.notifyBadge")}
+              hint={t("settings.notifyBadgeHint")} onChange={(badge) => updateNotificationSettings({ badge })} />
           </Match>
           <Match when={page() === "shortcuts"}>
             <div class="shortcut-row shortcut-head">

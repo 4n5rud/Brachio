@@ -4,6 +4,7 @@ mod agent_accounts;
 mod child_task_request;
 mod external_link;
 mod file_in_use;
+mod folder_access;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
@@ -48,10 +49,11 @@ fn tray_update(
     needs: Vec<tray_menu::TrayTask>,
     working: Vec<tray_menu::TrayTask>,
     labels: tray_menu::TrayLabels,
+    badge: bool,
 ) -> Result<(), String> {
     let handle = app.clone();
     app.run_on_main_thread(move || {
-        if let Err(error) = apply_tray(&handle, &needs, &working, &labels) {
+        if let Err(error) = apply_tray(&handle, &needs, &working, &labels, badge) {
             tracing::warn!(%error, "could not update the tray");
         }
     })
@@ -63,12 +65,13 @@ fn apply_tray(
     needs: &[tray_menu::TrayTask],
     working: &[tray_menu::TrayTask],
     labels: &tray_menu::TrayLabels,
+    badge: bool,
 ) -> tauri::Result<()> {
     if let Some(tray) = app.try_state::<TrayHandle>() {
         tray.0
             .set_menu(Some(build_tray_menu(app, needs, working, labels)?))?;
     }
-    set_taskbar_badge(app, needs.len());
+    set_taskbar_badge(app, if badge { needs.len() } else { 0 });
     Ok(())
 }
 
@@ -247,6 +250,7 @@ pub fn run() {
         ))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(agent_accounts::SignInRun::default())
         .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
         .setup(|app| {
@@ -292,6 +296,8 @@ pub fn run() {
             workspace::folder_source_repos,
             agent_accounts::agent_auth_status,
             agent_accounts::codex_auth_action,
+            agent_accounts::codex_auth_cancel,
+            folder_access::open_folder_access_settings,
             agent_accounts::codex_usage,
             agent_accounts::open_claude_usage,
             workspace::task_list,

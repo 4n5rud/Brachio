@@ -192,11 +192,10 @@ pub async fn terminal_open(
         .as_deref()
         .ok_or_else(|| "A registered task terminal is required.".to_owned())?;
     let owner = terminal_authorization::resolve(&*database.lock()?, key)?;
-    let worktree = owner
-        .task
-        .worktree_path
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
+    let worktree =
+        owner.task.worktree_path.canonicalize().map_err(|error| {
+            crate::folder_access::tag(&owner.task.worktree_path, error.to_string())
+        })?;
     let requested = request
         .cwd
         .canonicalize()
@@ -279,7 +278,7 @@ pub async fn terminal_open(
     let spec = SpawnSpec {
         program: command.program.to_string_lossy().into_owned(),
         args: command.args,
-        cwd: request.cwd,
+        cwd: request.cwd.clone(),
         env: environment,
         rows: request.rows.max(1),
         cols: request.cols.max(1),
@@ -289,7 +288,8 @@ pub async fn terminal_open(
     let spawned = tauri::async_runtime::spawn_blocking(move || manager.spawn(&spec, sink))
         .await
         .map_err(|error| error.to_string())?;
-    let id = spawned.map_err(|error| to_message(&error))?;
+    let id =
+        spawned.map_err(|error| crate::folder_access::tag(&request.cwd, to_message(&error)))?;
     if let Some(key) = request.key.clone() {
         terminals.1.record(id, key);
     }

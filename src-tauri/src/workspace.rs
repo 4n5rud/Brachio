@@ -108,7 +108,9 @@ fn add_project(database: &Database, path: &Path, git_only: bool) -> Result<RepoR
             ));
         }
         Err(brachio_git::GitError::NotARepository { .. }) => {
-            let folder = path.canonicalize().map_err(to_text)?;
+            let folder = path
+                .canonicalize()
+                .map_err(|error| crate::folder_access::tag(path, error.to_string()))?;
             if !folder.is_dir() {
                 return Err(format!("{} is not a folder.", path.display()));
             }
@@ -118,7 +120,7 @@ fn add_project(database: &Database, path: &Path, git_only: bool) -> Result<RepoR
                 false,
             )
         }
-        Err(error) => return Err(to_text(error)),
+        Err(error) => return Err(crate::folder_access::tag(path, error.to_string())),
     };
     let connection = database.lock()?;
     if let Some(existing) = RepoRecord::find_by_path(&connection, &root).map_err(to_text)? {
@@ -333,7 +335,8 @@ pub(crate) async fn create_task(
         return create_folder_task(database, &repo, &request);
     }
     // Read first, so a broken file stops the task before anything is created.
-    let setup = brachio_git::read_setup(&repo.path).map_err(to_text)?;
+    let setup = brachio_git::read_setup(&repo.path)
+        .map_err(|error| crate::folder_access::tag(&repo.path, error.to_string()))?;
     let id = new_id();
     let branch = brachio_git::branch_name(&request.title, &id[..6]);
     let path = brachio_git::worktree_path(&repo.path, &branch);
@@ -350,7 +353,10 @@ pub(crate) async fn create_task(
     let added = tauri::async_runtime::spawn_blocking(move || {
         brachio_git::add_worktree(&Git::new(&repo_path), &add)
     });
-    added.await.map_err(to_text)?.map_err(to_text)?;
+    added
+        .await
+        .map_err(to_text)?
+        .map_err(|error| crate::folder_access::tag(&repo.path, error.to_string()))?;
 
     // Pinning the conversation id lets the task resume exactly its own
     // conversation after a restart.

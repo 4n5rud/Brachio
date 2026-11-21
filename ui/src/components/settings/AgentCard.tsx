@@ -33,6 +33,8 @@ export interface AgentCardProps {
   error?: string;
   onRefresh: () => void;
   onSignIn?: () => void;
+  /** Stops the browser sign-in the app started. */
+  onCancelSignIn?: () => void;
   onSignOut?: () => void;
   onClaudeUsage?: () => void;
 }
@@ -89,6 +91,9 @@ export function AgentCard(props: AgentCardProps) {
         <Show when={props.kind === "codex" && props.account.state === "signedOut"}>
           <Button size="sm" loading={props.signingIn} loadingLabel={t("settings.agentSigningIn")} disabled={props.busy && !props.signingIn}
             onClick={() => props.onSignIn?.()}>{t("settings.agentSignIn")}</Button>
+        </Show>
+        <Show when={props.kind === "codex" && props.signingIn}>
+          <Button size="sm" onClick={() => props.onCancelSignIn?.()}>{t("settings.agentCancelSignIn")}</Button>
         </Show>
         <Show when={props.kind === "codex" && props.account.state === "signedIn"}>
           <Button size="sm" disabled={props.busy} onClick={() => props.onSignOut?.()}>{t("settings.agentSignOut")}</Button>
