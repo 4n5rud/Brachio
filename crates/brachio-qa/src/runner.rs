@@ -8,7 +8,7 @@ use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
 use brachio_git::{local_head, Git};
-use brachio_process::output_capped;
+use brachio_process::output_capped_tree;
 use thiserror::Error;
 
 use crate::{failure_signature, FeedbackDecision, FeedbackGate};
@@ -169,7 +169,8 @@ impl VerifiedQaRun {
     }
 }
 
-/// Runs at most one approval-bound command. Explicit redactions are literal
+/// Runs at most one approval-bound command. It and its descendants share one process group
+/// (Windows: Job Object) that is killed when the run times out, hits the output cap or ends. Explicit redactions are literal
 /// secret values supplied by the caller and are removed before returning logs.
 ///
 /// # Errors
@@ -193,13 +194,9 @@ pub fn run_approved(
     };
     let clean_before = worktree_is_clean(&configured.cwd);
     let started = Instant::now();
-    let result = output_capped(
-        Command::new(program)
-            .args(args)
-            .current_dir(&configured.cwd),
-        configured.timeout,
-        OUTPUT_BYTES,
-    );
+    let mut command = Command::new(program);
+    command.args(args).current_dir(&configured.cwd);
+    let result = output_capped_tree(command, configured.timeout, OUTPUT_BYTES);
     let elapsed = started.elapsed();
     let head_unchanged = local_head(&configured.cwd).is_ok_and(|head| head == sha);
     let clean_worktree = clean_before && worktree_is_clean(&configured.cwd);
