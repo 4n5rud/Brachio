@@ -230,6 +230,8 @@ mod tests {
 
     use super::*;
 
+    type MakeDirty = fn(&Path);
+
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("dir");
         for args in [
@@ -300,7 +302,7 @@ mod tests {
 
     #[test]
     fn a_dirty_worktree_is_never_verification_of_the_commit() {
-        let dirty: [(&str, fn(&Path)); 3] = [
+        let dirty: [(&str, MakeDirty); 3] = [
             ("untracked", |dir| {
                 fs::write(dir.join("new.txt"), "x").expect("write")
             }),
