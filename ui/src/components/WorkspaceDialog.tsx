@@ -1,22 +1,19 @@
 import { Button } from "./ui/Button";
 import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
-import { locale, setLocale, t, type MessageKey } from "../i18n";
+import { t, type MessageKey } from "../i18n";
 import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
-import { NEW_TASK_KEYS, QUICK_OPEN_KEYS } from "../lib/shortcut";
+import { NEW_TASK_KEYS } from "../lib/shortcut";
 import { shortBranch, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
 import type { ColorTheme, ThemeMode } from "../lib/theme";
-import { ThemePicker } from "./ui/ThemePicker";
 import { Dialog } from "./ui/Dialog";
-import { Select } from "./ui/Input";
 import { Marked, PaletteGroup, PaletteItem, PaletteSearch } from "./Palette";
 import { Icon, type IconName } from "./Icon";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { statusTone, type StatusTone } from "../lib/status";
 import { Kbd } from "./ui/Kbd";
-import { Toggle } from "./ui/Toggle";
-import { AgentSettings } from "./settings/AgentSettings";
-import { TerminalSettings } from "./settings/TerminalSettings";
+import { SettingsPanel, type SettingsPage, type UpdateSettingsProps } from "./settings/SettingsPanel";
+import { archivedAgo, createArchiveActions } from "./settings/archive-actions";
 
 
 const ACTIVITY_TONE: Partial<Record<MessageKey, StatusTone>> = {
@@ -58,7 +55,6 @@ export function WorkspaceDialog(props: {
   archived: readonly TaskRow[];
   onRestore: (id: string) => Promise<void>;
   onDelete: (task: TaskRow) => Promise<void>;
-  onOpenArchived?: () => void;
   onReportProblem?: () => void;
   mode: ThemeMode;
   colorTheme: ColorTheme;
@@ -66,14 +62,9 @@ export function WorkspaceDialog(props: {
   onMode: (mode: ThemeMode) => void;
   onColorTheme: (theme: ColorTheme) => void;
   onNotifications: (enabled: boolean) => void;
-  updates?: {
-    enabled: boolean;
-    status: "idle" | "checking" | "current" | "unavailable";
-    version: string | null;
-    onEnabled: (enabled: boolean) => void;
-    onCheck: () => void;
-    onDownload: () => void;
-  };
+  updates?: UpdateSettingsProps;
+  /** The settings page shown first. */
+  settingsPage?: SettingsPage;
   onOpen: (id: string, sessionKey?: string) => void;
   /** Files of the selected task, offered when the query is two characters or more. */
   files?: readonly string[];
@@ -84,8 +75,6 @@ export function WorkspaceDialog(props: {
 }) {
   const [query, setQuery] = createSignal("");
   const [highlight, setHighlight] = createSignal(0);
-  const [restoring, setRestoring] = createSignal<string>();
-  const [restoreError, setRestoreError] = createSignal("");
   const repoNames = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const repoName = (task: TaskRow) => task.repoId ? repoNames().get(task.repoId) : undefined;
   const entries = createMemo<QuickEntry[]>(() => {
@@ -119,35 +108,7 @@ export function WorkspaceDialog(props: {
       props.onClose();
     }
   };
-  const restore = async (id: string) => {
-    if (restoring()) return;
-    setRestoring(id);
-    setRestoreError("");
-    try {
-      await props.onRestore(id);
-    } catch (failure) {
-      setRestoreError(String(failure));
-    } finally {
-      setRestoring(undefined);
-    }
-  };
-  const remove = async (task: TaskRow) => {
-    if (restoring()) return;
-    setRestoring(task.id);
-    setRestoreError("");
-    try {
-      await props.onDelete(task);
-    } catch (failure) {
-      setRestoreError(String(failure));
-    } finally {
-      setRestoring(undefined);
-    }
-  };
-  const archivedAgo = (task: TaskRow) => {
-    if (task.archivedAt === undefined) return "";
-    const age = formatAge(task.archivedAt, props.now);
-    return age === t("time.now") ? t("task.archivedNow") : t("task.archivedAgo").replace("{age}", age);
-  };
+  const archive = createArchiveActions(props.onRestore, props.onDelete);
   const title = () => {
     if (props.panel === "quickOpen") return t("quickOpen.title");
     if (props.panel === "archived") {
@@ -159,6 +120,7 @@ export function WorkspaceDialog(props: {
   return (
     <Dialog title={title()} size={props.panel === "settings" ? "settings" : props.panel === "quickOpen" ? "quick" : "sheet"}
       onClose={props.onClose} closeOnScrim initialFocus={() => searchBox}
+      flush={props.panel === "settings"}
       bare={props.panel === "quickOpen"}
       headEnd={props.panel === "quickOpen" ? undefined : <Button size="sm" onClick={() => props.onClose()}>{t("workspace.close")}</Button>}
       footer={props.panel === "quickOpen" ? (
@@ -229,50 +191,11 @@ export function WorkspaceDialog(props: {
             </Show>
           </Match>
           <Match when={props.panel === "settings"}>
-            <div class="form-field">
-              <span class="form-label">{t("settings.theme")}</span>
-              <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
-            </div>
-            <Select label={t("settings.language")} value={locale()} onChange={(event) =>
-              setLocale(event.currentTarget.value === "ko" ? "ko" : "en")}>
-              <option value="en">English</option>
-              <option value="ko">한국어</option>
-            </Select>
-            <Toggle checked={props.notifications} label={t("settings.notifications")}
-              onChange={props.onNotifications} />
-            <div class="workspace-shortcuts">
-              <span>{t("quickOpen.title")}</span><Kbd>{QUICK_OPEN_KEYS}</Kbd>
-              <span>{t("newTask.title")}</span><Kbd>{NEW_TASK_KEYS}</Kbd>
-            </div>
-            <TerminalSettings />
-            <Show when={props.updates}>{(updates) => (
-              <section class="settings-group" aria-labelledby="settings-updates">
-                <h3 id="settings-updates">{t("updates.title")}</h3>
-                <Toggle checked={updates().enabled} label={t("updates.auto")}
-                  onChange={(enabled) => updates().onEnabled(enabled)} />
-                <Button size="sm" disabled={updates().status === "checking"}
-                  onClick={() => updates().onCheck()}>{t("updates.check")}</Button>
-                <Show when={updates().version}>{(version) => (
-                  <div>
-                    <p role="status">{t("updates.available").replace("{version}", version())}</p>
-                    <Button size="sm" onClick={() => updates().onDownload()}>
-                      {t("updates.download")}
-                    </Button>
-                  </div>
-                )}</Show>
-              </section>
-            )}</Show>
-            <Show when={props.onOpenArchived}>
-              <AgentSettings />
-              <Button size="sm" onClick={() => props.onOpenArchived?.()}>
-                {t("task.archived")}
-              </Button>
-            </Show>
-            <Show when={props.onReportProblem}>
-              <Button size="sm" onClick={() => props.onReportProblem?.()}>
-                {t("settings.reportProblem")}
-              </Button>
-            </Show>
+            <SettingsPanel page={props.settingsPage} mode={props.mode} colorTheme={props.colorTheme}
+              onMode={props.onMode} onColorTheme={props.onColorTheme}
+              notifications={props.notifications} onNotifications={props.onNotifications}
+              updates={props.updates} archived={props.archived} repos={props.repos} now={props.now}
+              onRestore={props.onRestore} onDelete={props.onDelete} onReportProblem={props.onReportProblem} />
           </Match>
           <Match when={props.panel === "archived"}>
             <Show when={props.archived.length > 0}
@@ -281,16 +204,16 @@ export function WorkspaceDialog(props: {
                 <For each={props.archived}>{(task) => (
                   <div class="palette-row">
                     <PaletteItem lead={<Icon name="branch" class="icon-sm" />} name={task.title} title={task.title}
-                      detail={<><Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show><span>{shortBranch(task.branch)}</span><span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>{archivedAgo(task)}</span></>} />
-                    <Button size="sm" disabled={!!restoring()}
-                      onClick={() => void restore(task.id)}>{t("task.restore")}</Button>
-                    <Button variant="ghost" size="sm" disabled={!!restoring()}
-                      onClick={() => void remove(task)}>{t("task.deleteForGood")}</Button>
+                      detail={<><Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show><span>{shortBranch(task.branch)}</span><span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>{archivedAgo(task, props.now)}</span></>} />
+                    <Button size="sm" disabled={archive.busy()}
+                      onClick={() => void archive.restore(task)}>{t("task.restore")}</Button>
+                    <Button variant="ghost" size="sm" disabled={archive.busy()}
+                      onClick={() => void archive.remove(task)}>{t("task.deleteForGood")}</Button>
                   </div>
                 )}</For>
               </div>
             </Show>
-            <Show when={restoreError()}><p class="form-error" role="alert">{restoreError()}</p></Show>
+            <Show when={archive.error()}><p class="form-error" role="alert">{archive.error()}</p></Show>
           </Match>
         </Switch>
     </Dialog>

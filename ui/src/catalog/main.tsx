@@ -8,6 +8,7 @@ import { pushToast } from "../lib/toasts";
 import { ChangesStates } from "./changes-states";
 import { DialogsStates } from "./dialogs-states";
 import { FilesQaStates } from "./files-qa-states";
+import { SettingsStates } from "./settings-states";
 import { ApprovalBar } from "../components/ApprovalBar";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
@@ -489,6 +490,10 @@ function Catalog() {
 
       <Section title="Dialogs, quick open, activity and board">
         <DialogsStates />
+      </Section>
+
+      <Section title="Settings pages">
+        <SettingsStates />
       </Section>
 
       <Section title="BoardTile">

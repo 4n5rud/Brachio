@@ -53,3 +53,8 @@
 .input-mono {
   font-family: var(--font-mono);
 }
+.input-num {
+  width: 88px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
