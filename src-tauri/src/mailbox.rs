@@ -11,7 +11,7 @@ use brachio_store::{
     child_reports, mark_read, peek_next_batch, peek_unread, recent_messages, reply_recipient,
     send_message, unread_counts, Message, NewMessage, TaskRecord,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -201,18 +201,15 @@ fn peers(connection: &Connection, key: &str) -> Outcome {
     let tasks = TaskRecord::list_open(connection).map_err(|error| error.to_string())?;
     let mut peers = Vec::new();
     for task in tasks {
-        let second_tab: Option<String> = connection
-            .query_row(
-                "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
-                [&task.id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        if let Some(tab_id) = second_tab {
+        let tabs =
+            brachio_store::task_tabs(connection, &task.id).map_err(|error| error.to_string())?;
+        for tab in tabs
+            .into_iter()
+            .filter(|tab| tab.kind != brachio_store::TabKind::Shell)
+        {
             peers.push(Peer {
-                key: format!("{}:agent-{tab_id}", task.id),
-                title: format!("{} (second agent)", task.title),
+                key: format!("{}:agent-{}", task.id, tab.tab_id),
+                title: format!("{} (extra agent)", task.title),
                 branch: task.branch.clone(),
             });
         }
@@ -580,12 +577,12 @@ mod tests {
     }
 
     #[test]
-    fn a_second_agent_tab_is_listed_and_can_receive_mail() {
+    fn an_extra_agent_tab_is_listed_and_can_receive_mail() {
         let mut connection = database();
         let tab = "123e4567-e89b-12d3-a456-426614174000";
         connection
             .execute(
-                "INSERT INTO task_secondary_tabs (task_id, tab_id) VALUES ('bbbb2222', ?1)",
+                "INSERT INTO task_tabs (task_id, tab_id, kind) VALUES ('bbbb2222', ?1, 'codex')",
                 [tab],
             )
             .expect("register tab");
@@ -602,7 +599,7 @@ mod tests {
             panic!("expected peers")
         };
         let second = peers.iter().find(|peer| peer.key == key).expect("listed");
-        assert_eq!(second.title, "Write docs (second agent)");
+        assert_eq!(second.title, "Write docs (extra agent)");
         assert_eq!(second.branch, "b2");
 
         let (answer, changed) =
