@@ -5,6 +5,7 @@
 use brachio_core::task_graph::{Change, GraphError, TaskGraph, TaskState};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+use crate::task_activity_record::record_activity;
 use crate::StoreError;
 
 /// Why an orchestration call was refused.
@@ -278,6 +279,13 @@ pub(crate) fn transition_in(
                                                 reason = NULL",
             params![change.id, change.to.as_str(), now_ms],
         )?;
+        record_activity(
+            transaction,
+            &change.id,
+            "status_changed",
+            Some(change.to.as_str()),
+            now_ms,
+        )?;
     }
     Ok(changes)
 }
@@ -446,6 +454,13 @@ pub fn record_handoff(
             handoff.created_at_ms,
         ],
     )?;
+    record_activity(
+        connection,
+        handoff.task_id,
+        "handoff_recorded",
+        None,
+        handoff.created_at_ms,
+    )?;
     Ok(())
 }
 
@@ -465,6 +480,16 @@ pub fn review_handoff(
         params![handoff_id, review.as_str(), now_ms],
     )?;
     if changed == 1 {
+        let task_id: String = connection.query_row(
+            "SELECT task_id FROM task_handoffs WHERE id = ?1",
+            [handoff_id],
+            |row| row.get(0),
+        )?;
+        let kind = match review {
+            HandoffReview::Approved => "handoff_approved",
+            HandoffReview::Rejected => "handoff_rejected",
+        };
+        record_activity(connection, &task_id, kind, None, now_ms)?;
         return Ok(());
     }
     let exists: bool = connection.query_row(

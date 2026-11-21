@@ -8,7 +8,7 @@ Espace de travail pour les agents de programmation
 
 Organisez les sessions Claude Code et Codex et examinez les modifications Git. Un processus local indépendant maintient les terminaux.
 
-Dépôts et dossiers, messages, tâches enfants avec approbation, revue des changements et QA.
+Dépôts et dossiers, messages, tâches enfants avec approbation, dépendances entre tâches avec démarrage automatique optionnel, revue des transmissions (handoff), QA lancée après approbation, serveur MCP (outils en lecture seule et outils soumis à approbation ; non configuré automatiquement pour les agents), compétences d'agent (brachio-send, brachio-lead), système de design et 8 thèmes.
 
 ## Développement
 

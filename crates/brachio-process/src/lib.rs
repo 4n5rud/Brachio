@@ -1,12 +1,14 @@
 //! Short-lived helper programs (`git`, `gh`, `--version` probes) run for a bounded time.
 
 use std::io::{self, Read};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use process_wrap::std::{ChildWrapper, CommandWrap};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -53,34 +55,107 @@ pub fn output_capped(
         use std::os::windows::process::CommandExt;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = command
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    capture(Running::Single(child), limit, max_stdout)
+}
+
+/// Like [`output_capped`], but the program and everything it starts run as one unit: a Job
+/// Object on Windows, a process group on Unix. When the time or output limit stops the run, and
+/// when it ends for any reason, the whole tree is killed and reaped, so no worker outlives it.
+///
+/// Limits: a descendant that deliberately leaves the group (`setsid`, a detached service
+/// started through another session or job) is out of reach.
+///
+/// # Errors
+/// Fails when the program cannot start, or with `ErrorKind::TimedOut` after the tree was killed
+/// for running longer than `limit`.
+pub fn output_capped_tree(
+    mut command: Command,
+    limit: Duration,
+    max_stdout: usize,
+) -> io::Result<Capped> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut wrapped = CommandWrap::from(command);
+    #[cfg(windows)]
+    {
+        use process_wrap::std::{CreationFlags, JobObject};
+        use windows::Win32::System::Threading::PROCESS_CREATION_FLAGS;
+        wrapped.wrap(CreationFlags(PROCESS_CREATION_FLAGS(CREATE_NO_WINDOW)));
+        wrapped.wrap(JobObject);
+    }
+    #[cfg(unix)]
+    wrapped.wrap(process_wrap::std::ProcessGroup::leader());
+    capture(Running::Tree(wrapped.spawn()?), limit, max_stdout)
+}
+
+/// A started program, alone or together with the tree it leads.
+enum Running {
+    Single(Child),
+    Tree(Box<dyn ChildWrapper>),
+}
+
+impl Running {
+    fn take_pipes(
+        &mut self,
+    ) -> (
+        Option<std::process::ChildStdout>,
+        Option<std::process::ChildStderr>,
+    ) {
+        match self {
+            Self::Single(child) => (child.stdout.take(), child.stderr.take()),
+            Self::Tree(child) => (child.stdout().take(), child.stderr().take()),
+        }
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        match self {
+            Self::Single(child) => child.try_wait(),
+            Self::Tree(child) => child.try_wait(),
+        }
+    }
+
+    /// Kills the program, and its descendants when it leads a tree, then reaps it.
+    fn stop(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            Self::Single(child) => {
+                let _ = child.kill();
+                child.wait()
+            }
+            Self::Tree(child) => {
+                let _ = child.start_kill();
+                child.wait()
+            }
+        }
+    }
+}
+
+fn capture(mut child: Running, limit: Duration, max_stdout: usize) -> io::Result<Capped> {
     let over = Arc::new(AtomicBool::new(false));
-    let stdout = child
-        .stdout
-        .take()
-        .map(|pipe| drain(pipe, max_stdout, Some(Arc::clone(&over))));
-    let stderr = child
-        .stderr
-        .take()
-        .map(|pipe| drain_keeping(pipe, KEPT_STDERR));
+    let (stdout, stderr) = child.take_pipes();
+    let stdout = stdout.map(|pipe| drain(pipe, max_stdout, Some(Arc::clone(&over))));
+    let stderr = stderr.map(|pipe| drain_keeping(pipe, KEPT_STDERR));
     let started = Instant::now();
     let deadline = started + limit;
     let status = loop {
         if over.load(Ordering::Acquire) {
-            let _ = child.kill();
-            break child.wait()?;
+            break child.stop()?;
         }
         if let Some(status) = child.try_wait()? {
+            if matches!(child, Running::Tree(_)) {
+                let _ = child.stop();
+            }
             break status;
         }
         if Instant::now() >= deadline {
             // Readers are left to finish by themselves: a grandchild may still hold the pipes.
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = child.stop();
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!("timed out after {} seconds", limit.as_secs()),
@@ -381,5 +456,71 @@ mod tests {
         };
         output_within(&mut shell(script), Duration::from_secs(20))
             .expect("returns once stdin is closed");
+    }
+
+    fn process_is_alive(pid: &str) -> bool {
+        if cfg!(windows) {
+            let listing = Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+                .output()
+                .expect("tasklist runs");
+            String::from_utf8_lossy(&listing.stdout).contains(pid)
+        } else {
+            Command::new("kill")
+                .args(["-0", pid])
+                .stderr(Stdio::null())
+                .status()
+                .expect("kill runs")
+                .success()
+        }
+    }
+
+    fn wait_for_pid_file(path: &std::path::Path) -> String {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                let pid = text.trim().trim_start_matches('\u{feff}').to_owned();
+                if !pid.is_empty() {
+                    return pid;
+                }
+            }
+            assert!(Instant::now() < deadline, "the grandchild never started");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn a_timeout_kills_the_grandchild_too() {
+        let pid_file =
+            std::env::temp_dir().join(format!("brachio-process-tree-{}", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        let path = pid_file.display().to_string();
+        let (command, limit) = if cfg!(windows) {
+            let script = format!(
+                "$p = Start-Process -PassThru -WindowStyle Hidden ping -ArgumentList '-n','60','127.0.0.1'; Set-Content -Path '{path}' -Value $p.Id; Wait-Process -Id $p.Id"
+            );
+            let mut command = Command::new("powershell.exe");
+            command.args(["-NoProfile", "-Command", &script]);
+            (command, Duration::from_secs(8))
+        } else {
+            let script = format!("sh -c 'sleep 60 & echo $! > \"{path}\"; wait'");
+            let mut command = Command::new("sh");
+            command.args(["-c", &script]);
+            (command, Duration::from_secs(2))
+        };
+        let error = output_capped_tree(command, limit, 1024)
+            .err()
+            .expect("must time out");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        let pid = wait_for_pid_file(&pid_file);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while process_is_alive(&pid) {
+            assert!(
+                Instant::now() < deadline,
+                "grandchild {pid} survived the timeout"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+        let _ = std::fs::remove_file(&pid_file);
     }
 }

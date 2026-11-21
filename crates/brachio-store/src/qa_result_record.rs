@@ -2,6 +2,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+use crate::task_activity_record::record_activity;
 use crate::StoreError;
 
 /// How many QA runs a task keeps. Storing another run deletes the oldest beyond this.
@@ -109,6 +110,13 @@ pub fn save_qa_result(
         "DELETE FROM qa_results WHERE task_id = ?1
          AND id NOT IN (SELECT id FROM qa_results WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2)",
         params![result.task_id, MAX_QA_RESULTS_PER_TASK],
+    )?;
+    record_activity(
+        &transaction,
+        result.task_id,
+        "qa_run",
+        Some(result.outcome),
+        result.created_at_ms,
     )?;
     if result.verified_by_brachio {
         transaction.execute(

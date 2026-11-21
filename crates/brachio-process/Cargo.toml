@@ -8,3 +8,9 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+process-wrap = { version = "10", default-features = false, features = ["creation-flags", "job-object", "process-group", "std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", default-features = false, features = ["Win32_System_Threading"] }

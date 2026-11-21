@@ -1,0 +1,104 @@
+import { invoke } from "@tauri-apps/api/core";
+import { t, type MessageKey } from "../i18n";
+import type { StatusTone } from "./status";
+
+/** One recorded event of a task, as the core stores it. */
+export interface StoredActivity {
+  id: number;
+  kind: string;
+  detail: string | null;
+  at: number;
+}
+
+export interface ActivityRow {
+  id: number;
+  label: string;
+  detail: string | null;
+  tone: StatusTone;
+  at: number;
+}
+
+export const listTaskActivity = (taskId: string) => invoke<StoredActivity[]>("task_activity_list", { taskId });
+
+export const recordTaskActivity = (taskId: string, kind: string, detail: string | null, at: number) =>
+  invoke<void>("task_activity_record", { taskId, kind, detail, at });
+
+/** Kinds the interface records itself; the core records the rest where they happen. */
+const KIND_OF_NOTIFICATION: Partial<Record<MessageKey, string>> = {
+  "notify.permission": "permission_asked",
+  "notify.question": "question_asked",
+  "notify.auth": "auth_needed",
+  "notify.error": "agent_error",
+  "notify.finished": "agent_finished",
+  "notify.crashed": "agent_crashed",
+};
+
+export const activityKindOf = (key: MessageKey) => KIND_OF_NOTIFICATION[key];
+
+const STATE_TONE: Record<string, StatusTone> = {
+  queued: "unknown",
+  ready: "ready",
+  running: "working",
+  review_required: "blocked",
+  completed: "done",
+  blocked: "blocked",
+  failed: "error",
+  cancelled: "unknown",
+};
+
+const SIMPLE: Record<string, { key: MessageKey; tone: StatusTone }> = {
+  permission_asked: { key: "notify.permission", tone: "blocked" },
+  approval_answered: { key: "activity.approvalAnswered", tone: "ready" },
+  question_asked: { key: "notify.question", tone: "blocked" },
+  auth_needed: { key: "notify.auth", tone: "blocked" },
+  agent_error: { key: "notify.error", tone: "error" },
+  agent_finished: { key: "notify.finished", tone: "ready" },
+  agent_crashed: { key: "notify.crashed", tone: "error" },
+  child_created: { key: "activity.childCreated", tone: "ready" },
+  handoff_recorded: { key: "activity.handoffRecorded", tone: "blocked" },
+  handoff_approved: { key: "activity.handoffApproved", tone: "ready" },
+  handoff_rejected: { key: "activity.handoffRejected", tone: "error" },
+  mail_received: { key: "activity.mailReceived", tone: "unknown" },
+  git_action: { key: "activity.gitAction", tone: "done" },
+};
+
+const GIT_LABEL: Record<string, MessageKey> = {
+  commit: "activity.git.commit",
+  push: "activity.git.push",
+  "pull request": "activity.git.pullRequest",
+};
+
+const QA_OUTCOME: Record<string, MessageKey> = {
+  failed: "inspector.qa.outcome.failed",
+  timedOut: "inspector.qa.outcome.timedOut",
+  outputLimit: "inspector.qa.outcome.outputLimit",
+  processError: "inspector.qa.outcome.processError",
+};
+
+/** The wording and tone for a stored event; an unknown kind from a newer version still shows. */
+export function describeActivity(entry: StoredActivity): ActivityRow {
+  const base = { id: entry.id, at: entry.at };
+  const { kind, detail } = entry;
+  if (kind === "status_changed") {
+    const state = detail ?? "";
+    const label = STATE_TONE[state] ? t(`orchestration.state.${state}` as MessageKey) : state;
+    return { ...base, label: t("activity.statusChanged"), detail: label || null, tone: STATE_TONE[state] ?? "unknown" };
+  }
+  if (kind === "qa_run") {
+    const passed = detail === "passed";
+    const outcome = detail && QA_OUTCOME[detail];
+    return {
+      ...base,
+      label: t(passed ? "activity.qaPassed" : "activity.qaFailed"),
+      detail: outcome ? t(outcome) : null,
+      tone: passed ? "ready" : "error",
+    };
+  }
+  if (kind === "git_action") {
+    const git = detail && GIT_LABEL[detail];
+    return { ...base, label: t("activity.gitAction"), detail: git ? t(git) : detail, tone: "done" };
+  }
+  const simple = SIMPLE[kind];
+  if (!simple) return { ...base, label: t("activity.other"), detail: null, tone: "unknown" };
+  return { ...base, label: t(simple.key), detail, tone: simple.tone };
+}

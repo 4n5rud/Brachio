@@ -8,6 +8,7 @@ mod orchestration_schedule;
 mod pr_status_record;
 mod qa_result_record;
 mod repo_record;
+mod task_activity_record;
 mod task_record;
 mod task_tabs;
 
@@ -34,6 +35,10 @@ pub use qa_result_record::{
     QaResultRecord, MAX_QA_RESULTS_PER_TASK,
 };
 pub use repo_record::{NewRepo, RepoRecord};
+pub use task_activity_record::{
+    record_activity, task_activity, ActivityEntry, ACTIVITY_KINDS, MAX_ACTIVITY_DETAIL_CHARS,
+    MAX_TASK_ACTIVITY,
+};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{
     forget_retired_secondary_tab, load_secondary_tabs, retired_secondary_tabs, set_secondary_tab,
