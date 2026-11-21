@@ -9,6 +9,7 @@ mod pr_status_record;
 mod qa_result_record;
 mod repo_record;
 mod task_activity_record;
+mod task_pin_record;
 mod task_record;
 mod task_tabs;
 
@@ -39,6 +40,7 @@ pub use task_activity_record::{
     record_activity, task_activity, ActivityEntry, ACTIVITY_KINDS, MAX_ACTIVITY_DETAIL_CHARS,
     MAX_TASK_ACTIVITY,
 };
+pub use task_pin_record::{pinned_task_ids, set_task_pinned};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{
     forget_retired_secondary_tab, load_secondary_tabs, retired_secondary_tabs, set_secondary_tab,

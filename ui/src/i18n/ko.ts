@@ -106,6 +106,8 @@ export const ko: Messages = {
   "task.deleteIgnoredNote": "무시된 항목은 커밋된 적이 없어서, 삭제하면 되돌릴 수 없어요.",
   "taskMenu.label": "작업 메뉴",
   "taskMenu.open": "열기",
+  "taskMenu.pin": "맨 위에 고정",
+  "taskMenu.unpin": "고정 해제",
   "taskMenu.copyBranch": "브랜치 이름 복사",
   "taskMenu.showMac": "Finder에서 worktree 보기",
   "taskMenu.showOther": "탐색기에서 worktree 보기",

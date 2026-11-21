@@ -70,6 +70,11 @@ export function shortBranch(branch: string): string {
   return branch.replace(/^brachio\//, "");
 }
 
+/** Moves pinned tasks ahead of the others, keeping the order within each part. */
+export function pinnedFirst(tasks: readonly TaskRow[], pinned: ReadonlySet<string>): TaskRow[] {
+  return [...tasks.filter((task) => pinned.has(task.id)), ...tasks.filter((task) => !pinned.has(task.id))];
+}
+
 /** Keeps root order and puts each task's children right after it; a child with no parent in the list stays a root. */
 export function orderWithChildren(tasks: readonly TaskRow[]): TaskRow[] {
   const ids = new Set(tasks.map((task) => task.id));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupTasks, orderWithChildren, shortBranch, taskGroup, type TaskRow } from "./tasks";
+import { groupTasks, orderWithChildren, pinnedFirst, shortBranch, taskGroup, type TaskRow } from "./tasks";
 
 const row = (id: string, status: TaskRow["status"], updatedAt: number): TaskRow => ({
   id,
@@ -61,4 +61,11 @@ describe("orderWithChildren", () => {
 it("shortBranch drops only the brachio prefix", () => {
   expect(shortBranch("brachio/login-a3f9")).toBe("login-a3f9");
   expect(shortBranch("feature/x")).toBe("feature/x");
+});
+
+describe("pinnedFirst", () => {
+  it("puts pinned tasks ahead and keeps the order within each part", () => {
+    const rows = ["a", "b", "c", "d"].map((id) => ({ id }) as TaskRow);
+    expect(pinnedFirst(rows, new Set(["c", "b"])).map((task) => task.id)).toEqual(["b", "c", "a", "d"]);
+  });
 });

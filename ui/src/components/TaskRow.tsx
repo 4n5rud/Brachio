@@ -8,6 +8,7 @@ import { prReport } from "../lib/pr-status-store";
 import { statusTone } from "../lib/status";
 import { shortBranch, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
+import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
 import { AgentChip } from "./ui/AgentChip";
 import { DiffStat } from "./ui/DiffStat";
@@ -28,6 +29,9 @@ export function TaskRowItem(props: {
   /** The pull request chip to show; read from the pull request store when left out. */
   pr?: PrChipState | null;
   onSelect: () => void;
+  pinned?: boolean;
+  /** Pins or unpins the task; the menu item is left out when missing. */
+  onTogglePin?: () => void;
   /** Archives the task; the item is left out when the row cannot be archived. */
   onArchive?: () => void;
   onError?: (failure: unknown) => void;
@@ -53,8 +57,9 @@ export function TaskRowItem(props: {
     >
       <StatusGlyph tone={tone()} />
       <span class="task-title">{props.task.title}</span>
-      <Show when={props.finished} fallback={<span class="task-age">{formatAge(props.task.updatedAt, props.now)}</span>}>
+      <Show when={props.finished} fallback={<span class="task-age"><Show when={props.pinned}><Icon name="pin" class="icon-xs task-pin" /></Show>{formatAge(props.task.updatedAt, props.now)}</span>}>
         <span class="task-age task-age-new" title={t("task.finishedUnread")}>
+          <Show when={props.pinned}><Icon name="pin" class="icon-xs task-pin" /></Show>
           <i class="task-new-dot" aria-hidden="true" />{t("task.new")}
         </span>
       </Show>
@@ -76,6 +81,11 @@ export function TaskRowItem(props: {
         {(anchor) => (
           <Menu anchor={anchor()} label={t("taskMenu.label")} onClose={() => setMenu(undefined)}>
             <MenuItem hint="↵" onSelect={() => act(props.onSelect)}>{t("taskMenu.open")}</MenuItem>
+            <Show when={props.onTogglePin}>
+              <MenuItem onSelect={() => act(() => props.onTogglePin?.())}>
+                {props.pinned ? t("taskMenu.unpin") : t("taskMenu.pin")}
+              </MenuItem>
+            </Show>
             <MenuItem disabled={!props.task.branch}
               onSelect={() => act(() => navigator.clipboard.writeText(props.task.branch ?? ""))}>
               {t("taskMenu.copyBranch")}
