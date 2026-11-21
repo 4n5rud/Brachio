@@ -27,11 +27,6 @@
 .settings-nav button:hover {
   background: var(--color-hover);
 }
-.settings-nav button[aria-current="page"] {
-  background: var(--color-raised);
-  color: var(--color-text);
-  box-shadow: inset 0 0 0 1px var(--color-line);
-}
 .settings-nav-rule {
   height: 1px;
   margin: 6px 4px;
@@ -44,6 +39,15 @@
   display: grid;
   align-content: start;
   gap: var(--space-1);
+}
+.settings-column {
+  width: 100%;
+  max-width: 720px;
+  display: grid;
+  gap: var(--space-1);
+}
+.settings-group > * + * {
+  border-top: 1px solid var(--color-line);
 }
 .settings-page h3 {
   font: var(--text-heading);
@@ -74,10 +78,6 @@
   gap: 4px;
   justify-items: start;
   padding: 10px 0;
-  border-top: 1px solid var(--color-line);
-}
-.agent-card:first-of-type {
-  border-top: 0;
 }
 .agent-card-name {
   display: flex;

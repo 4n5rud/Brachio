@@ -27,7 +27,7 @@ export function FileRow(props: {
     return at < 0 ? { name: props.path, dir: "" } : { name: props.path.slice(at + 1), dir: props.path.slice(0, at) };
   };
   return (
-    <Dynamic component={props.onSelect ? "button" : "div"} class="file-row" classList={{ on: props.selected }}
+    <Dynamic component={props.onSelect ? "button" : "div"} class="file-row" data-current={props.selected || undefined}
       title={props.path} type={props.onSelect ? "button" : undefined} aria-pressed={props.onSelect ? !!props.selected : undefined}
       onClick={() => props.onSelect?.()}>
       <Show when={props.mark}>

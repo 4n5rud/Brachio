@@ -5,6 +5,7 @@ import { agentUsageRefreshing, agentUsages, refreshAgentUsage, startAgentUsagePo
 import { UsageStatus } from "./AgentUsage";
 import { Icon } from "./Icon";
 import { Button } from "./ui/Button";
+import { Popover } from "./ui/Popover";
 import { StatusGlyph } from "./ui/StatusBadge";
 import "./StatusBar.css";
 
@@ -21,6 +22,45 @@ interface ResourceUsage {
 export function formatMemory(bytes: number): string {
   const megabytes = bytes / (1024 * 1024);
   return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : `${Math.round(megabytes)} MB`;
+}
+
+/** One summary in the bar; sessions, memory and CPU open in a popover. */
+function ResourceSummary(props: {
+  sessions: number;
+  usageUnavailable?: boolean;
+  memory?: string;
+  memoryTitle?: string;
+  cpu?: string;
+}) {
+  const [anchor, setAnchor] = createSignal<HTMLElement>();
+  return (
+    <>
+      <button type="button" class="statusbar-summary" aria-haspopup="dialog" aria-expanded={anchor() !== undefined}
+        onClick={(event) => setAnchor(anchor() ? undefined : event.currentTarget)}>
+        <Show when={props.usageUnavailable} fallback={<i class="dot" />}>
+          <StatusGlyph tone="error" />
+        </Show>
+        {t(props.usageUnavailable ? "statusbar.usageUnavailable" : "statusbar.ok")}
+        <span>{t("statusbar.sessions")} <b>{props.sessions}</b></span>
+      </button>
+      <Show when={anchor()}>
+        {(element) => (
+          <Popover anchor={element()} label={t("statusbar.details")} onClose={() => setAnchor(undefined)}>
+            <dl class="statusbar-details">
+              <dt>{t("statusbar.sessions")}</dt><dd>{props.sessions}</dd>
+              <dt><Icon name="memory" class="icon-xs" />{t("statusbar.memory")}</dt><dd>{props.memory ?? "–"}</dd>
+              <Show when={props.memoryTitle}>{(parts) => <dd class="statusbar-details-note">{parts()}</dd>}</Show>
+              <dt><Icon name="cpu" class="icon-xs" />{t("statusbar.cpu")}</dt><dd>{props.cpu ?? "–"}</dd>
+            </dl>
+            <Show when={props.usageUnavailable}>
+              <p class="statusbar-details-error">{t("statusbar.usageUnavailableNote")}</p>
+              <Button size="sm" variant="ghost" onClick={() => window.location.reload()}>{t("statusbar.reload")}</Button>
+            </Show>
+          </Popover>
+        )}
+      </Show>
+    </>
+  );
 }
 
 /** What the bar shows. A missing number prints as a dash. */
@@ -42,26 +82,8 @@ export function StatusBarView(props: {
   return (
     <footer class="statusbar">
       {props.usage}
-      <span title={props.usageUnavailable ? t("statusbar.usageUnavailableNote") : undefined}>
-        <Show when={props.usageUnavailable} fallback={<i class="dot" />}>
-          <StatusGlyph tone="error" />
-        </Show>
-        {t(props.usageUnavailable ? "statusbar.usageUnavailable" : "statusbar.ok")}
-        <Show when={props.usageUnavailable}>
-          <Button size="sm" variant="ghost" onClick={() => window.location.reload()}>{t("statusbar.reload")}</Button>
-        </Show>
-      </span>
-      <span>
-        {t("statusbar.sessions")} <b>{props.sessions}</b>
-      </span>
-      <span title={props.memoryTitle}>
-        <Icon name="memory" class="icon-xs" />
-        {t("statusbar.memory")} <b>{props.memory ?? "–"}</b>
-      </span>
-      <span>
-        <Icon name="cpu" class="icon-xs" />
-        {t("statusbar.cpu")} <b>{props.cpu ?? "–"}</b>
-      </span>
+      <ResourceSummary sessions={props.sessions} usageUnavailable={props.usageUnavailable} memory={props.memory}
+        memoryTitle={props.memoryTitle} cpu={props.cpu} />
       <Show when={props.branch}>
         {(branch) => (
           <span class="statusbar-end">

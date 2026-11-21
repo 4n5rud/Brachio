@@ -591,6 +591,7 @@ export const en = {
   "statusbar.memoryParts": "App and agents {app}, runtime {runtime}",
   "statusbar.memory": "Memory",
   "statusbar.cpu": "CPU",
+  "statusbar.details": "Resource use",
 
   "empty.repo.title": "Add a repository to get started",
   "empty.repo.body": "Choose a Git repository folder.",

@@ -20,10 +20,6 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
-.task-item-selected {
-  background: var(--color-raised);
-  box-shadow: inset 0 0 0 1px var(--color-line);
-}
 .task-item-child {
   width: calc(100% - 30px);
   margin-left: 24px;

@@ -43,19 +43,26 @@ p {
 
 /* Icons */
 .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   flex: none;
 }
 .icon-sm {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   flex: none;
 }
 .icon-xs {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   flex: none;
+}
+
+/* The current row of any list: one raised surface, no new colour. Hover must not hide it. */
+[data-current],
+[data-current]:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
 }
 
 .folder-repos {

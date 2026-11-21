@@ -30,7 +30,7 @@ export function UsageMeter(props: { window: UsageWindow | null; label: string })
   );
 }
 
-/** Status bar readout: per agent the 5-hour bar, percent and time to reset, then the weekly pair. */
+/** Status bar readout, kept to a summary: per agent the 5-hour bar and percent. Reset times and the weekly figure are in the popover. */
 export function UsageReadout(props: {
   usages: readonly AgentUsage[];
   /** Unix seconds. */
@@ -43,9 +43,8 @@ export function UsageReadout(props: {
   return (
     <Show when={props.usages.length > 0}>
       <span class="usage-readout">
-        <button type="button" class="usage-trigger" aria-haspopup="dialog" aria-expanded={props.open ?? false}
+        <button type="button" class="usage-trigger" aria-haspopup="dialog" aria-expanded={props.open ?? false} aria-label={t("usage.title")}
           onClick={(event) => props.onToggle?.(event.currentTarget)}>
-          <span>{t("usage.label")}</span>
           <For each={props.usages}>{(usage) => (
             <span class="usage-agent">
               <AgentIcon agent={usage.agent} />
@@ -54,10 +53,6 @@ export function UsageReadout(props: {
                   <>
                     <UsageMeter window={ok().session} label={`${AGENT_NAME[usage.agent]} ${t("usage.fiveHour")}`} />
                     <b>{percentText(ok().session)}</b>
-                    <small>{remainingText(ok().session, props.now)}</small>
-                    <span aria-hidden="true">·</span>
-                    <b>{percentText(ok().weekly)}</b>
-                    <small>{remainingText(ok().weekly, props.now)}</small>
                   </>
                 )}</Match>
                 <Match when={usage.state === "unavailable"}>
