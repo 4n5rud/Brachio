@@ -20,6 +20,7 @@ import { TaskList } from "./components/TaskList";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
+import { activityKindOf, recordTaskActivity } from "./lib/task-activity";
 import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
@@ -380,6 +381,8 @@ export function App() {
       { taskId: task.id, sessionKey, title: task.title, key, detail, at },
       ...items.slice(0, ACTIVITY_LIMIT - 1),
     ]);
+    const kind = activityKindOf(key);
+    if (inTauri && kind) recordTaskActivity(task.id, kind, detail, at).catch(report);
     if (notifications()) notifyIfAway(key, task, detail, sessionKey).catch(report);
   };
 
@@ -735,7 +738,12 @@ export function App() {
           }
           setQuestions((open) => [...open, question]);
         },
-        (id) => setQuestions((open) => open.filter((question) => question.id !== id)),
+        (id) => {
+          const answered = questions().find((question) => question.id === id);
+          const task = answered && findTask(taskIdOf(answered.key));
+          if (task) recordTaskActivity(task.id, "approval_answered", null, Date.now()).catch(report);
+          setQuestions((open) => open.filter((question) => question.id !== id));
+        },
         report,
       );
       onCleanup(stopApprovals);
@@ -881,7 +889,6 @@ export function App() {
                 task={task()}
                 isGit={repos().find((item) => item.id === task().repoId)?.isGit !== false}
                 onDraft={draftComment}
-                activity={activity().filter((item) => item.taskId === task().id)}
                 now={now()}
                 onDiffTotals={recordDiffTotals}
                 onWide={setInspectorWide}

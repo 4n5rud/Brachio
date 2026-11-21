@@ -14,6 +14,7 @@ mod qa_run;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
+mod task_activity;
 mod task_ports;
 mod task_tabs;
 mod terminal;
@@ -207,6 +208,8 @@ pub fn run() {
             terminal::terminal_close,
             terminal::terminal_detach,
             terminal::terminal_park,
+            task_activity::task_activity_list,
+            task_activity::task_activity_record,
             task_tabs::task_secondary_tabs,
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
