@@ -30,6 +30,7 @@ const PATHS = {
   panelLeft: () => <><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M6 3v10" /></>,
   panelRight: () => <><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M10 3v10" /></>,
   archive: () => <><rect x="2" y="3" width="12" height="3" rx="1" /><path d="M3 6v6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6M6.5 9h3" /></>,
+  message: () => <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />,
   download: () => <><path d="M8 2.5v7M5 6.5l3 3 3-3" /><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" /></>,
   mail: () => <><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4.2 5.5-4.2" /></>,
   pin: () => <path d="M6 2.5h4l-.5 4 2 2H4.5l2-2zM8 8.5V14" />,

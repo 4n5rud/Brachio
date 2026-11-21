@@ -11,6 +11,7 @@ import { statusTone, type AgentState } from "../lib/status";
 import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
 import { ApprovalBar } from "./ApprovalBar";
+import { MailboxInbox } from "./MailboxInbox";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
@@ -19,6 +20,7 @@ import { onShellRequest } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { DropVeil } from "./DropVeil";
+import { taskIdOf } from "../lib/approvals";
 import { CORE_AGENT } from "../lib/terminal";
 import { MAX_MOUNTED_TERMINALS, drawnTaskIds, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
@@ -79,11 +81,14 @@ export function TaskView(props: {
   shouldResume?: (taskId: string) => boolean;
   registerDraftTarget: (taskId: string, target: () => DraftTarget | undefined) => () => void;
   unreadForTab?: (key: string | undefined) => number;
+  mailboxRevision: number;
+  onMailboxReminder?: (tabKey: string) => void;
   /** Files are being dragged over the terminal. */
   filesOver?: boolean;
   /** Opens the problem report with the error text. */
   onReportProblem?: (message: string) => void;
 }) {
+  const [inboxTab, setInboxTab] = createSignal<string>();
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredAgents = new Map<string, string>();
@@ -318,6 +323,12 @@ export function TaskView(props: {
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
+        <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
+          {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")}
+            badge={props.unreadForTab?.(key()) ?? 0}
+            aria-expanded={inboxTab() === key()}
+            onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
+        </Show>
         <Show when={tabMenu()}>
           {(anchor) => (
             <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
@@ -469,6 +480,12 @@ export function TaskView(props: {
             }}
           </For>
         </div>
+        <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
+          {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
+            sourceTitle={(fromKey) => props.findTask(taskIdOf(fromKey))?.title ?? fromKey}
+            onReminder={() => props.onMailboxReminder?.(key)}
+            onClose={() => setInboxTab(undefined)} />}
+        </Show>
         <Show when={otherApproval()}>
           {(pending) => (
             <Notice tone="blocked" lead={t("approval.otherTabLead").replace("{agent}",
