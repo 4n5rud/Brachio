@@ -507,46 +507,44 @@ pub fn orchestration_view(
     build_view(&*database.lock()?, &lead_task_id)
 }
 
+/// Decides under the database lock, reading the worktree's HEAD at decision time so a branch
+/// that moved after the review began is still caught.
+fn review_handoff(
+    database: &Database,
+    handoff_id: &str,
+    approved: bool,
+    note: Option<&str>,
+    head_of: impl Fn(&Path) -> Result<String, String>,
+) -> Result<(), String> {
+    let mut connection = database.lock()?;
+    review_decision(
+        &mut connection,
+        handoff_id,
+        approved,
+        note,
+        head_of,
+        crate::pr_status::now_ms(),
+        &uuid::Uuid::new_v4().hyphenated().to_string(),
+    )
+}
+
 /// The user's decision on a handoff. Approving completes the child, rejecting sends it back to
 /// work with the reason. Nothing here merges anything.
 #[tauri::command]
-pub async fn handoff_review(
+pub fn handoff_review(
     app: AppHandle,
     database: State<'_, Database>,
     handoff_id: String,
     approved: bool,
     note: Option<String>,
 ) -> Result<(), String> {
-    let worktree = {
-        let connection = database.lock()?;
-        let handoff = Handoff::get(&connection, &handoff_id).map_err(|e| e.to_string())?;
-        TaskRecord::get(&connection, &handoff.task_id)
-            .map_err(|e| e.to_string())?
-            .worktree_path
-    };
-    // Read off the UI thread; the decision below re-checks nothing but the stored handoff.
-    let head = if approved {
-        let path = worktree.clone();
-        Some(
-            tauri::async_runtime::spawn_blocking(move || worktree_head(&path))
-                .await
-                .map_err(|e| e.to_string())??,
-        )
-    } else {
-        None
-    };
-    {
-        let mut connection = database.lock()?;
-        review_decision(
-            &mut connection,
-            &handoff_id,
-            approved,
-            note.as_deref(),
-            |_| head.clone().ok_or_else(|| "no head was read".to_owned()),
-            crate::pr_status::now_ms(),
-            &uuid::Uuid::new_v4().hyphenated().to_string(),
-        )?;
-    }
+    review_handoff(
+        &database,
+        &handoff_id,
+        approved,
+        note.as_deref(),
+        worktree_head,
+    )?;
     schedule_all(&app);
     if let Err(error) = app.emit(CHANGED_EVENT, ()) {
         tracing::debug!(%error, "could not tell the window about the review");
@@ -563,7 +561,8 @@ mod tests {
     use brachio_runtime::mailbox::MailResponse;
     use brachio_store::open_in_memory;
 
-    use super::{build_view, handoff_request, review_decision, worktree_head};
+    use super::{build_view, handoff_request, review_decision, review_handoff, worktree_head};
+    use crate::workspace::Database;
 
     fn git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")
@@ -734,5 +733,26 @@ mod tests {
             brachio_store::schedule_next(&mut db, "lead", 8).unwrap(),
             vec!["next"]
         );
+    }
+
+    #[test]
+    fn approval_reads_head_after_the_review_began() {
+        let (dir, mut db) = setup();
+        handoff_request(&mut db, "child:agent", "added b", &[], 5, "h1").unwrap();
+        let database = Database(std::sync::Mutex::new(db));
+        let error = review_handoff(&database, "h1", true, None, |path| {
+            std::fs::write(path.join("race.txt"), "x").unwrap();
+            git(path, &["add", "."]);
+            git(path, &["commit", "-q", "-m", "race"]);
+            worktree_head(path)
+        })
+        .unwrap_err();
+        assert!(error.contains("moved after the handoff"), "{error}");
+        let db = database.0.lock().unwrap();
+        assert_eq!(
+            build_view(&db, "lead").unwrap().children[0].state,
+            "review_required"
+        );
+        drop(dir);
     }
 }
