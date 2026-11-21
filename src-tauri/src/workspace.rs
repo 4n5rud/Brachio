@@ -2082,3 +2082,105 @@ mod dropped_path_tests {
         assert!(Path::new(&logs).is_absolute() && logs.ends_with("logs"));
     }
 }
+
+#[cfg(test)]
+mod git_task_deletion_tests {
+    use std::path::Path;
+    use std::process::Command;
+    use std::sync::{Arc, Mutex};
+
+    use brachio_agent::AgentKind;
+    use brachio_git::Git;
+    use brachio_pty::SessionManager;
+    use brachio_store::{open_in_memory, NewRepo, RepoRecord, TaskRecord};
+
+    use super::{create_task, delete_task, CreateTaskRequest, Database, TaskWorktreeLocks};
+    use crate::runtime_terminals::RuntimeTerminals;
+    use crate::terminal::{SessionKeys, Terminals};
+
+    fn git(folder: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(folder)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(output.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn work_added_after_the_preview_refuses_deletion_and_a_fresh_preview_deletes() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let repo_path = root.path().join("repo");
+        std::fs::create_dir(&repo_path).expect("make repo");
+        git(&repo_path, &["init", "-b", "main"]);
+        git(&repo_path, &["commit", "--allow-empty", "-m", "start"]);
+        let connection = open_in_memory().expect("open database");
+        let repo = NewRepo {
+            id: "r",
+            name: "repo",
+            path: &repo_path,
+            default_branch: "main",
+            added_at_ms: 0,
+            is_git: true,
+        };
+        RepoRecord::insert(&connection, &repo).expect("insert repo");
+        let database = Database(Mutex::new(connection));
+        let locks = TaskWorktreeLocks::default();
+        let runtime = RuntimeTerminals::default();
+        let in_app = Terminals(Arc::new(SessionManager::default()), SessionKeys::default());
+
+        let created = tauri::async_runtime::block_on(create_task(
+            &database,
+            &locks,
+            CreateTaskRequest {
+                repo_id: "r".to_owned(),
+                parent_task_id: None,
+                title: "Work".to_owned(),
+                prompt: String::new(),
+                agent: AgentKind::ClaudeCode,
+                base: None,
+                codex_conversation_id: None,
+                max_open_children: None,
+                scheduled: false,
+                after: Vec::new(),
+            },
+        ))
+        .expect("create task");
+        let (id, worktree, branch) = (
+            created.task.id.clone(),
+            created.task.worktree_path.clone(),
+            created.task.branch,
+        );
+        database
+            .lock()
+            .expect("lock")
+            .execute("UPDATE tasks SET archived_at_ms = 1 WHERE id = ?1", [&id])
+            .expect("archive");
+        let shown = brachio_git::unsaved_work(&Git::new(&repo_path), &worktree, &branch)
+            .expect("preview")
+            .fingerprint;
+        std::fs::write(worktree.join("late.txt"), "written after the preview").expect("write");
+
+        let refusal = tauri::async_runtime::block_on(delete_task(
+            &database, &locks, &runtime, &in_app, &id, &shown,
+        ))
+        .expect_err("stale fingerprint is refused");
+        assert!(refusal.starts_with("task changed:"), "{refusal}");
+        assert!(worktree.join("late.txt").exists());
+        assert!(TaskRecord::get(&database.lock().expect("lock"), &id).is_ok());
+
+        let fresh = brachio_git::unsaved_work(&Git::new(&repo_path), &worktree, &branch)
+            .expect("second preview")
+            .fingerprint;
+        assert_ne!(fresh, shown);
+        tauri::async_runtime::block_on(delete_task(
+            &database, &locks, &runtime, &in_app, &id, &fresh,
+        ))
+        .expect("deleted after a fresh preview");
+        assert!(!worktree.exists());
+        assert!(TaskRecord::get(&database.lock().expect("lock"), &id).is_err());
+        assert!(!git(&repo_path, &["branch", "--format=%(refname:short)"]).contains(&branch));
+    }
+}
