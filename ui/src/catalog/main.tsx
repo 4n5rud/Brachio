@@ -38,7 +38,8 @@ import { IconButton } from "../components/ui/IconButton";
 import { Input, Select, TextArea } from "../components/ui/Input";
 import { Kbd } from "../components/ui/Kbd";
 import { Notice } from "../components/ui/Notice";
-import { Menu, MenuItem, MenuSeparator } from "../components/ui/Menu";
+import { Menu, MenuItem, MenuSeparator, MenuSubmenu } from "../components/ui/Menu";
+import { Combobox } from "../components/ui/Combobox";
 import { AgentIcon } from "../components/AgentIcon";
 import { Icon } from "../components/Icon";
 import { StatusGlyph } from "../components/ui/StatusBadge";
@@ -145,6 +146,7 @@ function Catalog() {
   const [notify, setNotify] = createSignal(true);
   const [veil, setVeil] = createSignal(false);
   const [menuAnchor, setMenuAnchor] = createSignal<HTMLElement>();
+  const [combo, setCombo] = createSignal("main");
   const [dialog, setDialog] = createSignal<"plain" | "confirm" | "newTask" | undefined>();
   const applyTheme = (value: string) => {
     setTheme(value);
@@ -189,6 +191,10 @@ function Catalog() {
           <Button icon="folder">{t("empty.repo.add")}</Button>
           <Button variant="primary" icon="plus" kbd="Ctrl+Enter">{t("newTask.create")}</Button>
         </Row>
+        <Row cap="toggled">
+          <Button aria-pressed={true}>{t("task.archive")}</Button>
+          <Button variant="ghost" aria-pressed={true}>{t("task.archive")}</Button>
+        </Row>
       </Section>
 
       <Section title="IconButton">
@@ -203,6 +209,16 @@ function Catalog() {
         </Row>
       </Section>
 
+      <Section title="Tooltip">
+        <Row cap="hover 600ms">
+          <IconButton icon="split" label={t("task.split")} />
+          <IconButton icon="gear" label={t("titlebar.settings")} keys={["Ctrl", ","]} />
+        </Row>
+        <div class="tooltip" role="tooltip" style={{ position: "static", transform: "none", width: "fit-content" }}>
+          {t("titlebar.settings")}<span class="tooltip-keys"><Kbd>Ctrl</Kbd><Kbd>,</Kbd></span>
+        </div>
+      </Section>
+
       <Section title="Input">
         <div class="catalog-fields">
           <Input label="Default" placeholder="Example value" />
@@ -213,6 +229,24 @@ function Catalog() {
           <Select label="Select"><option>One</option><option>Two</option></Select>
         </div>
         <TextArea label="Multiline" placeholder="Describe the task" />
+        <div class="catalog-fields">
+          <Input compact label="Compact 28px" placeholder="Filter" />
+          <Input compact mono label="Compact mono" value="src/lib" />
+        </div>
+      </Section>
+
+      <Section title="Combobox">
+        <div class="catalog-fields">
+          <Combobox mono label="Base branch" listLabel="Branches" value={combo()} onValue={setCombo}
+            options={[
+              { value: "main", label: "main", detail: "local and origin" },
+              { value: "release/0.4", label: "release/0.4", detail: "origin" },
+              { value: "feat/relay-inbox", label: "feat/relay-inbox", detail: "local" },
+            ].filter((option) => option.value.includes(combo().trim()) || combo() === "main")} />
+          <Combobox label="Error" listLabel="Branches" value="mian" error="No branch named mian." onValue={() => {}} options={[]} />
+          <Combobox label="Disabled" listLabel="Branches" value="main" disabled onValue={() => {}} options={[]} />
+          <Combobox compact label="Compact" listLabel="Branches" value="main" onValue={() => {}} options={[]} />
+        </div>
       </Section>
 
       <Section title="Toggle">
@@ -377,7 +411,11 @@ function Catalog() {
               <MenuItem icon={<Icon name="terminal" class="icon-sm" />} hint={t("task.tabHintShell")} onSelect={() => setMenuAnchor(undefined)}>{t("task.shell")}</MenuItem>
               <MenuItem icon={<AgentIcon agent="codex" />} hint={t("task.tabHintAgent")} disabled onSelect={() => {}}>Codex</MenuItem>
               <MenuSeparator />
-              <MenuItem icon={<Icon name="split" class="icon-sm" />} onSelect={() => setMenuAnchor(undefined)}>{t("task.splitSideBySide")}</MenuItem>
+              <MenuItem icon={<Icon name="split" class="icon-sm" />} keys={["Ctrl", "\\"]} onSelect={() => setMenuAnchor(undefined)}>{t("task.splitSideBySide")}</MenuItem>
+              <MenuSubmenu icon={<Icon name="folder" class="icon-sm" />} label="Add project">
+                <MenuItem onSelect={() => setMenuAnchor(undefined)}>Choose folder</MenuItem>
+                <MenuItem onSelect={() => setMenuAnchor(undefined)}>Clone from URL</MenuItem>
+              </MenuSubmenu>
             </Menu>)}</Show>
         </Row>
         <div style={{ position: "relative", height: "150px", width: "100%", background: "var(--color-term-bg)" }}>

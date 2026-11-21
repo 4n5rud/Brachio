@@ -5,6 +5,7 @@ A text button for one clear action; primary marks the single most likely next st
 ## Use
 - One `button-primary` per region at most: the task header, a dialog, the approval bar. Everything else is secondary (`button`) or `button-ghost`.
 - `button-danger` only for actions that destroy work (delete a worktree, discard changes), and only inside a confirming Dialog. Red never appears for anything else.
+- Cancel, Close and Dismiss in a dialog footer are `button-ghost`: no fill, no colour, no shortcut chip. They are never danger, even when the other button is.
 - `button-sm` (26px) for dense spots: tile footers, the sidebar head. Default height is `size-row` (28px). Nothing smaller than 24px is clickable.
 - Labels are verbs that say what happens: "Allow once", "Create PR", "Create task". No "OK", no "Submit".
 - A shortcut hint goes inside the button as a Kbd, after the label.
@@ -20,7 +21,8 @@ Height `size-row`, side padding `space-3`, radius `radius-sm`, 1px `color-line` 
 |---|---|---|
 | Default | `color-raised` fill | `color-accent` fill, `color-accent-ink` text |
 | Hover | `color-hover` | accent at brightness 0.92 |
-| Pressed | `color-press` | accent at brightness 0.86 |
+| Pressed | `color-press` plus a 1px inset `color-line-strong` outline | accent at brightness 0.86 plus the outline |
+| Toggled on (`aria-pressed="true"`) | `color-press` fill and `color-line-strong` border | same |
 | Focus | 2px `color-focus` ring, offset 2px | same |
 | Disabled | opacity 0.45, no hover | same |
 | Loading | `aria-busy="true"`; the working arc replaces the icon and the label says what is happening ("Creating…"); width stays the same | same |

@@ -48,6 +48,27 @@
   color: var(--color-text-3);
   font-size: var(--text-xs);
 }
+.menu-keys {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+}
+.menu-item small + .menu-keys {
+  margin-left: var(--space-2);
+}
+.menu-chevron {
+  margin-left: auto;
+  color: var(--color-text-3);
+}
+small + .menu-chevron {
+  margin-left: var(--space-2);
+}
+.menu-sub-host {
+  display: contents;
+}
+.menu-sub {
+  z-index: 21;
+}
 .menu-item .icon-sm,
 .menu-item .agent-icon {
   flex: none;

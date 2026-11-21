@@ -122,7 +122,7 @@ export function WorkspaceDialog(props: {
       onClose={props.onClose} closeOnScrim initialFocus={() => searchBox}
       flush={props.panel === "settings"}
       bare={props.panel === "quickOpen"}
-      headEnd={props.panel === "quickOpen" ? undefined : <Button size="sm" onClick={() => props.onClose()}>{t("workspace.close")}</Button>}
+      headEnd={props.panel === "quickOpen" ? undefined : <Button size="sm" variant="ghost" onClick={() => props.onClose()}>{t("workspace.close")}</Button>}
       footer={props.panel === "quickOpen" ? (
         <div class="palette-hints">
           <span><Kbd>↑</Kbd><Kbd>↓</Kbd>{t("quickOpen.hintMove")}</span>

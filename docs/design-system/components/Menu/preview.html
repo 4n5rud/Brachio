@@ -1,0 +1,22 @@
+<!-- @dsCard group="Overlays" height=220 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.menu{display:grid;gap:1px;width:260px;padding:4px;background:var(--color-panel);border:1px solid var(--color-line-strong);border-radius:var(--radius-md);box-shadow:var(--shadow-overlay);font-size:var(--text-sm)}
+.item{display:flex;align-items:center;gap:8px;height:var(--size-row);padding:0 10px;border-radius:6px}
+.item.on{background:var(--color-hover)}
+.item small{margin-left:auto;color:var(--color-text-3);font-size:var(--text-xs)}
+.keys{margin-left:auto;display:inline-flex;gap:2px}
+.sep{height:1px;margin:4px 6px;background:var(--color-line)}
+</style></head>
+<body>
+<div class="menu">
+<div class="item">Shell<small>new tab</small></div>
+<div class="item">Split side by side<span class="keys"><kbd>Ctrl</kbd><kbd>\</kbd></span></div>
+<div class="sep"></div>
+<div class="item on">Add project<span style="margin-left:auto">›</span></div>
+</div>
+</body>
+</html>

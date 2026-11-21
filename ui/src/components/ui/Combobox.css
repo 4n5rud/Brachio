@@ -1,0 +1,41 @@
+.combobox-shell {
+  position: relative;
+  display: flex;
+}
+.combobox-input {
+  flex: 1;
+  min-width: 0;
+  padding-right: 30px;
+}
+.combobox-chevron {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-3);
+}
+.combobox-chevron:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+.combobox-chevron:disabled {
+  opacity: 0.45;
+}
+.combobox-chevron .icon-sm {
+  transition: transform var(--duration-fast, 120ms);
+}
+.combobox-chevron.open .icon-sm {
+  transform: rotate(180deg);
+}
+.combobox-list {
+  max-height: 288px;
+  overflow: auto;
+}

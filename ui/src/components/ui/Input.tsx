@@ -10,9 +10,11 @@ interface FieldProps {
   mono?: boolean;
   /** Marks the field invalid when the message is shown elsewhere. */
   invalid?: boolean;
+  /** 28px tall, for toolbars and dense forms. */
+  compact?: boolean;
 }
 
-function Field(props: FieldProps & { id: string; children: JSX.Element }) {
+export function Field(props: FieldProps & { id: string; children: JSX.Element }) {
   return (
     <Show when={props.label || props.hint || props.error} fallback={props.children}>
       <label class="form-field">
@@ -27,11 +29,11 @@ function Field(props: FieldProps & { id: string; children: JSX.Element }) {
 }
 
 const fieldClass = (props: FieldProps, extra = "") =>
-  `input${extra}${props.mono ? " input-mono" : ""}`;
+  `input${extra}${props.mono ? " input-mono" : ""}${props.compact ? " input-compact" : ""}`;
 
 /** Single-line field. Monospace for branches, paths and commands. */
 export function Input(props: FieldProps & Omit<JSX.InputHTMLAttributes<HTMLInputElement>, "class"> & { class?: string }) {
-  const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "class"]);
+  const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "compact", "class"]);
   const id = createUniqueId();
   return (
     <Field {...own} id={id}>
@@ -43,7 +45,7 @@ export function Input(props: FieldProps & Omit<JSX.InputHTMLAttributes<HTMLInput
 
 /** Multi-line field, 88px minimum, for prompts and report bodies. */
 export function TextArea(props: FieldProps & Omit<JSX.TextareaHTMLAttributes<HTMLTextAreaElement>, "class"> & { class?: string }) {
-  const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "class"]);
+  const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "compact", "class"]);
   const id = createUniqueId();
   return (
     <Field {...own} id={id}>
@@ -55,7 +57,7 @@ export function TextArea(props: FieldProps & Omit<JSX.TextareaHTMLAttributes<HTM
 
 /** Native select drawn like an Input. */
 export function Select(props: FieldProps & Omit<JSX.SelectHTMLAttributes<HTMLSelectElement>, "class"> & { class?: string }) {
-  const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "class"]);
+  const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "compact", "class"]);
   const id = createUniqueId();
   return (
     <Field {...own} id={id}>

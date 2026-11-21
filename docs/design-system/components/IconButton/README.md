@@ -4,7 +4,7 @@ A square button holding one icon, for chrome actions people repeat often.
 
 ## Use
 - Title bar, pane heads, tile heads: view switch, split, settings, notifications, more.
-- Always set `aria-label` to the action ("Split pane") and show the same words as a tooltip after 500ms.
+- Always set `aria-label` to the action ("Split pane") and show the same words as a Tooltip after 600ms. The IconButton does this itself; pass `keys` to add the shortcut as key caps. Do not also set `title`.
 - 28px (`size-row`) by default, 24px (`icon-button-sm`) in pane heads. Never smaller.
 - A count badge sits top right only for things waiting on the person (tasks that need you): `color-status-blocked` fill, `color-badge-ink` digits, 12px mono, 16px tall.
 
