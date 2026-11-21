@@ -43,6 +43,8 @@ export const en = {
   "sidebar.newTask": "New task",
   "sidebar.dropTitle": "Drop to add a project",
   "sidebar.dropBody": "A Git repository becomes a project with worktrees. Any other folder becomes a folder workspace.",
+  "recent.title": "Recent tasks",
+  "recent.hint": "{keys}: next task · release to open · Esc cancels",
   "sidebar.countTasks": "Tasks {count}",
   "sidebar.countNeeds": "Needs you {count}",
   "project.alreadyAdded": "{name} is already in the sidebar.",

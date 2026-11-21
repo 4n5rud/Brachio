@@ -31,7 +31,9 @@ import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
-import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
+import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
+import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -149,6 +151,8 @@ export function App() {
   const [view, setView] = createSignal<View>("tasks");
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [recent, setRecent] = createSignal<readonly string[]>([]);
+  const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
   const [revealed, setRevealed] = createSignal<{ id: string }>();
@@ -276,6 +280,10 @@ export function App() {
     if (id !== undefined && !workspaceTaskIds().includes(id)) {
       setWorkspaceTaskIds((ids) => [...ids, id]);
     }
+  });
+  createEffect(() => {
+    const id = selectedId();
+    if (id !== undefined) setRecent((current) => touchRecent(current, id));
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
   const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
@@ -841,7 +849,26 @@ export function App() {
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
     const onKey = (event: KeyboardEvent) => {
-      if (event.isComposing || dialogOpen() || workspacePanel()) return;
+      if (event.isComposing) return;
+      const inTerminal = event.target instanceof Element && event.target.closest(".xterm") !== null;
+      const switching = switcher();
+      const keys = recentTasksShortcut(event, inTerminal && !switching);
+      if (switching && keys) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSwitcher({ ...switching, index: stepSwitchIndex(switching.index, switching.tasks.length, keys.back) });
+        return;
+      }
+      if (!switching && keys && !dialogOpen() && !workspacePanel()) {
+        const candidates = recentTasks(recent(), rows());
+        if (candidates.length > 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSwitcher({ tasks: candidates, index: firstSwitchIndex(candidates.length, keys.back), hold: keys.hold, terminal: inTerminal });
+          return;
+        }
+      }
+      if (dialogOpen() || workspacePanel()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -871,6 +898,16 @@ export function App() {
     // Capture phase: the terminal swallows key events it handles.
     window.addEventListener("keydown", onKey, true);
     onCleanup(() => window.removeEventListener("keydown", onKey, true));
+    // Letting go of the held key opens the highlighted task.
+    const onKeyUp = (event: KeyboardEvent) => {
+      const switching = switcher();
+      if (!switching || event.key !== switching.hold) return;
+      const target = switching.tasks[switching.index];
+      setSwitcher(undefined);
+      if (target) open(target.id);
+    };
+    window.addEventListener("keyup", onKeyUp, true);
+    onCleanup(() => window.removeEventListener("keyup", onKeyUp, true));
   });
   createEffect(() => {
     if (inTauri && repos().length > 0) saveOpenWorkspaceTasks(workspaceTaskIds());
@@ -1002,6 +1039,13 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <Show when={switcher()} keyed>
+        {(current) => (
+          <RecentTasksSwitcher tasks={current.tasks} index={current.index}
+            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS : RECENT_TASKS_KEYS}
+            onPick={(id) => { setSwitcher(undefined); open(id); }} onClose={() => setSwitcher(undefined)} />
+        )}
+      </Show>
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}

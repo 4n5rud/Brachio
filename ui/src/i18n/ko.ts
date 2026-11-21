@@ -45,6 +45,8 @@ export const ko: Messages = {
   "sidebar.newTask": "새 작업",
   "sidebar.dropTitle": "놓아서 프로젝트 추가",
   "sidebar.dropBody": "Git 저장소는 worktree를 쓰는 프로젝트가 되고, 다른 폴더는 폴더 작업 공간이 돼요.",
+  "recent.title": "최근 작업",
+  "recent.hint": "{keys}: 다음 작업 · 키를 떼면 열려요 · Esc로 취소해요",
   "sidebar.countTasks": "작업 {count}개",
   "sidebar.countNeeds": "확인 필요 {count}개",
   "project.alreadyAdded": "{name}은(는) 이미 사이드바에 있어요.",
