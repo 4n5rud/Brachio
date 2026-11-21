@@ -25,7 +25,7 @@ pub use orchestration_record::{
     OrchestrationError,
 };
 pub use orchestration_schedule::{
-    fail_lost, running_children, schedule_next, scheduled_leads, scheduler_enabled,
+    fail_lost, fail_running, running_children, schedule_next, scheduled_leads, scheduler_enabled,
     set_scheduler_enabled, state_reason, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
