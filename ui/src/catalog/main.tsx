@@ -11,6 +11,8 @@ import { FilesQaStates } from "./files-qa-states";
 import { SettingsStates } from "./settings-states";
 import { ApprovalBar } from "../components/ApprovalBar";
 import { AlwaysAllowList } from "../components/TaskAlwaysAllow";
+import { PlanGraph } from "../components/PlanGraph";
+import type { ChildView } from "../lib/orchestration";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
 import { TaskHeader } from "../components/TaskHeader";
@@ -104,6 +106,18 @@ function Row(props: { cap: string; children: import("solid-js").JSX.Element }) {
     </div>
   );
 }
+
+const planChild = (id: string, title: string, state: ChildView["state"], waits: Array<[string, string, string]> = []): ChildView => ({
+  id, title, branch: id, state, reason: null, handoff: null,
+  dependencies: waits.map(([dependency, name, status]) => ({ id: dependency, title: name, state: status })),
+});
+const PLAN_CHILDREN: ChildView[] = [
+  planChild("a", "Add the limiter", "completed"),
+  planChild("b", "Write tests for the limiter", "review_required", [["a", "Add the limiter", "completed"]]),
+  planChild("c", "Document the 429 response", "completed", [["a", "Add the limiter", "completed"]]),
+  planChild("d", "Load test the login endpoint", "blocked", [["b", "Write tests for the limiter", "review_required"]]),
+  planChild("e", "Release note for 0.5", "queued", [["c", "Document the 429 response", "completed"], ["d", "Load test the login endpoint", "blocked"]]),
+];
 
 function Section(props: { title: string; children: import("solid-js").JSX.Element }) {
   return (
@@ -502,6 +516,12 @@ function Catalog() {
         <ChangesStates />
       </Section>
 
+      <Section title="PlanGraph">
+        <div class="catalog-frame">
+          <PlanGraph selectedId="b" onSelect={() => {}} children={PLAN_CHILDREN} />
+        </div>
+      </Section>
+
       <Section title="Files, QA, local ports and activity">
         <FilesQaStates />
       </Section>
@@ -528,7 +548,7 @@ function Catalog() {
         <div class="catalog-stack" style={{ width: "100%" }}>
           <div class="catalog-bar-frame"><StatusBarView sessions={7} memory="182 MB" memoryTitle="App and agents 151 MB, runtime 31 MB" cpu="3%" branch="main" ahead={0} behind={2} /></div>
           <div class="catalog-bar-frame"><StatusBarView sessions={0} /></div>
-          <div class="catalog-bar-frame"><StatusBarView sessions={7} coreStopped memory="88 MB" cpu="0%" /></div>
+          <div class="catalog-bar-frame"><StatusBarView sessions={7} usageUnavailable memory="88 MB" cpu="0%" /></div>
         </div>
       </Section>
 

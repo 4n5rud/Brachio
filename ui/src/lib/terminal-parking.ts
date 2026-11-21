@@ -6,6 +6,14 @@
  */
 export const MAX_MOUNTED_TERMINALS = 6;
 
+/**
+ * Which ids to draw now. A task that was parked draws a placeholder for one frame first, so
+ * switching to it paints at once instead of stalling while its terminal is built.
+ */
+export function drawnTaskIds(mounted: readonly string[], waking: ReadonlySet<string>): string[] {
+  return mounted.filter((id) => !waking.has(id));
+}
+
 /** Moves `id` to the front of the selection history. */
 export function touchRecent(recent: readonly string[], id: string): string[] {
   return [id, ...recent.filter((other) => other !== id)];
