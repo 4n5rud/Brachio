@@ -264,6 +264,8 @@ export const ko: Messages = {
   "files.filter": "파일 찾기",
   "files.empty": "일치하는 파일 없음",
   "files.more": "처음 100개 결과만 표시합니다. 검색 범위를 좁혀 주세요.",
+  "files.tree": "파일 목록",
+  "files.results": "검색 결과",
   "files.loading": "미리보기 불러오는 중…",
   "files.binary": "UTF-8 텍스트 파일만 미리 볼 수 있습니다.",
   "files.truncated": "처음 64 KiB만 표시합니다.",

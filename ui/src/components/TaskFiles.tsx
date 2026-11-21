@@ -1,9 +1,9 @@
 import { Input } from "./ui/Input";
 import { IconButton } from "./ui/IconButton";
-import { FileRow } from "./FileRow";
+import { FileTree } from "./FileTree";
 import { InspectorNote, OutputLog } from "./InspectorNote";
 import { InspectorSection } from "./InspectorSection";
-import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { listTaskFiles, previewTaskFile, previewTaskMedia } from "../lib/workspace";
 
@@ -29,6 +29,8 @@ export function FilesPanel(props: {
   loading: boolean;
   error?: string;
   matches: readonly string[];
+  /** Keeps which folders are open for this task. */
+  treeKey?: string;
   selected: string;
   onSelect: (path: string) => void;
   onRefresh: () => void;
@@ -44,10 +46,9 @@ export function FilesPanel(props: {
         <Show when={!props.loading && !props.error && props.matches.length === 0}>
           <InspectorNote>{t("files.empty")}</InspectorNote>
         </Show>
-        <For each={props.matches.slice(0, RESULT_LIMIT)}>{(file) => (
-          <FileRow path={file} selected={file === props.selected} onSelect={() => props.onSelect(file)} />
-        )}</For>
-        <Show when={props.matches.length > RESULT_LIMIT}><InspectorNote>{t("files.more")}</InspectorNote></Show>
+        <FileTree paths={props.matches} query={props.filter.trim()} treeKey={props.treeKey ?? ""}
+          selected={props.selected} onSelect={props.onSelect} limit={RESULT_LIMIT} />
+        <Show when={props.filter.trim() && props.matches.length > RESULT_LIMIT}><InspectorNote>{t("files.more")}</InspectorNote></Show>
       </InspectorSection>
       <Show when={props.preview}>
         {(preview) => (
@@ -127,6 +128,6 @@ export function TaskFiles(props: { taskId: string; onInsert: (path: string) => v
 
   return (
     <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading} error={files()?.error}
-      matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()} />
+      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()} />
   );
 }
