@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import type { AgentKind as CoreAgent, CodexConversation } from "./terminal";
 import type { AgentKind, TaskRow } from "./tasks";
@@ -49,6 +50,19 @@ export interface CreateTaskRequest {
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
 /** With `gitOnly`, a folder that is not a Git repository is refused instead of added as a folder workspace. */
 export const addRepo = (path: string, gitOnly = false) => invoke<RepoRecord>("repo_add", { path, gitOnly });
+/** Clones `url` into a new folder inside `parent` and adds it. Rejects with "cancelled" when stopped. */
+export const cloneProject = (jobId: string, url: string, parent: string, name?: string) =>
+  invoke<RepoRecord>("project_clone", { jobId, url, parent, name: name || null });
+export const cancelClone = (jobId: string) => invoke<void>("project_clone_cancel", { jobId });
+/** Calls `onPercent` with the overall progress, 0 to 100, of the clone with this id. */
+export const watchCloneProgress = (jobId: string, onPercent: (percent: number) => void) =>
+  listen<{ jobId: string; percent: number }>("project-clone-progress", (event) => {
+    if (event.payload.jobId === jobId) onPercent(event.payload.percent);
+  });
+/** Creates a folder inside `parent`, runs `git init` in it and adds it. */
+export const initProject = (parent: string, name: string) => invoke<RepoRecord>("project_init", { parent, name });
+/** `origin` URL of each project that has one, by project id. */
+export const listRemoteUrls = () => invoke<Record<string, string>>("repo_remote_urls");
 
 /** A git repository found inside a folder project. */
 export interface FolderRepo {

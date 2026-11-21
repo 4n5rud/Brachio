@@ -15,6 +15,7 @@ mod log_file;
 mod mailbox;
 mod orchestration;
 mod pr_status;
+mod project_add;
 mod qa_run;
 mod resource_usage;
 mod runtime_client;
@@ -261,6 +262,7 @@ pub fn run() {
             terminal::SessionKeys::default(),
         ))
         .manage(runtime_terminals::RuntimeTerminals::default())
+        .manage(project_add::CloneJobs::default())
         .manage(pr_status::PrStatuses::default())
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
@@ -316,6 +318,10 @@ pub fn run() {
             orchestration::orchestration_schedule,
             workspace::repo_list,
             workspace::repo_add,
+            project_add::project_clone,
+            project_add::project_clone_cancel,
+            project_add::project_init,
+            project_add::repo_remote_urls,
             workspace::repo_branches,
             workspace::repo_remove,
             workspace::folder_source_repos,

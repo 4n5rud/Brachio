@@ -26,3 +26,8 @@ The input shell is an Input (32px, or 28px with `compact`); a 20px ghost chevron
 
 ## Consumer provides
 `value`, `onValue`, the filtered `options`, `listLabel`, and optionally `onPick`.
+
+## Footer and two-line rows
+- `footer` pins a row under a divider below the scrolling rows, usually a `MenuSubmenu` such as "Add new project" with its three ways in. Arrow Down from the last row focuses it; Arrow Up or Esc returns to the input.
+- `subline` puts a muted second line under a row's label: owner/repo for a project, or its path when it has no remote.
+- A native Select gets the same chevron (not rotating).

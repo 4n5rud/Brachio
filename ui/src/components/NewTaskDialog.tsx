@@ -1,8 +1,13 @@
 import { Button } from "./ui/Button";
-import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import { confirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { Input, Select, TextArea } from "./ui/Input";
+import { Combobox } from "./ui/Combobox";
+import { MenuSubmenu } from "./ui/Menu";
+import { AddProjectItems } from "./AddProjectItems";
+import { Icon } from "./Icon";
+import { filterProjects, projectSubline, type AddProjectKind, type ProjectChoice } from "../lib/project-choices";
 import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
 import { CORE_AGENT, detectAgents } from "../lib/terminal";
@@ -36,12 +41,20 @@ const conversationLabel = (item: { id: string; timestamp: string | null }) => {
 
 const AGENTS: readonly AgentKind[] = ["claude", "codex"];
 
+/** The agent's own version line says "(Claude Code)" after the number; the card already shows the name. */
+const plainVersion = (version: string | null) => version?.replace(/\s*\(Claude Code\)/i, "") ?? null;
+
 const BAD_BASE = /invalid reference|not a valid (object name|commit)|unknown revision/i;
 
 /** "New task" dialog: prompt, name, agent and base branch. */
 export function NewTaskDialog(props: {
   repoId: string;
   repoName: string;
+  /** Every project the task can go to; the field above the prompt switches between them. */
+  projects: readonly ProjectChoice[];
+  onProjectChange: (id: string) => void;
+  /** The pinned "Add new project" submenu chose a way to bring one in. */
+  onAddProject: (kind: AddProjectKind) => void;
   defaultBranch: string;
   /** A plain folder has no branch to base a task on and no parent task. */
   isGit: boolean;
@@ -53,6 +66,7 @@ export function NewTaskDialog(props: {
   const [title, setTitle] = createSignal("");
   const [agent, setAgent] = createSignal<AgentKind>("claude");
   const [base, setBase] = createSignal("");
+  const [projectText, setProjectText] = createSignal(props.repoName);
   const [parentTaskId, setParentTaskId] = createSignal("");
   const [conversationId, setConversationId] = createSignal("");
   const [compare, setCompare] = createSignal(false);
@@ -91,6 +105,23 @@ export function NewTaskDialog(props: {
       ? t("newTask.baseMissing").replace("{name}", () => base().trim()) : undefined;
   };
   const createError = () => (baseError() ? null : error());
+
+  createEffect(() => setProjectText(props.repoName));
+  createEffect(on(() => props.repoId, () => {
+    setBase("");
+    setParentTaskId("");
+    setConversationId("");
+    setCompare(false);
+    setError(null);
+  }, { defer: true }));
+  const projectOptions = () =>
+    filterProjects(props.projects, projectText() === props.repoName ? "" : projectText()).map((project) => ({
+      value: project.name,
+      id: project.id,
+      label: project.name,
+      subline: projectSubline(project),
+      icon: <Icon name={project.isGit ? "branch" : "folder"} class="icon-sm" />,
+    }));
 
   const finalTitle = () => title().trim() || titleFromPrompt(prompt());
   const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "";
@@ -163,15 +194,25 @@ export function NewTaskDialog(props: {
       <TextArea ref={promptBox} label={t("newTask.prompt")} value={prompt()}
         onInput={(event) => setPrompt(event.currentTarget.value)} />
       <div class="form-grid">
+        <Combobox label={t("project.label")} listLabel={t("project.list")} value={projectText()}
+          options={projectOptions()} emptyText={t("project.empty")}
+          onValue={setProjectText}
+          onPick={(option) => { if (option.id) props.onProjectChange(option.id); }}
+          onBlur={() => setProjectText(props.repoName)}
+          footer={(api) => (
+            <MenuSubmenu icon={<Icon name="plus" class="icon-sm" />} label={t("project.addNew")}>
+              <AddProjectItems onPick={(kind) => { api.close(); props.onAddProject(kind); }} />
+            </MenuSubmenu>
+          )} />
         <Input label={t("newTask.name")} value={title()} placeholder={titleFromPrompt(prompt())}
           onInput={(event) => setTitle(event.currentTarget.value)} />
-        <Show when={props.isGit}>
-          <BranchField repoId={props.repoId} value={base()}
-            placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
-            error={baseError()}
-            onValue={(value) => { setBase(value); setError(null); }} />
-        </Show>
       </div>
+      <Show when={props.isGit}>
+        <BranchField repoId={props.repoId} value={base()}
+          placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
+          error={baseError()}
+          onValue={(value) => { setBase(value); setError(null); }} />
+      </Show>
       <Show when={props.isGit && props.parents?.length}>
         <Select label={t("newTask.parent")} value={parentTaskId()}
           onChange={(event) => setParentTaskId(event.currentTarget.value)}>
@@ -192,13 +233,16 @@ export function NewTaskDialog(props: {
                   disabled={agentInfo(kind).missing || comparing()}
                   onChange={() => { setAgent(kind); setConversationId(""); }}
                 />
-                <b><AgentIcon agent={kind} />{AGENT_NAME[kind]}</b>
-                <Show when={agentInfo(kind).missing || agentInfo(kind).version}>
-                  <span class="agent-card-note">
-                    {agentInfo(kind).missing
-                      ? t("newTask.agentMissing").replace("{name}", () => kind) : agentInfo(kind).version}
-                  </span>
-                </Show>
+                <AgentIcon agent={kind} />
+                <span class="agent-card-text">
+                  <b>{AGENT_NAME[kind]}</b>
+                  <Show when={agentInfo(kind).missing || agentInfo(kind).version}>
+                    <span class="agent-card-note">
+                      {agentInfo(kind).missing
+                        ? t("newTask.agentMissing").replace("{name}", () => kind) : plainVersion(agentInfo(kind).version)}
+                    </span>
+                  </Show>
+                </span>
               </label>
             )}
           </For>

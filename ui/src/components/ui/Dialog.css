@@ -58,6 +58,9 @@
   gap: 14px;
   overflow: auto;
 }
+.modal-body > * {
+  flex-shrink: 0;
+}
 .modal-foot {
   padding: var(--space-3) var(--space-5);
   border-top: 1px solid var(--color-line);

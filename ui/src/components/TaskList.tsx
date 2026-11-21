@@ -1,6 +1,8 @@
 import { IconButton } from "./ui/IconButton";
 import { Button } from "./ui/Button";
-import { Menu, MenuItem } from "./ui/Menu";
+import { Menu } from "./ui/Menu";
+import { AddProjectItems } from "./AddProjectItems";
+import type { AddProjectKind } from "../lib/project-choices";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { SETTINGS_KEYS } from "../lib/shortcut";
@@ -33,7 +35,7 @@ export function TaskList(props: {
   onImportWorktrees?: (repoId: string) => void;
   /** Adds a git repository found inside a folder project as a project of its own. */
   onAddFolderRepo?: (path: string) => Promise<void>;
-  onAddRepo?: (kind: "git" | "folder") => void;
+  onAddRepo?: (kind: AddProjectKind) => void;
   onOpenArchived?: () => void;
   /** Opens Settings; its button sits at the foot of the sidebar. */
   onSettings?: () => void;
@@ -122,12 +124,7 @@ export function TaskList(props: {
           <Show when={addMenu()}>
             {(anchor) => (
               <Menu anchor={anchor()} label={t("sidebar.addProject")} onClose={() => setAddMenu(undefined)}>
-                <MenuItem hint={t("sidebar.addGitHint")} onSelect={() => { setAddMenu(undefined); props.onAddRepo?.("git"); }}>
-                  {t("sidebar.addGit")}
-                </MenuItem>
-                <MenuItem hint={t("sidebar.addFolderHint")} onSelect={() => { setAddMenu(undefined); props.onAddRepo?.("folder"); }}>
-                  {t("sidebar.addFolder")}
-                </MenuItem>
+                <AddProjectItems onPick={(kind) => { setAddMenu(undefined); props.onAddRepo?.(kind); }} />
               </Menu>
             )}
           </Show>

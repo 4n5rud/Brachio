@@ -1,4 +1,5 @@
 import { Show, createUniqueId, splitProps, type JSX } from "solid-js";
+import { Icon } from "../Icon";
 import "./Input.css";
 
 interface FieldProps {
@@ -55,14 +56,17 @@ export function TextArea(props: FieldProps & Omit<JSX.TextareaHTMLAttributes<HTM
   );
 }
 
-/** Native select drawn like an Input. */
+/** Native select drawn like an Input, with the same chevron a Combobox has. */
 export function Select(props: FieldProps & Omit<JSX.SelectHTMLAttributes<HTMLSelectElement>, "class"> & { class?: string }) {
   const [own, rest] = splitProps(props, ["label", "hint", "error", "mono", "invalid", "compact", "class"]);
   const id = createUniqueId();
   return (
     <Field {...own} id={id}>
-      <select {...rest} class={fieldClass(own, own.class ? ` ${own.class}` : "")}
-        aria-invalid={own.error || own.invalid ? "true" : undefined} aria-describedby={own.error ?? own.hint ? id : undefined} />
+      <div class="select-shell">
+        <select {...rest} class={fieldClass(own, own.class ? ` ${own.class}` : "")}
+          aria-invalid={own.error || own.invalid ? "true" : undefined} aria-describedby={own.error ?? own.hint ? id : undefined} />
+        <Icon name="chevronDown" class="icon-sm select-chevron" />
+      </div>
     </Field>
   );
 }

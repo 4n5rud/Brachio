@@ -107,7 +107,11 @@ pub fn repo_add(
     add_project(&database, &path, git_only.unwrap_or(false))
 }
 
-fn add_project(database: &Database, path: &Path, git_only: bool) -> Result<RepoRecord, String> {
+pub(crate) fn add_project(
+    database: &Database,
+    path: &Path,
+    git_only: bool,
+) -> Result<RepoRecord, String> {
     let (root, default_branch, is_git) = match brachio_git::inspect_repo(path) {
         Ok(info) => (info.root, info.default_branch, true),
         Err(brachio_git::GitError::NotARepository { .. }) if git_only => {
