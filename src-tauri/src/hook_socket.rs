@@ -26,6 +26,27 @@ use crate::child_task_request::{ChildRequest, ChildTasks};
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const REVIEW_PROMPT_CHARS: usize = 2000;
 
+/// True when the client sends back an acknowledgement of exactly `ids` in time.
+///
+/// A write to a closed connection can still succeed into the operating system's buffer, so only
+/// this answer proves the client received the messages. An older `brachio` never acknowledges:
+/// its messages stay unread and are shown again, which is a duplicate, never a loss.
+async fn acknowledged(reader: &mut BufReader<Stream>, ids: &[String]) -> bool {
+    let Ok(Ok(Some(message))) =
+        tokio::time::timeout(mailbox::ACK_TIMEOUT, read_message(reader, MAX_MESSAGE)).await
+    else {
+        return false;
+    };
+    let Ok(MailRequest::Ack { ids: acked }) = serde_json::from_slice(&message) else {
+        return false;
+    };
+    let mut acked = acked;
+    let mut expected = ids.to_vec();
+    acked.sort();
+    expected.sort();
+    acked == expected
+}
+
 /// A question the user is being asked.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -92,10 +113,10 @@ impl Approvals {
     }
 
     /// Like [`Approvals::with_mail`], and `delivered` is given the ids of the messages a `check`
-    /// answer carried once that answer was written to the client, so the caller marks them
-    /// read. A write that succeeds only means the bytes were handed to the operating system:
-    /// delivery is at least once, so a client that dies right after may see them again, but they
-    /// are never lost to a client that had already gone.
+    /// answer carried once the client acknowledged exactly those ids, so the caller marks them
+    /// read. A write that succeeds only means the bytes were handed to the operating system, so
+    /// without the acknowledgement they stay unread: delivery is at least once, a duplicate is
+    /// possible and a loss is not.
     pub fn with_delivery(
         knows: impl Fn(&str) -> bool + Send + Sync + 'static,
         notify: impl Fn(Notice) + Send + Sync + 'static,
@@ -206,7 +227,7 @@ impl Approvals {
             write_message(reader.get_mut(), &response, MAX_RESPONSE).await?;
             if let (true, MailResponse::Messages { messages, .. }) = (consuming, &response) {
                 let ids: Vec<String> = messages.iter().map(|message| message.id.clone()).collect();
-                if !ids.is_empty() {
+                if !ids.is_empty() && acknowledged(&mut reader, &ids).await {
                     (self.delivered)(&ids);
                 }
             }
@@ -327,7 +348,7 @@ mod tests {
     use brachio_runtime::approval::{self, ApprovalRequest, Decision};
     use brachio_runtime::transport;
 
-    use super::{Approvals, Notice};
+    use super::{Approvals, BufReader, Notice, Stream};
     use crate::child_task_request::{ChildRequest, ChildTask, ChildTasks, CreateFuture};
 
     fn request(key: &str) -> ApprovalRequest {
@@ -489,13 +510,8 @@ mod tests {
     }
 
     type Store = Arc<Mutex<rusqlite::Connection>>;
-    type AnswerGate = Mutex<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>;
-
-    /// A socket over a real store holding two unread messages. The first answer waits on `gate`, so a
-    /// client can leave before it is written.
-    fn mailbox_over_store(name: &str, gate: AnswerGate) -> Store {
-        use std::sync::atomic::{AtomicBool, Ordering};
-
+    /// A socket over a real store holding two unread messages for `t:agent`.
+    fn mailbox_over_store(name: &str) -> Store {
         use brachio_runtime::mailbox::{MailMessage, MailRequest, MailResponse};
 
         let store = Arc::new(Mutex::new(brachio_store::open_in_memory().expect("open")));
@@ -523,7 +539,6 @@ mod tests {
         }
         let reading = Arc::clone(&store);
         let marking = Arc::clone(&store);
-        let slow = AtomicBool::new(true);
         let approvals = Approvals::with_delivery(
             |_| false,
             |_| {},
@@ -535,11 +550,6 @@ mod tests {
                     let connection = reading.lock().expect("lock");
                     brachio_store::peek_next_batch(&connection, &key, 10).expect("peek")
                 };
-                if slow.swap(false, Ordering::SeqCst) {
-                    let (entered, release) = &*gate.lock().expect("gate");
-                    let _ = entered.send(());
-                    let _ = release.recv_timeout(Duration::from_secs(30));
-                }
                 MailResponse::Messages {
                     messages: messages
                         .into_iter()
@@ -581,40 +591,112 @@ mod tests {
             .collect()
     }
 
+    /// Sends a consuming check and reads the answer, leaving the connection open for an ack.
+    async fn check_and_receive(name: &str) -> BufReader<Stream> {
+        use brachio_runtime::mailbox::MailResponse;
+        use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
+
+        let mut stream = transport::connect(name).await.expect("connect");
+        write_message(&mut stream, &check_request(), MAX_MESSAGE)
+            .await
+            .expect("send");
+        let mut reader = BufReader::new(stream);
+        let message = read_message(&mut reader, MAX_RESPONSE)
+            .await
+            .expect("read")
+            .expect("an answer");
+        let answer: MailResponse = serde_json::from_slice(&message).expect("decode");
+        assert!(
+            matches!(answer, MailResponse::Messages { ref messages, .. } if messages.len() == 2)
+        );
+        reader
+    }
+
+    /// Sends `ids` as the acknowledgement and waits until the server has closed the connection,
+    /// which it only does after deciding what to mark.
+    async fn ack_and_wait_for_close(mut reader: BufReader<Stream>, ids: &[&str]) {
+        use brachio_runtime::mailbox::MailRequest;
+        use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
+
+        let ack = MailRequest::Ack {
+            ids: ids.iter().map(|id| (*id).to_owned()).collect(),
+        };
+        write_message(reader.get_mut(), &ack, MAX_MESSAGE)
+            .await
+            .expect("ack");
+        let closed = tokio::time::timeout(
+            Duration::from_secs(30),
+            read_message(&mut reader, MAX_RESPONSE),
+        )
+        .await
+        .expect("the server never finished");
+        assert!(!matches!(closed, Ok(Some(_))));
+    }
+
+    fn unique_name() -> String {
+        format!("ack-{}", &uuid::Uuid::new_v4().simple().to_string()[..10])
+    }
+
     #[test]
-    fn messages_stay_unread_when_the_client_leaves_before_the_answer() {
+    fn messages_stay_unread_when_the_client_leaves_without_acknowledging() {
+        tauri::async_runtime::block_on(async {
+            let name = unique_name();
+            let store = mailbox_over_store(&name);
+
+            drop(check_and_receive(&name).await);
+            let again = check_and_receive(&name).await;
+            assert_eq!(unread_ids(&store), ["m1", "m2"]);
+            drop(again);
+        });
+    }
+
+    #[test]
+    fn messages_stay_unread_when_the_acknowledgement_names_other_ids() {
+        tauri::async_runtime::block_on(async {
+            let name = unique_name();
+            let store = mailbox_over_store(&name);
+
+            ack_and_wait_for_close(check_and_receive(&name).await, &["m1", "other"]).await;
+            assert_eq!(unread_ids(&store), ["m1", "m2"]);
+            ack_and_wait_for_close(check_and_receive(&name).await, &["m1"]).await;
+            assert_eq!(unread_ids(&store), ["m1", "m2"]);
+        });
+    }
+
+    #[test]
+    fn messages_are_marked_read_once_the_client_acknowledges_them() {
+        tauri::async_runtime::block_on(async {
+            let name = unique_name();
+            let store = mailbox_over_store(&name);
+
+            ack_and_wait_for_close(check_and_receive(&name).await, &["m2", "m1"]).await;
+            assert!(unread_ids(&store).is_empty());
+        });
+    }
+
+    #[test]
+    fn the_cli_helper_acknowledges_after_showing_the_messages() {
         tauri::async_runtime::block_on(async {
             use brachio_runtime::mailbox::MailResponse;
-            use brachio_runtime::wire::{write_message, MAX_MESSAGE};
 
-            let name = format!("ack-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-            let (entered, entered_receiver) = std::sync::mpsc::channel();
-            let (release, release_receiver) = std::sync::mpsc::channel::<()>();
-            let store = mailbox_over_store(&name, Mutex::new((entered, release_receiver)));
+            let name = unique_name();
+            let store = mailbox_over_store(&name);
 
-            let mut stream = transport::connect(&name).await.expect("connect");
-            write_message(&mut stream, &check_request(), MAX_MESSAGE)
-                .await
-                .expect("send");
-            tokio::task::spawn_blocking(move || {
-                entered_receiver.recv_timeout(Duration::from_secs(30))
-            })
+            let shown = std::cell::Cell::new(0);
+            brachio_runtime::mailbox::call_with_ack(
+                &name,
+                &check_request(),
+                Duration::from_secs(30),
+                |answer| {
+                    if let MailResponse::Messages { messages, .. } = answer {
+                        shown.set(messages.len());
+                    }
+                    Ok(())
+                },
+            )
             .await
-            .expect("join")
-            .expect("the server never began answering");
-            drop(stream);
-            release.send(()).expect("release the answer");
-            // The close is already complete, so the answer has nowhere to go; this only waits out
-            // the server finishing the failed write.
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            assert_eq!(unread_ids(&store), ["m1", "m2"]);
-
-            let answer = brachio_runtime::mailbox::call(&name, &check_request())
-                .await
-                .expect("answer");
-            assert!(
-                matches!(answer, MailResponse::Messages { ref messages, .. } if messages.len() == 2)
-            );
+            .expect("check");
+            assert_eq!(shown.get(), 2);
             assert!(unread_ids(&store).is_empty());
         });
     }
