@@ -11,6 +11,8 @@ import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
 import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, terminalClipboardText } from "../lib/terminal-paste";
+import { SetupMarkerFilter, type SetupResult } from "../lib/setup-signal";
+import { onShellInput } from "../lib/shell-input";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -28,6 +30,8 @@ export interface TerminalSession {
   key?: string;
   /** Typed into a shell the first time it starts, such as a repository's setup commands. */
   initialInput?: string;
+  /** Told how each setup command typed into this shell ended. */
+  onSetupResult?: (result: SetupResult) => void;
 }
 
 /**
@@ -366,8 +370,20 @@ export function TerminalPane(props: {
       };
     });
 
+    const setupMarkers = session && !session.agent ? new SetupMarkerFilter() : undefined;
     function writeOutput(bytes: Uint8Array) {
-      term.write(bytes, schedulePrompt);
+      if (!setupMarkers) {
+        term.write(bytes, schedulePrompt);
+        return;
+      }
+      const { output, results } = setupMarkers.feed(bytes);
+      for (const result of results) session?.onSetupResult?.(result);
+      term.write(output, schedulePrompt);
+    }
+    if (setupMarkers && session?.key) {
+      onCleanup(onShellInput(session.key, (text) => {
+        void handle?.write(`${text}\r`).catch(() => {});
+      }));
     }
 
     function schedulePrompt() {

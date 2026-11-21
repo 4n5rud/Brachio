@@ -206,6 +206,7 @@ pub fn run() {
             terminal::terminal_forget_uncertain_launch,
             terminal::terminal_codex_conversations,
             terminal::terminal_write,
+            terminal::terminal_shell_kind,
             terminal::terminal_resize,
             terminal::terminal_close,
             terminal::terminal_detach,
