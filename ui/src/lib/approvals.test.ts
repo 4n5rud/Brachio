@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listen } from "@tauri-apps/api/event";
 import { taskIdOf, watchApprovals } from "./approvals";
@@ -5,7 +6,10 @@ import { taskIdOf, watchApprovals } from "./approvals";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(invoke).mockResolvedValue([]);
+});
 
 describe("approval questions", () => {
   it("finds the task in a terminal key", () => {
@@ -49,5 +53,15 @@ describe("watchApprovals", () => {
     stop();
     deliver({ payload: { id: 1, key: "t:agent", review: "" } });
     expect(onAsked).not.toHaveBeenCalled();
+  });
+
+  it("shows questions that were already pending when it subscribed, once", async () => {
+    vi.mocked(listen).mockResolvedValue(() => {});
+    vi.mocked(invoke).mockResolvedValue([{ id: 7, key: "t:agent", review: "Bash" }]);
+    const onAsked = vi.fn();
+    watchApprovals(onAsked, vi.fn());
+    await vi.waitFor(() => expect(onAsked).toHaveBeenCalledWith({ id: 7, key: "t:agent", review: "Bash" }));
+    expect(invoke).toHaveBeenCalledWith("pending_approvals");
+    expect(onAsked).toHaveBeenCalledTimes(1);
   });
 });

@@ -72,7 +72,7 @@ type Delivered = Box<dyn Fn(&[String]) + Send + Sync>;
 
 /// The open questions, and who to tell about changes.
 pub struct Approvals {
-    pending: Mutex<HashMap<u64, oneshot::Sender<Decision>>>,
+    pending: Mutex<HashMap<u64, (Question, oneshot::Sender<Decision>)>>,
     next: AtomicU64,
     knows: Box<dyn Fn(&str) -> bool + Send + Sync>,
     notify: Box<dyn Fn(Notice) + Send + Sync>,
@@ -138,7 +138,19 @@ impl Approvals {
     /// Passes the user's choice to the waiting hook. `false` when the question is already over.
     pub fn answer(&self, id: u64, decision: Decision) -> bool {
         let sender = self.pending.lock().ok().and_then(|mut map| map.remove(&id));
-        sender.is_some_and(|sender| sender.send(decision).is_ok())
+        sender.is_some_and(|(_, sender)| sender.send(decision).is_ok())
+    }
+
+    /// The questions still waiting, oldest first, for an interface that missed their `Asked`
+    /// notice.
+    pub fn pending_questions(&self) -> Vec<Question> {
+        let mut questions: Vec<Question> = self
+            .pending
+            .lock()
+            .map(|map| map.values().map(|(question, _)| question.clone()).collect())
+            .unwrap_or_default();
+        questions.sort_by_key(|question| question.id);
+        questions
     }
 
     /// Shows the user a question raised by the app itself and blocks until they answer. Call it
@@ -146,8 +158,12 @@ impl Approvals {
     pub fn ask_blocking(&self, key: String, review: String) -> Option<Decision> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().ok()?.insert(id, sender);
-        (self.notify)(Notice::Asked(Question { id, key, review }));
+        let question = Question { id, key, review };
+        self.pending
+            .lock()
+            .ok()?
+            .insert(id, (question.clone(), sender));
+        (self.notify)(Notice::Asked(question));
         let decision = receiver.blocking_recv().ok();
         if let Ok(mut map) = self.pending.lock() {
             map.remove(&id);
@@ -255,11 +271,12 @@ impl Approvals {
     ) -> Result<Option<Decision>> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
+        let question = Question { id, key, review };
         self.pending
             .lock()
             .map_err(|_| anyhow!("approval list lock poisoned"))?
-            .insert(id, sender);
-        (self.notify)(Notice::Asked(Question { id, key, review }));
+            .insert(id, (question.clone(), sender));
+        (self.notify)(Notice::Asked(question));
         let outcome = tokio::select! {
             decision = receiver => decision.ok(),
             // The hook closed its end: answered in the terminal, or it gave up waiting.
@@ -325,6 +342,12 @@ impl ChildTasks for NoChildTasks {
     fn create(&self, _: String, _: ChildRequest) -> crate::child_task_request::CreateFuture {
         Box::pin(async { Err("Creating tasks is not available.".to_owned()) })
     }
+}
+
+/// The questions still open, so a reloaded interface can show them again.
+#[tauri::command]
+pub fn pending_approvals(approvals: tauri::State<'_, Arc<Approvals>>) -> Vec<Question> {
+    approvals.pending_questions()
 }
 
 /// The user's choice for an open question. Nothing else can answer one.
@@ -394,6 +417,27 @@ mod tests {
             assert!(Instant::now() < deadline, "no question arrived");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    #[test]
+    fn a_question_the_interface_missed_can_be_listed_and_answered_until_it_closes() {
+        tauri::async_runtime::block_on(async {
+            let (name, approvals, notices) = start("task1:agent");
+            let waiting = tokio::spawn({
+                let name = name.clone();
+                async move {
+                    approval::ask(&name, &request("task1:agent"), Duration::from_secs(10)).await
+                }
+            });
+            let id = first_question(&notices).await;
+            let listed = approvals.pending_questions();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].id, id);
+            assert_eq!(listed[0].key, "task1:agent");
+            assert!(approvals.answer(id, Decision::Allow));
+            assert_eq!(waiting.await.expect("hook task"), Some(Decision::Allow));
+            assert!(approvals.pending_questions().is_empty());
+        });
     }
 
     #[test]
