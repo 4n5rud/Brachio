@@ -53,5 +53,6 @@ export function issueBody(error: string, environment: IssueEnvironment): string 
 
 export const appVersion = () => invoke<string>("app_version");
 
+/** Resolves to `false` when the browser did not open and the report was copied instead. */
 export const openIssueDraft = (title: string, body: string) =>
-  invoke<void>("open_issue_draft", { title, body });
+  invoke<boolean>("open_issue_draft", { title, body });

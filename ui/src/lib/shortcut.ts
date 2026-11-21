@@ -17,6 +17,8 @@ interface ShortcutDef {
 export const SHORTCUTS = {
   quickOpen: { label: "quickOpen.title", mac: "⌘P", other: "Ctrl+Shift+P" },
   newTask: { label: "newTask.title", mac: "⌘N", other: "Ctrl+Shift+N" },
+  recentTasks: { label: "recent.title", mac: "⌃Tab", other: "Ctrl+Tab" },
+  recentTasksTerminal: { label: "recent.title", mac: "⌘L", other: "Ctrl+Shift+L" },
   settings: { label: "titlebar.settings", mac: "⌘,", other: "Ctrl+," },
   shortcutList: { label: "shortcuts.show", mac: "⌘/", other: "Ctrl+Shift+/" },
   sidebar: { label: "settings.shortcutSidebar", mac: "⌘B", other: "Ctrl+Shift+B" },
@@ -72,6 +74,31 @@ export function isShortcutListShortcut(event: KeyPress & { code?: string }, mac 
     : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
+export interface RecentTasksKeys {
+  /** Moves toward older tasks instead of newer ones. */
+  back: boolean;
+  /** The modifier whose release opens the highlighted task. */
+  hold: "Control" | "Meta";
+}
+
+/**
+ * "Switch recent tasks": Ctrl+Tab (Shift reverses) unless the terminal has focus, where the keys
+ * belong to the shell. There ⌘L on macOS and Ctrl+Shift+L elsewhere do the same.
+ */
+export function recentTasksShortcut(
+  event: KeyPress,
+  inTerminal: boolean,
+  mac = isMac,
+): RecentTasksKeys | undefined {
+  if (event.altKey) return undefined;
+  if (event.key === "Tab") {
+    return event.ctrlKey && !event.metaKey && !inTerminal ? { back: event.shiftKey, hold: "Control" } : undefined;
+  }
+  if (event.key.toLowerCase() !== "l") return undefined;
+  if (mac) return event.metaKey && !event.ctrlKey && !event.shiftKey ? { back: false, hold: "Meta" } : undefined;
+  return event.ctrlKey && event.shiftKey && !event.metaKey ? { back: false, hold: "Control" } : undefined;
+}
+
 /** "Settings": ⌘, on macOS and Ctrl+, elsewhere, as in most desktop apps. */
 export function isSettingsShortcut(event: KeyPress, mac = isMac): boolean {
   if (event.key !== "," || event.altKey || event.shiftKey) return false;
@@ -89,6 +116,10 @@ export const QUICK_OPEN_KEYS = keysOf(SHORTCUTS.quickOpen);
 export const NEW_TASK_KEYS = keysOf(SHORTCUTS.newTask);
 
 export const SHORTCUT_LIST_KEYS = keysOf(SHORTCUTS.shortcutList);
+
+export const RECENT_TASKS_KEYS = keysOf(SHORTCUTS.recentTasks);
+
+export const RECENT_TASKS_TERMINAL_KEYS = keysOf(SHORTCUTS.recentTasksTerminal);
 
 /** "Submit": ⌘⏎ on macOS, Ctrl+Enter elsewhere. */
 export const SUBMIT_KEYS = keysOf(SHORTCUTS.submit);

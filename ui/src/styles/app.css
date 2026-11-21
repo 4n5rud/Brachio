@@ -192,6 +192,7 @@ p {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-import,
 .project-new-task {
   flex: none;
   margin-inline-end: var(--space-2);

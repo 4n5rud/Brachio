@@ -1,4 +1,5 @@
 import { Show, createSignal, onMount } from "solid-js";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { homeDir } from "@tauri-apps/api/path";
 import { t } from "../i18n";
 import { appVersion, issueBody, issueTitle, openIssueDraft } from "../lib/issue-report";
@@ -32,25 +33,23 @@ export function IssueReportDialog(props: { error: string; onClose: () => void })
     setBusy(true);
     setFailure("");
     try {
-      await openIssueDraft(title(), body() ?? "");
+      const opened = await openIssueDraft(title(), body() ?? "");
       props.onClose();
-    } catch (error) {
-      const text = `${title()}
-
-${body() ?? ""}`;
-      const copy = () => navigator.clipboard.writeText(text);
-      try {
-        await copy();
-        props.onClose();
+      if (!opened) {
         pushToast({
           tone: "error",
           title: t("issue.openFailed"),
           message: t("issue.copied"),
-          action: { label: t("issue.copyAgain"), onClick: () => void copy().catch(() => {}) },
+          action: {
+            label: t("issue.copyAgain"),
+            onClick: () => void writeText(`${title().trim()}
+
+${body() ?? ""}`).catch(() => {}),
+          },
         });
-      } catch {
-        setFailure(String(error));
       }
+    } catch (error) {
+      setFailure(String(error));
     } finally {
       setBusy(false);
     }

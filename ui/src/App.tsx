@@ -14,9 +14,11 @@ import { pushToast } from "./lib/toasts";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
+import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
+import { detectKeepAwake, holdAwake, keepAwakeEnabled } from "./lib/keep-awake";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
@@ -33,7 +35,9 @@ import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
-import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
+import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
+import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -48,9 +52,10 @@ import { checkForRelease, openRelease } from "./lib/updates";
 import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
+import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
-  toTaskRow, type CreatedTask, type RepoRecord } from "./lib/workspace";
+  toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
 // show example tasks so the layout can be reviewed.
@@ -106,6 +111,14 @@ export function App() {
     }, 300);
     onCleanup(() => clearTimeout(timer));
   });
+  const anyAgentWorking = createMemo(() => rows().some((task) => taskGroup(task.status) === "working"));
+  createEffect(() => {
+    if (!inTauri) return;
+    const on = keepAwakeEnabled() && anyAgentWorking();
+    holdAwake(on).catch((failure) => {
+      if (on) pushToast({ tone: "error", title: t("settings.keepAwakeFailed"), message: String(failure) });
+    });
+  });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
   const [diffByTask, setDiffByTask] = createSignal<ReadonlyMap<string, DiffTotals>>(new Map());
   const recordDiffTotals = (id: string, totals: DiffTotals | undefined) => {
@@ -149,10 +162,29 @@ export function App() {
     }),
   );
   const [view, setView] = createSignal<View>("tasks");
+  const [unreadFinish, setUnreadFinishMarks] = createSignal<ReadonlySet<string>>(new Set());
+  const setUnreadFinish = (change: (marks: ReadonlySet<string>) => ReadonlySet<string>) => {
+    const next = change(unreadFinish());
+    setUnreadFinishMarks(next);
+    saveUnreadFinish(next);
+  };
+  const [windowFocused, setWindowFocused] = createSignal(document.hasFocus());
+  onMount(() => {
+    const sync = () => setWindowFocused(document.hasFocus());
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    onCleanup(() => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+    });
+  });
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const [recent, setRecent] = createSignal<readonly string[]>([]);
+  const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
+  const [importRepoId, setImportRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
   const [revealed, setRevealed] = createSignal<{ id: string }>();
   const [folderOverWindow, setFolderOverWindow] = createSignal(false);
@@ -256,11 +288,26 @@ export function App() {
     setDialogRepoId(id);
     setDialogOpen(true);
   };
+  const importRepo = createMemo(() => repos().find((item) => item.id === importRepoId()));
+  const adoptImported = (records: TaskRecord[]) => {
+    const rows = records.map(toTaskRow);
+    setTasks((list) => [...rows, ...list]);
+    if (rows[0]) open(rows[0].id);
+  };
   const repoRows = createMemo(() => inTauri ? rows().filter((task) => task.repoId === repo()?.id) : rows());
   const selected = createMemo(() => rows().find((task) => task.id === selectedId()));
   createEffect(() => {
     const task = selected();
     if (task?.repoId) localStorage.setItem(`brachio.task.${task.repoId}`, task.id);
+  });
+  createEffect(() => {
+    const id = selectedId();
+    if (id === undefined || view() !== "tasks" || !windowFocused() || !unreadFinish().has(id)) return;
+    setUnreadFinish((marks) => {
+      const next = new Set(marks);
+      next.delete(id);
+      return next;
+    });
   });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
@@ -279,6 +326,10 @@ export function App() {
     if (id !== undefined && !workspaceTaskIds().includes(id)) {
       setWorkspaceTaskIds((ids) => [...ids, id]);
     }
+  });
+  createEffect(() => {
+    const id = selectedId();
+    if (id !== undefined) setRecent((current) => touchRecent(current, id));
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
   const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
@@ -434,6 +485,8 @@ export function App() {
     const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
     const at = Date.now();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
+    if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     const key = notificationKey(previous, status);
     if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
     recordActivity(task, sessionKey, key, message, at);
@@ -457,6 +510,7 @@ export function App() {
       setTasks(storedTasks.map(toTaskRow));
       setArchived(storedArchives.map(toTaskRow));
       setWorkspaceTaskIds(restoredTasks);
+      setUnreadFinishMarks(loadUnreadFinish(new Set(storedTasks.map((task) => task.id))));
       restoreSelection();
     });
   };
@@ -754,6 +808,7 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
+      detectKeepAwake();
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
@@ -832,7 +887,26 @@ export function App() {
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
     const onKey = (event: KeyboardEvent) => {
-      if (event.isComposing || dialogOpen() || workspacePanel() || shortcutsOpen()) return;
+      if (event.isComposing) return;
+      const inTerminal = event.target instanceof Element && event.target.closest(".xterm") !== null;
+      const switching = switcher();
+      const keys = recentTasksShortcut(event, inTerminal && !switching);
+      if (switching && keys) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSwitcher({ ...switching, index: stepSwitchIndex(switching.index, switching.tasks.length, keys.back) });
+        return;
+      }
+      if (!switching && keys && !dialogOpen() && !workspacePanel() && !shortcutsOpen()) {
+        const candidates = recentTasks(recent(), rows());
+        if (candidates.length > 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSwitcher({ tasks: candidates, index: firstSwitchIndex(candidates.length, keys.back), hold: keys.hold, terminal: inTerminal });
+          return;
+        }
+      }
+      if (dialogOpen() || importRepoId() || workspacePanel() || shortcutsOpen()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -868,6 +942,16 @@ export function App() {
     // Capture phase: the terminal swallows key events it handles.
     window.addEventListener("keydown", onKey, true);
     onCleanup(() => window.removeEventListener("keydown", onKey, true));
+    // Letting go of the held key opens the highlighted task.
+    const onKeyUp = (event: KeyboardEvent) => {
+      const switching = switcher();
+      if (!switching || event.key !== switching.hold) return;
+      const target = switching.tasks[switching.index];
+      setSwitcher(undefined);
+      if (target) open(target.id);
+    };
+    window.addEventListener("keyup", onKeyUp, true);
+    onCleanup(() => window.removeEventListener("keyup", onKeyUp, true));
   });
   createEffect(() => {
     if (inTauri && repos().length > 0) saveOpenWorkspaceTasks(workspaceTaskIds());
@@ -924,6 +1008,7 @@ export function App() {
           selectedId={selectedId()}
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
+          onImportWorktrees={inTauri ? setImportRepoId : undefined}
           onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
@@ -932,6 +1017,7 @@ export function App() {
           reveal={revealed()}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
+          finishedUnread={(id) => unreadFinish().has(id)}
           now={now()}
         />
         </Show>
@@ -1000,6 +1086,13 @@ export function App() {
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
       <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
+      <Show when={switcher()} keyed>
+        {(current) => (
+          <RecentTasksSwitcher tasks={current.tasks} index={current.index}
+            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS : RECENT_TASKS_KEYS}
+            onPick={(id) => { setSwitcher(undefined); open(id); }} onClose={() => setSwitcher(undefined)} />
+        )}
+      </Show>
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}
@@ -1029,6 +1122,16 @@ export function App() {
             parents={repoRows()}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
+          />
+        )}
+      </Show>
+      <Show when={importRepo()}>
+        {(current) => (
+          <ImportWorktreesDialog
+            repoId={current().id}
+            repoName={current().name}
+            onImported={adoptImported}
+            onClose={() => setImportRepoId(undefined)}
           />
         )}
       </Show>

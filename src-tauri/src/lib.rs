@@ -9,6 +9,7 @@ mod folder_access;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
+mod keep_awake;
 mod log_file;
 mod mailbox;
 mod orchestration;
@@ -19,6 +20,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod task_activity;
 mod task_folder;
+mod task_overlaps;
 mod task_ports;
 mod task_tabs;
 #[cfg(any(windows, test))]
@@ -29,6 +31,7 @@ mod terminal_status;
 mod tray_menu;
 mod update_release;
 mod workspace;
+mod worktree_import;
 
 #[cfg(test)]
 mod ui_event_tests;
@@ -246,7 +249,9 @@ pub fn run() {
                 show_main_window(app);
             },
         ))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(keep_awake::KeepAwake::start())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(
             Arc::new(SessionManager::default()),
@@ -254,6 +259,7 @@ pub fn run() {
         ))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
@@ -269,6 +275,8 @@ pub fn run() {
             app_version,
             resource_usage::resource_usage,
             tray_update,
+            keep_awake::keep_awake_supported,
+            keep_awake::keep_awake_set,
             terminal::agents_detect,
             update_release::open_update_release,
             terminal::terminal_open,
@@ -320,6 +328,9 @@ pub fn run() {
             workspace::task_file_preview,
             workspace::task_file_media,
             workspace::task_changes,
+            worktree_import::worktree_import_candidates,
+            worktree_import::worktree_import,
+            task_overlaps::task_overlaps,
             pr_status::task_pr_status,
             qa_run::qa_run,
             qa_run::qa_last_result,

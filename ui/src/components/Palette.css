@@ -97,6 +97,10 @@
   font: var(--text-meta);
   color: var(--color-text-3);
 }
+.palette-foot {
+  font: var(--text-meta);
+  color: var(--color-text-3);
+}
 .palette-empty {
   padding: 16px 10px;
   font: var(--text-caption);

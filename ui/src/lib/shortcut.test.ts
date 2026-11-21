@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, SHORTCUT_LIST } from "./shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, recentTasksShortcut, SHORTCUT_LIST } from "./shortcut";
 
 const key = (pressed: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => ({
   altKey: false,
@@ -39,6 +39,20 @@ describe("the shortcut list", () => {
     const chords = SHORTCUT_LIST.filter((shortcut) => shortcut.mac !== "Esc" && shortcut.mac !== "↵");
     expect(new Set(chords.map((shortcut) => shortcut.mac)).size).toBe(chords.length);
     expect(new Set(chords.map((shortcut) => shortcut.other)).size).toBe(chords.length);
+  });
+});
+
+describe("recentTasksShortcut", () => {
+  it("takes Ctrl+Tab outside the terminal, and Shift goes back", () => {
+    expect(recentTasksShortcut(key({ key: "Tab", ctrlKey: true }), false, false)).toEqual({ back: false, hold: "Control" });
+    expect(recentTasksShortcut(key({ key: "Tab", ctrlKey: true, shiftKey: true }), false, true)).toEqual({ back: true, hold: "Control" });
+  });
+
+  it("leaves Ctrl+Tab to the terminal and offers a different key there", () => {
+    expect(recentTasksShortcut(key({ key: "Tab", ctrlKey: true }), true, false)).toBeUndefined();
+    expect(recentTasksShortcut(key({ key: "L", ctrlKey: true, shiftKey: true }), true, false)).toEqual({ back: false, hold: "Control" });
+    expect(recentTasksShortcut(key({ key: "l", metaKey: true }), true, true)).toEqual({ back: false, hold: "Meta" });
+    expect(recentTasksShortcut(key({ key: "l", ctrlKey: true }), true, false)).toBeUndefined();
   });
 });
 
