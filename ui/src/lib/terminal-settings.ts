@@ -4,6 +4,8 @@ import { createSignal } from "solid-js";
 export interface TerminalSettings {
   fontSize: number;
   scrollback: number;
+  /** Terminals use the theme's background and text; off keeps the fixed dark palette in every theme. */
+  themeColors: boolean;
 }
 
 /** The design system sets terminal text at 13px and nothing in the interface goes below 12px. */
@@ -25,6 +27,7 @@ export function normalizeTerminalSettings(raw: unknown): TerminalSettings {
   return {
     fontSize: clamp(fields.fontSize, FONT_SIZE_RANGE),
     scrollback: clamp(fields.scrollback, SCROLLBACK_RANGE),
+    themeColors: fields.themeColors !== false,
   };
 }
 
@@ -36,7 +39,20 @@ function load(): TerminalSettings {
   }
 }
 
+/** Background and text of the fixed palette, the dark terminal tokens of the design system. */
+const FIXED_COLORS = { "--color-term-bg": "#141418", "--color-term-text": "#d9d9e0" } as const;
+
+/** Points the terminal color tokens at the fixed palette, or back at the theme's own. */
+function applyColors(themeColors: boolean): void {
+  if (typeof document === "undefined") return;
+  for (const [name, value] of Object.entries(FIXED_COLORS)) {
+    if (themeColors) document.documentElement.style.removeProperty(name);
+    else document.documentElement.style.setProperty(name, value);
+  }
+}
+
 const [settings, setSettings] = createSignal<TerminalSettings>(load());
+applyColors(settings().themeColors);
 
 /** The current settings. Reading it inside an effect re-runs the effect when they change. */
 export const terminalSettings = settings;
@@ -45,6 +61,7 @@ export const terminalSettings = settings;
 export function updateTerminalSettings(change: Partial<TerminalSettings>): void {
   const next = normalizeTerminalSettings({ ...settings(), ...change });
   setSettings(next);
+  applyColors(next.themeColors);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {

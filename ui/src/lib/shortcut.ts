@@ -31,6 +31,14 @@ export function panelToggleShortcut(event: KeyPress & { code?: string }, mac = i
   return event.altKey ? "inspector" : "sidebar";
 }
 
+/** "Settings": ⌘, on macOS and Ctrl+, elsewhere, as in most desktop apps. */
+export function isSettingsShortcut(event: KeyPress, mac = isMac): boolean {
+  if (event.key !== "," || event.altKey || event.shiftKey) return false;
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+export const SETTINGS_KEYS = isMac ? "⌘," : "Ctrl+,";
+
 export const TOGGLE_SIDEBAR_KEYS = isMac ? "⌘B" : "Ctrl+Shift+B";
 
 export const TOGGLE_INSPECTOR_KEYS = isMac ? "⌘⌥B" : "Ctrl+Shift+Alt+B";

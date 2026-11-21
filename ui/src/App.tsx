@@ -29,7 +29,7 @@ import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
-import { isNewTaskShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
@@ -760,6 +760,12 @@ export function App() {
         event.preventDefault();
         event.stopPropagation();
         setWorkspacePanel("quickOpen");
+        return;
+      }
+      if (isSettingsShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setWorkspacePanel("settings");
         return;
       }
       const panel = panelToggleShortcut(event);
