@@ -47,6 +47,7 @@ import { checkForRelease, openRelease } from "./lib/updates";
 import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
+import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord } from "./lib/workspace";
@@ -148,6 +149,22 @@ export function App() {
     }),
   );
   const [view, setView] = createSignal<View>("tasks");
+  const [unreadFinish, setUnreadFinishMarks] = createSignal<ReadonlySet<string>>(new Set());
+  const setUnreadFinish = (change: (marks: ReadonlySet<string>) => ReadonlySet<string>) => {
+    const next = change(unreadFinish());
+    setUnreadFinishMarks(next);
+    saveUnreadFinish(next);
+  };
+  const [windowFocused, setWindowFocused] = createSignal(document.hasFocus());
+  onMount(() => {
+    const sync = () => setWindowFocused(document.hasFocus());
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    onCleanup(() => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+    });
+  });
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
@@ -259,6 +276,15 @@ export function App() {
   createEffect(() => {
     const task = selected();
     if (task?.repoId) localStorage.setItem(`brachio.task.${task.repoId}`, task.id);
+  });
+  createEffect(() => {
+    const id = selectedId();
+    if (id === undefined || view() !== "tasks" || !windowFocused() || !unreadFinish().has(id)) return;
+    setUnreadFinish((marks) => {
+      const next = new Set(marks);
+      next.delete(id);
+      return next;
+    });
   });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
@@ -432,6 +458,8 @@ export function App() {
     const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
     const at = Date.now();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
+    if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     const key = notificationKey(previous, status);
     if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
     recordActivity(task, sessionKey, key, message, at);
@@ -455,6 +483,7 @@ export function App() {
       setTasks(storedTasks.map(toTaskRow));
       setArchived(storedArchives.map(toTaskRow));
       setWorkspaceTaskIds(restoredTasks);
+      setUnreadFinishMarks(loadUnreadFinish(new Set(storedTasks.map((task) => task.id))));
       restoreSelection();
     });
   };
@@ -924,6 +953,7 @@ export function App() {
           reveal={revealed()}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
+          finishedUnread={(id) => unreadFinish().has(id)}
           now={now()}
         />
         </Show>

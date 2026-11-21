@@ -55,6 +55,8 @@ export const en = {
   "task.archivedNow": "archived just now",
   "task.childCreated": "Child task created: {title}.",
   "task.open": "Open",
+  "task.new": "new",
+  "task.finishedUnread": "Finished while you were away. Opening the task clears it.",
 
   "task.reviewChanges": "Review changes",
   "task.createPr": "Create PR",
