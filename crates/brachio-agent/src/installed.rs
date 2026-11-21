@@ -94,7 +94,7 @@ pub enum PromptDelivery {
 }
 
 /// True when `cmd.exe` passes `text` through unchanged inside double quotes.
-fn is_safe_for_cmd(text: &str) -> bool {
+pub fn is_safe_for_cmd(text: &str) -> bool {
     const SPECIAL: &[char] = &['"', '%', '^', '&', '|', '<', '>', '!'];
     !text.contains(SPECIAL) && !text.chars().any(char::is_control)
 }

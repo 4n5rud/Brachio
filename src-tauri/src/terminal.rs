@@ -227,21 +227,7 @@ pub async fn terminal_open(
         }
     }
     if let (Some(AgentKind::Codex), Some(_)) = (request.agent, request.key.as_deref()) {
-        // A batch shim cannot carry multi-line text, and Codex must still start without it.
-        let batch = brachio_agent::locate(AgentKind::Codex).is_some_and(|codex| {
-            matches!(
-                codex
-                    .path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(str::to_ascii_lowercase)
-                    .as_deref(),
-                Some("cmd" | "bat")
-            )
-        });
-        if !batch {
-            options = hook.codex_arguments();
-        }
+        options = hook.codex_arguments();
     }
     // Every agent, not only Claude Code, can send and read messages.
     if let (Some(_), Some(key)) = (request.agent, request.key.as_deref()) {
