@@ -1,7 +1,7 @@
 import { Button } from "./ui/Button";
 import { Show, createResource, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
-import { formatDuration, readLastTaskQa, runTaskQa, shortSha, type QaOutcome, type QaReport } from "../lib/qa-run";
+import { deleteTaskQaOutput, formatDuration, readLastTaskQa, runTaskQa, shortSha, type QaOutcome, type QaReport } from "../lib/qa-run";
 import { InspectorNote, OutputLog } from "./InspectorNote";
 import { ActionRow, InspectorSection } from "./InspectorSection";
 import { StatusGlyph } from "./ui/StatusBadge";
@@ -37,6 +37,7 @@ export function QaPanel(props: {
   message?: { tone: "warn" | "error"; text: string };
   onRun: () => void;
   onInsertFailure?: (report: QaReport) => void;
+  onDeleteOutput?: () => void;
 }) {
   const run = () => (
     <Button size="sm" icon="refresh" loading={props.running} loadingLabel={t("inspector.qa.waiting")} onClick={props.onRun}>
@@ -78,6 +79,13 @@ export function QaPanel(props: {
             <Show when={reportOutput(report())}>{(output) => <OutputLog text={output()} />}</Show>
             <Show when={outcomeNote[report().outcome]}>{(key) => <InspectorNote>{t(key())}</InspectorNote>}</Show>
             <Show when={report().truncated}><InspectorNote>{t("inspector.qa.truncated")}</InspectorNote></Show>
+            <Show when={props.onDeleteOutput}>
+              {(remove) => (
+                <ActionRow>
+                  <Button size="sm" onClick={() => remove()()}>{t("inspector.qa.deleteOutput")}</Button>
+                </ActionRow>
+              )}
+            </Show>
             <Show when={report().outcome === "failed" && props.onInsertFailure}>
               {(insert) => (
                 <ActionRow>
@@ -115,8 +123,18 @@ export function TaskQaRun(props: { taskId: string; onDraft: (text: string) => Pr
       setRunning(false);
     }
   };
+  const deleteOutput = async () => {
+    const id = props.taskId;
+    try {
+      await deleteTaskQaOutput(id);
+      if (props.taskId === id) mutate(null);
+    } catch (error) {
+      if (props.taskId === id) setMessage({ tone: "error", text: String(error) });
+    }
+  };
   return (
     <QaPanel report={last()} running={running()} message={message()} onRun={() => void run()}
+      onDeleteOutput={() => void deleteOutput()}
       onInsertFailure={(report) => void props.onDraft(qaFailureDraft(report))} />
   );
 }

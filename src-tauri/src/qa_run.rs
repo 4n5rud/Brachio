@@ -8,7 +8,8 @@ use brachio_qa::{
 };
 use brachio_runtime::approval::Decision;
 use brachio_store::{
-    latest_qa_result, save_qa_result, NewQaResult, QaResultRecord, RepoRecord, TaskRecord,
+    delete_qa_results, latest_qa_result, save_qa_result, NewQaResult, QaResultRecord, RepoRecord,
+    TaskRecord,
 };
 use serde::Serialize;
 use tauri::State;
@@ -76,8 +77,8 @@ fn view(record: QaResultRecord) -> QaView {
             duration_ms: u64::try_from(record.duration_ms).unwrap_or(0),
             sha: record.commit_sha,
             verified_by_brachio: record.verified_by_brachio,
-            stdout: record.stdout,
-            stderr: record.stderr,
+            stdout: brachio_qa::redact_secrets(&record.stdout, record.truncated),
+            stderr: brachio_qa::redact_secrets(&record.stderr, record.truncated),
             truncated: record.truncated,
         },
         matches_handoff: record.matches_handoff,
@@ -94,6 +95,8 @@ fn store_report(
     now_ms: i64,
 ) -> Result<QaView, String> {
     let retry_allowed = results.retry_allowed(task_id, report);
+    let stdout = brachio_qa::redact_secrets(&report.stdout, report.truncated);
+    let stderr = brachio_qa::redact_secrets(&report.stderr, report.truncated);
     let mut connection = database.lock()?;
     save_qa_result(
         &mut connection,
@@ -106,8 +109,8 @@ fn store_report(
             duration_ms: i64::try_from(report.duration_ms).unwrap_or(i64::MAX),
             commit_sha: &report.sha,
             verified_by_brachio: report.verified_by_brachio,
-            stdout: &report.stdout,
-            stderr: &report.stderr,
+            stdout: &stdout,
+            stderr: &stderr,
             truncated: report.truncated,
             retry_allowed,
             created_at_ms: now_ms,
@@ -192,6 +195,14 @@ pub fn qa_last_result(
     read_latest(&*database.lock()?, &task_id)
 }
 
+/// Deletes the stored QA results and their output for the task.
+#[tauri::command]
+pub fn qa_delete_output(database: State<'_, Database>, task_id: String) -> Result<(), String> {
+    delete_qa_results(&*database.lock()?, &task_id)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::hook_socket::Notice;
@@ -239,6 +250,31 @@ mod tests {
             .expect("a result");
         assert_eq!(after.report, report);
         assert!(!after.matches_handoff);
+    }
+
+    #[test]
+    fn a_secret_in_the_output_is_neither_stored_nor_shown() {
+        let database = database();
+        let report = failed("auth failed with ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+        let stored =
+            store_report(&database, &QaResults::default(), "t", &report, 5).expect("store");
+        assert_eq!(stored.report.stderr, "auth failed with [redacted]");
+        let raw: String = database
+            .lock()
+            .expect("lock")
+            .query_row("SELECT stderr FROM qa_results", [], |row| row.get(0))
+            .expect("row");
+        assert_eq!(raw, "auth failed with [redacted]");
+    }
+
+    #[test]
+    fn deleting_the_output_removes_the_results_of_that_task() {
+        let database = database();
+        store_report(&database, &QaResults::default(), "t", &failed("x"), 1).expect("store");
+        delete_qa_results(&database.lock().expect("lock"), "t").expect("delete");
+        assert!(read_latest(&database.lock().expect("lock"), "t")
+            .expect("read")
+            .is_none());
     }
 
     #[test]

@@ -407,6 +407,7 @@ export const ko: Messages = {
   "inspector.qa.unverified": "확인되지 않음: 체크아웃된 커밋이 바뀌었어요",
   "inspector.qa.truncated": "출력이 한도에 맞게 잘렸어요.",
   "inspector.qa.last": "마지막 결과",
+  "inspector.qa.deleteOutput": "저장된 출력 삭제",
   "inspector.qa.counts": "QA 집계",
   "inspector.qa.command": "명령",
   "inspector.qa.folder": "폴더",
