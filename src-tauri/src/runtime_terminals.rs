@@ -986,3 +986,7 @@ mod pending_launch_tests {
         assert!(pending_launch_in(folder.path(), "task:agent").is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_terminal_flow_tests.rs"]
+mod flow_tests;

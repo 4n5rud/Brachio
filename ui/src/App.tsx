@@ -28,6 +28,7 @@ import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
+import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
@@ -585,37 +586,25 @@ export function App() {
     void requestSetup(record.id, current.id, record.setupCommands);
   };
 
-  // A task created by an agent: start its tab without moving the user's selection.
-  // A task the scheduler starts may already be listed, because it was created earlier and waited.
-  const adoptCreatedTask = async (record: CreatedTask, startListed = false) => {
-    if (findTask(record.id) && !startListed) return;
-    if (!repos().some((item) => item.id === record.repoId)) {
-      const stored = await listRepos();
-      if (!stored.some((item) => item.id === record.repoId)) return;
-      setRepos(stored);
-      if (findTask(record.id) && !startListed) return;
-    }
-    createdThisRun.add(record.id);
-    const setupCopyError = record.setupCopyError;
-    if (setupCopyError) {
-      setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
-    }
-    if (record.prompt) firstPrompts.set(record.id, record.prompt);
-    const listed = findTask(record.id);
-    if (listed && !startListed) return;
-    if (!listed && record.parentTaskId) {
-      pushToast({
-        tone: "info",
-        message: t("task.childCreated").replace("{title}", () => record.title),
-        action: { label: t("task.open"), onClick: () => open(record.id) },
-      });
-    }
-    batch(() => {
-      if (!listed) setTasks((list) => [toTaskRow(record), ...list]);
-      setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
-    });
-    void requestSetup(record.id, record.repoId, record.setupCommands);
-  };
+  const adoptCreated = (record: CreatedTask, startListed = false) => adoptCreatedTask({
+    isListed: (id) => findTask(id) !== undefined,
+    hasRepo: (repoId) => repos().some((item) => item.id === repoId),
+    listRepos,
+    showRepos: setRepos,
+    markCreatedHere: (id) => createdThisRun.add(id),
+    failSetupCopy: (id, error) => setSetupFailures((items) => new Map(items).set(id, error)),
+    rememberPrompt: (id, prompt) => firstPrompts.set(id, prompt),
+    announceChild: (task) => pushToast({
+      tone: "info",
+      message: t("task.childCreated").replace("{title}", () => task.title),
+      action: { label: t("task.open"), onClick: () => open(task.id) },
+    }),
+    open: (task, listed) => batch(() => {
+      if (!listed) setTasks((list) => [toTaskRow(task), ...list]);
+      setOpenIds((ids) => (ids.includes(task.id) ? ids : [...ids, task.id]));
+    }),
+    requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
+  }, record, startListed);
 
   const archive = async (task: TaskRow) => {
     if (archiving()) return;
@@ -766,8 +755,8 @@ export function App() {
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
-      onCleanup(watchCreatedTasks((record) => void adoptCreatedTask(record).catch(report)));
-      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreatedTask(record, true).catch(report)));
+      onCleanup(watchCreatedTasks((record) => void adoptCreated(record).catch(report)));
+      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreated(record, true).catch(report)));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
