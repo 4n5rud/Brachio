@@ -468,12 +468,15 @@ mod tests {
 
     #[test]
     fn a_command_that_floods_standard_error_finishes_and_only_a_start_of_it_is_kept() {
+        // Long lines keep the iteration count low, so run time barely depends on machine load.
+        let pad = "x".repeat(500);
         let script = if cfg!(windows) {
-            "for /L %i in (1,1,150000) do @echo flooding standard error line %i 1>&2"
+            format!("for /L %i in (1,1,6000) do @echo {pad} 1>&2")
         } else {
-            "i=0; while [ $i -lt 150000 ]; do echo flooding standard error line $i >&2; i=$((i+1)); done"
+            format!("i=0; while [ $i -lt 6000 ]; do echo {pad} >&2; i=$((i+1)); done")
         };
-        let output = output_within(&mut shell(script), Duration::from_secs(60)).expect("finishes");
+        let output =
+            output_within(&mut shell(&script), Duration::from_secs(120)).expect("finishes");
         assert!(output.status.success());
         assert_eq!(output.stderr.len(), KEPT_STDERR);
     }
