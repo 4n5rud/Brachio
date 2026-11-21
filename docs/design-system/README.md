@@ -24,6 +24,13 @@ The screens follow the combined design guideline (myWorkFlow and unslop-ui). Whe
 - No emoji, no exclamation marks. Times are relative in lists ("now", "6m", "3h", "2d") and absolute in local time in tooltips.
 - Join items with layout (rows, columns), not with chains of commas, slashes or arrows.
 
+### Korean UI writing rules
+- Titles, column, tab and section labels, buttons, menu items, placeholders and badges are short noun forms with no sentence ending: "확인 필요", "검토 대기", "완료".
+- Status, toasts, empty states and short notices end in "~됨", "~없음", "~했습니다" or a plain noun phrase: "하위 작업 생성: {title}", "보관한 작업 없음".
+- Help text and confirmations that need a full sentence use the polite "~합니다/~됩니다" style, kept short. Avoid "~해요" unless the line is genuinely conversational.
+- Use plain words instead of jargon (인계 승인 → 결과 확인, 의존성 그래프 → 작업 순서도). Keep developer terms users know: 커밋, 브랜치, PR, 워크트리.
+- Keep `{placeholders}` intact and never remove a key; the English and Korean catalogs must match.
+
 ## Color
 - Four color themes, each with a dark and a light set: **Mint** (default, charcoal neutrals), **Lilac** (violet-tinted neutrals), **Sand** (warm paper neutrals, teal accent) and **Contrast** (black and white, for low vision and bright rooms). They are the eight token themes, `mint-dark` to `contrast-light`. The person picks Mode (System, Light, Dark) and a theme in Settings, Appearance (ThemePicker).
 - A theme changes surfaces, text, lines, the accent and the focus ring. Status, diff and danger colors keep their meaning in every theme.

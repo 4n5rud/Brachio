@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use brachio_agent::AgentKind;
 use brachio_git::{predict_conflict, AddWorktree, Git, PullRequest};
 use brachio_store::{ChildInsertError, NewRepo, NewTask, RepoRecord, TaskRecord};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -899,7 +899,7 @@ fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), Str
 }
 
 /// Terminals of the task that are still running, in the runtime or in the app, or why that could
-/// not be told. Second agent tabs the task has since replaced are asked for too.
+/// not be told. Tabs the task has since closed are asked for too.
 pub(crate) async fn live_task_terminals(
     database: &Database,
     terminals: &RuntimeTerminals,
@@ -908,14 +908,11 @@ pub(crate) async fn live_task_terminals(
 ) -> Result<Vec<String>, String> {
     let (current, retired) = {
         let connection = database.lock()?;
-        let current: Option<String> = connection
-            .query_row(
-                "SELECT tab_id FROM task_secondary_tabs WHERE task_id = ?1 AND tab_id IS NOT NULL",
-                [task_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(to_text)?;
+        let current: Vec<String> = brachio_store::task_tabs(&connection, task_id)
+            .map_err(to_text)?
+            .into_iter()
+            .map(|tab| tab.tab_id)
+            .collect();
         let retired =
             brachio_store::retired_secondary_tabs(&connection, task_id).map_err(to_text)?;
         (current, retired)
@@ -933,7 +930,9 @@ pub(crate) async fn live_task_terminals(
     );
     let connection = database.lock()?;
     for tab in retired {
-        if !live.contains(&format!("{task_id}:agent-{tab}")) {
+        if !live.contains(&format!("{task_id}:agent-{tab}"))
+            && !live.contains(&format!("{task_id}:shell-{tab}"))
+        {
             // A failed cleanup only keeps the id for the next check.
             let _ = brachio_store::forget_retired_secondary_tab(&connection, task_id, &tab);
         }

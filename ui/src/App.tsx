@@ -41,7 +41,7 @@ import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -49,6 +49,7 @@ import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type
 import { sendShellInput } from "./lib/shell-input";
 import { requestShell } from "./lib/shell-request";
 import { terminalKey } from "./lib/terminal-layout";
+import { requestNewTab } from "./lib/tab-request";
 import type { DiffTotals } from "./lib/diff";
 import { pasteText } from "./lib/terminal-paste";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
@@ -132,16 +133,16 @@ export function App() {
   };
   const [live, setLive] = createSignal<ReadonlyMap<string, ReadonlyMap<string, LiveStatus>>>(new Map());
   const [questions, setQuestions] = createSignal<ApprovalQuestion[]>([]);
-  const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const [secondaryKeys, setSecondaryKeys] = createSignal<ReadonlyMap<string, readonly string[]>>(new Map());
   const [mailbox, setMailbox] = createSignal<{ unread: ReadonlyMap<string, number>; revision: number }>({
     unread: new Map(),
     revision: 0,
   });
   const unreadForTab = (key: string | undefined) => key ? mailbox().unread.get(key) ?? 0 : 0;
-  const unreadForTask = (id: string) => unreadForTab(`${id}:agent`) + unreadForTab(secondaryKeys().get(id));
+  const unreadForTask = (id: string) => (secondaryKeys().get(id) ?? []).reduce((total, key) => total + unreadForTab(key), unreadForTab(`${id}:agent`));
   const [requestedTab, setRequestedTab] = createSignal<{ key: string }>();
   const activeAgentKey = (taskId: string, key: string) =>
-    key === `${taskId}:agent` || key === secondaryKeys().get(taskId);
+    key === `${taskId}:agent` || (secondaryKeys().get(taskId) ?? []).includes(key);
   const rows = createMemo(() =>
     tasks().map((stored) => {
       const totals = diffByTask().get(stored.id);
@@ -1005,6 +1006,12 @@ export function App() {
         event.stopPropagation();
         if (panel === "sidebar") toggleSidebar();
         else toggleInspector();
+        return;
+      }
+      if (isNewTabShortcut(event) && view() === "tasks" && selectedId()) {
+        event.preventDefault();
+        event.stopPropagation();
+        requestNewTab(selectedId() as string);
         return;
       }
       if (isNewTaskShortcut(event) && canCreate()) {

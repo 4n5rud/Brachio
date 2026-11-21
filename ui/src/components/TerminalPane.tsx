@@ -17,6 +17,7 @@ import { SetupMarkerFilter, type SetupResult } from "../lib/setup-signal";
 import { onShellInput } from "../lib/shell-input";
 import { typedSinceSubmit } from "../lib/typed-input";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
+import { silenceDeviceAttributes } from "../lib/terminal-queries";
 
 /** What to run. Without it the pane stays an empty terminal. */
 export interface TerminalSession {
@@ -140,6 +141,8 @@ export function TerminalPane(props: {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    let hostAnswersQueries = false;
+    silenceDeviceAttributes(term, () => hostAnswersQueries);
     term.open(host);
     const applyTheme = () => {
       term.options.theme = {
@@ -300,6 +303,7 @@ export function TerminalPane(props: {
             return;
           }
           handle = opened;
+          hostAnswersQueries = opened.hosted;
           props.onHosted?.(opened.hosted);
           if (opened.attached) setContinuity("terminal.liveAttached");
           else if (resume) setContinuity(opened.resumed ? "terminal.conversationResuming" : "terminal.newConversation");

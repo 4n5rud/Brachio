@@ -30,6 +30,7 @@ mod task_tabs;
 mod taskbar_badge;
 mod terminal;
 mod terminal_authorization;
+mod terminal_shells;
 mod terminal_status;
 mod tray_menu;
 mod update_release;
@@ -298,8 +299,11 @@ pub fn run() {
             task_pin::task_pin_set,
             task_activity::task_activity_list,
             task_activity::task_activity_record,
-            task_tabs::task_secondary_tabs,
-            task_tabs::task_set_secondary_tab,
+            task_tabs::task_open_tabs,
+            task_tabs::task_add_tab,
+            task_tabs::task_close_tab,
+            terminal_shells::shell_list,
+            terminal_shells::shell_set_default,
             workspace::task_drop_paths,
             hook_socket::approval_answer,
             hook_socket::approval_answer_always,

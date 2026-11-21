@@ -24,8 +24,13 @@ import { taskIdOf } from "../lib/approvals";
 import { CORE_AGENT } from "../lib/terminal";
 import { MAX_MOUNTED_TERMINALS, drawnTaskIds, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
-import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
+import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts,
   saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
+import { installedShells, loadShells } from "../lib/shells";
+import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, type TabKind, type TabSpec,
+  type TaskTab } from "../lib/task-tabs";
+import { onNewTabRequest } from "../lib/tab-request";
+import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
 
 export interface DraftTarget {
@@ -55,7 +60,7 @@ export function TaskView(props: {
   /** A permission question this task's agent is waiting on, and how to answer it. */
   questions?: readonly ApprovalQuestion[];
   requestedTab?: { key: string };
-  onSecondaryKeys?: (keys: ReadonlyMap<string, string>) => void;
+  onSecondaryKeys?: (keys: ReadonlyMap<string, readonly string[]>) => void;
   onSecondaryClosed?: (taskId: string, key: string) => void;
   onAnswer?: (id: number, allow: boolean) => void;
   /** Allows the request and remembers it for this task for the app session. */
@@ -91,10 +96,11 @@ export function TaskView(props: {
   const [inboxTab, setInboxTab] = createSignal<string>();
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
-  const restoredAgents = new Map<string, string>();
-  const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const restoredTabs = new Set<string>();
+  const [tabsByTask, setTabsByTask] = createSignal<ReadonlyMap<string, readonly TaskTab[]>>(new Map());
   const [tabsReady, setTabsReady] = createSignal(false);
   const [tabsSaving, setTabsSaving] = createSignal(false);
+  const [recentSpec, setRecentSpec] = createSignal<TabSpec | undefined>(loadRecentSpec());
   const failedSetup = () => {
     const outcome = props.setupOutcome;
     return outcome?.state === "failed" ? outcome : undefined;
@@ -103,67 +109,89 @@ export function TaskView(props: {
   let disposed = false;
   onCleanup(() => { disposed = true; });
   onMount(() => {
+    void loadShells();
     if (!("__TAURI_INTERNALS__" in window)) return;
     const legacy = Object.fromEntries(loadSecondaryAgents());
-    void invoke<Record<string, string>>("task_secondary_tabs", { legacy }).then((tabs) => {
+    void invoke<Record<string, TaskTab[]>>("task_open_tabs", { legacy }).then((tabs) => {
       if (disposed) return;
-      for (const [id, tab] of Object.entries(tabs)) restoredAgents.set(id, tab);
-      const saved = new Map(restoredAgents);
-      setSecondary(saved);
-      saveSecondaryAgents(saved);
+      for (const list of Object.values(tabs)) for (const tab of list) restoredTabs.add(tab.id);
+      setTabsByTask(new Map(Object.entries(tabs)));
       setTabsReady(true);
     }).catch((failure) => { if (!disposed) setTabError(String(failure)); });
   });
   const [selectedSecondary, setSelectedSecondary] =
     createSignal<ReadonlyMap<string, string>>(loadSelectedSecondaryAgents());
-  const isSecondarySelected = (id: string) => {
-    const session = secondary().get(id);
-    return session !== undefined && selectedSecondary().get(id) === session;
+  const tabsOf = (id: string): readonly TaskTab[] => tabsByTask().get(id) ?? [];
+  const selectedTab = (id: string): TaskTab | undefined => {
+    const wanted = selectedSecondary().get(id);
+    return tabsOf(id).find((tab) => tab.id === wanted);
   };
+  const isTabSelected = (id: string, tab: TaskTab) => selectedTab(id)?.id === tab.id;
+  const isSecondarySelected = (id: string) => selectedTab(id) !== undefined;
   const secondaryWriters = new Map<string, PrepareDraft>();
-  const secondaryKind = (task: TaskRow) => task.agent === "claude" ? "codex" : "claude";
-  const extraKey = (id: string, sessionId: string) => `${id}:agent-${sessionId}`;
-  const currentExtraKey = (id: string) => {
-    const session = secondary().get(id);
-    return session ? extraKey(id, session) : undefined;
-  };
+  const shellName = (id: string | null) =>
+    installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id)?.name ?? t("task.shell");
+  const labels = createMemo(() => tabLabels(props.task.agent, tabsOf(props.task.id), shellName));
+  const agentTabs = (id: string) => tabsOf(id).filter((tab) => tab.kind !== "shell");
   createEffect(() => {
-    props.onSecondaryKeys?.(new Map([...secondary()].map(([id, sessionId]) => [id, extraKey(id, sessionId)])));
+    props.onSecondaryKeys?.(new Map([...tabsByTask()].map(([id, list]) =>
+      [id, list.filter((tab) => tab.kind !== "shell").map((tab) => tabKey(id, tab))])));
   });
-  const selectAgent = (id: string, extra: boolean) => {
+  const selectTab = (id: string, tab: TaskTab | undefined) => {
     setSelectedSecondary((current) => {
       const next = new Map(current);
-      const session = secondary().get(id);
-      if (extra && session) next.set(id, session);
+      if (tab) next.set(id, tab.id);
       else next.delete(id);
       return next;
     });
     saveSelectedSecondaryAgents(selectedSecondary());
     if (props.task.id === id && layout() === "shell") setLayout("agent");
   };
-  const changeSecondary = async (id: string, sessionId?: string) => {
+  const selectAgent = (id: string, extra: boolean) => {
+    const first = agentTabs(id)[0];
+    selectTab(id, extra ? first : undefined);
+  };
+  const openTab = async (spec: TabSpec) => {
+    const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
-    const previous = currentExtraKey(id);
+    const tab: TaskTab = { id: crypto.randomUUID(), kind: spec.kind, shell: spec.shell };
     setTabsSaving(true);
     setTabError("");
     try {
-      await invoke("task_set_secondary_tab", { taskId: id, tabId: sessionId ?? null });
+      await invoke("task_add_tab", { taskId: id, tabId: tab.id, kind: tab.kind, shell: tab.shell });
       if (disposed) return;
-      setSecondary((current) => {
-        const next = new Map(current);
-        if (sessionId) next.set(id, sessionId);
-        else next.delete(id);
-        return next;
-      });
-      saveSecondaryAgents(secondary());
-      if (previous) props.onSecondaryClosed?.(id, previous);
-      selectAgent(id, sessionId !== undefined);
+      setTabsByTask((current) => new Map(current).set(id, [...tabsOf(id), tab]));
+      setRecentSpec(spec);
+      saveRecentSpec(spec);
+      selectTab(id, tab);
     } catch (failure) {
       setTabError(String(failure));
     } finally {
       setTabsSaving(false);
     }
   };
+  const closeTab = async (tab: TaskTab) => {
+    const id = props.task.id;
+    if (!tabsReady() || tabsSaving()) return;
+    setTabsSaving(true);
+    setTabError("");
+    try {
+      await invoke("task_close_tab", { taskId: id, tabId: tab.id });
+      if (disposed) return;
+      const wasSelected = isTabSelected(id, tab);
+      setTabsByTask((current) => new Map(current).set(id, tabsOf(id).filter((other) => other.id !== tab.id)));
+      props.onSecondaryClosed?.(id, tabKey(id, tab));
+      if (wasSelected) selectTab(id, undefined);
+    } catch (failure) {
+      setTabError(String(failure));
+    } finally {
+      setTabsSaving(false);
+    }
+  };
+  const quickSpec = (): TabSpec => recentSpec() ?? { kind: "shell", shell: null };
+  onCleanup(onNewTabRequest((id) => {
+    if (id === props.task.id && props.task.worktreePath) void openTab(quickSpec());
+  }));
   const setShells = (update: (current: ReadonlyMap<string, TerminalLayout>) => ReadonlyMap<string, TerminalLayout>) => {
     setLayouts((current) => update(current));
     saveLayouts(shells());
@@ -180,7 +208,10 @@ export function TaskView(props: {
   const selectKey = (key: string) => {
     const id = props.task.id;
     if (key === terminalKey(id, "agent")) selectAgent(id, false);
-    else if (key === currentExtraKey(id)) selectAgent(id, true);
+    else {
+      const tab = agentTabs(id).find((candidate) => tabKey(id, candidate) === key);
+      if (tab) selectTab(id, tab);
+    }
   };
   createEffect(on([() => props.requestedTab, tabsReady], ([request, ready]) => {
     if (request && ready) selectKey(request.key);
@@ -188,7 +219,13 @@ export function TaskView(props: {
   const activeAgentTab = () => {
     if (layout() === "shell") return undefined;
     const id = props.task.id;
-    return isSecondarySelected(id) ? currentExtraKey(id) : terminalKey(id, "agent");
+    const tab = selectedTab(id);
+    if (!tab) return terminalKey(id, "agent");
+    return tab.kind === "shell" ? undefined : tabKey(id, tab);
+  };
+  const pendingAgentName = (key: string) => {
+    const tab = agentTabs(props.task.id).find((candidate) => tabKey(props.task.id, candidate) === key);
+    return AGENT_NAME[tab ? UI_AGENT[tab.kind as Exclude<TabKind, "shell">] : props.task.agent];
   };
   const approval = () => props.questions?.find((question) => question.key === activeAgentTab());
   const [sending, setSending] = createSignal<number>();
@@ -294,20 +331,26 @@ export function TaskView(props: {
           {AGENT_NAME[props.task.agent]}
           <MailboxBadge count={props.unreadForTab?.(terminalKey(props.task.id, "agent")) ?? 0} />
         </button>
-        <Show when={secondary().has(props.task.id)}>
-          <div class="tab-item" role="presentation"
-            data-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}>
-            <button class="tab" role="tab" type="button"
-              aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
-              onClick={() => selectAgent(props.task.id, true)}>
-              <StatusGlyph tone={tabTone(currentExtraKey(props.task.id))} />
-              <AgentIcon agent={secondaryKind(props.task)} />
-              {AGENT_NAME[secondaryKind(props.task)]}
-              <MailboxBadge count={props.unreadForTab?.(currentExtraKey(props.task.id)) ?? 0} />
-            </button>
-            <TabClose disabled={tabsSaving()} onClose={() => void changeSecondary(props.task.id)} />
-          </div>
-        </Show>
+        <For each={tabsOf(props.task.id)}>
+          {(tab) => (
+            <div class="tab-item" role="presentation"
+              data-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}>
+              <button class="tab" role="tab" type="button"
+                aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
+                onClick={() => { selectTab(props.task.id, tab); }}>
+                <Show when={tab.kind !== "shell"} fallback={<Icon name="terminal" class="icon-sm" />}>
+                  <StatusGlyph tone={tabTone(tabKey(props.task.id, tab))} />
+                  <AgentIcon agent={UI_AGENT[tab.kind as Exclude<TabKind, "shell">]} />
+                </Show>
+                {labels().get(tab.id)}
+                <Show when={tab.kind !== "shell"}>
+                  <MailboxBadge count={props.unreadForTab?.(tabKey(props.task.id, tab)) ?? 0} />
+                </Show>
+              </button>
+              <TabClose disabled={tabsSaving()} onClose={() => void closeTab(tab)} />
+            </div>
+          )}
+        </For>
         <Show when={shells().has(props.task.id)}>
           <div class="tab-item" role="presentation" data-selected={layout() === "shell"}>
             <button class="tab" role="tab" aria-selected={layout() === "shell"} type="button"
@@ -319,7 +362,7 @@ export function TaskView(props: {
           </div>
         </Show>
         <Show when={props.task.worktreePath}>
-          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.newTab")} aria-haspopup="menu"
+          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} aria-haspopup="menu"
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
@@ -332,17 +375,33 @@ export function TaskView(props: {
         <Show when={tabMenu()}>
           {(anchor) => (
             <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
-              <Show when={!shells().has(props.task.id)}>
-                <MenuItem icon={<Icon name="terminal" class="icon-sm" />} hint={t("task.tabHintShell")}
-                  onSelect={() => { setTabMenu(undefined); setLayout("shell"); }}>{t("task.shell")}</MenuItem>
-              </Show>
-              <Show when={!secondary().has(props.task.id)}>
-                <MenuItem icon={<AgentIcon agent={secondaryKind(props.task)} />} hint={t("task.tabHintAgent")}
-                  disabled={!tabsReady() || tabsSaving()}
-                  onSelect={() => { setTabMenu(undefined); void changeSecondary(props.task.id, crypto.randomUUID()); }}>
-                  {AGENT_NAME[secondaryKind(props.task)]}
+              <For each={AGENT_SPECS}>
+                {(spec) => (
+                  <MenuItem icon={<AgentIcon agent={UI_AGENT[spec.kind as Exclude<TabKind, "shell">]} />}
+                    disabled={!tabsReady() || tabsSaving()}
+                    onSelect={() => { setTabMenu(undefined); void openTab(spec); }}>
+                    {AGENT_NAME[UI_AGENT[spec.kind as Exclude<TabKind, "shell">]]}
+                    <RecentChip show={sameSpec(spec, quickSpec())} />
+                  </MenuItem>
+                )}
+              </For>
+              <MenuSeparator />
+              <For each={installedShells()} fallback={
+                <MenuItem icon={<Icon name="terminal" class="icon-sm" />} disabled={!tabsReady() || tabsSaving()}
+                  onSelect={() => { setTabMenu(undefined); void openTab({ kind: "shell", shell: null }); }}>
+                  {t("task.shell")}
+                  <RecentChip show={sameSpec({ kind: "shell", shell: null }, quickSpec())} />
                 </MenuItem>
-              </Show>
+              }>
+                {(shell) => (
+                  <MenuItem icon={<Icon name="terminal" class="icon-sm" />} disabled={!tabsReady() || tabsSaving()}
+                    onSelect={() => { setTabMenu(undefined); void openTab({ kind: "shell", shell: shell.id }); }}>
+                    {shell.name}
+                    <RecentChip show={sameSpec({ kind: "shell", shell: shell.id }, quickSpec())
+                      || (shell.isDefault && sameSpec({ kind: "shell", shell: null }, quickSpec()))} />
+                  </MenuItem>
+                )}
+              </For>
               <MenuSeparator />
               <MenuItem icon={<Icon name="split" class="icon-sm" />}
                 onSelect={() => { setTabMenu(undefined); setLayout(layout() === "split" ? "agent" : "split"); }}>
@@ -430,41 +489,56 @@ export function TaskView(props: {
                           if (!extraSelected()) {
                             return { key: terminalKey(id, "agent"), agent: AGENT_NAME[task.agent], prepare };
                           }
-                          const key = currentExtraKey(id);
-                          const extra = key && secondaryWriters.get(key);
-                          return key && extra
-                            ? { key, agent: AGENT_NAME[secondaryKind(task)], prepare: extra }
+                          const tab = selectedTab(id);
+                          if (!tab || tab.kind === "shell") return undefined;
+                          const key = tabKey(id, tab);
+                          const extra = secondaryWriters.get(key);
+                          return extra
+                            ? { key, agent: AGENT_NAME[UI_AGENT[tab.kind]], prepare: extra }
                             : undefined;
                         })}
                       />
                     </div>
-                    <Show when={secondary().get(id)} keyed>
-                      {(sessionId) => {
+                    <For each={tabsOf(id)}>
+                      {(tab) => {
                         const task = props.findTask(id);
                         if (!task?.worktreePath) return null;
+                        const key = tabKey(id, tab);
+                        const tabSelected = () => isTabSelected(id, tab);
                         return (
-                          <div class="terminal-cell" hidden={!extraSelected()}>
-                            <TerminalPane
-                              session={{ agent: CORE_AGENT[secondaryKind(task)], cwd: task.worktreePath,
-                                key: extraKey(id, sessionId), sessionId, resume: restoredAgents.get(id) === sessionId }}
-                              active={selected() && mode() !== "shell" && extraSelected()}
-                              leave="park"
-                              onHosted={(hosted) => noteHosted(id, hosted)}
-                              onReport={props.onReportProblem}
-                              theme={props.theme}
-                              onStatus={(status, message) => props.onStatus?.(id, extraKey(id, sessionId), status, message)}
-                              registerDraftWriter={(prepare) => {
-                                const key = extraKey(id, sessionId);
-                                secondaryWriters.set(key, prepare);
-                                return () => {
-                                  if (secondaryWriters.get(key) === prepare) secondaryWriters.delete(key);
-                                };
-                              }}
-                            />
+                          <div class="terminal-cell" hidden={!tabSelected()}>
+                            <Show when={tab.kind !== "shell"} fallback={
+                              <TerminalPane
+                                session={{ agent: null, cwd: task.worktreePath, key }}
+                                active={selected() && mode() !== "shell" && tabSelected()}
+                                focus={tabSelected()}
+                                leave="park"
+                                onHosted={(hosted) => noteHosted(id, hosted)}
+                                onReport={props.onReportProblem}
+                                theme={props.theme}
+                              />
+                            }>
+                              <TerminalPane
+                                session={{ agent: CORE_AGENT[UI_AGENT[tab.kind as Exclude<TabKind, "shell">]], cwd: task.worktreePath,
+                                  key, sessionId: tab.id, resume: restoredTabs.has(tab.id) }}
+                                active={selected() && mode() !== "shell" && tabSelected()}
+                                leave="park"
+                                onHosted={(hosted) => noteHosted(id, hosted)}
+                                onReport={props.onReportProblem}
+                                theme={props.theme}
+                                onStatus={(status, message) => props.onStatus?.(id, key, status, message)}
+                                registerDraftWriter={(prepare) => {
+                                  secondaryWriters.set(key, prepare);
+                                  return () => {
+                                    if (secondaryWriters.get(key) === prepare) secondaryWriters.delete(key);
+                                  };
+                                }}
+                              />
+                            </Show>
                           </div>
                         );
                       }}
-                    </Show>
+                    </For>
                   </div>
                   <Show when={mode() && props.findTask(id)?.worktreePath}>
                     {(cwd) => (
@@ -489,7 +563,7 @@ export function TaskView(props: {
         <Show when={otherApproval()}>
           {(pending) => (
             <Notice tone="blocked" lead={t("approval.otherTabLead").replace("{agent}",
-              pending().key === currentExtraKey(props.task.id) ? AGENT_NAME[secondaryKind(props.task)] : AGENT_NAME[props.task.agent])}
+              pendingAgentName(pending().key))}
               actions={<Button size="sm"
                 onClick={() => selectKey(pending().key)}>{t("approval.openTab")}</Button>}>
               {t("approval.otherTabNote")}
@@ -532,6 +606,14 @@ export function TaskView(props: {
       </div>
     </section>
   );
+}
+
+const AGENT_SPECS: readonly TabSpec[] = [{ kind: "claude_code", shell: null }, { kind: "codex", shell: null }];
+
+/** The shortcut that opens the kind used last, shown on that kind's row. */
+// TODO: replace with the shared Menu shortcut chip once the primitive lands.
+function RecentChip(props: { show: boolean }) {
+  return <Show when={props.show}><kbd class="menu-chip">{NEW_TAB_KEYS}</kbd></Show>;
 }
 
 /** Sits beside its tab, not inside it, so a button never nests in a button. */
