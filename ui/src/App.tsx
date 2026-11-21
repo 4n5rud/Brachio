@@ -38,6 +38,7 @@ import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
 import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
+import { deleteBlock } from "./lib/delete-preview";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord } from "./lib/workspace";
@@ -594,6 +595,19 @@ export function App() {
   const deleteArchived = async (task: TaskRow) => {
     const folderProject = repos().find((item) => item.id === task.repoId)?.isGit === false;
     const loss = await previewTaskDeletion(task.id);
+    const block = deleteBlock(loss);
+    if (block) {
+      await confirmDialog({
+        title: t(folderProject ? "task.deleteFolderTitle" : "task.deleteTitle"),
+        error: t(block === "running" ? "task.deleteBlockedRunning" : "task.deleteBlockedUnknown"),
+        loss: block === "running" ? [{ label: t("task.lossTerminals"), count: loss.runningTerminals }] : undefined,
+        confirmLabel: t("task.deleteBlockedClose"),
+        cancelLabel: t("task.deleteBlockedClose"),
+        blocked: true,
+        tone: "danger",
+      });
+      return;
+    }
     // A folder is the user's own: only the task's entry goes, never the folder.
     const agreed = await confirmDialog(folderProject
       ? {

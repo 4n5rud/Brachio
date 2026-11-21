@@ -731,6 +731,8 @@ pub struct TaskLoss {
     /// Changes whenever anything the user was shown, or the branch head, changes.
     fingerprint: String,
     running_terminals: usize,
+    /// The liveness check failed, so `running_terminals` says nothing.
+    terminals_unknown: bool,
 }
 
 /// Refuses deletion when the loss is no longer what the user confirmed.
@@ -831,6 +833,14 @@ pub async fn task_delete_preview(
     id: String,
 ) -> Result<TaskLoss, String> {
     let (task, repo) = archived_task(&database, &id)?;
+    let (running_terminals, terminals_unknown) =
+        match live_task_terminals(&database, &terminals, &in_app, &id).await {
+            Ok(keys) => (keys.len(), false),
+            Err(error) => {
+                tracing::warn!(%error, "could not check the task's terminals");
+                (0, true)
+            }
+        };
     if !repo.is_git {
         return Ok(TaskLoss {
             uncommitted_files: 0,
@@ -838,12 +848,10 @@ pub async fn task_delete_preview(
             ignored_entries: 0,
             ignored_examples: Vec::new(),
             fingerprint: String::new(),
-            running_terminals: 0,
+            running_terminals,
+            terminals_unknown,
         });
     }
-    let running_terminals = live_task_terminals(&database, &terminals, &in_app, &id)
-        .await
-        .map_or(0, |keys| keys.len());
     let work = tauri::async_runtime::spawn_blocking(move || {
         brachio_git::unsaved_work(&Git::new(&repo.path), &task.worktree_path, &task.branch)
     })
@@ -857,6 +865,7 @@ pub async fn task_delete_preview(
         ignored_examples: work.ignored_examples,
         fingerprint: work.fingerprint,
         running_terminals,
+        terminals_unknown,
     })
 }
 

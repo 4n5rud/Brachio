@@ -70,6 +70,8 @@ export interface TaskLoss {
   /** Identifies the state shown; `deleteTask` must send it back. */
   fingerprint: string;
   runningTerminals: number;
+  /** The terminal check failed, so `runningTerminals` means nothing. */
+  terminalsUnknown: boolean;
 }
 export const previewTaskDeletion = (id: string) => invoke<TaskLoss>("task_delete_preview", { id });
 export const listTaskFiles = (id: string) => invoke<string[]>("task_files", { id });
