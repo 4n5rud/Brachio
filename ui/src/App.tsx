@@ -29,7 +29,7 @@ import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
-import { isNewTaskShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT } from "./lib/terminal";
@@ -650,10 +650,13 @@ export function App() {
           await deleteArchived(task);
           return;
         }
+        const busy = /file in use: (.*)$/u.exec(message);
         if (!await confirmDialog({
           title: t("task.deleteFailedTitle"),
-          error: t("task.deleteFailed").replace("{detail}", () => message),
-          body: t("task.deleteFailedBody"),
+          error: busy
+            ? t("task.deleteFileInUse").replace("{path}", () => busy[1] || t("task.deleteFileInUseSome"))
+            : t("task.deleteFailed").replace("{detail}", () => message),
+          body: busy ? t("task.deleteFileInUseBody") : t("task.deleteFailedBody"),
           confirmLabel: t("task.tryAgain"),
           tone: "danger",
         })) return;
@@ -759,6 +762,12 @@ export function App() {
         setWorkspacePanel("quickOpen");
         return;
       }
+      if (isSettingsShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setWorkspacePanel("settings");
+        return;
+      }
       const panel = panelToggleShortcut(event);
       if (panel) {
         event.preventDefault();
@@ -833,6 +842,8 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
+          onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
+          onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           reveal={revealed()}

@@ -968,7 +968,12 @@ async fn delete_task(
             let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
                 .map_err(to_text)?;
             ensure_loss_unchanged(&expected_fingerprint, &current.fingerprint)?;
-            brachio_git::discard_worktree(&git, &task.worktree_path, &task.branch).map_err(to_text)
+            brachio_git::discard_worktree(&git, &task.worktree_path, &task.branch).map_err(
+                |error| {
+                    let text = to_text(error);
+                    crate::file_in_use::describe(&text).unwrap_or(text)
+                },
+            )
         })
         .await
         .map_err(to_text)??;

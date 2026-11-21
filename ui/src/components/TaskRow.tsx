@@ -1,4 +1,8 @@
-import { Show } from "solid-js";
+import { Show, createSignal } from "solid-js";
+import { t } from "../i18n";
+import { isMac } from "../lib/shortcut";
+import { openTaskFolder, revealTask } from "../lib/workspace";
+import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { chipOf, type PrChip as PrChipState } from "../lib/pr-status";
 import { prReport } from "../lib/pr-status-store";
 import { statusTone } from "../lib/status";
@@ -22,7 +26,16 @@ export function TaskRowItem(props: {
   /** The pull request chip to show; read from the pull request store when left out. */
   pr?: PrChipState | null;
   onSelect: () => void;
+  /** Archives the task; the item is left out when the row cannot be archived. */
+  onArchive?: () => void;
+  onError?: (failure: unknown) => void;
 }) {
+  const [menu, setMenu] = createSignal<HTMLElement>();
+  const inApp = "__TAURI_INTERNALS__" in window;
+  const act = (action: () => void | Promise<void>) => {
+    setMenu(undefined);
+    Promise.resolve().then(action).catch((failure) => props.onError?.(failure));
+  };
   const tone = () => statusTone(props.task.status);
   const chip = () => (props.pr !== undefined ? props.pr : chipOf(prReport(props.task.id)));
   return (
@@ -32,7 +45,9 @@ export function TaskRowItem(props: {
       type="button"
       title={props.task.title}
       aria-current={props.selected ? "true" : undefined}
+      aria-haspopup="menu"
       onClick={() => props.onSelect()}
+      onContextMenu={(event) => { event.preventDefault(); setMenu(event.currentTarget); }}
     >
       <StatusGlyph tone={tone()} />
       <span class="task-title">{props.task.title}</span>
@@ -50,6 +65,29 @@ export function TaskRowItem(props: {
       </Show>
       <Show when={props.task.note}>
         <span class={`task-note task-note-${tone()}`}>{props.task.note}</span>
+      </Show>
+      <Show when={menu()}>
+        {(anchor) => (
+          <Menu anchor={anchor()} label={t("taskMenu.label")} onClose={() => setMenu(undefined)}>
+            <MenuItem hint="↵" onSelect={() => act(props.onSelect)}>{t("taskMenu.open")}</MenuItem>
+            <MenuItem disabled={!props.task.branch}
+              onSelect={() => act(() => navigator.clipboard.writeText(props.task.branch ?? ""))}>
+              {t("taskMenu.copyBranch")}
+            </MenuItem>
+            <Show when={inApp && props.task.worktreePath}>
+              <MenuItem onSelect={() => act(() => revealTask(props.task.id))}>
+                {isMac ? t("taskMenu.showMac") : t("taskMenu.showOther")}
+              </MenuItem>
+              <MenuItem hint={t("taskMenu.editorHint")} onSelect={() => act(() => openTaskFolder(props.task.id))}>
+                {t("taskMenu.editor")}
+              </MenuItem>
+            </Show>
+            <Show when={props.onArchive}>
+              <MenuSeparator />
+              <MenuItem onSelect={() => act(() => props.onArchive?.())}>{t("taskMenu.archive")}</MenuItem>
+            </Show>
+          </Menu>
+        )}
       </Show>
     </button>
   );

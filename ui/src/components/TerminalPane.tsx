@@ -54,6 +54,9 @@ const CONTINUITY_TONE: Record<string, NoticeTone> = {
   "terminal.resumeFailed": "info",
 };
 
+/** What Claude Code accepts in its own input to start signing in. */
+const SIGN_IN_INPUT = "/login";
+
 const SIGN_IN: Record<AgentKind, { name: string; command: string }> = {
   claude_code: { name: "Claude Code", command: "claude auth login" },
   codex: { name: "Codex", command: "codex login" },
@@ -104,6 +107,7 @@ export function TerminalPane(props: {
   let copyTail: () => string = () => "";
   let reopen: () => void;
   let chooseConversation: (id?: string) => void;
+  let insertSignIn: () => Promise<boolean> = () => Promise.resolve(false);
   const [choices, setChoices] = createSignal<readonly CodexConversation[]>();
   const [checkingConversations, setCheckingConversations] = createSignal(false);
   const [conversationCheckFailed, setConversationCheckFailed] = createSignal(false);
@@ -172,6 +176,7 @@ export function TerminalPane(props: {
     // Settings changed in the settings panel apply to terminals that are already open.
     createEffect(() => {
       const { fontSize, scrollback } = terminalSettings();
+      applyTheme();
       term.options.fontSize = fontSize;
       term.options.scrollback = scrollback;
       fitVisible();
@@ -336,6 +341,17 @@ export function TerminalPane(props: {
     void prepareOpen(session?.resume === true && session.agent !== null, session?.prompt ?? null);
     const canPasteDraft = () => session?.agent && !exited && !disposed && !blocked
       && !working && props.active && term.modes.bracketedPasteMode;
+    // Puts the command in the agent's input without pressing Enter. Unlike a draft it is allowed
+    // while the agent waits for sign-in, which is what marks the terminal as blocked.
+    insertSignIn = async () => {
+      const destination = handle;
+      if (!destination || !session?.agent || exited || disposed || !props.active || !term.modes.bracketedPasteMode) return false;
+      inputRevision += 1;
+      editedBeforePrompt = true;
+      await destination.write(bracketedPaste(SIGN_IN_INPUT, true));
+      term.focus();
+      return true;
+    };
     const unregister = props.registerDraftWriter?.((text) => {
       const destination = handle;
       if (!destination || !canPasteDraft()) return undefined;
@@ -587,7 +603,12 @@ export function TerminalPane(props: {
       </Show>
       <Show when={authNeeded() && props.session?.agent}>
         {(agent) => (
-          <Notice tone="blocked" lead={t("terminal.signInLead").replace("{agent}", SIGN_IN[agent()].name)}>
+          <Notice tone="blocked" lead={t("terminal.signInLead").replace("{agent}", SIGN_IN[agent()].name)}
+            actions={agent() === "claude_code" ? (
+              <Button size="sm" onClick={() => void insertSignIn().then((done) => {
+                if (!done) setInputFailure(t("diff.notReady"));
+              }, (failure) => setInputFailure(String(failure)))}>{t("terminal.insertSignIn")}</Button>
+            ) : undefined}>
             {t("terminal.signInNote").replace("{command}", SIGN_IN[agent()].command)}
           </Notice>
         )}

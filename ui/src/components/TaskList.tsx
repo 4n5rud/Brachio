@@ -32,6 +32,8 @@ export function TaskList(props: {
   onAddFolderRepo?: (path: string) => Promise<void>;
   onAddRepo?: (kind: "git" | "folder") => void;
   onOpenArchived?: () => void;
+  onArchiveTask?: (id: string) => void;
+  onError?: (failure: unknown) => void;
   /** A project to show: its group opens when the object changes. */
   reveal?: { id: string };
   /** Starting set of collapsed projects; read from storage when left out. */
@@ -153,6 +155,8 @@ export function TaskList(props: {
                         unread={props.unreadForTask?.(task.id) ?? 0}
                         pr={props.prFor?.(task.id)}
                         onSelect={() => props.onSelect(task.id)}
+                        onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}
+                        onError={props.onError}
                       />
                     )}
                   </For>

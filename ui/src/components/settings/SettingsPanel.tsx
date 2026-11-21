@@ -2,6 +2,8 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
+import { isMac } from "../../lib/shortcut";
+import { openLogFolder } from "../../lib/workspace";
 import { Icon, type IconName } from "../Icon";
 import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
@@ -42,6 +44,7 @@ const PAGES: { page: SettingsPage; icon: IconName; label: () => string; desktopO
 const SHORTCUTS: { label: () => string; mac: string; windows: string }[] = [
   { label: () => t("quickOpen.title"), mac: "⌘P", windows: "Ctrl+Shift+P" },
   { label: () => t("newTask.title"), mac: "⌘N", windows: "Ctrl+Shift+N" },
+  { label: () => t("titlebar.settings"), mac: "⌘,", windows: "Ctrl+," },
   { label: () => t("settings.shortcutSidebar"), mac: "⌘B", windows: "Ctrl+Shift+B" },
   { label: () => t("settings.shortcutInspector"), mac: "⌘⌥B", windows: "Ctrl+Shift+Alt+B" },
   { label: () => t("settings.shortcutCreate"), mac: "⌘⏎", windows: "Ctrl+⏎" },
@@ -67,6 +70,20 @@ function LanguageRow() {
         </Menu>
       )}</Show>
     </SettingRow>
+  );
+}
+
+function LogFilesRow() {
+  const [error, setError] = createSignal("");
+  return (
+    <>
+      <SettingRow label={t("settings.logFiles")} hint={t("settings.logFilesHint")}>
+        <Button size="sm" onClick={() => { setError(""); openLogFolder().catch((failure) => setError(String(failure))); }}>
+          {isMac ? t("settings.showLogMac") : t("settings.showLogOther")}
+        </Button>
+      </SettingRow>
+      <Show when={error()}><p class="form-error" role="alert">{error()}</p></Show>
+    </>
   );
 }
 
@@ -174,6 +191,7 @@ export function SettingsPanel(props: {
             <LanguageRow />
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
+            <Show when={"__TAURI_INTERNALS__" in window}><LogFilesRow /></Show>
           </Match>
           <Match when={page() === "appearance"}>
             <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
