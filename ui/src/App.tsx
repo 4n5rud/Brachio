@@ -18,6 +18,7 @@ import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
+import { listPinnedTasks, setTaskPinned } from "./lib/task-pins";
 import { detectKeepAwake, holdAwake, keepAwakeEnabled } from "./lib/keep-awake";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
@@ -34,9 +35,10 @@ import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
+import { ShortcutsDialog } from "./components/ShortcutList";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -85,6 +87,7 @@ export function App() {
   const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
+  const [pinned, setPinned] = createSignal<ReadonlySet<string>>(new Set());
   const [trayReady, setTrayReady] = createSignal(false);
   createEffect(() => {
     if (!trayReady()) return;
@@ -179,6 +182,7 @@ export function App() {
   });
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const [recent, setRecent] = createSignal<readonly string[]>([]);
   const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
@@ -499,14 +503,15 @@ export function App() {
   };
 
   const load = async () => {
-    const [storedRepos, storedTasks, storedArchives] = await Promise.all([
-      listRepos(), listTasks(), listArchivedTasks(),
+    const [storedRepos, storedTasks, storedArchives, storedPins] = await Promise.all([
+      listRepos(), listTasks(), listArchivedTasks(), listPinnedTasks().catch(() => [] as string[]),
     ]);
     const restoredTasks = loadOpenWorkspaceTasks(new Set(storedTasks.map((task) => task.id)));
     batch(() => {
       setRepos(storedRepos);
       setTasks(storedTasks.map(toTaskRow));
       setArchived(storedArchives.map(toTaskRow));
+      setPinned(new Set(storedPins));
       setWorkspaceTaskIds(restoredTasks);
       setUnreadFinishMarks(loadUnreadFinish(new Set(storedTasks.map((task) => task.id))));
       restoreSelection();
@@ -676,6 +681,16 @@ export function App() {
     }),
     requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
   }, record, startListed);
+
+  const togglePin = (id: string, pin: boolean) => {
+    const before = pinned();
+    setPinned((current) => {
+      const next = new Set(current);
+      if (pin) next.add(id); else next.delete(id);
+      return next;
+    });
+    if (inTauri) setTaskPinned(id, pin).catch((failure) => { setPinned(before); report(failure); });
+  };
 
   const archiveNow = async (task: TaskRow) => {
       await archiveTask(task.id);
@@ -935,7 +950,7 @@ export function App() {
         setSwitcher({ ...switching, index: stepSwitchIndex(switching.index, switching.tasks.length, keys.back) });
         return;
       }
-      if (!switching && keys && !dialogOpen() && !workspacePanel()) {
+      if (!switching && keys && !dialogOpen() && !workspacePanel() && !shortcutsOpen()) {
         const candidates = recentTasks(recent(), rows());
         if (candidates.length > 1) {
           event.preventDefault();
@@ -944,11 +959,17 @@ export function App() {
           return;
         }
       }
-      if (dialogOpen() || importRepoId() || workspacePanel()) return;
+      if (dialogOpen() || importRepoId() || workspacePanel() || shortcutsOpen()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
         setWorkspacePanel("quickOpen");
+        return;
+      }
+      if (isShortcutListShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutsOpen(true);
         return;
       }
       if (isSettingsShortcut(event)) {
@@ -1043,6 +1064,8 @@ export function App() {
           onImportWorktrees={inTauri ? setImportRepoId : undefined}
           onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
+          pinned={pinned()}
+          onTogglePin={togglePin}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
@@ -1118,6 +1141,7 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
       <Show when={switcher()} keyed>
         {(current) => (
           <RecentTasksSwitcher tasks={current.tasks} index={current.index}

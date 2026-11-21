@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareSiblings, groupTasks, orderWithChildren, orderWithCompare, shortBranch, taskGroup, type TaskRow } from "./tasks";
+import { compareSiblings, groupTasks, orderWithChildren, orderWithCompare, pinnedFirst, shortBranch, taskGroup, type TaskRow } from "./tasks";
 
 const row = (id: string, status: TaskRow["status"], updatedAt: number): TaskRow => ({
   id,
@@ -76,5 +76,12 @@ describe("comparison groups", () => {
     const tasks = [first, grouped("b", "g"), grouped("c", "other"), { ...grouped("d", "g"), repoId: "r2" }];
     expect(compareSiblings(tasks, first).map((task) => task.id)).toEqual(["b"]);
     expect(compareSiblings(tasks, grouped("solo"))).toEqual([]);
+  });
+});
+
+describe("pinnedFirst", () => {
+  it("puts pinned tasks ahead and keeps the order within each part", () => {
+    const rows = ["a", "b", "c", "d"].map((id) => ({ id }) as TaskRow);
+    expect(pinnedFirst(rows, new Set(["c", "b"])).map((task) => task.id)).toEqual(["b", "c", "a", "d"]);
   });
 });

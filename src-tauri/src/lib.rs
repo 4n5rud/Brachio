@@ -21,6 +21,7 @@ mod runtime_terminals;
 mod task_activity;
 mod task_folder;
 mod task_overlaps;
+mod task_pin;
 mod task_ports;
 mod task_tabs;
 #[cfg(any(windows, test))]
@@ -289,6 +290,8 @@ pub fn run() {
             terminal::terminal_close,
             terminal::terminal_detach,
             terminal::terminal_park,
+            task_pin::task_pins_list,
+            task_pin::task_pin_set,
             task_activity::task_activity_list,
             task_activity::task_activity_record,
             task_tabs::task_secondary_tabs,
