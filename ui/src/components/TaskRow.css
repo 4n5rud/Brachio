@@ -65,6 +65,13 @@
 .task-meta {
   overflow: hidden;
 }
+.task-compare {
+  flex: none;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-2);
+}
 .task-branch {
   overflow: hidden;
   text-overflow: ellipsis;

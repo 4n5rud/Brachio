@@ -227,6 +227,7 @@ impl ChildTasks for AppChildTasks {
                     agent,
                     base: request.base,
                     codex_conversation_id: None,
+                    compare_group: None,
                     max_open_children: Some(MAX_OPEN_CHILDREN),
                 },
             )

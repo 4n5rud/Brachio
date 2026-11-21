@@ -123,6 +123,7 @@ mod tests {
             worktree_path: Path::new("/w"),
             agent_kind: None,
             agent_session_id: None,
+            compare_group: None,
             created_at_ms: 0,
         };
         TaskRecord::insert(&connection, &task).expect("task");

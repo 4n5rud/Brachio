@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupTasks, orderWithChildren, shortBranch, taskGroup, type TaskRow } from "./tasks";
+import { compareSiblings, groupTasks, orderWithChildren, orderWithCompare, shortBranch, taskGroup, type TaskRow } from "./tasks";
 
 const row = (id: string, status: TaskRow["status"], updatedAt: number): TaskRow => ({
   id,
@@ -61,4 +61,20 @@ describe("orderWithChildren", () => {
 it("shortBranch drops only the brachio prefix", () => {
   expect(shortBranch("brachio/login-a3f9")).toBe("login-a3f9");
   expect(shortBranch("feature/x")).toBe("feature/x");
+});
+
+describe("comparison groups", () => {
+  const grouped = (id: string, compareGroup?: string): TaskRow => ({ ...row(id, { state: "idle" }, 0), repoId: "r", compareGroup });
+
+  it("puts the members of a comparison next to each other without moving other tasks", () => {
+    const ordered = orderWithCompare([grouped("a", "g"), grouped("x"), grouped("b", "g"), grouped("y")]);
+    expect(ordered.map((task) => task.id)).toEqual(["a", "b", "x", "y"]);
+  });
+
+  it("lists only the other tasks of the same comparison and project", () => {
+    const first = grouped("a", "g");
+    const tasks = [first, grouped("b", "g"), grouped("c", "other"), { ...grouped("d", "g"), repoId: "r2" }];
+    expect(compareSiblings(tasks, first).map((task) => task.id)).toEqual(["b"]);
+    expect(compareSiblings(tasks, grouped("solo"))).toEqual([]);
+  });
 });

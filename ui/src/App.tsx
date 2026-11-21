@@ -24,7 +24,7 @@ import { activityKindOf, recordTaskActivity } from "./lib/task-activity";
 import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
-import { taskGroup, type TaskRow } from "./lib/tasks";
+import { compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
@@ -561,17 +561,16 @@ export function App() {
     setSetupRevision((revision) => revision + 1);
   };
 
-  const create = async (input: NewTaskInput) => {
-    const current = dialogRepo();
-    if (!current) return;
+  const createOne = async (repoId: string, input: NewTaskInput, agent: AgentKind, compareGroup?: string) => {
     const record = await createTask({
-      repoId: current.id,
+      repoId,
       parentTaskId: input.parentTaskId ?? null,
       title: input.title,
       prompt: input.prompt,
-      agent: CORE_AGENT[input.agent],
+      agent: CORE_AGENT[agent],
       base: input.base === "" ? null : input.base,
       codexConversationId: input.codexConversationId ?? null,
+      compareGroup: compareGroup ?? null,
     });
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;
@@ -580,9 +579,27 @@ export function App() {
     }
     if (input.prompt !== "") firstPrompts.set(record.id, input.prompt);
     setTasks((list) => [toTaskRow(record), ...list]);
-    open(record.id);
+    void requestSetup(record.id, repoId, record.setupCommands);
+    return record;
+  };
+  const create = async (input: NewTaskInput) => {
+    const current = dialogRepo();
+    if (!current) return;
+    if (!input.compare) {
+      const record = await createOne(current.id, input, input.agent);
+      open(record.id);
+      setDialogOpen(false);
+      return;
+    }
+    const group = crypto.randomUUID();
+    const first = await createOne(current.id, input, "claude", group);
+    try {
+      await createOne(current.id, input, "codex", group);
+    } catch (failure) {
+      pushToast({ tone: "error", title: t("newTask.compareSecondFailed"), message: String(failure) });
+    }
+    open(first.id);
     setDialogOpen(false);
-    void requestSetup(record.id, current.id, record.setupCommands);
   };
 
   // A task created by an agent: start its tab without moving the user's selection.
@@ -617,17 +634,7 @@ export function App() {
     void requestSetup(record.id, record.repoId, record.setupCommands);
   };
 
-  const archive = async (task: TaskRow) => {
-    if (archiving()) return;
-    setArchiving(true);
-    try {
-      if (!await confirmDialog({
-        title: t("task.archiveTitle"),
-        body: t("task.archiveBody"),
-        confirmLabel: t("task.archive"),
-        cancelLabel: t("workspace.close"),
-        tone: "primary",
-      })) return;
+  const archiveNow = async (task: TaskRow) => {
       await archiveTask(task.id);
       batch(() => {
         setTasks((items) => items.filter((item) => item.id !== task.id));
@@ -650,6 +657,19 @@ export function App() {
         next.delete(task.id);
         return next;
       });
+  };
+  const archive = async (task: TaskRow) => {
+    if (archiving()) return;
+    setArchiving(true);
+    try {
+      if (!await confirmDialog({
+        title: t("task.archiveTitle"),
+        body: t("task.archiveBody"),
+        confirmLabel: t("task.archive"),
+        cancelLabel: t("workspace.close"),
+        tone: "primary",
+      })) return;
+      await archiveNow(task);
     } catch (failure) {
       pushToast({
         tone: "error",
@@ -657,6 +677,26 @@ export function App() {
         message: String(failure),
         action: { label: t("task.tryAgain"), onClick: () => void archive(task) },
       });
+    } finally {
+      setArchiving(false);
+    }
+  };
+  // Ends a comparison: the other tasks run on the same prompt are archived and this one stays.
+  const keepOnly = async (task: TaskRow) => {
+    const siblings = compareSiblings(tasks(), task);
+    if (archiving() || siblings.length === 0) return;
+    setArchiving(true);
+    try {
+      if (!await confirmDialog({
+        title: t("task.keepOnlyTitle"),
+        body: t("task.keepOnlyBody"),
+        confirmLabel: t("task.keepOnlyConfirm"),
+        cancelLabel: t("workspace.close"),
+        tone: "primary",
+      })) return;
+      for (const sibling of siblings) await archiveNow(sibling);
+    } catch (failure) {
+      pushToast({ tone: "error", title: t("task.archiveFailed"), message: String(failure) });
     } finally {
       setArchiving(false);
     }
@@ -928,6 +968,7 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
+          onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}

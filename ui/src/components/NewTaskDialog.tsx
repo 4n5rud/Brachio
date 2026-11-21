@@ -10,6 +10,7 @@ import { BranchField } from "./BranchField";
 import { FolderAccessNotice } from "./FolderAccessNotice";
 import { blockedFolder } from "../lib/folder-access";
 import { AgentIcon } from "./AgentIcon";
+import { Toggle } from "./ui/Toggle";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { repoCodexConversations, titleFromPrompt } from "../lib/workspace";
 
@@ -23,6 +24,8 @@ export interface NewTaskInput {
   parentTaskId?: string;
   /** A Codex conversation recorded for the project that the task continues. */
   codexConversationId?: string;
+  /** Run the prompt once with Claude Code and once with Codex, to compare them. */
+  compare?: boolean;
 }
 
 const conversationLabel = (item: { id: string; timestamp: string | null }) => {
@@ -52,6 +55,7 @@ export function NewTaskDialog(props: {
   const [base, setBase] = createSignal("");
   const [parentTaskId, setParentTaskId] = createSignal("");
   const [conversationId, setConversationId] = createSignal("");
+  const [compare, setCompare] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [confirmingClose, setConfirmingClose] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -72,13 +76,15 @@ export function NewTaskDialog(props: {
       }
     },
   );
-  const conversationChoices = () => (agent() === "codex" ? conversations() ?? [] : []);
+  const conversationChoices = () => (agent() === "codex" && !compare() ? conversations() ?? [] : []);
   const agentInfo = (kind: AgentKind) => {
     const found = installed();
     if (!found) return { missing: false, version: null };
     const entry = found.find((item) => item.kind === CORE_AGENT[kind]);
     return { missing: !entry, version: entry?.version ?? null };
   };
+  const canCompare = () => props.isGit && !parentTaskId() && !agentInfo("claude").missing && !agentInfo("codex").missing;
+  const comparing = () => compare() && canCompare();
   const baseError = () => {
     const message = error();
     return message !== null && base().trim() !== "" && BAD_BASE.test(message)
@@ -90,7 +96,7 @@ export function NewTaskDialog(props: {
   const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "";
   const requestClose = async () => {
     if (busy() || confirmingClose()) return;
-    if (!prompt().trim() && !title().trim() && !base().trim() && agent() === "claude" && !conversationId()) {
+    if (!prompt().trim() && !title().trim() && !base().trim() && agent() === "claude" && !conversationId() && !compare()) {
       props.onClose();
       return;
     }
@@ -118,7 +124,8 @@ export function NewTaskDialog(props: {
     try {
       await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(),
         base: base().trim(), parentTaskId: parentTaskId() || undefined,
-        codexConversationId: agent() === "codex" && conversationId() ? conversationId() : undefined });
+        codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
+        compare: comparing() || undefined });
     } catch (failure) {
       setError(String(failure));
       setBusy(false);
@@ -182,7 +189,7 @@ export function NewTaskDialog(props: {
                   type="radio"
                   name="agent"
                   checked={agent() === kind}
-                  disabled={agentInfo(kind).missing}
+                  disabled={agentInfo(kind).missing || comparing()}
                   onChange={() => { setAgent(kind); setConversationId(""); }}
                 />
                 <b><AgentIcon agent={kind} />{AGENT_NAME[kind]}</b>
@@ -197,6 +204,9 @@ export function NewTaskDialog(props: {
           </For>
         </div>
       </fieldset>
+      <Show when={canCompare()}>
+        <Toggle checked={compare()} onChange={setCompare} label={t("newTask.compare")} hint={t("newTask.compareHint")} />
+      </Show>
       <Show when={conversationChoices().length > 0}>
         <Select label={t("newTask.codexConversation")} hint={t("newTask.codexConversationHint")}
           value={conversationId()} onChange={(event) => setConversationId(event.currentTarget.value)}>

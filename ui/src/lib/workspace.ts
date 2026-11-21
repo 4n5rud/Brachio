@@ -28,6 +28,8 @@ export interface TaskRecord {
   archivedAtMs: number | null;
   /** Conversation id the agent resumes, when Brachio picked one. */
   agentSessionId: string | null;
+  /** Shared by the sibling tasks that run one prompt with different agents. */
+  compareGroup?: string | null;
 }
 
 export interface CreateTaskRequest {
@@ -40,6 +42,8 @@ export interface CreateTaskRequest {
   base: string | null;
   /** A Codex conversation recorded for the project folder, continued by the new task. */
   codexConversationId?: string | null;
+  /** Marks the task as one of several run on one prompt to compare agents. */
+  compareGroup?: string | null;
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
@@ -138,6 +142,7 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     archivedAt: record.archivedAtMs ?? undefined,
     worktreePath: record.worktreePath,
     agentSessionId: record.agentSessionId ?? undefined,
+    compareGroup: record.compareGroup ?? undefined,
     parentTaskId: record.parentTaskId ?? undefined,
   };
 }

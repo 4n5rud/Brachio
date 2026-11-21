@@ -70,6 +70,9 @@ pub struct CreateTaskRequest {
     /// A Codex conversation recorded for the project folder that the new task continues.
     #[serde(default)]
     pub codex_conversation_id: Option<String>,
+    /// Marks the task as one of several run on the same prompt to compare agents.
+    #[serde(default)]
+    pub compare_group: Option<String>,
     /// Set for tasks an agent asked for: the parent's open children are counted again when the
     /// task is saved, since other requests may have been approved meanwhile.
     #[serde(skip)]
@@ -375,6 +378,7 @@ pub(crate) async fn create_task(
         worktree_path: &path,
         agent_kind: Some(agent_name(request.agent)),
         agent_session_id: session_id.as_deref(),
+        compare_group: request.compare_group.as_deref(),
         created_at_ms: now_ms(),
     };
     let mut refused = false;
@@ -515,6 +519,7 @@ fn create_folder_task(
         worktree_path: &repo.path,
         agent_kind: Some(agent_name(request.agent)),
         agent_session_id: session_id.as_deref(),
+        compare_group: None,
         created_at_ms: now_ms(),
     };
     let record = TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)?;
@@ -1234,6 +1239,7 @@ mod folder_project_tests {
             agent: AgentKind::ClaudeCode,
             base: Some("main".to_owned()),
             codex_conversation_id: None,
+            compare_group: None,
             max_open_children: None,
             scheduled: false,
             after: Vec::new(),
@@ -1667,6 +1673,7 @@ mod agent_child_limit_tests {
             agent: AgentKind::ClaudeCode,
             base: None,
             codex_conversation_id: None,
+            compare_group: None,
             max_open_children: Some(4),
             scheduled: false,
             after: Vec::new(),
@@ -1860,6 +1867,7 @@ mod archive_children_tests {
             worktree_path: Path::new("/w"),
             agent_kind: None,
             agent_session_id: None,
+            compare_group: None,
             created_at_ms: 0,
         }
     }
@@ -2142,6 +2150,7 @@ mod git_task_deletion_tests {
                 agent: AgentKind::ClaudeCode,
                 base: None,
                 codex_conversation_id: None,
+                compare_group: None,
                 max_open_children: None,
                 scheduled: false,
                 after: Vec::new(),
