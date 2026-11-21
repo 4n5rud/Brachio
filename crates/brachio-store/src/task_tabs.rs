@@ -1,59 +1,155 @@
-//! Durable secondary terminal identities. A NULL row records an explicit close.
+//! Durable extra terminal tabs of a task. Any number of agent or shell tabs can be open at once.
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::StoreError;
 
-/// Imports legacy tab IDs without overwriting a saved tab or close.
+/// What a tab runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabKind {
+    /// A Claude Code session; the tab id is its conversation id.
+    ClaudeCode,
+    /// A Codex session.
+    Codex,
+    /// A plain shell.
+    Shell,
+}
+
+impl TabKind {
+    /// The name stored in the database and sent to the window.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude_code",
+            Self::Codex => "codex",
+            Self::Shell => "shell",
+        }
+    }
+
+    /// Parses a stored or requested kind name.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "claude_code" => Some(Self::ClaudeCode),
+            "codex" => Some(Self::Codex),
+            "shell" => Some(Self::Shell),
+            _ => None,
+        }
+    }
+}
+
+/// One open extra tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskTab {
+    /// Unique per tab; also names the terminal and, for Claude Code, its conversation.
+    pub tab_id: String,
+    /// What the tab runs.
+    pub kind: TabKind,
+    /// Which detected shell a shell tab runs. `None` means the default shell.
+    pub shell_id: Option<String>,
+}
+
+fn read_tab(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<TaskTab>> {
+    let kind: String = row.get(1)?;
+    Ok(TabKind::parse(&kind).map(|kind| TaskTab {
+        tab_id: row.get(0).unwrap_or_default(),
+        kind,
+        shell_id: row.get(2).unwrap_or_default(),
+    }))
+}
+
+/// Imports legacy second-agent IDs once, then lists every open tab by task in opening order.
 ///
 /// # Errors
 /// Fails when the database cannot be read or written.
-pub fn load_secondary_tabs(
+pub fn load_task_tabs(
     connection: &mut Connection,
     legacy: &HashMap<String, String>,
-) -> Result<HashMap<String, String>, StoreError> {
+) -> Result<HashMap<String, Vec<TaskTab>>, StoreError> {
     let transaction = connection.transaction()?;
     for (task_id, tab_id) in legacy {
-        transaction.execute(
+        // The old single-tab table stays as the record of what was already imported or closed.
+        let imported = transaction.execute(
             "INSERT INTO task_secondary_tabs (task_id, tab_id)
              SELECT id, ?2 FROM tasks WHERE id = ?1
              ON CONFLICT(task_id) DO NOTHING",
             params![task_id, tab_id],
         )?;
+        if imported > 0 {
+            transaction.execute(
+                "INSERT OR IGNORE INTO task_tabs (task_id, tab_id, kind)
+                 SELECT id, ?2, CASE WHEN agent_kind = 'codex' THEN 'claude_code' ELSE 'codex' END
+                 FROM tasks WHERE id = ?1",
+                params![task_id, tab_id],
+            )?;
+        }
     }
-    let tabs = {
+    let mut tabs: HashMap<String, Vec<TaskTab>> = HashMap::new();
+    {
         let mut statement = transaction
-            .prepare("SELECT task_id, tab_id FROM task_secondary_tabs WHERE tab_id IS NOT NULL")?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        rows.collect::<Result<_, _>>()?
-    };
+            .prepare("SELECT tab_id, kind, shell_id, task_id FROM task_tabs ORDER BY rowid")?;
+        let rows = statement.query_map([], |row| Ok((read_tab(row)?, row.get::<_, String>(3)?)))?;
+        for row in rows {
+            let (tab, task_id) = row?;
+            if let Some(tab) = tab {
+                tabs.entry(task_id).or_default().push(tab);
+            }
+        }
+    }
     transaction.commit()?;
     Ok(tabs)
 }
 
-/// Saves a tab ID or remembers that the user closed it.
+/// The open tabs of one task in opening order.
 ///
 /// # Errors
-/// Fails when the task is not an open task, or the database cannot be written.
-pub fn set_secondary_tab(
+/// Fails when the database cannot be read.
+pub fn task_tabs(connection: &Connection, task_id: &str) -> Result<Vec<TaskTab>, StoreError> {
+    let mut statement = connection.prepare(
+        "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1 ORDER BY rowid",
+    )?;
+    let rows = statement.query_map([task_id], read_tab)?;
+    let mut tabs = Vec::new();
+    for row in rows {
+        tabs.extend(row?);
+    }
+    Ok(tabs)
+}
+
+/// One open tab of a task, if it is still open.
+///
+/// # Errors
+/// Fails when the database cannot be read.
+pub fn task_tab(
     connection: &Connection,
     task_id: &str,
-    tab_id: Option<&str>,
+    tab_id: &str,
+) -> Result<Option<TaskTab>, StoreError> {
+    let tab = connection
+        .query_row(
+            "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1 AND tab_id = ?2",
+            params![task_id, tab_id],
+            read_tab,
+        )
+        .optional()?;
+    Ok(tab.flatten())
+}
+
+/// Opens one more tab. The same agent or shell can be added again; every tab has its own id.
+///
+/// # Errors
+/// Fails when the task is not an open task, the id is taken, or the database cannot be written.
+pub fn add_task_tab(
+    connection: &Connection,
+    task_id: &str,
+    tab: &TaskTab,
 ) -> Result<(), StoreError> {
-    // The replaced tab's program may outlive this row, so its id is kept until proven stopped.
-    connection.execute(
-        "INSERT OR IGNORE INTO task_retired_secondary_tabs (task_id, tab_id)
-         SELECT task_id, tab_id FROM task_secondary_tabs
-         WHERE task_id = ?1 AND tab_id IS NOT NULL AND tab_id IS NOT ?2",
-        params![task_id, tab_id],
-    )?;
     let affected = connection.execute(
-        "INSERT INTO task_secondary_tabs (task_id, tab_id)
-         SELECT id, ?2 FROM tasks WHERE id = ?1 AND archived_at_ms IS NULL
-         ON CONFLICT(task_id) DO UPDATE SET tab_id = excluded.tab_id",
-        params![task_id, tab_id],
+        "INSERT INTO task_tabs (task_id, tab_id, kind, shell_id)
+         SELECT id, ?2, ?3, ?4 FROM tasks WHERE id = ?1 AND archived_at_ms IS NULL",
+        params![task_id, tab.tab_id, tab.kind.as_str(), tab.shell_id],
     )?;
     if affected == 0 {
         return Err(StoreError::NotFound {
@@ -61,6 +157,28 @@ pub fn set_secondary_tab(
             id: task_id.to_owned(),
         });
     }
+    Ok(())
+}
+
+/// Closes a tab and keeps its id until its program is proven stopped.
+///
+/// # Errors
+/// Fails when the database cannot be written.
+pub fn close_task_tab(
+    connection: &Connection,
+    task_id: &str,
+    tab_id: &str,
+) -> Result<(), StoreError> {
+    // The program may outlive this row, so its id is kept until proven stopped.
+    connection.execute(
+        "INSERT OR IGNORE INTO task_retired_secondary_tabs (task_id, tab_id)
+         SELECT task_id, tab_id FROM task_tabs WHERE task_id = ?1 AND tab_id = ?2",
+        params![task_id, tab_id],
+    )?;
+    connection.execute(
+        "DELETE FROM task_tabs WHERE task_id = ?1 AND tab_id = ?2",
+        params![task_id, tab_id],
+    )?;
     Ok(())
 }
 
@@ -96,9 +214,13 @@ pub fn forget_retired_secondary_tab(
 
 #[cfg(test)]
 mod tests {
-    use super::{forget_retired_secondary_tab, retired_secondary_tabs, set_secondary_tab};
+    use std::collections::HashMap;
     use std::path::Path;
 
+    use super::{
+        add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
+        retired_secondary_tabs, task_tab, task_tabs, TabKind, TaskTab,
+    };
     use crate::database::open_in_memory;
     use crate::{NewRepo, NewTask, RepoRecord, TaskRecord};
 
@@ -130,22 +252,49 @@ mod tests {
         connection
     }
 
+    fn tab(id: &str, kind: TabKind) -> TaskTab {
+        TaskTab {
+            tab_id: id.to_owned(),
+            kind,
+            shell_id: None,
+        }
+    }
+
     #[test]
-    fn a_replaced_or_closed_tab_is_remembered_until_forgotten() {
+    fn the_same_agent_can_be_open_twice_and_each_close_is_remembered() {
         let connection = connection_with_task();
-        set_secondary_tab(&connection, "t1", Some("a")).expect("first");
+        add_task_tab(&connection, "t1", &tab("a", TabKind::Codex)).expect("first");
+        add_task_tab(&connection, "t1", &tab("b", TabKind::Codex)).expect("second");
+        add_task_tab(&connection, "t1", &tab("c", TabKind::Shell)).expect("shell");
+        let open: Vec<_> = task_tabs(&connection, "t1")
+            .expect("list")
+            .into_iter()
+            .map(|tab| tab.tab_id)
+            .collect();
+        assert_eq!(open, ["a", "b", "c"]);
+        assert!(add_task_tab(&connection, "t1", &tab("a", TabKind::Codex)).is_err());
+        close_task_tab(&connection, "t1", "a").expect("close");
+        assert!(task_tab(&connection, "t1", "a").expect("read").is_none());
+        assert!(task_tab(&connection, "t1", "b").expect("read").is_some());
+        assert_eq!(
+            retired_secondary_tabs(&connection, "t1").expect("list"),
+            ["a"]
+        );
+        forget_retired_secondary_tab(&connection, "t1", "a").expect("forget");
         assert!(retired_secondary_tabs(&connection, "t1")
             .expect("list")
             .is_empty());
-        set_secondary_tab(&connection, "t1", Some("b")).expect("replace");
-        set_secondary_tab(&connection, "t1", None).expect("close");
-        let mut retired = retired_secondary_tabs(&connection, "t1").expect("list");
-        retired.sort();
-        assert_eq!(retired, ["a", "b"]);
-        forget_retired_secondary_tab(&connection, "t1", "a").expect("forget");
-        assert_eq!(
-            retired_secondary_tabs(&connection, "t1").expect("list"),
-            ["b"]
-        );
+    }
+
+    #[test]
+    fn a_legacy_second_agent_is_imported_once() {
+        let mut connection = connection_with_task();
+        let legacy = HashMap::from([("t1".to_owned(), "old".to_owned())]);
+        let tabs = load_task_tabs(&mut connection, &legacy).expect("import");
+        assert_eq!(tabs["t1"], [tab("old", TabKind::Codex)]);
+        close_task_tab(&connection, "t1", "old").expect("close");
+        assert!(load_task_tabs(&mut connection, &legacy)
+            .expect("reload")
+            .is_empty());
     }
 }

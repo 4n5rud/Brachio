@@ -31,6 +31,7 @@ pub fn port_for_terminal(
     if !matches!(pane, "agent" | "shell")
         && pane
             .strip_prefix("agent-")
+            .or_else(|| pane.strip_prefix("shell-"))
             .is_none_or(|id| uuid::Uuid::parse_str(id).is_err())
     {
         return Ok(None);

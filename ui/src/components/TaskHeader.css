@@ -109,6 +109,14 @@
   align-self: center;
   margin-left: 2px;
 }
+.menu-chip {
+  margin-left: auto;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-text-3);
+  font: var(--text-meta);
+}
 .tab .glyph {
   width: 11px;
   height: 11px;

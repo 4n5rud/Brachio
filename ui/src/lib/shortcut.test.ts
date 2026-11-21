@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, recentTasksShortcut, SHORTCUT_LIST } from "./shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, recentTasksShortcut, SHORTCUT_LIST } from "./shortcut";
 
 const key = (pressed: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => ({
   altKey: false,
@@ -76,5 +76,13 @@ describe("isSettingsShortcut", () => {
     expect(isSettingsShortcut(key({ key: ",", ctrlKey: true }), false)).toBe(true);
     expect(isSettingsShortcut(key({ key: ",", ctrlKey: true, shiftKey: true }), false)).toBe(false);
     expect(isSettingsShortcut(key({ key: ".", ctrlKey: true }), false)).toBe(false);
+  });
+});
+
+describe("new tab shortcut", () => {
+  it("is Cmd+T on macOS and Ctrl+Shift+T elsewhere, never plain Ctrl+T", () => {
+    expect(isNewTabShortcut(key({ key: "t", metaKey: true }), true)).toBe(true);
+    expect(isNewTabShortcut(key({ key: "t", ctrlKey: true, shiftKey: true }), false)).toBe(true);
+    expect(isNewTabShortcut(key({ key: "t", ctrlKey: true }), false)).toBe(false);
   });
 });

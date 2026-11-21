@@ -1,5 +1,6 @@
-import { createSignal, type Accessor } from "solid-js";
-import { Input } from "../ui/Input";
+import { For, createSignal, onMount, type Accessor } from "solid-js";
+import { Input, Select } from "../ui/Input";
+import { chooseShell, chosenShell, installedShells, loadShells } from "../../lib/shells";
 import { Toggle } from "../ui/Toggle";
 import { t } from "../../i18n";
 import {
@@ -52,8 +53,16 @@ function NumberRow(props: {
 
 /** Font size and scrollback of every terminal. Open terminals follow the change at once. */
 export function TerminalSettings(props: { drafts?: Partial<Record<keyof TerminalValues, string>> }) {
+  onMount(() => void loadShells());
   return (
     <>
+      <SettingRow label={t("settings.defaultShell")} hint={t("settings.defaultShellHint")}>
+        <Select aria-label={t("settings.defaultShell")} value={chosenShell() ?? ""}
+          onChange={(event) => chooseShell(event.currentTarget.value || null)}>
+          <option value="">{t("settings.systemShell")}</option>
+          <For each={installedShells()}>{(shell) => <option value={shell.id}>{shell.name}</option>}</For>
+        </Select>
+      </SettingRow>
       <NumberRow field="fontSize" label={t("settings.fontSize")} range={FONT_SIZE_RANGE} step={1} draft={props.drafts?.fontSize}
         error={(value) => t("settings.fontSizeError").replace("{value}", value)} />
       <NumberRow field="scrollback" label={t("settings.scrollback")} hint={t("settings.scrollbackHint")}

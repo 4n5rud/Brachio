@@ -208,6 +208,7 @@ pub async fn terminal_open(
     }
     request.cwd = owner.task.worktree_path;
     request.session_id = owner.conversation;
+    let shell_id = owner.shell;
     request.project_root = brachio_store::RepoRecord::get(&*database.lock()?, &owner.task.repo_id)
         .ok()
         .map(|repo| repo.path);
@@ -249,7 +250,11 @@ pub async fn terminal_open(
             request = returned_request;
             prepared?
         }
-        None => (shell_command(), PromptDelivery::None, false),
+        None => (
+            shell_command(shell_id.as_deref()),
+            PromptDelivery::None,
+            false,
+        ),
     };
     environment.extend(command.env);
     if let Some(key) = request.key.clone() {
@@ -477,11 +482,22 @@ fn installed(kind: AgentKind) -> CommandResult<Installed> {
         .ok_or_else(|| format!("{} is not installed or not on PATH", kind.program()))
 }
 
-fn shell_command() -> ResolvedCommand {
-    ResolvedCommand {
-        program: default_shell(),
-        args: Vec::new(),
-        env: Vec::new(),
+/// The shell a tab asked for, else the one chosen in Settings, else the system's own.
+fn shell_command(requested: Option<&str>) -> ResolvedCommand {
+    match requested
+        .and_then(crate::terminal_shells::find)
+        .or_else(crate::terminal_shells::chosen_default)
+    {
+        Some(shell) => ResolvedCommand {
+            program: shell.program,
+            args: shell.args,
+            env: Vec::new(),
+        },
+        None => ResolvedCommand {
+            program: default_shell(),
+            args: Vec::new(),
+            env: Vec::new(),
+        },
     }
 }
 
@@ -526,7 +542,7 @@ pub(crate) fn send(channel: &Channel<InvokeResponseBody>, body: InvokeResponseBo
 /// report how they ended in that shell's own syntax.
 #[tauri::command]
 pub fn terminal_shell_kind() -> &'static str {
-    shell_kind(&default_shell())
+    shell_kind(&shell_command(None).program)
 }
 
 fn shell_kind(program: &std::path::Path) -> &'static str {

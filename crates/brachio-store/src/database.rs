@@ -21,6 +21,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0014_task_activity.sql"),
     include_str!("../migrations/0015_task_pins.sql"),
     include_str!("../migrations/0016_task_compare_group.sql"),
+    include_str!("../migrations/0017_task_tabs.sql"),
 ];
 
 /// Why a storage call failed.

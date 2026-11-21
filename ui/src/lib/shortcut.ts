@@ -17,6 +17,7 @@ interface ShortcutDef {
 export const SHORTCUTS = {
   quickOpen: { label: "quickOpen.title", mac: "⌘P", other: "Ctrl+Shift+P" },
   newTask: { label: "newTask.title", mac: "⌘N", other: "Ctrl+Shift+N" },
+  newTab: { label: "task.newTabShortcut", mac: "⌘T", other: "Ctrl+Shift+T" },
   recentTasks: { label: "recent.title", mac: "⌃Tab", other: "Ctrl+Tab" },
   recentTasksTerminal: { label: "recent.title", mac: "⌘L", other: "Ctrl+Shift+L" },
   settings: { label: "titlebar.settings", mac: "⌘,", other: "Ctrl+," },
@@ -42,6 +43,12 @@ type KeyPress = Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "
 export function isNewTaskShortcut(event: KeyPress, mac = isMac): boolean {
   if (event.key.toLowerCase() !== "n" || event.altKey) return false;
   return mac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey;
+}
+
+/** "New tab": ⌘T on macOS, Ctrl+Shift+T elsewhere, because plain Ctrl+T belongs to the terminal. */
+export function isNewTabShortcut(event: KeyPress, mac = isMac): boolean {
+  if (event.key.toLowerCase() !== "t" || event.altKey) return false;
+  return mac ? event.metaKey && !event.shiftKey && !event.ctrlKey : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
 export function isQuickOpenShortcut(event: KeyPress, mac = isMac): boolean {
@@ -114,6 +121,8 @@ export const TOGGLE_INSPECTOR_KEYS = keysOf(SHORTCUTS.inspector);
 export const QUICK_OPEN_KEYS = keysOf(SHORTCUTS.quickOpen);
 
 export const NEW_TASK_KEYS = keysOf(SHORTCUTS.newTask);
+
+export const NEW_TAB_KEYS = keysOf(SHORTCUTS.newTab);
 
 export const SHORTCUT_LIST_KEYS = keysOf(SHORTCUTS.shortcutList);
 
