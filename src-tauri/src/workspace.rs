@@ -31,7 +31,10 @@ impl Database {
 pub struct TaskWorktreeLocks(Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>);
 
 impl TaskWorktreeLocks {
-    async fn acquire(&self, repo_id: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    pub(crate) async fn acquire(
+        &self,
+        repo_id: &str,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
         let lock = {
             let mut locks = self
                 .0
@@ -1603,7 +1606,7 @@ fn to_text(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
-fn agent_name(agent: AgentKind) -> &'static str {
+pub(crate) fn agent_name(agent: AgentKind) -> &'static str {
     match agent {
         AgentKind::ClaudeCode => "claude_code",
         AgentKind::Codex => "codex",
@@ -1617,11 +1620,11 @@ fn folder_name(path: &Path) -> String {
     )
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();

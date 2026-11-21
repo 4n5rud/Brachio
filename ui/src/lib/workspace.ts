@@ -54,6 +54,15 @@ export interface FolderRepo {
   added: boolean;
 }
 export const listFolderRepos = (id: string) => invoke<FolderRepo[]>("folder_source_repos", { id });
+/** A Git worktree of a project that no task uses yet. */
+export interface ImportableWorktree {
+  path: string;
+  branch: string;
+}
+export const listImportableWorktrees = (repoId: string) =>
+  invoke<ImportableWorktree[]>("worktree_import_candidates", { repoId });
+export const importWorktrees = (repoId: string, paths: string[]) =>
+  invoke<TaskRecord[]>("worktree_import", { repoId, paths });
 export const listTasks = () => invoke<TaskRecord[]>("task_list");
 /** A task that was just created, with the setup commands its repository asks to run. */
 export type CreatedTask = TaskRecord & { setupCommands: string[]; setupCopyError?: string | null };

@@ -29,6 +29,7 @@ mod terminal_status;
 mod tray_menu;
 mod update_release;
 mod workspace;
+mod worktree_import;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -317,6 +318,8 @@ pub fn run() {
             workspace::task_file_preview,
             workspace::task_file_media,
             workspace::task_changes,
+            worktree_import::worktree_import_candidates,
+            worktree_import::worktree_import,
             pr_status::task_pr_status,
             qa_run::qa_run,
             qa_run::qa_last_result,

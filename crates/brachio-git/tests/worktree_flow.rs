@@ -474,3 +474,23 @@ fn repositories_inside_a_folder_are_found_two_levels_down_and_their_own_folders_
         .collect();
     assert_eq!(found, ["group/two", "one"]);
 }
+
+#[test]
+fn worktrees_made_outside_brachio_are_listed_and_importable() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    let outside = trees.path().join("hotfix");
+    add(&git, "fix/crash", &outside);
+    let entries = brachio_git::list_worktrees(&git).expect("list worktrees");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].branch.as_deref(), Some("main"));
+    assert_eq!(entries[1].branch.as_deref(), Some("fix/crash"));
+    let found = brachio_git::importable(&entries, &[repo.path().to_path_buf()]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        brachio_git::path_key(&found[0].path),
+        brachio_git::path_key(&outside)
+    );
+    assert!(brachio_git::importable(&entries, &[outside]).is_empty());
+}
