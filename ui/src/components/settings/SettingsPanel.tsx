@@ -42,6 +42,7 @@ const PAGES: { page: SettingsPage; icon: IconName; label: () => string; desktopO
 const SHORTCUTS: { label: () => string; mac: string; windows: string }[] = [
   { label: () => t("quickOpen.title"), mac: "⌘P", windows: "Ctrl+Shift+P" },
   { label: () => t("newTask.title"), mac: "⌘N", windows: "Ctrl+Shift+N" },
+  { label: () => t("titlebar.settings"), mac: "⌘,", windows: "Ctrl+," },
   { label: () => t("settings.shortcutSidebar"), mac: "⌘B", windows: "Ctrl+Shift+B" },
   { label: () => t("settings.shortcutInspector"), mac: "⌘⌥B", windows: "Ctrl+Shift+Alt+B" },
   { label: () => t("settings.shortcutCreate"), mac: "⌘⏎", windows: "Ctrl+⏎" },

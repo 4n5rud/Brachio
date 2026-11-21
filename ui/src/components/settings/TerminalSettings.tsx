@@ -1,5 +1,6 @@
 import { createSignal, type Accessor } from "solid-js";
 import { Input } from "../ui/Input";
+import { Toggle } from "../ui/Toggle";
 import { t } from "../../i18n";
 import {
   FONT_SIZE_RANGE,
@@ -15,7 +16,7 @@ const inRange = (value: number, range: Range) => Number.isInteger(value) && valu
 
 /** A number field that applies valid values at once and keeps the last valid one while a typed value is out of range. */
 function NumberRow(props: {
-  field: keyof TerminalValues;
+  field: "fontSize" | "scrollback";
   label: string;
   hint?: string;
   range: Range;
@@ -58,6 +59,8 @@ export function TerminalSettings(props: { drafts?: Partial<Record<keyof Terminal
       <NumberRow field="scrollback" label={t("settings.scrollback")} hint={t("settings.scrollbackHint")}
         range={SCROLLBACK_RANGE} step={1000} draft={props.drafts?.scrollback}
         error={(value) => t("settings.scrollbackError").replace("{value}", Number(value).toLocaleString())} />
+      <Toggle checked={terminalSettings().themeColors} label={t("settings.terminalColors")}
+        hint={t("settings.terminalColorsHint")} onChange={(themeColors) => updateTerminalSettings({ themeColors })} />
     </>
   );
 }

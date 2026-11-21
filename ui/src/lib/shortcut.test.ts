@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTaskShortcut, panelToggleShortcut } from "./shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, panelToggleShortcut } from "./shortcut";
 
 const key = (pressed: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => ({
   altKey: false,
@@ -32,5 +32,15 @@ describe("panelToggleShortcut", () => {
     expect(panelToggleShortcut(key({ key: "b", ctrlKey: true }), false)).toBeUndefined();
     expect(panelToggleShortcut(key({ key: "B", ctrlKey: true, shiftKey: true }), false)).toBe("sidebar");
     expect(panelToggleShortcut({ ...key({ key: "B", ctrlKey: true, shiftKey: true }), altKey: true }, false)).toBe("inspector");
+  });
+});
+
+describe("isSettingsShortcut", () => {
+  it("is Cmd+, on macOS and Ctrl+, elsewhere", () => {
+    expect(isSettingsShortcut(key({ key: ",", metaKey: true }), true)).toBe(true);
+    expect(isSettingsShortcut(key({ key: ",", ctrlKey: true }), true)).toBe(false);
+    expect(isSettingsShortcut(key({ key: ",", ctrlKey: true }), false)).toBe(true);
+    expect(isSettingsShortcut(key({ key: ",", ctrlKey: true, shiftKey: true }), false)).toBe(false);
+    expect(isSettingsShortcut(key({ key: ".", ctrlKey: true }), false)).toBe(false);
   });
 });

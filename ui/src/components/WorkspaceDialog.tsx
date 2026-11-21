@@ -2,7 +2,7 @@ import { Button } from "./ui/Button";
 import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
-import { NEW_TASK_KEYS } from "../lib/shortcut";
+import { NEW_TASK_KEYS, SETTINGS_KEYS } from "../lib/shortcut";
 import { shortBranch, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
 import type { ColorTheme, ThemeMode } from "../lib/theme";
@@ -183,7 +183,8 @@ export function WorkspaceDialog(props: {
                             ? <><span>{fileDir(entry.path)}</span><span>{t("quickOpen.file")}</span></>
                             : <span>{t("quickOpen.command")}</span>}
                         end={highlight() === index() ? <Kbd>↵</Kbd>
-                          : entry.kind === "command" && entry.id === "newTask" ? <Kbd>{NEW_TASK_KEYS}</Kbd> : undefined} />
+                          : entry.kind === "command" && entry.id === "newTask" ? <Kbd>{NEW_TASK_KEYS}</Kbd>
+                            : entry.kind === "command" && entry.id === "settings" ? <Kbd>{SETTINGS_KEYS}</Kbd> : undefined} />
                     )}</For>
                   </Show>
                 )}</For>
