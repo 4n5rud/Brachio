@@ -756,6 +756,7 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 22%, transparent);
 }
 .input-mono { font-family: var(--font-mono); }
+.input-compact { min-height: var(--size-row); padding: 3px 8px; }
 .input-area { min-height: 88px; line-height: 1.55; resize: vertical; }
 .input[aria-invalid="true"] { border-color: var(--color-status-error); }
 .input:disabled { opacity: 0.45; }

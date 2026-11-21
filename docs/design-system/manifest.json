@@ -10,6 +10,7 @@
     "components/ApprovalBar/README.md",
     "components/BoardTile/README.md",
     "components/Button/README.md",
+    "components/Combobox/README.md",
     "components/ConfirmDialog/README.md",
     "components/Dialog/README.md",
     "components/DiffStat/README.md",
@@ -17,6 +18,7 @@
     "components/IconButton/README.md",
     "components/Input/README.md",
     "components/Kbd/README.md",
+    "components/Menu/README.md",
     "components/Notice/README.md",
     "components/PrChip/README.md",
     "components/SegmentedControl/README.md",
@@ -27,6 +29,7 @@
     "components/ThemePicker/README.md",
     "components/TitleBar/README.md",
     "components/Toast/README.md",
+    "components/Tooltip/README.md",
     "components/Toggle/README.md",
     "components/bundle.css",
     "tokens.css"
@@ -52,6 +55,11 @@
       "name": "Button",
       "group": "Actions",
       "summary": "A text button for one clear action; primary marks the single most likely next step in a view."
+    },
+    {
+      "name": "Combobox",
+      "group": "Inputs",
+      "summary": "An input with a chevron and a list of choices under it; typing filters and the chevron rotates while open."
     },
     {
       "name": "ConfirmDialog",
@@ -97,6 +105,11 @@
       "name": "LaterConvenience",
       "group": "Later",
       "page": true
+    },
+    {
+      "name": "Menu",
+      "group": "Overlays",
+      "summary": "A list of actions opened from a button, with submenu rows, hints and shortcut key caps."
     },
     {
       "name": "Notice",
@@ -847,6 +860,11 @@
       "name": "Toast",
       "group": "Feedback",
       "summary": "A short message that confirms an action finished or failed, shown bottom center above the status bar."
+    },
+    {
+      "name": "Tooltip",
+      "group": "Overlays",
+      "summary": "A small label above an icon-only control that names the action, with its shortcut as key caps."
     },
     {
       "name": "Toggle",

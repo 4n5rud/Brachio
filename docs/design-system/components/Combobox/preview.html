@@ -1,0 +1,27 @@
+<!-- @dsCard group="Inputs" height=320 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>preview</title>
+<style>
+body{background:var(--color-canvas);padding:16px;}
+.col{display:grid;gap:12px;max-width:360px}
+.shell{position:relative;display:flex}
+.shell .input{flex:1;padding-right:30px}
+.chev{position:absolute;top:50%;right:4px;width:20px;height:20px;transform:translateY(-50%);display:grid;place-items:center;border:0;border-radius:var(--radius-xs);background:transparent;color:var(--color-text-3)}
+.chev svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.chev.open svg{transform:rotate(180deg)}
+.list{margin-top:4px;padding:4px;background:var(--color-panel);border:1px solid var(--color-line-strong);border-radius:var(--radius-md);box-shadow:var(--shadow-overlay);font-size:var(--text-sm)}
+.row{display:flex;align-items:center;height:var(--size-row);padding:0 10px;border-radius:6px}
+.row.on{background:var(--color-hover)}
+.row small{margin-left:auto;color:var(--color-text-3);font-size:var(--text-xs)}
+</style></head>
+<body>
+<div class="col">
+<label class="field"><span class="field-label">Base branch</span><div class="shell"><input class="input input-mono" value="main"><button class="chev"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></button></div></label>
+<div>
+<label class="field"><span class="field-label">Base branch</span><div class="shell"><input class="input input-mono is-focus" value="rel"><button class="chev open"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></button></div></label>
+<div class="list"><div class="row on">release/0.4<small>local and origin</small></div><div class="row">release/0.3<small>origin</small></div></div>
+</div>
+</div>
+</body>
+</html>

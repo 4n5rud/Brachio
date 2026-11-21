@@ -50,6 +50,10 @@
   resize: vertical;
   line-height: 1.55;
 }
+.input-compact {
+  min-height: var(--size-row);
+  padding: 3px 8px;
+}
 .input-mono {
   font-family: var(--font-mono);
 }

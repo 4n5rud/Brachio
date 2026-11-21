@@ -7,6 +7,8 @@ A text field with its label above it, for the new task sheet and settings.
 - Monospace (`input-mono`) for branches, paths and commands.
 - A hint under the field in `caption` `color-text-3`. An error replaces the hint, in `color-status-error`, and says what is wrong and how to fix it.
 - Multiline (`input-area`, 88px min) for the task prompt.
+- `input-compact` is 28px (`size-row`) with 8px side padding, for toolbars, filters and dense forms. Everything else stays 32px.
+- A field that opens a list is a Combobox, which adds a chevron to this shell.
 
 ## Anatomy
 32px min height, padding 7px 10px, radius 7px, `color-canvas` fill (sunk below the panel), 1px `color-line-strong` border.
