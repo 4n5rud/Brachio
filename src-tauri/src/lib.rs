@@ -3,6 +3,7 @@
 mod agent_accounts;
 mod child_task_request;
 mod external_link;
+mod file_in_use;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
@@ -15,6 +16,7 @@ mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
 mod task_activity;
+mod task_folder;
 mod task_ports;
 mod task_tabs;
 mod terminal;
@@ -251,6 +253,9 @@ pub fn run() {
             workspace::task_pr_feedback,
             workspace::task_git_action,
             open_local_port,
+            task_folder::task_reveal,
+            task_folder::task_open_folder,
+            task_folder::open_log_folder,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Brachio");

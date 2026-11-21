@@ -2,6 +2,7 @@ import { Input, TextArea } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createSignal, type JSX } from "solid-js";
 import { t } from "../i18n";
+import { requestShell } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
 import { openExternalLink } from "../lib/pr-status";
 import { prReport, refreshPrStatus } from "../lib/pr-status-store";
@@ -191,6 +192,9 @@ export function TaskGitActions(props: {
         ))}
         <ActionRow>
           <Button size="sm" icon="download" disabled={busy()} onClick={() => void push()}>{t("git.push")}</Button>
+          <Show when={failureOf(pushOutcome())?.kind === "rejected"}>
+            <Button size="sm" icon="terminal" onClick={() => requestShell(props.taskId)}>{t("git.openShell")}</Button>
+          </Show>
         </ActionRow>
         <Show when={!existing() || existing()?.state !== "open"}>
           <form class="insp-form" onSubmit={(event) => {
