@@ -263,6 +263,8 @@ export const ko: Messages = {
   "files.title": "파일",
   "files.filter": "파일 찾기",
   "files.empty": "일치하는 파일이 없어요.",
+  "files.tree": "파일 목록",
+  "files.results": "검색 결과",
   "files.more": "처음 100개 결과를 보여 줘요. 검색 범위를 좁혀 주세요.",
   "files.loading": "미리보기 불러오는 중…",
   "files.binary": "UTF-8 텍스트 파일만 미리 볼 수 있어요.",
