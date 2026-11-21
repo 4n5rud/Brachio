@@ -11,9 +11,11 @@ pub const MAX_TASK_ACTIVITY: usize = 200;
 pub const MAX_ACTIVITY_DETAIL_CHARS: usize = 200;
 
 /// What can be recorded. The interface chooses the wording for each.
-pub const ACTIVITY_KINDS: [&str; 15] = [
+pub const ACTIVITY_KINDS: [&str; 17] = [
     "permission_asked",
     "approval_answered",
+    "approval_auto_allowed",
+    "approval_closed_elsewhere",
     "question_asked",
     "auth_needed",
     "agent_error",

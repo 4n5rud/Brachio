@@ -19,6 +19,7 @@ import { TaskFiles } from "./TaskFiles";
 import { TaskQaRun } from "./TaskQaRun";
 import { TaskOrchestration } from "./TaskOrchestration";
 import { TaskActivityList } from "./TaskActivityList";
+import { TaskAlwaysAllow } from "./TaskAlwaysAllow";
 import { listTaskActivity } from "../lib/task-activity";
 
 /** How often the open Activity tab reloads, since the core records events the interface never sees. */
@@ -165,6 +166,7 @@ export function Inspector(props: {
           </section>
         </Match>
         <Match when={pane() === "activity"}>
+          <Show when={props.task.id} keyed>{(id) => <TaskAlwaysAllow taskId={id} />}</Show>
           <TaskActivityList items={history.latest?.id === props.task.id ? history.latest.items : []} now={props.now} />
         </Match>
       </Switch>
