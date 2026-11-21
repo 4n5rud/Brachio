@@ -28,6 +28,8 @@ export function TaskList(props: {
   selectedId: string | undefined;
   onSelect: (id: string) => void;
   onNewTask?: (repoId: string) => void;
+  /** Opens the dialog that imports a Git project's existing worktrees. */
+  onImportWorktrees?: (repoId: string) => void;
   /** Adds a git repository found inside a folder project as a project of its own. */
   onAddFolderRepo?: (path: string) => Promise<void>;
   onAddRepo?: (kind: "git" | "folder") => void;
@@ -142,6 +144,11 @@ export function TaskList(props: {
                     <span class="project-name" title={name()}>{name()}</span>
                     <span class="count">{tasks().length}</span>
                   </button>
+                  <Show when={id && !folderProjects().has(id) && props.onImportWorktrees}>
+                    <IconButton class="project-import" icon="download" size="sm"
+                      title={t("sidebar.importWorktrees")} label={t("sidebar.importWorktreesIn").replace("{project}", () => name())}
+                      onClick={() => props.onImportWorktrees?.(id)} />
+                  </Show>
                   <Show when={id && props.onNewTask}>
                     <IconButton class="project-new-task" icon="plus" size="sm"
                       title={t("sidebar.newTask")} label={t("sidebar.newTaskIn").replace("{project}", () => name())}
