@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
-use brachio_git::local_head;
+use brachio_git::{local_head, Git};
 use brachio_process::output_capped;
 use thiserror::Error;
 
@@ -146,6 +146,9 @@ pub struct VerifiedQaRun {
     pub sha: String,
     /// Whether Git reported the same HEAD after execution.
     pub head_unchanged: bool,
+    /// No tracked, staged or untracked changes existed before the command and none after it.
+    /// Without this the run tested uncommitted content, not the commit at `sha`.
+    pub clean_worktree: bool,
     /// How the approved execution ended.
     pub exit: QaExit,
     /// Elapsed time spent executing and collecting process output.
@@ -188,6 +191,7 @@ pub fn run_approved(
     let [program, args @ ..] = configured.argv.as_slice() else {
         unreachable!("QaCommand construction always includes the executable")
     };
+    let clean_before = worktree_is_clean(&configured.cwd);
     let started = Instant::now();
     let result = output_capped(
         Command::new(program)
@@ -198,6 +202,7 @@ pub fn run_approved(
     );
     let elapsed = started.elapsed();
     let head_unchanged = local_head(&configured.cwd).is_ok_and(|head| head == sha);
+    let clean_worktree = clean_before && worktree_is_clean(&configured.cwd);
     let (exit, stdout, stderr) = match result {
         Ok(capped) => {
             let status = capped.output.status;
@@ -240,6 +245,7 @@ pub fn run_approved(
     Ok(VerifiedQaRun {
         sha,
         head_unchanged,
+        clean_worktree,
         exit,
         elapsed,
         stdout,
@@ -283,4 +289,12 @@ fn redact_output(bytes: &[u8], redact: &[&str]) -> QaOutput {
         truncated = true;
     }
     QaOutput { text, truncated }
+}
+
+/// False when Git reports any change, or cannot be asked: a run is only commit evidence on a
+/// worktree known to be clean.
+fn worktree_is_clean(cwd: &Path) -> bool {
+    Git::new(cwd)
+        .run_text(&["status", "--porcelain", "--untracked-files=all"])
+        .is_ok_and(|status| status.trim().is_empty())
 }
