@@ -9,10 +9,10 @@ use brachio_core::task_graph::TaskState;
 use brachio_git::Git;
 use brachio_runtime::mailbox::MailResponse;
 use brachio_store::{
-    decide_handoff, decide_handoff_then, fail_lost, load_graph, qa_result_by_id, running_children,
-    schedule_next, scheduled_leads, scheduler_enabled, send_message, set_scheduler_enabled,
-    state_reason, submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff, NewMessage,
-    RepoRecord, TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
+    decide_handoff, decide_handoff_then, fail_lost, fail_running, load_graph, qa_result_by_id,
+    running_children, schedule_next, scheduled_leads, scheduler_enabled, send_message,
+    set_scheduler_enabled, state_reason, submit_handoff, Handoff, HandoffReview, HandoffSource,
+    NewHandoff, NewMessage, RepoRecord, TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -407,16 +407,33 @@ pub fn schedule_all(app: &AppHandle) {
 
 fn start_ready_children(database: &Database) -> Result<Vec<CreatedTask>, String> {
     let mut connection = database.lock()?;
-    let now = crate::pr_status::now_ms();
+    start_children(&mut connection, crate::pr_status::now_ms(), |repo| {
+        brachio_git::read_setup(repo)
+            .map(|setup| setup.run)
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// A child whose setup cannot be read is failed with that error rather than launched as if it
+/// had no setup; the failure blocks its dependents and shows as the task's reason.
+fn start_children(
+    connection: &mut Connection,
+    now: i64,
+    setup_of: impl Fn(&Path) -> Result<Vec<String>, String>,
+) -> Result<Vec<CreatedTask>, String> {
     let mut started = Vec::new();
-    for lead in scheduled_leads(&connection).map_err(|e| e.to_string())? {
-        for id in schedule_next(&mut connection, &lead, now).map_err(|e| e.to_string())? {
-            let task = TaskRecord::get(&connection, &id).map_err(|e| e.to_string())?;
-            let repo = RepoRecord::get(&connection, &task.repo_id).map_err(|e| e.to_string())?;
-            let setup = brachio_git::read_setup(&repo.path)
-                .map(|setup| setup.run)
-                .unwrap_or_default();
-            started.push(CreatedTask::started(task, setup));
+    for lead in scheduled_leads(connection).map_err(|e| e.to_string())? {
+        for id in schedule_next(connection, &lead, now).map_err(|e| e.to_string())? {
+            let task = TaskRecord::get(connection, &id).map_err(|e| e.to_string())?;
+            let repo = RepoRecord::get(connection, &task.repo_id).map_err(|e| e.to_string())?;
+            match setup_of(&repo.path) {
+                Ok(setup) => started.push(CreatedTask::started(task, setup)),
+                Err(error) => {
+                    let reason = format!("invalid setup configuration: {error}");
+                    tracing::warn!(task = %id, %reason, "child task not started");
+                    fail_running(connection, &[id], &reason, now).map_err(|e| e.to_string())?;
+                }
+            }
         }
     }
     Ok(started)
@@ -565,7 +582,9 @@ mod tests {
     use brachio_runtime::mailbox::MailResponse;
     use brachio_store::open_in_memory;
 
-    use super::{build_view, handoff_request, review_decision, review_handoff, worktree_head};
+    use super::{
+        build_view, handoff_request, review_decision, review_handoff, start_children, worktree_head,
+    };
     use crate::workspace::Database;
 
     fn git(dir: &Path, args: &[&str]) {
@@ -798,5 +817,16 @@ mod tests {
             build_view(&db, "lead").unwrap().children[0].state,
             "review_required"
         );
+    }
+
+    #[test]
+    fn a_child_with_invalid_setup_fails_instead_of_starting_with_none() {
+        let (_dir, mut db) = setup();
+        brachio_store::set_scheduler_enabled(&db, "lead", true).unwrap();
+        let started = start_children(&mut db, 1, |_| Err("bad brachio.toml".to_owned())).unwrap();
+        assert!(started.is_empty());
+        assert_eq!(build_view(&db, "lead").unwrap().children[0].state, "failed");
+        let reason = brachio_store::state_reason(&db, "child").unwrap();
+        assert!(reason.is_some_and(|r| r.contains("invalid setup configuration: bad brachio.toml")));
     }
 }

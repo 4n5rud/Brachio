@@ -155,7 +155,8 @@ pub struct QaReport {
     pub duration_ms: u64,
     /// The commit that was checked out when the run started.
     pub sha: String,
-    /// Brachio ran the command itself and the same commit was still checked out afterwards.
+    /// Brachio ran the command itself on a clean worktree and the same commit was still checked
+    /// out afterwards.
     /// An agent's own claim that tests passed is never this.
     pub verified_by_brachio: bool,
     /// Captured standard output, capped.
@@ -181,7 +182,9 @@ fn report(command: &QaCommand, run: &VerifiedQaRun) -> QaReport {
         exit_code,
         duration_ms: u64::try_from(run.elapsed.as_millis()).unwrap_or(u64::MAX),
         sha: run.sha.clone(),
-        verified_by_brachio: run.head_unchanged && outcome != QaOutcome::ProcessError,
+        verified_by_brachio: run.head_unchanged
+            && run.clean_worktree
+            && outcome != QaOutcome::ProcessError,
         stdout: run.stdout.text.clone(),
         stderr: run.stderr.text.clone(),
         truncated: run.stdout.truncated || run.stderr.truncated,
@@ -226,6 +229,8 @@ mod tests {
     use std::process::Command;
 
     use super::*;
+
+    type MakeDirty = fn(&Path);
 
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("dir");
@@ -293,6 +298,51 @@ mod tests {
         assert_eq!(report.exit_code, Some(0));
         assert_eq!(report.sha, local_head(dir.path()).expect("head"));
         assert!(report.verified_by_brachio);
+    }
+
+    #[test]
+    fn a_dirty_worktree_is_never_verification_of_the_commit() {
+        let dirty: [(&str, MakeDirty); 3] = [
+            ("untracked", |dir| {
+                fs::write(dir.join("new.txt"), "x").expect("write")
+            }),
+            ("staged", |dir| {
+                fs::write(dir.join("new.txt"), "x").expect("write");
+                assert!(Command::new("git")
+                    .args(["add", "new.txt"])
+                    .current_dir(dir)
+                    .status()
+                    .expect("git")
+                    .success());
+            }),
+            ("modified", |dir| {
+                fs::write(dir.join("tracked.txt"), "a").expect("write");
+                let git = |args: &[&str]| {
+                    assert!(Command::new("git")
+                        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                        .args(args)
+                        .current_dir(dir)
+                        .status()
+                        .expect("git")
+                        .success());
+                };
+                git(&["add", "tracked.txt"]);
+                git(&["commit", "-q", "-m", "t"]);
+                fs::write(dir.join("tracked.txt"), "b").expect("write");
+            }),
+        ];
+        for (name, make_dirty) in dirty {
+            let dir = repo();
+            make_dirty(dir.path());
+            let command = command(dir.path());
+            let GatedOutcome::Ran(report) =
+                run_after_approval(&command, &[], |_| true).expect("ran")
+            else {
+                panic!("expected a run");
+            };
+            assert_eq!(report.outcome, QaOutcome::Passed, "{name}");
+            assert!(!report.verified_by_brachio, "{name}");
+        }
     }
 
     #[test]

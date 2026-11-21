@@ -162,6 +162,20 @@ pub fn fail_lost(
     task_ids: &[String],
     now_ms: i64,
 ) -> Result<Vec<String>, OrchestrationError> {
+    fail_running(connection, task_ids, LOST_AFTER_RESTART, now_ms)
+}
+
+/// Fails each of these tasks that is still running, recording `reason`, which also blocks what
+/// depends on them. Returns the tasks that were failed.
+///
+/// # Errors
+/// Fails when the database fails.
+pub fn fail_running(
+    connection: &mut Connection,
+    task_ids: &[String],
+    reason: &str,
+    now_ms: i64,
+) -> Result<Vec<String>, OrchestrationError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut failed = Vec::new();
     for id in task_ids {
@@ -178,7 +192,7 @@ pub fn fail_lost(
         transition_in(&transaction, id, TaskState::Failed, now_ms)?;
         transaction.execute(
             "UPDATE task_orchestration SET reason = ?2 WHERE task_id = ?1",
-            params![id, LOST_AFTER_RESTART],
+            params![id, reason],
         )?;
         failed.push(id.clone());
     }

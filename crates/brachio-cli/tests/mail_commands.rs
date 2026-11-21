@@ -12,36 +12,56 @@ const BRACHIO: &str = env!("CARGO_BIN_EXE_brachio");
 /// Accepts one request, hands it back and answers with `response`.
 fn app(name: &str, response: MailResponse) -> tokio::task::JoinHandle<MailRequest> {
     let listener = transport::listen(name).expect("listen");
+    tokio::spawn(async move { serve_one(&listener, &response).await })
+}
+
+/// Accepts one connection per response, in order, and returns the requests it saw.
+fn app_in_order(
+    name: &str,
+    responses: Vec<MailResponse>,
+) -> tokio::task::JoinHandle<Vec<MailRequest>> {
+    let listener = transport::listen(name).expect("listen");
     tokio::spawn(async move {
-        use interprocess::local_socket::tokio::prelude::*;
-        let stream = listener.accept().await.expect("accept");
-        let mut reader = BufReader::new(stream);
-        let message = read_message(&mut reader, MAX_MESSAGE)
-            .await
-            .expect("read")
-            .expect("a request");
-        let request: MailRequest = serde_json::from_slice(&message).expect("decode");
-        write_message(reader.get_mut(), &response, MAX_RESPONSE)
-            .await
-            .expect("answer");
-        if let (MailRequest::Check { peek: false, .. }, MailResponse::Messages { messages, .. }) =
-            (&request, &response)
-        {
-            if !messages.is_empty() {
-                let ack = read_message(&mut reader, MAX_MESSAGE)
-                    .await
-                    .expect("read ack")
-                    .expect("an acknowledgement");
-                let ids = messages.iter().map(|message| message.id.clone()).collect();
-                assert_eq!(
-                    serde_json::from_slice::<MailRequest>(&ack).expect("decode ack"),
-                    MailRequest::Ack { ids }
-                );
-            }
+        let mut requests = Vec::new();
+        for response in &responses {
+            requests.push(serve_one(&listener, response).await);
         }
-        let _ = reader.get_mut().shutdown().await;
-        request
+        requests
     })
+}
+
+async fn serve_one(
+    listener: &interprocess::local_socket::tokio::Listener,
+    response: &MailResponse,
+) -> MailRequest {
+    use interprocess::local_socket::tokio::prelude::*;
+    let stream = listener.accept().await.expect("accept");
+    let mut reader = BufReader::new(stream);
+    let message = read_message(&mut reader, MAX_MESSAGE)
+        .await
+        .expect("read")
+        .expect("a request");
+    let request: MailRequest = serde_json::from_slice(&message).expect("decode");
+    write_message(reader.get_mut(), response, MAX_RESPONSE)
+        .await
+        .expect("answer");
+    if let (MailRequest::Check { peek: false, .. }, MailResponse::Messages { messages, .. }) =
+        (&request, response)
+    {
+        if !messages.is_empty() {
+            let ack = read_message(&mut reader, MAX_MESSAGE)
+                .await
+                .expect("read ack")
+                .expect("an acknowledgement");
+            let ids = messages.iter().map(|message| message.id.clone()).collect();
+            assert_eq!(
+                serde_json::from_slice::<MailRequest>(&ack).expect("decode ack"),
+                MailRequest::Ack { ids }
+            );
+        }
+    }
+    let _ = reader.get_mut().shutdown().await;
+    request
 }
 
 async fn brachio(endpoint: Option<&str>, args: &[&str]) -> (String, String, i32) {
@@ -454,4 +474,185 @@ async fn mcp_lists_child_status_using_the_cli_terminal_identity() {
     assert_eq!(last["result"]["content"][0]["text"], "[]");
     let observed = request.await.expect("receive socket request");
     assert!(matches!(observed, MailRequest::ListTasks { key } if key == "task1:agent"));
+}
+
+fn waiting_message(id: &str) -> MailMessage {
+    MailMessage {
+        id: id.into(),
+        thread_id: id.into(),
+        from: "task2:agent".into(),
+        to: "task1:agent".into(),
+        from_title: Some("Write docs".into()),
+        kind: "status".into(),
+        priority: "normal".into(),
+        subject: "Ready".into(),
+        body: String::new(),
+        payload: None,
+        created_at_ms: 0,
+        read: false,
+    }
+}
+
+#[tokio::test]
+async fn check_wait_looks_without_taking_then_takes_and_acknowledges_what_arrived() {
+    let endpoint = name();
+    let messages = |unread_left| MailResponse::Messages {
+        messages: vec![waiting_message("m5")],
+        unread_left,
+    };
+    let served = app_in_order(&endpoint, vec![messages(1), messages(0)]);
+    let (out, err, code) =
+        brachio(Some(&endpoint), &["check", "--wait", "--timeout-secs", "5"]).await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "m5 [status] from Write docs: Ready");
+    let requests = served.await.expect("app task");
+    assert!(matches!(requests[0], MailRequest::Check { peek: true, .. }));
+    assert!(matches!(
+        requests[1],
+        MailRequest::Check { peek: false, .. }
+    ));
+}
+
+#[tokio::test]
+async fn check_peek_takes_nothing_and_sends_no_acknowledgement() {
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::Messages {
+            messages: vec![waiting_message("m6")],
+            unread_left: 0,
+        },
+    );
+    let (out, _, code) = brachio(Some(&endpoint), &["check", "--peek"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "m6 [status] from Write docs: Ready");
+    assert!(matches!(
+        served.await.expect("app task"),
+        MailRequest::Check { peek: true, .. }
+    ));
+}
+
+#[tokio::test]
+async fn inbox_lists_recent_mail_with_its_limit() {
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::Messages {
+            messages: vec![waiting_message("m7")],
+            unread_left: 0,
+        },
+    );
+    let (out, _, code) = brachio(Some(&endpoint), &["inbox", "--limit", "5"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "m7 [status] from Write docs: Ready");
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::Inbox {
+            key: "task1:agent".into(),
+            limit: Some(5)
+        }
+    );
+}
+
+#[tokio::test]
+async fn peers_prints_key_title_and_branch_or_says_there_are_none() {
+    use brachio_runtime::mailbox::Peer;
+
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::Peers {
+            peers: vec![Peer {
+                key: "task2:agent".into(),
+                title: "Write docs".into(),
+                branch: "brachio/write-docs".into(),
+            }],
+        },
+    );
+    let (out, _, code) = brachio(Some(&endpoint), &["peers"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "task2:agent  Write docs  (brachio/write-docs)");
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::Peers {
+            key: "task1:agent".into()
+        }
+    );
+
+    let endpoint = name();
+    app(&endpoint, MailResponse::Peers { peers: vec![] });
+    let (out, _, _) = brachio(Some(&endpoint), &["peers"]).await;
+    assert_eq!(out, "no other open tasks");
+}
+
+#[tokio::test]
+async fn send_to_parent_with_worker_done_reaches_the_app_unresolved() {
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::Sent {
+            id: "m8".into(),
+            thread_id: "m8".into(),
+            to: "lead:agent".into(),
+            duplicate: false,
+        },
+    );
+    let (out, _, code) = brachio(
+        Some(&endpoint),
+        &[
+            "send",
+            "--to",
+            "parent",
+            "--type",
+            "worker_done",
+            "--subject",
+            "done",
+        ],
+    )
+    .await;
+    assert_eq!((out.as_str(), code), ("sent m8 to lead:agent", 0));
+    let MailRequest::Send(sent) = served.await.expect("app task") else {
+        panic!("expected a send request");
+    };
+    assert_eq!(
+        (sent.to.as_str(), sent.kind.as_str()),
+        ("parent", "worker_done")
+    );
+}
+
+#[tokio::test]
+async fn task_handoff_sends_the_summary_and_tests_and_prints_the_short_commit() {
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::HandedOff {
+            commit_sha: "0123456789abcdef0123".into(),
+            changed_paths: 3,
+        },
+    );
+    let (out, err, code) = brachio(
+        Some(&endpoint),
+        &[
+            "task",
+            "handoff",
+            "--summary",
+            "Added parser",
+            "--tests",
+            r#"["cargo test"]"#,
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        out,
+        "handed off 0123456789ab (3 changed files); waiting for the user's review"
+    );
+    assert_eq!(
+        served.await.expect("app task"),
+        MailRequest::Handoff {
+            key: "task1:agent".into(),
+            summary: "Added parser".into(),
+            tests: vec!["cargo test".into()]
+        }
+    );
 }
