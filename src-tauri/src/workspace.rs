@@ -1244,7 +1244,13 @@ pub async fn task_git_action(
 ) -> Result<Option<String>, String> {
     // Held until the action ends so a deletion cannot remove the worktree underneath it.
     let (task, _guard) = lock_open_git_task(&database, &worktrees, &id).await?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let recorded = match &request {
+        TaskGitAction::Commit { .. } => Some("commit"),
+        TaskGitAction::Push => Some("push"),
+        TaskGitAction::CreatePr { .. } => Some("pull request"),
+        _ => None,
+    };
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
         let git = Git::new(&task.worktree_path);
         let branch_ref = format!("refs/heads/{}", task.branch);
         let current_ref = git.run(&["symbolic-ref", "HEAD"]).map_err(to_text)?;
@@ -1281,7 +1287,19 @@ pub async fn task_git_action(
         Ok(None)
     })
     .await
-    .map_err(to_text)?
+    .map_err(to_text)??;
+    if let Some(label) = recorded {
+        if let Err(error) = brachio_store::record_activity(
+            &*database.lock()?,
+            &id,
+            "git_action",
+            Some(label),
+            now_ms(),
+        ) {
+            tracing::warn!(%error, "could not record the git action");
+        }
+    }
+    Ok(outcome)
 }
 
 /// Opens a pull request from the task branch into the repository's default branch.

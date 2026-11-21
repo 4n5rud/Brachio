@@ -4,6 +4,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
+use crate::task_activity_record::record_for_key;
 use crate::StoreError;
 
 /// Longest body, in bytes. Anything bigger belongs in a file the message points to.
@@ -246,6 +247,13 @@ pub fn send_message(
         &format!("SELECT {COLUMNS} FROM messages WHERE id = ?1"),
         [message.id],
         message_from,
+    )?;
+    record_for_key(
+        connection,
+        message.to_key,
+        "mail_received",
+        Some(message.subject),
+        message.created_at_ms,
     )?;
     Ok((stored, false))
 }

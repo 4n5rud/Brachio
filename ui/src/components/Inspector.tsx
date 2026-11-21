@@ -19,7 +19,10 @@ import { TaskFiles } from "./TaskFiles";
 import { TaskQaRun } from "./TaskQaRun";
 import { TaskOrchestration } from "./TaskOrchestration";
 import { TaskActivityList } from "./TaskActivityList";
-import type { TaskActivity } from "./WorkspaceDialog";
+import { listTaskActivity } from "../lib/task-activity";
+
+/** How often the open Activity tab reloads, since the core records events the interface never sees. */
+const ACTIVITY_REFRESH_MS = 5_000;
 
 type Pane = "changes" | "files" | "qa" | "tasks" | "activity";
 
@@ -29,8 +32,6 @@ export function Inspector(props: {
   /** False for a plain folder project, which has no changes, branch or pull request to show. */
   isGit?: boolean;
   onDraft: (taskId: string, text: string) => Promise<boolean>;
-  /** This session's events for the selected task. */
-  activity: readonly TaskActivity[];
   now: number;
   onDiffTotals: (taskId: string, totals: DiffTotals | undefined) => void;
   /** True while a diff is open side by side, so the inspector can widen. */
@@ -57,6 +58,21 @@ export function Inspector(props: {
       }
     },
   );
+  const [history, { refetch: refetchHistory }] = createResource(
+    () => pane() === "activity" && props.task.id,
+    async (id) => {
+      try {
+        return { id, items: await listTaskActivity(id) };
+      } catch {
+        return { id, items: [] };
+      }
+    },
+  );
+  createEffect(() => {
+    if (pane() !== "activity") return;
+    const timer = setInterval(() => void refetchHistory(), ACTIVITY_REFRESH_MS);
+    onCleanup(() => clearInterval(timer));
+  });
   const currentChanges = () => changes()?.id === props.task.id ? changes() : undefined;
   createEffect(() => props.onWide?.(pane() === "changes" && split() && !!currentChanges()?.data?.patch));
   createEffect(on(currentChanges, (result) => {
@@ -145,7 +161,7 @@ export function Inspector(props: {
           </section>
         </Match>
         <Match when={pane() === "activity"}>
-          <TaskActivityList items={props.activity} now={props.now} />
+          <TaskActivityList items={history.latest?.id === props.task.id ? history.latest.items : []} now={props.now} />
         </Match>
       </Switch>
       <Show when={props.task.worktreePath && props.task.id} keyed>

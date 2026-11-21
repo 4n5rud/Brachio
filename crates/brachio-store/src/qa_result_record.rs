@@ -2,6 +2,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+use crate::task_activity_record::record_activity;
 use crate::StoreError;
 
 /// A finished QA run to store.
@@ -102,6 +103,13 @@ pub fn save_qa_result(
         ],
     )?;
     let id = transaction.last_insert_rowid();
+    record_activity(
+        &transaction,
+        result.task_id,
+        "qa_run",
+        Some(result.outcome),
+        result.created_at_ms,
+    )?;
     if result.verified_by_brachio {
         transaction.execute(
             "UPDATE task_handoffs SET verified_qa_result_id = ?1

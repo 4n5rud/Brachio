@@ -34,10 +34,12 @@ const ports = (over: Partial<Parameters<typeof PortsPanel>[0]> = {}) => (
 );
 
 const activity = [
-  { taskId: "a", title: "Add rate limit", key: "notify.permission" as const, detail: "Bash(cargo test -p brachio-auth)", at: NOW - 5_000 },
-  { taskId: "a", title: "Add rate limit", key: "notify.finished" as const, detail: null, at: NOW - 4 * 60_000 },
-  { taskId: "a", title: "Add rate limit", key: "notify.crashed" as const, detail: "exit code 101", at: NOW - 3 * 3_600_000 },
+  { id: 4, kind: "permission_asked", detail: "Bash(cargo test -p brachio-auth)", at: NOW - 5_000 },
+  { id: 3, kind: "qa_run", detail: "passed", at: NOW - 2 * 60_000 },
+  { id: 2, kind: "handoff_recorded", detail: null, at: NOW - 4 * 60_000 },
+  { id: 1, kind: "child_created", detail: "Write tests for the limiter", at: NOW - 3 * 3_600_000 },
 ];
+
 
 /** Files, QA, local ports and the Activity tab in every state the inspector can show. */
 export function FilesQaStates() {

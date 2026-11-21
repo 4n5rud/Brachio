@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
 use crate::database::StoreError;
+use crate::task_activity_record::record_activity;
 
 /// A task as stored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -161,6 +162,13 @@ impl TaskRecord {
             return Err(ChildInsertError::LimitReached);
         }
         let record = Self::insert(&transaction, task)?;
+        record_activity(
+            &transaction,
+            parent_id,
+            "child_created",
+            Some(task.title),
+            task.created_at_ms,
+        )?;
         for predecessor in after {
             transaction
                 .execute(
