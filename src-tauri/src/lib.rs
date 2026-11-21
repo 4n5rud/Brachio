@@ -214,6 +214,7 @@ pub fn run() {
             task_tabs::task_set_secondary_tab,
             workspace::task_drop_paths,
             hook_socket::approval_answer,
+            hook_socket::pending_approvals,
             mailbox::mailbox_unread,
             mailbox::mailbox_inbox,
             orchestration::orchestration_view,
