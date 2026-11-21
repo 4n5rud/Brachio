@@ -13,6 +13,7 @@ import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind
 import { bracketedPaste, terminalClipboardText } from "../lib/terminal-paste";
 import { SetupMarkerFilter, type SetupResult } from "../lib/setup-signal";
 import { onShellInput } from "../lib/shell-input";
+import { typedSinceSubmit } from "../lib/typed-input";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -75,7 +76,13 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
  * tasks is instant. It gives up its WebGL context, since browsers allow only
  * a handful at once.
  */
-export type PrepareDraft = (text: string) => (() => Promise<boolean>) | undefined;
+export interface DraftInsert {
+  insert: () => Promise<boolean>;
+  /** The user typed in this tab's input since they last submitted it, so the draft lands after it. */
+  userTyped: boolean;
+}
+
+export type PrepareDraft = (text: string) => DraftInsert | undefined;
 
 export function TerminalPane(props: {
   session?: TerminalSession;
@@ -192,6 +199,7 @@ export function TerminalPane(props: {
     let working = false;
     let inputRevision = 0;
     let editedBeforePrompt = false;
+    let userTyped = false;
     let disposed = false;
     let generation = 0;
     let promptTimer: ReturnType<typeof setTimeout> | undefined;
@@ -208,6 +216,7 @@ export function TerminalPane(props: {
       blocked = false;
       working = false;
       editedBeforePrompt = false;
+      userTyped = false;
       if (!session) return;
       const launch = ++generation;
       let streamEnded = false;
@@ -246,6 +255,7 @@ export function TerminalPane(props: {
           blocked = message.status.state === "blocked";
           setAuthNeeded(message.status.state === "blocked" && message.status.reason === "auth");
           working = message.status.state === "working";
+          if (working) userTyped = false;
           props.onStatus?.(message.status, message.message);
           return;
         }
@@ -360,7 +370,7 @@ export function TerminalPane(props: {
       const destination = handle;
       if (!destination || !canPasteDraft()) return undefined;
       const revision = inputRevision;
-      return async () => {
+      const insert = async () => {
         if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
         inputRevision += 1;
         editedBeforePrompt = true;
@@ -368,6 +378,7 @@ export function TerminalPane(props: {
         if (destination === handle && props.active) term.focus();
         return true;
       };
+      return { insert, userTyped };
     });
 
     const setupMarkers = session && !session.agent ? new SetupMarkerFilter() : undefined;
@@ -420,9 +431,13 @@ export function TerminalPane(props: {
 
     const noteUserInput = () => { editedBeforePrompt = true; };
     // onData also receives replies to terminal queries. Track user gestures separately.
-    const keys = term.onKey(noteUserInput);
-    host.addEventListener("paste", noteUserInput, true);
-    host.addEventListener("compositionstart", noteUserInput, true);
+    const keys = term.onKey(({ key }) => {
+      noteUserInput();
+      userTyped = typedSinceSubmit(userTyped, key);
+    });
+    const notePastedInput = () => { noteUserInput(); userTyped = true; };
+    host.addEventListener("paste", notePastedInput, true);
+    host.addEventListener("compositionstart", notePastedInput, true);
     let lastWriteFailure = "";
     const pasteClipboard = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
