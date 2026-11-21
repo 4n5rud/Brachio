@@ -116,10 +116,9 @@ export function TaskList(props: {
           <span class="count" role="img" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
         </Show>
         <Show when={props.onAddRepo}>
-          <Button variant="primary" size="sm" aria-haspopup="menu" aria-expanded={addMenu() !== undefined}
-            onClick={(event) => setAddMenu(addMenu() ? undefined : event.currentTarget)}>
-            <Icon name="plus" />{t("sidebar.addProject")}
-          </Button>
+          <IconButton icon="plus" size="sm" label={t("sidebar.addProject")} aria-haspopup="menu"
+            aria-expanded={addMenu() !== undefined}
+            onClick={(event) => setAddMenu(addMenu() ? undefined : event.currentTarget)} />
           <Show when={addMenu()}>
             {(anchor) => (
               <Menu anchor={anchor()} label={t("sidebar.addProject")} onClose={() => setAddMenu(undefined)}>
