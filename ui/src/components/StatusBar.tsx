@@ -1,12 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { t } from "../i18n";
+import { agentUsageRefreshing, agentUsages, refreshAgentUsage, startAgentUsagePolling } from "../lib/agent-usage";
+import { UsageStatus } from "./AgentUsage";
 import { Icon } from "./Icon";
 import { Button } from "./ui/Button";
 import { StatusGlyph } from "./ui/StatusBadge";
 import "./StatusBar.css";
 
 const REFRESH_MS = 3000;
+const CLOCK_MS = 30_000;
 const inTauri = "__TAURI_INTERNALS__" in window;
 
 interface ResourceUsage {
@@ -33,9 +36,12 @@ export function StatusBarView(props: {
   branch?: string;
   ahead?: number;
   behind?: number;
+  /** Agent usage readout, at the left edge. */
+  usage?: JSX.Element;
 }) {
   return (
     <footer class="statusbar">
+      {props.usage}
       <span title={props.usageUnavailable ? t("statusbar.usageUnavailableNote") : undefined}>
         <Show when={props.usageUnavailable} fallback={<i class="dot" />}>
           <StatusGlyph tone="error" />
@@ -69,9 +75,10 @@ export function StatusBarView(props: {
 }
 
 /** Bottom bar. Memory and CPU cover the app and every process it started, plus the terminal runtime. */
-export function StatusBar(props: { sessions: number }) {
+export function StatusBar(props: { sessions: number; onAgentSettings: () => void }) {
   const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
   const [usageUnavailable, setUsageUnavailable] = createSignal(false);
+  const [now, setNow] = createSignal(Date.now() / 1000);
 
   onMount(() => {
     if (!inTauri) return;
@@ -82,7 +89,9 @@ export function StatusBar(props: { sessions: number }) {
       );
     refresh();
     const timer = window.setInterval(refresh, REFRESH_MS);
-    onCleanup(() => window.clearInterval(timer));
+    const clock = window.setInterval(() => setNow(Date.now() / 1000), CLOCK_MS);
+    const stopUsage = startAgentUsagePolling();
+    onCleanup(() => { window.clearInterval(timer); window.clearInterval(clock); stopUsage(); });
   });
   const memoryTitle = () => {
     const current = usage();
@@ -99,6 +108,11 @@ export function StatusBar(props: { sessions: number }) {
       memory={usage() ? formatMemory(usage()!.memoryBytes) : undefined}
       memoryTitle={memoryTitle()}
       cpu={usage() ? `${Math.round(usage()!.cpuPercent)}%` : undefined}
+      usage={
+        <UsageStatus usages={agentUsages()} now={now()} refreshing={agentUsageRefreshing()}
+          onRefresh={() => void refreshAgentUsage(true)} onAccounts={props.onAgentSettings}
+          onDetails={agentUsages().some((entry) => entry.agent === "claude") ? () => void invoke("open_claude_usage") : undefined} />
+      }
     />
   );
 }

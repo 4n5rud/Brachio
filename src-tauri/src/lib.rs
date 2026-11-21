@@ -3,6 +3,7 @@
 mod agent_accounts;
 mod always_allow;
 mod child_task_request;
+mod claude_usage;
 mod external_link;
 mod file_in_use;
 mod folder_access;
@@ -262,6 +263,7 @@ pub fn run() {
         .manage(pr_status::PrStatuses::default())
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
+        .manage(claude_usage::ClaudeUsageCache::default())
         .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
         .setup(|app| {
@@ -318,6 +320,7 @@ pub fn run() {
             agent_accounts::codex_auth_cancel,
             folder_access::open_folder_access_settings,
             agent_accounts::codex_usage,
+            claude_usage::claude_usage,
             agent_accounts::open_claude_usage,
             workspace::task_list,
             workspace::task_create,
