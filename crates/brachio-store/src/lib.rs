@@ -31,7 +31,8 @@ pub use orchestration_schedule::{
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
 pub use qa_result_record::{
-    latest_qa_result, qa_result_by_id, save_qa_result, NewQaResult, QaResultRecord,
+    delete_qa_results, latest_qa_result, qa_result_by_id, save_qa_result, NewQaResult,
+    QaResultRecord, MAX_QA_RESULTS_PER_TASK,
 };
 pub use repo_record::{NewRepo, RepoRecord};
 pub use task_activity_record::{

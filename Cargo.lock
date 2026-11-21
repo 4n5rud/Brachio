@@ -484,6 +484,7 @@ version = "0.0.1"
 dependencies = [
  "brachio-git",
  "brachio-process",
+ "regex",
  "serde",
  "tempfile",
  "thiserror 2.0.21",

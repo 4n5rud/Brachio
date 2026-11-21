@@ -3,9 +3,11 @@
 mod feedback_gate;
 mod gated_run;
 mod runner;
+mod secret_redaction;
 
 pub use feedback_gate::{failure_signature, FeedbackDecision, FeedbackGate};
 pub use gated_run::{
     read_command, review_text, run_after_approval, GatedOutcome, QaOutcome, QaReport,
 };
 pub use runner::{run_approved, QaApproval, QaCommand, QaExit, QaNotRun, QaOutput, VerifiedQaRun};
+pub use secret_redaction::redact_secrets;

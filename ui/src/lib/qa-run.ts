@@ -25,6 +25,9 @@ export const runTaskQa = (taskId: string) => invoke<QaReport | null>("qa_run", {
 
 export const readLastTaskQa = (taskId: string) => invoke<QaReport | null>("qa_last_result", { taskId });
 
+/** Removes every stored QA result and its output for the task. */
+export const deleteTaskQaOutput = (taskId: string) => invoke<void>("qa_delete_output", { taskId });
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   const seconds = ms / 1000;
