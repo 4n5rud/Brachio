@@ -32,7 +32,8 @@ import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
-import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { ShortcutsDialog } from "./components/ShortcutList";
+import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -150,6 +151,7 @@ export function App() {
   const [view, setView] = createSignal<View>("tasks");
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
   const [revealed, setRevealed] = createSignal<{ id: string }>();
@@ -830,11 +832,17 @@ export function App() {
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
     const onKey = (event: KeyboardEvent) => {
-      if (event.isComposing || dialogOpen() || workspacePanel()) return;
+      if (event.isComposing || dialogOpen() || workspacePanel() || shortcutsOpen()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
         setWorkspacePanel("quickOpen");
+        return;
+      }
+      if (isShortcutListShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutsOpen(true);
         return;
       }
       if (isSettingsShortcut(event)) {
@@ -991,6 +999,7 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}

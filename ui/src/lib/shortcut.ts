@@ -1,5 +1,35 @@
+import type { MessageKey } from "../i18n";
+
 /** Whether the app runs on macOS, where shortcuts use ⌘. */
 export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+
+interface ShortcutDef {
+  label: MessageKey;
+  mac: string;
+  /** Windows and Linux. */
+  other: string;
+}
+
+/**
+ * Every shortcut the app shows, once. The key labels used across the interface and the shortcut
+ * list are all read from here, so they cannot disagree.
+ */
+export const SHORTCUTS = {
+  quickOpen: { label: "quickOpen.title", mac: "⌘P", other: "Ctrl+Shift+P" },
+  newTask: { label: "newTask.title", mac: "⌘N", other: "Ctrl+Shift+N" },
+  settings: { label: "titlebar.settings", mac: "⌘,", other: "Ctrl+," },
+  shortcutList: { label: "shortcuts.show", mac: "⌘/", other: "Ctrl+Shift+/" },
+  sidebar: { label: "settings.shortcutSidebar", mac: "⌘B", other: "Ctrl+Shift+B" },
+  inspector: { label: "settings.shortcutInspector", mac: "⌘⌥B", other: "Ctrl+Shift+Alt+B" },
+  submit: { label: "settings.shortcutCreate", mac: "⌘⏎", other: "Ctrl+⏎" },
+  allow: { label: "settings.shortcutAllow", mac: "↵", other: "↵" },
+  deny: { label: "settings.shortcutDeny", mac: "Esc", other: "Esc" },
+  close: { label: "settings.shortcutClose", mac: "Esc", other: "Esc" },
+} as const satisfies Record<string, ShortcutDef>;
+
+export const SHORTCUT_LIST: readonly ShortcutDef[] = Object.values(SHORTCUTS);
+
+const keysOf = (shortcut: ShortcutDef, mac = isMac): string => (mac ? shortcut.mac : shortcut.other);
 
 /**
  * "New task": ⌘N on macOS. Elsewhere Ctrl+Shift+N, because plain Ctrl+N
@@ -31,21 +61,34 @@ export function panelToggleShortcut(event: KeyPress & { code?: string }, mac = i
   return event.altKey ? "inspector" : "sidebar";
 }
 
+/**
+ * "Keyboard shortcuts": ⌘/ on macOS. Elsewhere Ctrl+Shift+/, because plain Ctrl+/ is "undo" in
+ * the shell (the same byte as Ctrl+_).
+ */
+export function isShortcutListShortcut(event: KeyPress & { code?: string }, mac = isMac): boolean {
+  if (event.altKey || (event.key !== "/" && event.key !== "?" && event.code !== "Slash")) return false;
+  return mac
+    ? event.metaKey && !event.ctrlKey && !event.shiftKey
+    : event.ctrlKey && event.shiftKey && !event.metaKey;
+}
+
 /** "Settings": ⌘, on macOS and Ctrl+, elsewhere, as in most desktop apps. */
 export function isSettingsShortcut(event: KeyPress, mac = isMac): boolean {
   if (event.key !== "," || event.altKey || event.shiftKey) return false;
   return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
-export const SETTINGS_KEYS = isMac ? "⌘," : "Ctrl+,";
+export const SETTINGS_KEYS = keysOf(SHORTCUTS.settings);
 
-export const TOGGLE_SIDEBAR_KEYS = isMac ? "⌘B" : "Ctrl+Shift+B";
+export const TOGGLE_SIDEBAR_KEYS = keysOf(SHORTCUTS.sidebar);
 
-export const TOGGLE_INSPECTOR_KEYS = isMac ? "⌘⌥B" : "Ctrl+Shift+Alt+B";
+export const TOGGLE_INSPECTOR_KEYS = keysOf(SHORTCUTS.inspector);
 
-export const QUICK_OPEN_KEYS = isMac ? "⌘P" : "Ctrl+Shift+P";
+export const QUICK_OPEN_KEYS = keysOf(SHORTCUTS.quickOpen);
 
-export const NEW_TASK_KEYS = isMac ? "⌘N" : "Ctrl+Shift+N";
+export const NEW_TASK_KEYS = keysOf(SHORTCUTS.newTask);
+
+export const SHORTCUT_LIST_KEYS = keysOf(SHORTCUTS.shortcutList);
 
 /** "Submit": ⌘⏎ on macOS, Ctrl+Enter elsewhere. */
-export const SUBMIT_KEYS = isMac ? "⌘⏎" : "Ctrl+⏎";
+export const SUBMIT_KEYS = keysOf(SHORTCUTS.submit);
