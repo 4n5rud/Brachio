@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import { listen } from "@tauri-apps/api/event";
-import { watchCreatedTasks } from "./created-task-events";
+import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./created-task-events";
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
@@ -28,4 +28,25 @@ test("unsubscribing before the subscription resolves still unlistens", async () 
   stop();
   resolve(unlisten);
   await vi.waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
+});
+
+test("scheduling waits until the started-event listener is registered", async () => {
+  let register: (fn: () => void) => void = () => {};
+  vi.mocked(listen).mockImplementation(() => new Promise((r) => { register = r; }));
+  const schedule = vi.fn(async () => {});
+  watchStartedTasksThenSchedule(vi.fn(), schedule);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(schedule).not.toHaveBeenCalled();
+  register(() => {});
+  await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+});
+
+test("a failed registration never schedules", async () => {
+  vi.mocked(listen).mockRejectedValue(new Error("no webview"));
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const schedule = vi.fn(async () => {});
+  watchStartedTasksThenSchedule(vi.fn(), schedule);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(schedule).not.toHaveBeenCalled();
 });

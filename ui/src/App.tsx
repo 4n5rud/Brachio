@@ -25,7 +25,7 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
-import { scheduleReadyTasks, watchCreatedTasks, watchStartedTasks } from "./lib/created-task-events";
+import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { isNewTaskShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
@@ -669,8 +669,7 @@ export function App() {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
       onCleanup(watchCreatedTasks((record) => void adoptCreatedTask(record).catch(report)));
-      onCleanup(watchStartedTasks((record) => void adoptCreatedTask(record, true).catch(report)));
-      scheduleReadyTasks().catch((error) => console.warn("Could not start ready tasks", error));
+      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreatedTask(record, true).catch(report)));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
