@@ -48,12 +48,39 @@ fn issue_url(title: &str, body: &str) -> String {
     url
 }
 
+/// The report as plain text, for pasting when the browser cannot be opened.
+fn report_text(title: &str, body: &str) -> String {
+    format!(
+        "{}
+
+{body}",
+        title.trim()
+    )
+}
+
+/// Returns `true` when the browser opened, or `false` when it did not and the report text was
+/// copied to the clipboard instead.
 #[tauri::command]
-pub async fn open_issue_draft(title: String, body: String) -> Result<(), String> {
+pub async fn open_issue_draft(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+) -> Result<bool, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt as _;
+
     if title.trim().is_empty() {
         return Err("An issue needs a title.".to_owned());
     }
-    crate::external_link::open_in_browser(issue_url(&title, &body)).await
+    let Err(open_error) = crate::external_link::open_in_browser(issue_url(&title, &body)).await
+    else {
+        return Ok(true);
+    };
+    app.clipboard()
+        .write_text(report_text(&title, &body))
+        .map_err(|copy_error| {
+            format!("{open_error} The report could not be copied: {copy_error}")
+        })?;
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -67,6 +94,21 @@ mod tests {
             url,
             "https://github.com/4n5rud/Brachio/issues/new?labels=bug\
              &title=Crash%20%26%20burn&body=a%3Db%20%231%0A%ED%95%9C"
+        );
+    }
+
+    #[test]
+    fn the_copied_report_is_the_trimmed_title_then_the_body() {
+        assert_eq!(
+            report_text(
+                " Crash ",
+                "line 1
+line 2"
+            ),
+            "Crash
+
+line 1
+line 2"
         );
     }
 
