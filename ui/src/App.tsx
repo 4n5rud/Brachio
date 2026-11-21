@@ -28,6 +28,7 @@ import { compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
+import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
@@ -46,6 +47,7 @@ import { checkForRelease, openRelease } from "./lib/updates";
 import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
+import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord } from "./lib/workspace";
@@ -147,6 +149,22 @@ export function App() {
     }),
   );
   const [view, setView] = createSignal<View>("tasks");
+  const [unreadFinish, setUnreadFinishMarks] = createSignal<ReadonlySet<string>>(new Set());
+  const setUnreadFinish = (change: (marks: ReadonlySet<string>) => ReadonlySet<string>) => {
+    const next = change(unreadFinish());
+    setUnreadFinishMarks(next);
+    saveUnreadFinish(next);
+  };
+  const [windowFocused, setWindowFocused] = createSignal(document.hasFocus());
+  onMount(() => {
+    const sync = () => setWindowFocused(document.hasFocus());
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    onCleanup(() => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+    });
+  });
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
@@ -258,6 +276,15 @@ export function App() {
   createEffect(() => {
     const task = selected();
     if (task?.repoId) localStorage.setItem(`brachio.task.${task.repoId}`, task.id);
+  });
+  createEffect(() => {
+    const id = selectedId();
+    if (id === undefined || view() !== "tasks" || !windowFocused() || !unreadFinish().has(id)) return;
+    setUnreadFinish((marks) => {
+      const next = new Set(marks);
+      next.delete(id);
+      return next;
+    });
   });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
@@ -431,6 +458,8 @@ export function App() {
     const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
     const at = Date.now();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
+    if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     const key = notificationKey(previous, status);
     if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
     recordActivity(task, sessionKey, key, message, at);
@@ -454,6 +483,7 @@ export function App() {
       setTasks(storedTasks.map(toTaskRow));
       setArchived(storedArchives.map(toTaskRow));
       setWorkspaceTaskIds(restoredTasks);
+      setUnreadFinishMarks(loadUnreadFinish(new Set(storedTasks.map((task) => task.id))));
       restoreSelection();
     });
   };
@@ -602,37 +632,25 @@ export function App() {
     setDialogOpen(false);
   };
 
-  // A task created by an agent: start its tab without moving the user's selection.
-  // A task the scheduler starts may already be listed, because it was created earlier and waited.
-  const adoptCreatedTask = async (record: CreatedTask, startListed = false) => {
-    if (findTask(record.id) && !startListed) return;
-    if (!repos().some((item) => item.id === record.repoId)) {
-      const stored = await listRepos();
-      if (!stored.some((item) => item.id === record.repoId)) return;
-      setRepos(stored);
-      if (findTask(record.id) && !startListed) return;
-    }
-    createdThisRun.add(record.id);
-    const setupCopyError = record.setupCopyError;
-    if (setupCopyError) {
-      setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
-    }
-    if (record.prompt) firstPrompts.set(record.id, record.prompt);
-    const listed = findTask(record.id);
-    if (listed && !startListed) return;
-    if (!listed && record.parentTaskId) {
-      pushToast({
-        tone: "info",
-        message: t("task.childCreated").replace("{title}", () => record.title),
-        action: { label: t("task.open"), onClick: () => open(record.id) },
-      });
-    }
-    batch(() => {
-      if (!listed) setTasks((list) => [toTaskRow(record), ...list]);
-      setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
-    });
-    void requestSetup(record.id, record.repoId, record.setupCommands);
-  };
+  const adoptCreated = (record: CreatedTask, startListed = false) => adoptCreatedTask({
+    isListed: (id) => findTask(id) !== undefined,
+    hasRepo: (repoId) => repos().some((item) => item.id === repoId),
+    listRepos,
+    showRepos: setRepos,
+    markCreatedHere: (id) => createdThisRun.add(id),
+    failSetupCopy: (id, error) => setSetupFailures((items) => new Map(items).set(id, error)),
+    rememberPrompt: (id, prompt) => firstPrompts.set(id, prompt),
+    announceChild: (task) => pushToast({
+      tone: "info",
+      message: t("task.childCreated").replace("{title}", () => task.title),
+      action: { label: t("task.open"), onClick: () => open(task.id) },
+    }),
+    open: (task, listed) => batch(() => {
+      if (!listed) setTasks((list) => [toTaskRow(task), ...list]);
+      setOpenIds((ids) => (ids.includes(task.id) ? ids : [...ids, task.id]));
+    }),
+    requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
+  }, record, startListed);
 
   const archiveNow = async (task: TaskRow) => {
       await archiveTask(task.id);
@@ -806,8 +824,8 @@ export function App() {
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
-      onCleanup(watchCreatedTasks((record) => void adoptCreatedTask(record).catch(report)));
-      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreatedTask(record, true).catch(report)));
+      onCleanup(watchCreatedTasks((record) => void adoptCreated(record).catch(report)));
+      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreated(record, true).catch(report)));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
@@ -976,6 +994,7 @@ export function App() {
           reveal={revealed()}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
+          finishedUnread={(id) => unreadFinish().has(id)}
           now={now()}
         />
         </Show>

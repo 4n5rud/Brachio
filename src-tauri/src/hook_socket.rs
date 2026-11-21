@@ -449,7 +449,7 @@ impl Approvals {
 
 /// Used where creating tasks is not wired up.
 #[cfg(test)]
-struct NoChildTasks;
+pub(crate) struct NoChildTasks;
 
 #[cfg(test)]
 impl ChildTasks for NoChildTasks {
