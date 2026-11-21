@@ -52,3 +52,28 @@ export function loadFilesUnlessCancelled(
   );
   return () => { cancelled = true; };
 }
+
+export interface TextPart {
+  text: string;
+  hit: boolean;
+}
+
+/** Splits text so the parts that match a query word can be marked. */
+export function highlightParts(text: string, query: string): TextPart[] {
+  const terms = termsOf(query);
+  if (terms.length === 0) return [{ text, hit: false }];
+  const lower = text.toLowerCase();
+  const hit = new Array<boolean>(text.length).fill(false);
+  for (const term of terms) {
+    for (let at = lower.indexOf(term); at !== -1; at = lower.indexOf(term, at + term.length)) {
+      hit.fill(true, at, at + term.length);
+    }
+  }
+  const parts: TextPart[] = [];
+  for (let index = 0; index < text.length; index++) {
+    const last = parts[parts.length - 1];
+    if (last && last.hit === hit[index]) last.text += text[index];
+    else parts.push({ text: text[index] ?? "", hit: hit[index] ?? false });
+  }
+  return parts;
+}

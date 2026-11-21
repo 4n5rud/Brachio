@@ -52,7 +52,8 @@ export function AgentAccountControls(props: { kind: AgentKind }) {
 
   const changeAuth = (signedIn: boolean) => run(async () => {
     if (signedIn && !(await confirmDialog({
-      title: t("settings.agentSignOutConfirm"),
+      title: t("settings.agentSignOutTitle"),
+      body: t("settings.agentSignOutConfirm"),
       confirmLabel: t("settings.agentSignOut"),
       tone: "danger",
     }))) return;

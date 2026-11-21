@@ -8,12 +8,30 @@ import { formatAge } from "../lib/time";
 import type { ColorTheme, ThemeMode } from "../lib/theme";
 import { ThemePicker } from "./ui/ThemePicker";
 import { Dialog } from "./ui/Dialog";
-import { Input, Select } from "./ui/Input";
+import { Select } from "./ui/Input";
+import { Marked, PaletteGroup, PaletteItem, PaletteSearch } from "./Palette";
+import { Icon, type IconName } from "./Icon";
+import { StatusGlyph } from "./ui/StatusBadge";
+import { statusTone, type StatusTone } from "../lib/status";
 import { Kbd } from "./ui/Kbd";
 import { Toggle } from "./ui/Toggle";
 import { AgentSettings } from "./settings/AgentSettings";
 import { TerminalSettings } from "./settings/TerminalSettings";
 
+
+const ACTIVITY_TONE: Partial<Record<MessageKey, StatusTone>> = {
+  "notify.error": "error",
+  "notify.crashed": "error",
+  "notify.finished": "ready",
+};
+const COMMAND_ICON: Record<CommandId, IconName> = { newTask: "plus", settings: "sliders", archived: "list" };
+const GROUPS = [
+  { kind: "task", label: () => t("quickOpen.groupTasks") },
+  { kind: "file", label: () => t("quickOpen.groupFiles") },
+  { kind: "command", label: () => t("quickOpen.groupCommands") },
+] as const;
+const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+const fileDir = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 
 const COMMANDS: readonly CommandId[] = ["newTask", "settings", "archived"];
 const COMMAND_LABEL: Record<CommandId, () => string> = {
@@ -72,17 +90,17 @@ export function WorkspaceDialog(props: {
   const repoName = (task: TaskRow) => task.repoId ? repoNames().get(task.repoId) : undefined;
   const entries = createMemo<QuickEntry[]>(() => {
     const text = query();
-    const tasks = props.tasks
+    const tasks = (text.trim() === "" ? [...props.tasks].sort((a, b) => b.updatedAt - a.updatedAt) : props.tasks)
       .filter((task) => matchesAll([task.title, task.branch, repoName(task), task.worktreePath].filter(Boolean).join(" "), text))
       .map((task): QuickEntry => ({ kind: "task", task }));
-    const commands = props.onCommand && text.trim() !== ""
+    const commands = props.onCommand
       ? COMMANDS.filter((id) => matchesAll(COMMAND_LABEL[id](), text))
           .map((id): QuickEntry => ({ kind: "command", id }))
       : [];
     const files = props.onInsertFile
       ? rankFiles(props.files ?? [], text).map((path): QuickEntry => ({ kind: "file", path }))
       : [];
-    return [...tasks, ...commands, ...files];
+    return [...tasks, ...files, ...commands];
   });
   let searchBox: HTMLInputElement | undefined;
 
@@ -141,29 +159,35 @@ export function WorkspaceDialog(props: {
   return (
     <Dialog title={title()} size={props.panel === "settings" ? "settings" : props.panel === "quickOpen" ? "quick" : "sheet"}
       onClose={props.onClose} closeOnScrim initialFocus={() => searchBox}
-      headEnd={<Button size="sm" onClick={() => props.onClose()}>{t("workspace.close")}</Button>}>
+      bare={props.panel === "quickOpen"}
+      headEnd={props.panel === "quickOpen" ? undefined : <Button size="sm" onClick={() => props.onClose()}>{t("workspace.close")}</Button>}
+      footer={props.panel === "quickOpen" ? (
+        <div class="palette-hints">
+          <span><Kbd>↑</Kbd><Kbd>↓</Kbd>{t("quickOpen.hintMove")}</span>
+          <span><Kbd>↵</Kbd>{t("quickOpen.hintOpen")}</span>
+          <span><Kbd>Esc</Kbd>{t("quickOpen.hintClose")}</span>
+        </div>
+      ) : undefined}>
         <Switch>
           <Match when={props.panel === "activity"}>
-            <Show when={props.activity.length > 0} fallback={<p class="muted">{t("activity.empty")}</p>}>
-              <ul class="quick-open-results activity-list">
+            <Show when={props.activity.length > 0} fallback={<p class="palette-empty">{t("activity.empty")}</p>}>
+              <div class="palette-list">
                 <For each={props.activity}>{(item) => (
-                  <li>
-                    <button class="quick-open-result activity-result" type="button"
-                      disabled={!props.activeTaskIds.has(item.taskId)} onClick={() => choose(item.taskId, item.sessionKey)}>
-                      <strong>{item.title}</strong>
-                      <time dateTime={new Date(item.at).toISOString()}>{formatAge(item.at, props.now)}</time>
-                      <span>{t(item.key)}</span>
-                      <Show when={item.detail}>{(detail) => <span class="activity-detail">{detail()}</span>}</Show>
-                    </button>
-                  </li>
+                  <PaletteItem
+                    lead={<StatusGlyph tone={ACTIVITY_TONE[item.key] ?? "blocked"} />}
+                    name={t(item.key)}
+                    detail={<span class="palette-prose">{[item.title, item.detail].filter(Boolean).join(": ")}</span>}
+                    end={<time dateTime={new Date(item.at).toISOString()}>{formatAge(item.at, props.now)}</time>}
+                    disabled={!props.activeTaskIds.has(item.taskId)}
+                    onClick={() => choose(item.taskId, item.sessionKey)} />
                 )}</For>
-              </ul>
+              </div>
             </Show>
           </Match>
           <Match when={props.panel === "quickOpen"}>
-            <Input ref={searchBox} aria-label={t("titlebar.search")}
+            <PaletteSearch ref={(element) => { searchBox = element; }} label={t("titlebar.search")}
               placeholder={t("quickOpen.placeholder")} value={query()}
-              onInput={(event) => { setQuery(event.currentTarget.value); setHighlight(0); }}
+              onInput={(value) => { setQuery(value); setHighlight(0); }}
               onKeyDown={(event) => {
                 if (event.isComposing) return;
                 const count = entries().length;
@@ -177,18 +201,29 @@ export function WorkspaceDialog(props: {
                   const step = event.key === "ArrowDown" ? 1 : -1;
                   const next = (highlight() + count + step) % count;
                   setHighlight(next);
-                  document.querySelectorAll(".modal .quick-open-result")[next]?.scrollIntoView({ block: "nearest" });
+                  document.querySelectorAll(".modal .palette-item")[next]?.scrollIntoView({ block: "nearest" });
                 }
               }} />
-            <Show when={entries().length > 0} fallback={<p class="muted">{t("quickOpen.empty")}</p>}>
-              <div class="quick-open-results">
-                <For each={entries()}>{(entry, index) => (
-                  <button class="quick-open-result" classList={{ selected: highlight() === index() }}
-                    type="button" onClick={() => activate(entry)}>
-                    {entry.kind === "task" && (<><strong>{entry.task.title}</strong><span>{[repoName(entry.task), entry.task.branch].filter(Boolean).join(" · ")}</span></>)}
-                    {entry.kind === "command" && (<><strong>{COMMAND_LABEL[entry.id]()}</strong><span>{t("quickOpen.command")}</span></>)}
-                    {entry.kind === "file" && (<><strong>{entry.path}</strong><span>{t("quickOpen.file")}</span></>)}
-                  </button>
+            <Show when={entries().length > 0} fallback={<p class="palette-empty">{t("quickOpen.empty")}</p>}>
+              <div class="palette-list">
+                <For each={GROUPS}>{(group) => (
+                  <Show when={entries().some((entry) => entry.kind === group.kind)}>
+                    <PaletteGroup label={group.label()} />
+                    <For each={entries()}>{(entry, index) => entry.kind === group.kind && (
+                      <PaletteItem on={highlight() === index()} onClick={() => activate(entry)}
+                        lead={entry.kind === "task" ? <StatusGlyph tone={statusTone(entry.task.status)} />
+                          : <Icon name={entry.kind === "file" ? "folder" : COMMAND_ICON[entry.kind === "command" ? entry.id : "newTask"]} class="icon-sm" />}
+                        name={<Marked text={entry.kind === "task" ? entry.task.title : entry.kind === "command"
+                          ? COMMAND_LABEL[entry.id]() : fileName(entry.path)} query={query()} />}
+                        detail={entry.kind === "task"
+                          ? <><span>{repoName(entry.task)}</span><span>{shortBranch(entry.task.branch)}</span></>
+                          : entry.kind === "file"
+                            ? <><span>{fileDir(entry.path)}</span><span>{t("quickOpen.file")}</span></>
+                            : <span>{t("quickOpen.command")}</span>}
+                        end={highlight() === index() ? <Kbd>↵</Kbd>
+                          : entry.kind === "command" && entry.id === "newTask" ? <Kbd>{NEW_TASK_KEYS}</Kbd> : undefined} />
+                    )}</For>
+                  </Show>
                 )}</For>
               </div>
             </Show>
@@ -241,25 +276,21 @@ export function WorkspaceDialog(props: {
           </Match>
           <Match when={props.panel === "archived"}>
             <Show when={props.archived.length > 0}
-              fallback={<p class="muted">{t("task.noArchived")}</p>}>
-              <ul class="quick-open-results">
+              fallback={<p class="palette-empty">{t("task.noArchived")}</p>}>
+              <div class="palette-list">
                 <For each={props.archived}>{(task) => (
-                  <li class="archive-row">
-                    <div class="archive-text">
-                      <strong title={task.title}>{task.title}</strong>
-                      <small title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>
-                        {[repoName(task), shortBranch(task.branch), archivedAgo(task)].filter(Boolean).join("  ")}
-                      </small>
-                    </div>
+                  <div class="palette-row">
+                    <PaletteItem lead={<Icon name="branch" class="icon-sm" />} name={task.title} title={task.title}
+                      detail={<><Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show><span>{shortBranch(task.branch)}</span><span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>{archivedAgo(task)}</span></>} />
                     <Button size="sm" disabled={!!restoring()}
                       onClick={() => void restore(task.id)}>{t("task.restore")}</Button>
                     <Button variant="ghost" size="sm" disabled={!!restoring()}
                       onClick={() => void remove(task)}>{t("task.deleteForGood")}</Button>
-                  </li>
+                  </div>
                 )}</For>
-              </ul>
+              </div>
             </Show>
-            <Show when={restoreError()}><p role="alert">{restoreError()}</p></Show>
+            <Show when={restoreError()}><p class="form-error" role="alert">{restoreError()}</p></Show>
           </Match>
         </Switch>
     </Dialog>

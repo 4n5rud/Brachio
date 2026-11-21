@@ -592,39 +592,53 @@ export function App() {
   const deleteArchived = async (task: TaskRow) => {
     const folderProject = repos().find((item) => item.id === task.repoId)?.isGit === false;
     const loss = await previewTaskDeletion(task.id);
-    const gitBody = [
-      t("task.deleteBody").replace("{branch}", task.branch),
-      t("task.deleteLoss")
-        .replace("{files}", String(loss.uncommittedFiles))
-        .replace("{commits}", String(loss.unpushedCommits)),
-      ...(loss.ignoredEntries > 0
-        ? [
-            t("task.deleteIgnored")
-              .replace("{count}", String(loss.ignoredEntries))
-              .replace("{names}", loss.ignoredExamples.join(", ")),
-          ]
-        : []),
-    ].join("\n\n");
     // A folder is the user's own: only the task's entry goes, never the folder.
-    const body = folderProject
-      ? t("task.deleteFolderBody").replace("{path}", task.worktreePath ?? "")
-      : gitBody;
-    const agreed = await confirmDialog({
-      title: `${t("task.delete")} · ${task.title}`,
-      body,
-      confirmLabel: t("task.delete"),
-      cancelLabel: t("workspace.close"),
-      tone: "danger",
-    });
+    const agreed = await confirmDialog(folderProject
+      ? {
+          title: t("task.deleteFolderTitle"),
+          body: t("task.deleteFolderBody").replace("{path}", () => task.worktreePath ?? ""),
+          confirmLabel: t("task.deleteConfirm"),
+          tone: "danger",
+        }
+      : {
+          title: t("task.deleteTitle"),
+          body: t("task.deleteBody").replace("{branch}", () => task.branch),
+          loss: [
+            { label: t("task.lossUncommitted"), count: loss.uncommittedFiles },
+            { label: t("task.lossCommits"), count: loss.unpushedCommits },
+            {
+              label: loss.ignoredExamples.length > 0
+                ? t("task.lossIgnoredExamples").replace("{names}", () => loss.ignoredExamples.join(", "))
+                : t("task.lossIgnored"),
+              count: loss.ignoredEntries,
+              plain: true,
+            },
+            { label: t("task.lossTerminals"), count: loss.runningTerminals },
+          ],
+          note: loss.ignoredEntries > 0 ? t("task.deleteIgnoredNote") : undefined,
+          confirmLabel: t("task.deleteConfirm"),
+          tone: "danger",
+        });
     if (!agreed) return;
-    try {
-      await deleteTask(task.id, loss.fingerprint);
-    } catch (failure) {
-      const message = String(failure);
-      if (!message.includes("task changed:")) throw failure;
-      report(message.replace(/^.*task changed:\s*/u, ""));
-      await deleteArchived(task);
-      return;
+    for (;;) {
+      try {
+        await deleteTask(task.id, loss.fingerprint);
+        break;
+      } catch (failure) {
+        const message = String(failure);
+        if (message.includes("task changed:")) {
+          report(message.replace(/^.*task changed:\s*/u, ""));
+          await deleteArchived(task);
+          return;
+        }
+        if (!await confirmDialog({
+          title: t("task.deleteFailedTitle"),
+          error: t("task.deleteFailed").replace("{detail}", () => message),
+          body: t("task.deleteFailedBody"),
+          confirmLabel: t("task.tryAgain"),
+          tone: "danger",
+        })) return;
+      }
     }
     setArchived((items) => items.filter((item) => item.id !== task.id));
   };
@@ -779,7 +793,7 @@ export function App() {
       />
       <Show when={view() === "board"}>
         <main class="layout layout-full">
-          <Board tasks={repoRows()} now={now()} onOpen={open} />
+          <Board tasks={rows()} repos={repos()} now={now()} onOpen={open} />
         </main>
       </Show>
       <main class="layout" classList={{

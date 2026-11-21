@@ -61,3 +61,6 @@
 .tile-foot .button {
   margin-left: auto;
 }
+.tile-note-error {
+  color: var(--color-status-error);
+}

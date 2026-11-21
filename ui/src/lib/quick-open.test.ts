@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadFilesUnlessCancelled, matchesAll, rankFiles } from "./quick-open";
+import { highlightParts, loadFilesUnlessCancelled, matchesAll, rankFiles } from "./quick-open";
 
 describe("quick open file loading", () => {
   it("drops a slower earlier response and a stale failure once cancelled", async () => {
@@ -51,4 +51,15 @@ describe("quick open file search", () => {
     const many = Array.from({ length: 100 }, (_, index) => `src/file-${index}.ts`);
     expect(rankFiles(many, "file", 5)).toHaveLength(5);
   });
+});
+
+it("highlightParts marks every query word, ignoring case", () => {
+  expect(highlightParts("Add rate limit to the limiter", "lim")).toEqual([
+    { text: "Add rate ", hit: false },
+    { text: "lim", hit: true },
+    { text: "it to the ", hit: false },
+    { text: "lim", hit: true },
+    { text: "iter", hit: false },
+  ]);
+  expect(highlightParts("login", " ")).toEqual([{ text: "login", hit: false }]);
 });

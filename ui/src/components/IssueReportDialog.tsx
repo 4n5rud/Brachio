@@ -3,6 +3,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { t } from "../i18n";
 import { appVersion, issueBody, issueTitle, openIssueDraft } from "../lib/issue-report";
 import { detectAgents } from "../lib/terminal";
+import { pushToast } from "../lib/toasts";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
 import { Input, TextArea } from "./ui/Input";
@@ -34,7 +35,22 @@ export function IssueReportDialog(props: { error: string; onClose: () => void })
       await openIssueDraft(title(), body() ?? "");
       props.onClose();
     } catch (error) {
-      setFailure(String(error));
+      const text = `${title()}
+
+${body() ?? ""}`;
+      const copy = () => navigator.clipboard.writeText(text);
+      try {
+        await copy();
+        props.onClose();
+        pushToast({
+          tone: "error",
+          title: t("issue.openFailed"),
+          message: t("issue.copied"),
+          action: { label: t("issue.copyAgain"), onClick: () => void copy().catch(() => {}) },
+        });
+      } catch {
+        setFailure(String(error));
+      }
     } finally {
       setBusy(false);
     }
