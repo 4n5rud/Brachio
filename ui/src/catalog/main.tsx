@@ -10,6 +10,8 @@ import { DialogsStates } from "./dialogs-states";
 import { FilesQaStates } from "./files-qa-states";
 import { SettingsStates } from "./settings-states";
 import { ApprovalBar } from "../components/ApprovalBar";
+import { PlanGraph } from "../components/PlanGraph";
+import type { ChildView } from "../lib/orchestration";
 import { BoardTile } from "../components/BoardTile";
 import { StatusBarView } from "../components/StatusBar";
 import { TaskHeader } from "../components/TaskHeader";
@@ -103,6 +105,18 @@ function Row(props: { cap: string; children: import("solid-js").JSX.Element }) {
     </div>
   );
 }
+
+const planChild = (id: string, title: string, state: ChildView["state"], waits: Array<[string, string, string]> = []): ChildView => ({
+  id, title, branch: id, state, reason: null, handoff: null,
+  dependencies: waits.map(([dependency, name, status]) => ({ id: dependency, title: name, state: status })),
+});
+const PLAN_CHILDREN: ChildView[] = [
+  planChild("a", "Add the limiter", "completed"),
+  planChild("b", "Write tests for the limiter", "review_required", [["a", "Add the limiter", "completed"]]),
+  planChild("c", "Document the 429 response", "completed", [["a", "Add the limiter", "completed"]]),
+  planChild("d", "Load test the login endpoint", "blocked", [["b", "Write tests for the limiter", "review_required"]]),
+  planChild("e", "Release note for 0.5", "queued", [["c", "Document the 429 response", "completed"], ["d", "Load test the login endpoint", "blocked"]]),
+];
 
 function Section(props: { title: string; children: import("solid-js").JSX.Element }) {
   return (
@@ -484,6 +498,12 @@ function Catalog() {
 
       <Section title="Changes, diff and pull request">
         <ChangesStates />
+      </Section>
+
+      <Section title="PlanGraph">
+        <div class="catalog-frame">
+          <PlanGraph selectedId="b" onSelect={() => {}} children={PLAN_CHILDREN} />
+        </div>
       </Section>
 
       <Section title="Files, QA, local ports and activity">

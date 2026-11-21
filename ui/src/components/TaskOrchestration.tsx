@@ -2,44 +2,18 @@ import { Toggle } from "./ui/Toggle";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
-import { t, type MessageKey } from "../i18n";
+import { t } from "../i18n";
 import { shortSha } from "../lib/qa-run";
 import {
   readOrchestration,
   reviewHandoff,
   setScheduler,
-  stateTone,
   testEvidence,
   watchOrchestration,
   type ChildView,
 } from "../lib/orchestration";
-import { StatusGlyph } from "./ui/StatusBadge";
-
-const stateLabel: Record<string, MessageKey> = {
-  queued: "orchestration.state.queued",
-  ready: "orchestration.state.ready",
-  running: "orchestration.state.running",
-  review_required: "orchestration.state.review_required",
-  completed: "orchestration.state.completed",
-  blocked: "orchestration.state.blocked",
-  failed: "orchestration.state.failed",
-  cancelled: "orchestration.state.cancelled",
-};
-
-function stateText(state: string): string {
-  const key = stateLabel[state];
-  return key ? t(key) : state;
-}
-
-function StateChip(props: { state: string }) {
-  const tone = () => stateTone(props.state);
-  return (
-    <span class={`status status-${tone()}`}>
-      <StatusGlyph tone={tone()} />
-      {stateText(props.state)}
-    </span>
-  );
-}
+import { PlanGraph } from "./PlanGraph";
+import { StateChip, stateText } from "./OrchestrationState";
 
 function ChildCard(props: { child: ChildView; onChanged: () => void }) {
   const [rejecting, setRejecting] = createSignal(false);
@@ -111,6 +85,19 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
                 : testEvidence(handoff()) === "failed" ? t("orchestration.qa.failed")
                 : t("orchestration.qa.none")}
             </p>
+            <Show when={handoff().verifiedQa}>
+              {(qa) => (
+                <p class="muted">
+                  <code>{qa().command}</code>
+                  {" · "}
+                  {t("orchestration.exitCode")} {qa().exitCode ?? "–"}
+                  {" · "}
+                  <code>{shortSha(handoff().commitSha)}</code>
+                  {" · "}
+                  {t("orchestration.verifiedByBrachio")}
+                </p>
+              )}
+            </Show>
             <Show when={handoff().review}>
               {(review) => (
                 <p class="muted">
@@ -168,6 +155,14 @@ export function TaskOrchestration(props: { leadTaskId: string }) {
     const value = view();
     return value && "error" in value ? value.error : undefined;
   };
+  const [selectedId, setSelectedId] = createSignal<string>();
+  // Opens on the first task waiting for the user's review, else the first task.
+  const selected = () => {
+    const children = current()?.children ?? [];
+    return children.find((child) => child.id === selectedId())
+      ?? children.find((child) => child.handoff?.canReview)
+      ?? children[0];
+  };
   return (
     <div class="orchestration">
       <p class="muted">{t("orchestration.note")}</p>
@@ -185,11 +180,15 @@ export function TaskOrchestration(props: { leadTaskId: string }) {
           <p class="muted">{t("orchestration.schedulerNote")} ({data().maxRunning})</p>
           <Show when={schedulerError()}>{(text) => <p role="alert">{text()}</p>}</Show>
           <Show when={data().children.length > 0} fallback={<p class="muted">{t("orchestration.empty")}</p>}>
-            <ul class="orchestration-list">
-              <For each={data().children}>
-                {(child) => <ChildCard child={child} onChanged={() => void refetch()} />}
-              </For>
-            </ul>
+            <PlanGraph children={data().children} selectedId={selected()?.id} onSelect={setSelectedId} />
+            <p class="muted">{t("orchestration.graphNote")}</p>
+            <Show when={selected()} keyed>
+              {(child) => (
+                <ul class="orchestration-list">
+                  <ChildCard child={child} onChanged={() => void refetch()} />
+                </ul>
+              )}
+            </Show>
           </Show>
           </>
         )}
