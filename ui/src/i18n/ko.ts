@@ -57,6 +57,8 @@ export const ko: Messages = {
   "task.archivedNow": "방금 보관",
   "task.childCreated": "하위 작업을 만들었어요: {title}.",
   "task.open": "열기",
+  "task.new": "새 결과",
+  "task.finishedUnread": "자리를 비운 사이에 끝났어요. 작업을 열면 표시가 사라져요.",
 
   "task.reviewChanges": "변경 검토",
   "task.createPr": "PR 만들기",

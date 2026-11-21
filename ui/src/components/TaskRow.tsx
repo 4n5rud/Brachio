@@ -23,6 +23,8 @@ export function TaskRowItem(props: {
   selected: boolean;
   now: number;
   unread: number;
+  /** The agent finished while the task was not open. */
+  finished?: boolean;
   /** The pull request chip to show; read from the pull request store when left out. */
   pr?: PrChipState | null;
   onSelect: () => void;
@@ -51,7 +53,11 @@ export function TaskRowItem(props: {
     >
       <StatusGlyph tone={tone()} />
       <span class="task-title">{props.task.title}</span>
-      <span class="task-age">{formatAge(props.task.updatedAt, props.now)}</span>
+      <Show when={props.finished} fallback={<span class="task-age">{formatAge(props.task.updatedAt, props.now)}</span>}>
+        <span class="task-age task-age-new" title={t("task.finishedUnread")}>
+          <i class="task-new-dot" aria-hidden="true" />{t("task.new")}
+        </span>
+      </Show>
       <span class="task-meta">
         <AgentChip agent={props.task.agent} />
         <span class="task-branch">{shortBranch(props.task.branch)}</span>

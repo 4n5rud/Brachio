@@ -43,6 +43,7 @@ export function TaskList(props: {
   needsYou: number;
   now: number;
   unreadForTask?: (taskId: string) => number;
+  finishedUnread?: (taskId: string) => boolean;
 }) {
   const [addMenu, setAddMenu] = createSignal<HTMLElement>();
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
@@ -153,6 +154,7 @@ export function TaskList(props: {
                         selected={task.id === props.selectedId}
                         now={props.now}
                         unread={props.unreadForTask?.(task.id) ?? 0}
+                        finished={props.finishedUnread?.(task.id)}
                         pr={props.prFor?.(task.id)}
                         onSelect={() => props.onSelect(task.id)}
                         onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}
