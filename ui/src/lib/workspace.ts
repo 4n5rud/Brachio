@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AgentKind as CoreAgent } from "./terminal";
+import type { AgentKind as CoreAgent, CodexConversation } from "./terminal";
 import type { AgentKind, TaskRow } from "./tasks";
 
 /** A repository as the core stores it. */
@@ -38,6 +38,8 @@ export interface CreateTaskRequest {
   agent: CoreAgent;
   /** `null` branches from the repository's default branch. */
   base: string | null;
+  /** A Codex conversation recorded for the project folder, continued by the new task. */
+  codexConversationId?: string | null;
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
@@ -56,6 +58,8 @@ export const listTasks = () => invoke<TaskRecord[]>("task_list");
 /** A task that was just created, with the setup commands its repository asks to run. */
 export type CreatedTask = TaskRecord & { setupCommands: string[]; setupCopyError?: string | null };
 export const createTask = (request: CreateTaskRequest) => invoke<CreatedTask>("task_create", { request });
+export const repoCodexConversations = (id: string) =>
+  invoke<CodexConversation[]>("repo_codex_conversations", { id });
 export const retrySetupCopy = (id: string) => invoke<void>("task_retry_setup_copy", { id });
 export const archiveTask = (id: string) => invoke<void>("task_archive", { id });
 export const listArchivedTasks = () => invoke<TaskRecord[]>("task_list_archived");

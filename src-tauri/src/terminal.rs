@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use brachio_agent::{AgentKind, Installed, PromptDelivery, ResolvedCommand};
@@ -74,6 +74,9 @@ pub struct OpenRequest {
     pub session_id: Option<String>,
     /// A Codex conversation picked explicitly from the worktree's history.
     pub codex_conversation_id: Option<String>,
+    /// The project folder of the task, filled in by the app, never by the window.
+    #[serde(skip)]
+    pub project_root: Option<PathBuf>,
     /// Working directory.
     pub cwd: PathBuf,
     /// Initial height in rows.
@@ -206,6 +209,9 @@ pub async fn terminal_open(
     }
     request.cwd = owner.task.worktree_path;
     request.session_id = owner.conversation;
+    request.project_root = brachio_store::RepoRecord::get(&*database.lock()?, &owner.task.repo_id)
+        .ok()
+        .map(|repo| repo.path);
     if request.codex_conversation_id.is_some()
         && (!request.resume || request.agent != Some(AgentKind::Codex))
     {
@@ -380,18 +386,31 @@ fn agent_command(
     mut options: Vec<String>,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let installed = installed(kind)?;
+    let from_project = kind == AgentKind::Codex
+        && request.codex_conversation_id.is_none()
+        && request.session_id.as_deref().is_some_and(|chosen| {
+            codex_conversation_allowed(
+                chosen,
+                request,
+                Some(chosen),
+                &brachio_agent::codex_conversations,
+            )
+        });
     let earlier = if let Some(chosen) = &request.codex_conversation_id {
-        if uuid::Uuid::parse_str(chosen).is_err()
-            || !brachio_agent::codex_conversations(&request.cwd)
-                .iter()
-                .any(|candidate| candidate.id == *chosen)
-        {
+        if !codex_conversation_allowed(
+            chosen,
+            request,
+            request.session_id.as_deref(),
+            &brachio_agent::codex_conversations,
+        ) {
             return Err(
                 "The chosen Codex conversation is no longer available for this worktree."
                     .to_owned(),
             );
         }
         Some(chosen.clone())
+    } else if from_project {
+        request.session_id.clone()
     } else if request.resume {
         earlier_conversation(kind, request.session_id.as_deref())
     } else {
@@ -404,7 +423,19 @@ fn agent_command(
         let command = installed
             .resolve(&launch)
             .map_err(|error| error.to_string())?;
-        return Ok((command, PromptDelivery::None, true));
+        // A task created from a project conversation still owes the user's first prompt.
+        let delivery = if from_project
+            && !request.resume
+            && request
+                .prompt
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty())
+        {
+            PromptDelivery::TypeIn
+        } else {
+            PromptDelivery::None
+        };
+        return Ok((command, delivery, true));
     }
     let session_id = request
         .session_id
@@ -414,6 +445,22 @@ fn agent_command(
         .resolve_interactive(request.prompt.as_deref(), session_id, options)
         .map_err(|error| error.to_string())?;
     Ok((command, delivery, false))
+}
+
+/// Whether Codex may resume `chosen` in this launch: a conversation recorded for the worktree,
+/// or one recorded for the project folder when it is the conversation the task was created from.
+fn codex_conversation_allowed(
+    chosen: &str,
+    request: &OpenRequest,
+    created_from: Option<&str>,
+    lookup: &dyn Fn(&Path) -> Vec<brachio_agent::CodexConversation>,
+) -> bool {
+    let recorded_for =
+        |folder: &Path| crate::workspace::project_conversation_exists(&lookup(folder), chosen);
+    if recorded_for(&request.cwd) {
+        return true;
+    }
+    created_from == Some(chosen) && request.project_root.as_deref().is_some_and(recorded_for)
 }
 
 /// Resume only an identity known to belong to this tab.
@@ -527,6 +574,51 @@ mod tests {
         assert_eq!(kind("cmd.exe"), "cmd");
         assert_eq!(kind("pwsh.exe"), "powershell");
         assert_eq!(kind("/usr/bin/fish"), "none");
+    }
+
+    fn open_request(cwd: &str, root: Option<&str>) -> OpenRequest {
+        OpenRequest {
+            agent: Some(AgentKind::Codex),
+            prompt: None,
+            resume: false,
+            session_id: None,
+            codex_conversation_id: None,
+            project_root: root.map(PathBuf::from),
+            cwd: PathBuf::from(cwd),
+            rows: 24,
+            cols: 80,
+            key: None,
+        }
+    }
+
+    #[test]
+    fn a_project_conversation_is_accepted_only_for_the_task_created_from_it() {
+        const ID: &str = "11111111-2222-4333-8444-555555555555";
+        let lookup = |folder: &Path| {
+            if folder == Path::new("project") {
+                vec![brachio_agent::CodexConversation {
+                    id: ID.to_owned(),
+                    timestamp: None,
+                }]
+            } else {
+                Vec::new()
+            }
+        };
+        let request = open_request("worktree", Some("project"));
+        assert!(codex_conversation_allowed(ID, &request, Some(ID), &lookup));
+        assert!(!codex_conversation_allowed(ID, &request, None, &lookup));
+        assert!(!codex_conversation_allowed(
+            ID,
+            &open_request("worktree", None),
+            Some(ID),
+            &lookup
+        ));
+        assert!(!codex_conversation_allowed(
+            "not-a-uuid",
+            &request,
+            Some("not-a-uuid"),
+            &lookup
+        ));
     }
 
     #[test]
