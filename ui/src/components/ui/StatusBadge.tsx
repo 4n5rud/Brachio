@@ -11,7 +11,7 @@ export function StatusGlyph(props: { tone: StatusTone }) {
     <svg class={props.tone === "working" ? "glyph glyph-spin" : "glyph"} viewBox="0 0 12 12" aria-hidden="true">
       <Switch>
         <Match when={props.tone === "working"}>
-          <circle cx="6" cy="6" r="4.5" fill="none" stroke={color()} stroke-opacity=".28" stroke-width="1.8" />
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke={color()} stroke-opacity=".45" stroke-width="1.8" />
           <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" fill="none" stroke={color()} stroke-width="1.8" stroke-linecap="round" />
         </Match>
         <Match when={props.tone === "blocked"}>

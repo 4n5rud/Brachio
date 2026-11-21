@@ -11,7 +11,7 @@ export function DiffStat(props: { additions?: number; deletions?: number }) {
     <Show when={!empty()}>
       <span class="diffstat">
         <Show when={known()}
-          fallback={<span class="diffstat-unknown" title={t("diff.totalsUnavailable")} aria-label={t("diff.totalsUnavailable")}>—</span>}>
+          fallback={<span class="diffstat-unknown" role="img" title={t("diff.totalsUnavailable")} aria-label={t("diff.totalsUnavailable")}>—</span>}>
           <span class="diffstat-add">+{formatLineCount(props.additions ?? 0)}</span>
           <span class="diffstat-del">−{formatLineCount(props.deletions ?? 0)}</span>
         </Show>

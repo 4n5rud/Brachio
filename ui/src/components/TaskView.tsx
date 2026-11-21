@@ -252,23 +252,28 @@ export function TaskView(props: {
           <MailboxBadge count={props.unreadForTab?.(terminalKey(props.task.id, "agent")) ?? 0} />
         </button>
         <Show when={secondary().has(props.task.id)}>
-          <button class="tab" role="tab" type="button"
-            aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
-            onClick={() => selectAgent(props.task.id, true)}>
-            <StatusGlyph tone={tabTone(currentExtraKey(props.task.id))} />
-            <AgentIcon agent={secondaryKind(props.task)} />
-            {AGENT_NAME[secondaryKind(props.task)]}
-            <MailboxBadge count={props.unreadForTab?.(currentExtraKey(props.task.id)) ?? 0} />
+          <div class="tab-item" role="presentation"
+            data-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}>
+            <button class="tab" role="tab" type="button"
+              aria-selected={layout() !== "shell" && isSecondarySelected(props.task.id)}
+              onClick={() => selectAgent(props.task.id, true)}>
+              <StatusGlyph tone={tabTone(currentExtraKey(props.task.id))} />
+              <AgentIcon agent={secondaryKind(props.task)} />
+              {AGENT_NAME[secondaryKind(props.task)]}
+              <MailboxBadge count={props.unreadForTab?.(currentExtraKey(props.task.id)) ?? 0} />
+            </button>
             <TabClose disabled={tabsSaving()} onClose={() => void changeSecondary(props.task.id)} />
-          </button>
+          </div>
         </Show>
         <Show when={shells().has(props.task.id)}>
-          <button class="tab" role="tab" aria-selected={layout() === "shell"} type="button"
-            onClick={() => setLayout("shell")}>
-            <Icon name="terminal" class="icon-sm" />
-            {t("task.shell")}
+          <div class="tab-item" role="presentation" data-selected={layout() === "shell"}>
+            <button class="tab" role="tab" aria-selected={layout() === "shell"} type="button"
+              onClick={() => setLayout("shell")}>
+              <Icon name="terminal" class="icon-sm" />
+              {t("task.shell")}
+            </button>
             <TabClose onClose={closeShell} />
-          </button>
+          </div>
         </Show>
         <Show when={props.task.worktreePath}>
           <IconButton icon="plus" size="sm" class="tab-add" label={t("task.newTab")} aria-haspopup="menu"
@@ -457,17 +462,15 @@ export function TaskView(props: {
   );
 }
 
-/** The close mark inside a tab; the tab itself is a button, so this is a button role on a span. */
+/** Sits beside its tab, not inside it, so a button never nests in a button. */
 function TabClose(props: { onClose: () => void; disabled?: boolean }) {
   const close = (event: Event) => {
     event.stopPropagation();
     if (!props.disabled) props.onClose();
   };
   return (
-    <span class="tab-close" role="button" tabindex="0" aria-label={t("task.closeTab")} aria-disabled={props.disabled}
-      onClick={close}
-      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); close(event); } }}>
+    <button class="tab-close" type="button" aria-label={t("task.closeTab")} aria-disabled={props.disabled} onClick={close}>
       <Icon name="x" class="icon-xs" />
-    </span>
+    </button>
   );
 }

@@ -43,7 +43,7 @@ The screens follow the combined design guideline (myWorkFlow and unslop-ui). Whe
 
 ## Space, size and layout
 - A 4px base (`space-1` to `space-8`). Chrome insets are 14px on the left of panels and 18px in content headers.
-- Hit targets are 24px minimum and 28px by default (`size-row`). Settings rows are 44px.
+- Hit targets are 24px minimum and 28px by default (`size-row`). Settings rows are 44px. Brachio is a pointer-first desktop app, so the 44px touch target of the integrated guideline is not applied to buttons; this README wins.
 - Dialogs: confirm `size-dialog` 480px, new task 560px, quick open 640px, settings 820px. The inspector widens to `size-inspector-wide` 560px while a diff is side by side.
 - Window: `size-titlebar` 40px, `size-statusbar` 24px. Body: sidebar `size-sidebar` 288px, main area, inspector `size-inspector` 360px (Changes, Files, QA, Activity). Both side panels can be hidden (`⌘B`, `⌘⌥B`; Windows `Ctrl+Shift+B`, `Ctrl+Shift+Alt+B`) and the choice is kept. Minimum window 1000 × 600.
 - Board view: tiles in `minmax(320px, 1fr)` columns.

@@ -1,5 +1,5 @@
 import { Show, createSignal } from "solid-js";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 import { sampleTasks } from "../lib/sample";
 import { Board } from "../components/Board";
 import { IssueReportDialog } from "../components/IssueReportDialog";
@@ -10,7 +10,7 @@ import { Cell } from "./changes-states";
 
 const NOW = Date.now();
 const none = () => {};
-const TASKS = sampleTasks(NOW).map((task, index) => ({ ...task, repoId: index % 2 ? "web" : "app" }));
+const tasks = () => sampleTasks(NOW, locale()).map((task, index) => ({ ...task, repoId: index % 2 ? "web" : "app" }));
 const REPOS = [{ id: "app", name: "brachio" }, { id: "web", name: "web-shop" }, { id: "docs", name: "docs-site" }];
 const FILES = ["crates/brachio-auth/src/limiter.rs", "crates/brachio-auth/tests/limit.rs"];
 const ACTIVITY: TaskActivity[] = [
@@ -62,17 +62,17 @@ export function DialogsStates() {
       </div>
       <Show when={open()}>{(sheet) => sheet().report
         ? <IssueReportDialog error="Could not start the terminal" onClose={() => setOpen(undefined)} />
-        : <WorkspaceDialog panel={sheet().panel ?? "quickOpen"} tasks={TASKS} activity={sheet().empty ? [] : ACTIVITY}
-            activeTaskIds={new Set(["a", "b"])} now={NOW} archived={sheet().empty ? [] : TASKS.slice(0, 2).map((task) => ({ ...task, archivedAt: NOW - 3_600_000 }))}
+        : <WorkspaceDialog panel={sheet().panel ?? "quickOpen"} tasks={tasks()} activity={sheet().empty ? [] : ACTIVITY}
+            activeTaskIds={new Set(["a", "b"])} now={NOW} archived={sheet().empty ? [] : tasks().slice(0, 2).map((task) => ({ ...task, archivedAt: NOW - 3_600_000 }))}
             onRestore={async () => {}} onDelete={async () => {}} mode="system" colorTheme="mint" notifications
             onMode={none} onColorTheme={none} onNotifications={none} onOpen={none} onClose={() => setOpen(undefined)}
             files={FILES} onInsertFile={none} onCommand={none} repos={REPOS} />}
       </Show>
       <div class="catalog-cells">
-        <Cell cap="Board, columns by status" width={1100}>
-          <Board tasks={TASKS} repos={REPOS} now={NOW} onOpen={none} />
+        <Cell cap="Board, columns by status" width={1180}>
+          <Board tasks={tasks()} repos={REPOS} now={NOW} onOpen={none} />
         </Cell>
-        <Cell cap="Board, a project with no tasks" width={1100}>
+        <Cell cap="Board, a project with no tasks" width={1180}>
           <Board tasks={[]} repos={REPOS} now={NOW} onOpen={none} />
         </Cell>
       </div>

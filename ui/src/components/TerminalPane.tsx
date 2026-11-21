@@ -6,7 +6,7 @@ import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
 import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
@@ -34,6 +34,7 @@ export interface TerminalSession {
  * A resumed agent that exits this soon with an error found nothing to resume,
  * so the pane starts a fresh one instead.
  */
+const CANDIDATE_TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 const RESUME_GRACE_MS = 5_000;
 
 /**
@@ -511,7 +512,7 @@ export function TerminalPane(props: {
                   <Button size="sm" title={candidate.id}
                     onClick={() => chooseConversation(candidate.id)}>
                     <Show when={candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))}>
-                      <span>{new Date(candidate.timestamp!).toLocaleString()}</span>
+                      <span>{new Date(candidate.timestamp!).toLocaleString(locale(), CANDIDATE_TIME)}</span>
                     </Show>
                     <code>{candidate.id.slice(-8)}</code>
                   </Button>
@@ -579,7 +580,7 @@ export function TerminalPane(props: {
                 <Show when={props.onReport}>
                   <Button size="sm" onClick={() => props.onReport?.(e.reason)}>{t("error.report")}</Button>
                 </Show></>}>
-              {e.reason}
+              {t("terminal.failureDetail").replace("{detail}", () => e.reason)}
             </Notice>
           );
         }}
@@ -592,7 +593,7 @@ export function TerminalPane(props: {
         )}
       </Show>
       <Show when={inputFailure()}>
-        {(failure) => <Notice tone="error" lead={t("terminal.inputFailed")}>{failure()}</Notice>}
+        {(failure) => <Notice tone="error" lead={t("terminal.inputFailed")}>{t("terminal.failureDetail").replace("{detail}", () => failure())}</Notice>}
       </Show>
       <Show when={promptNote()}>
         {(note) => (

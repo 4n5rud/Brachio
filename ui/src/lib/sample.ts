@@ -4,9 +4,9 @@ import type { TaskRow } from "./tasks";
  * Example tasks for previewing the UI in a plain browser (`pnpm dev`), where
  * the Rust core is not running. Never shown inside the Tauri app.
  */
-export function sampleTasks(now: number): TaskRow[] {
+export function sampleTasks(now: number, language: "en" | "ko" = "en"): TaskRow[] {
   const min = 60_000;
-  return [
+  const rows: TaskRow[] = [
     {
       id: "login-redirect",
       title: "Return to the original page after sign-in",
@@ -87,4 +87,16 @@ export function sampleTasks(now: number): TaskRow[] {
       note: "PR #142 merged",
     },
   ];
+  if (language === "en") return rows;
+  return rows.map((row) => ({ ...row, ...KOREAN_TEXT[row.id] }));
 }
+
+const KOREAN_TEXT: Record<string, { title: string; note?: string }> = {
+  "login-redirect": { title: "로그인 뒤 원래 페이지로 돌아가기", note: "명령 승인 대기: pnpm add zod" },
+  "nav-a11y": { title: "내비게이션 접근성 고치기", note: "aria-current를 어디에 둘지 물어보고 있어요" },
+  "search-cache": { title: "검색 결과 캐시하기", note: "사용량 한도에서 멈췄어요" },
+  "checkout-card": { title: "결제 화면에서 카드 번호 검증하기", note: "QA 실패 1건을 고치는 중이에요. 3번 중 2번째" },
+  "lazy-images": { title: "상품 이미지 지연 로딩" },
+  "dark-tokens": { title: "다크 모드 토큰 정리하기" },
+  "deps-cleanup": { title: "의존성 정리하기", note: "PR #142를 병합했어요" },
+};

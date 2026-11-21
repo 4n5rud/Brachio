@@ -3,6 +3,8 @@ import { sampleTasks } from "../lib/sample";
 import { AgentCard, type AgentCardProps } from "../components/settings/AgentCard";
 import { AgentList } from "../components/settings/AgentSettings";
 import { SettingsPanel, type SettingsPage, type UpdateSettingsProps } from "../components/settings/SettingsPanel";
+import { Button } from "../components/ui/Button";
+import { t } from "../i18n";
 import { Cell } from "./changes-states";
 
 const NOW = Date.now();
@@ -19,7 +21,8 @@ const updates = (over: Partial<UpdateSettingsProps>): UpdateSettingsProps =>
 function Frame(props: { page: SettingsPage; agents?: JSX.Element; updates?: Partial<UpdateSettingsProps>; drafts?: { fontSize?: string }; empty?: boolean }) {
   return (
     <div class="modal-flush catalog-settings">
-      <div class="modal-head"><h2>Settings</h2></div>
+      <div class="modal-head"><h2>Settings</h2>
+        <div class="modal-head-end"><Button size="sm" onClick={none}>{t("workspace.close")}</Button></div></div>
       <div class="modal-body">
         <SettingsPanel page={props.page} mode="light" colorTheme="sand" onMode={none} onColorTheme={none} notifications onNotifications={none}
           updates={updates(props.updates ?? {})} agents={props.agents} terminalDrafts={props.drafts}

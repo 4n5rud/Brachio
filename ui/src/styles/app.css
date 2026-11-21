@@ -490,12 +490,14 @@ p {
   border-radius: var(--radius-md);
 }
 .swatch-art {
+  background: var(--color-panel);
   display: grid;
   grid-template-columns: 22px 1fr;
   height: 64px;
 }
 .swatch-art .sb {
-  border-right: 1px solid rgb(127 127 127 / 18%);
+  background: var(--color-canvas);
+  border-right: 1px solid var(--color-line);
 }
 .swatch-art .mn {
   display: grid;
@@ -504,11 +506,13 @@ p {
   padding: 10px 8px;
 }
 .swatch-art i {
+  background: var(--color-text);
   display: block;
   height: 5px;
   border-radius: 3px;
 }
 .swatch-art .btn-art {
+  background: var(--color-accent);
   width: 26px;
   height: 9px;
   margin-top: 3px;

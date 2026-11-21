@@ -286,7 +286,7 @@ function Catalog() {
           <Notice tone="info">{t("terminal.resumeFailed")}</Notice>
           <Notice tone="progress">{t("terminal.checkingConversations")}</Notice>
           <Notice tone="info" actions={<>
-            <Button size="sm">Nov 19, 16:40 <code>3f9a21bc</code></Button>
+            <Button size="sm">{new Date(NOW).toLocaleString(locale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} <code>3f9a21bc</code></Button>
             <Button size="sm">{t("terminal.startNewConversation")}</Button></>}>{t("terminal.chooseConversation")}</Notice>
           <Notice tone="error" lead={t("terminal.conversationCheckFailed")}
             actions={<Button size="sm">{t("terminal.startNewConversation")}</Button>} />
@@ -301,10 +301,10 @@ function Catalog() {
             {t("terminal.exitedCode").replace("{code}", "101")}</Notice>
           <Notice tone="error" lead={t("terminal.startFailed")}
             actions={<><Button size="sm">{t("terminal.reopen")}</Button>
-              <Button size="sm">{t("error.report")}</Button></>}>claude was not found on PATH.</Notice>
+              <Button size="sm">{t("error.report")}</Button></>}>{t("terminal.failureDetail").replace("{detail}", "claude was not found on PATH.")}</Notice>
           <Notice tone="blocked" lead={t("terminal.signInLead").replace("{agent}", "Claude Code")}>
             {t("terminal.signInNote").replace("{command}", "claude auth login")}</Notice>
-          <Notice tone="error" lead={t("terminal.inputFailed")}>The runtime did not answer.</Notice>
+          <Notice tone="error" lead={t("terminal.inputFailed")}>{t("terminal.failureDetail").replace("{detail}", "The runtime did not answer.")}</Notice>
           <Notice tone="info">{t("terminal.outputTrimmed")}</Notice>
           <Notice tone="blocked" lead={t("terminal.promptNotSentLead")}
             actions={<Button size="sm">{t("task.draftOriginalPrompt")}</Button>}>{t("terminal.promptNotSent")}</Notice>
@@ -328,12 +328,14 @@ function Catalog() {
         <div class="tabs" role="tablist" style={{ width: "100%" }}>
           <button class="tab" role="tab" aria-selected="true" type="button">
             <StatusGlyph tone="ready" />Claude Code</button>
-          <button class="tab" role="tab" aria-selected="false" type="button">
-            <StatusGlyph tone="blocked" /><AgentIcon agent="codex" />Codex
-            <span class="tab-close" role="button" tabindex="0" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></span></button>
-          <button class="tab" role="tab" aria-selected="false" type="button">
-            <Icon name="terminal" class="icon-sm" />{t("task.shell")}
-            <span class="tab-close" role="button" tabindex="0" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></span></button>
+          <div class="tab-item" role="presentation">
+            <button class="tab" role="tab" aria-selected="false" type="button">
+              <StatusGlyph tone="blocked" /><AgentIcon agent="codex" />Codex</button>
+            <button class="tab-close" type="button" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></button></div>
+          <div class="tab-item" role="presentation">
+            <button class="tab" role="tab" aria-selected="false" type="button">
+              <Icon name="terminal" class="icon-sm" />{t("task.shell")}</button>
+            <button class="tab-close" type="button" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></button></div>
           <IconButton icon="plus" size="sm" class="tab-add" label={t("task.newTab")} />
         </div>
         <div class="menu catalog-menu" role="menu">
