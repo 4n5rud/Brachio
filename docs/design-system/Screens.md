@@ -41,7 +41,7 @@ The smallest window is 1000 × 600.
 | Card | Covers |
 |---|---|
 | StatesSidebar | every task status, hover, selected, focus, long and Korean titles, lead and workers, unread mail, all PR chips, empty, collapsed and folder projects |
-| StatesChrome | title bar on macOS and Windows, badge counts, tooltips, status bar loading and core stopped |
+| StatesChrome | title bar on macOS and Windows, badge counts, tooltips, status bar loading and unreadable resource use |
 | StatesTerminal | tabs, every terminal notice (restore, reattach, resume, Codex conversation choice, lost connection, exited, could not start, prompt held back, setup copy failed), unknown launch in two steps, original prompt, file drop, background tabs |
 | StatesApproval | tool requests, sending, long command, setup commands, QA run, answered in the terminal, focus |
 | StatesChanges | loading, empty, file states, staged and untracked, conflicts, cut diff, merge check (idle, checking, clean, conflicts, local only), PR feedback, commit, agent drafts, push and create PR, done, failed |
@@ -137,7 +137,7 @@ Whole windows for every failure. Each one says what broke, what is kept, and off
 
 | Card | Failure |
 |---|---|
-| ScreenErrorCoreStopped | The core stopped: terminals keep running in the runtime |
+| ScreenErrorCoreStopped | Cannot read resource use: terminals keep running |
 | ScreenErrorRuntimeLost | Lost the connection to the terminal runtime |
 | ScreenErrorStartFailed | Could not start the terminal: the agent is not on PATH |
 | ScreenErrorExited | The agent exited normally: reopen to continue |

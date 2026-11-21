@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import { Icon } from "./Icon";
+import { Button } from "./ui/Button";
 import { StatusGlyph } from "./ui/StatusBadge";
 import "./StatusBar.css";
 
@@ -22,7 +23,8 @@ export function formatMemory(bytes: number): string {
 /** What the bar shows. A missing number prints as a dash. */
 export function StatusBarView(props: {
   sessions: number;
-  coreStopped?: boolean;
+  /** The app could not read its own memory and CPU use. */
+  usageUnavailable?: boolean;
   memory?: string;
   /** Tooltip that splits the memory figure into its parts. */
   memoryTitle?: string;
@@ -34,11 +36,14 @@ export function StatusBarView(props: {
 }) {
   return (
     <footer class="statusbar">
-      <span>
-        <Show when={props.coreStopped} fallback={<i class="dot" />}>
+      <span title={props.usageUnavailable ? t("statusbar.usageUnavailableNote") : undefined}>
+        <Show when={props.usageUnavailable} fallback={<i class="dot" />}>
           <StatusGlyph tone="error" />
         </Show>
-        {t(props.coreStopped ? "statusbar.coreStopped" : "statusbar.coreOk")}
+        {t(props.usageUnavailable ? "statusbar.usageUnavailable" : "statusbar.ok")}
+        <Show when={props.usageUnavailable}>
+          <Button size="sm" variant="ghost" onClick={() => window.location.reload()}>{t("statusbar.reload")}</Button>
+        </Show>
       </span>
       <span>
         {t("statusbar.sessions")} <b>{props.sessions}</b>
@@ -66,14 +71,14 @@ export function StatusBarView(props: {
 /** Bottom bar. Memory and CPU cover the app and every process it started, plus the terminal runtime. */
 export function StatusBar(props: { sessions: number }) {
   const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
-  const [coreStopped, setCoreStopped] = createSignal(false);
+  const [usageUnavailable, setUsageUnavailable] = createSignal(false);
 
   onMount(() => {
     if (!inTauri) return;
     const refresh = () =>
       void invoke<ResourceUsage>("resource_usage").then(
-        (next) => { setUsage(next); setCoreStopped(false); },
-        () => setCoreStopped(true),
+        (next) => { setUsage(next); setUsageUnavailable(false); },
+        () => setUsageUnavailable(true),
       );
     refresh();
     const timer = window.setInterval(refresh, REFRESH_MS);
@@ -90,7 +95,7 @@ export function StatusBar(props: { sessions: number }) {
   return (
     <StatusBarView
       sessions={props.sessions}
-      coreStopped={coreStopped()}
+      usageUnavailable={usageUnavailable()}
       memory={usage() ? formatMemory(usage()!.memoryBytes) : undefined}
       memoryTitle={memoryTitle()}
       cpu={usage() ? `${Math.round(usage()!.cpuPercent)}%` : undefined}
