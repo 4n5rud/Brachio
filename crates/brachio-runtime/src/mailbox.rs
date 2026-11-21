@@ -21,6 +21,9 @@ pub const CREATE_TASK_TIMEOUT: Duration = Duration::from_secs(300);
 pub const DEFAULT_WAIT_SECS: u64 = 600;
 /// The longest `brachio task wait` may be asked to wait.
 pub const MAX_WAIT_SECS: u64 = 3600;
+/// How long the app waits for the client to acknowledge the messages of a `check` before it
+/// leaves them unread.
+pub const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 /// Messages returned by one `check` unless asked for fewer.
 pub const DEFAULT_BATCH: usize = 10;
 /// The most messages one request can return.
@@ -70,6 +73,14 @@ pub enum MailRequest {
         /// Leave the messages unread.
         #[serde(default)]
         peek: bool,
+    },
+    /// Sent on the connection of a consuming `check` once its messages were received and shown.
+    /// Only then does the app mark exactly these messages read; a client that never acknowledges
+    /// (a closed connection, a timeout, or an older `brachio` that does not know this request)
+    /// leaves them unread and they are shown again by the next `check`.
+    Ack {
+        /// The ids of the messages the `check` answer carried.
+        ids: Vec<String>,
     },
     /// The latest messages to or from the terminal, read or not.
     Inbox {
@@ -280,6 +291,49 @@ pub fn is_mail(message: &serde_json::Value) -> bool {
 /// Fails when the app is not running, closes the connection, or does not answer in time.
 pub async fn call(endpoint: &str, request: &MailRequest) -> Result<MailResponse> {
     call_with_timeout(endpoint, request, CALL_TIMEOUT).await
+}
+
+/// Sends a consuming `check`, runs `show` on the answer, then acknowledges the messages so the app
+/// marks them read. `show` runs before the acknowledgement, so a message that was not shown stays
+/// unread. An answer without messages needs no acknowledgement.
+///
+/// # Errors
+/// Fails like [`call`], or with the error `show` returns; nothing is acknowledged then.
+pub async fn call_with_ack(
+    endpoint: &str,
+    request: &MailRequest,
+    timeout: Duration,
+    show: impl FnOnce(&MailResponse) -> Result<()>,
+) -> Result<MailResponse> {
+    let exchange = async {
+        let mut stream = transport::connect(endpoint)
+            .await
+            .map_err(|_| anyhow!("Brachio is not running or does not accept messages."))?;
+        write_message(&mut stream, request, MAX_MESSAGE).await?;
+        let mut reader = BufReader::new(stream);
+        let message = read_message(&mut reader, MAX_RESPONSE)
+            .await?
+            .ok_or_else(|| anyhow!("Brachio closed the connection without answering."))?;
+        let response = serde_json::from_slice::<MailResponse>(&message)?;
+        show(&response)?;
+        if let MailResponse::Messages { messages, .. } = &response {
+            if !messages.is_empty() {
+                let ids = messages.iter().map(|message| message.id.clone()).collect();
+                // The messages were shown; a failed acknowledgement only leaves them unread.
+                if write_message(reader.get_mut(), &MailRequest::Ack { ids }, MAX_MESSAGE)
+                    .await
+                    .is_ok()
+                {
+                    // The app closes once it has handled the acknowledgement.
+                    let _ = read_message(&mut reader, MAX_RESPONSE).await;
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>(response)
+    };
+    tokio::time::timeout(timeout, exchange)
+        .await
+        .map_err(|_| anyhow!("Brachio did not answer in time."))?
 }
 
 /// Like [`call`], with a different time to wait for the answer.

@@ -36,6 +36,7 @@ pub fn handle(
     let outcome = match request {
         MailRequest::Send(mail) => send(connection, &mail, now_ms, new_id),
         MailRequest::Check { key, limit, .. } => check(connection, &key, limit),
+        MailRequest::Ack { .. } => Err("An acknowledgement answers a check.".to_owned()),
         MailRequest::Inbox { key, limit } => inbox(connection, &key, limit),
         MailRequest::Peers { key } => peers(connection, &key),
         MailRequest::CreateTask { .. } => Err("Creating tasks needs the user's answer.".to_owned()),
@@ -160,7 +161,7 @@ fn resolve_target(
 }
 
 /// The next unread messages, still unread: the socket marks them with [`mark_delivered`] once
-/// the answer was written, so a client that left cannot lose them.
+/// the client acknowledged them, so a client that left cannot lose them.
 fn check(connection: &mut Connection, key: &str, limit: Option<usize>) -> Outcome {
     agent_owner(connection, key)?;
     let limit = limit.unwrap_or(DEFAULT_BATCH).clamp(1, MAX_BATCH);

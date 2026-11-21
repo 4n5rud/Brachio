@@ -186,14 +186,33 @@ pub fn check(args: &CheckArgs) -> Result<()> {
         limit: args.limit,
         peek: args.peek,
     };
-    let MailResponse::Messages {
-        messages,
-        unread_left,
-    } = call(&endpoint, &request)?
-    else {
-        bail!("Brachio answered with something unexpected.");
+    let show = |response: &MailResponse| {
+        let MailResponse::Messages {
+            messages,
+            unread_left,
+        } = response
+        else {
+            if let MailResponse::Error { message } = response {
+                bail!("{message}");
+            }
+            bail!("Brachio answered with something unexpected.");
+        };
+        print_messages(messages, *unread_left, args.full, &key);
+        Ok(())
     };
-    print_messages(&messages, unread_left, args.full, &key);
+    if args.peek {
+        let response = call(&endpoint, &request)?;
+        return show(&response);
+    }
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(mailbox::call_with_ack(
+        &endpoint,
+        &request,
+        mailbox::CALL_TIMEOUT,
+        show,
+    ))?;
     Ok(())
 }
 

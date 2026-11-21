@@ -24,6 +24,21 @@ fn app(name: &str, response: MailResponse) -> tokio::task::JoinHandle<MailReques
         write_message(reader.get_mut(), &response, MAX_RESPONSE)
             .await
             .expect("answer");
+        if let (MailRequest::Check { peek: false, .. }, MailResponse::Messages { messages, .. }) =
+            (&request, &response)
+        {
+            if !messages.is_empty() {
+                let ack = read_message(&mut reader, MAX_MESSAGE)
+                    .await
+                    .expect("read ack")
+                    .expect("an acknowledgement");
+                let ids = messages.iter().map(|message| message.id.clone()).collect();
+                assert_eq!(
+                    serde_json::from_slice::<MailRequest>(&ack).expect("decode ack"),
+                    MailRequest::Ack { ids }
+                );
+            }
+        }
         let _ = reader.get_mut().shutdown().await;
         request
     })
