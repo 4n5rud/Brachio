@@ -2,12 +2,15 @@ import { For, Show, createSignal } from "solid-js";
 import { t } from "../../i18n";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { StatusGlyph } from "./StatusBadge";
 import "./ConfirmDialog.css";
 
 export interface LossItem {
   label: string;
   /** Counts above zero read as errors; zeros are muted. */
   count: number;
+  /** Counts that are not lost work stay in the normal text color. */
+  plain?: boolean;
 }
 
 export interface ConfirmRequest {
@@ -17,6 +20,10 @@ export interface ConfirmRequest {
   body?: string;
   /** What is lost, with real counts. */
   loss?: readonly LossItem[];
+  /** A short fact under the loss list. */
+  note?: string;
+  /** What went wrong, shown with the error glyph above the body. */
+  error?: string;
   /** A verb that says what happens. */
   confirmLabel: string;
   cancelLabel?: string;
@@ -46,13 +53,16 @@ export function ConfirmDialog(props: ConfirmRequest & { onResult: (confirmed: bo
         </>
       }
     >
+      <Show when={props.error}>
+        {(error) => <p class="confirm-error" role="alert"><StatusGlyph tone="error" />{error()}</p>}
+      </Show>
       <Show when={props.body}>
         {(body) => <For each={body().split("\n\n")}>{(paragraph) => <p class="confirm-text">{paragraph}</p>}</For>}
       </Show>
       <Show when={props.loss?.length}>
         <ul class="loss">
           <For each={props.loss}>{(item) => (
-            <li classList={{ hot: item.count > 0, zero: item.count === 0 }}>
+            <li classList={{ hot: item.count > 0 && !item.plain, zero: item.count === 0 }}>
               <span>{item.label}</span>
               <b>{item.count}</b>
             </li>

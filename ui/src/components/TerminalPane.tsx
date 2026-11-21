@@ -1,3 +1,4 @@
+import { confirmDialog } from "./ui/ConfirmDialog";
 import { Notice, type NoticeTone } from "./ui/Notice";
 import { Button } from "./ui/Button";
 import { pushToast } from "../lib/toasts";
@@ -91,7 +92,6 @@ export function TerminalPane(props: {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
   const [uncertainOperation, setUncertainOperation] = createSignal<string>();
-  const [confirmingReset, setConfirmingReset] = createSignal(false);
   const [resetError, setResetError] = createSignal<string>();
   const [restoredFrame, setRestoredFrame] = createSignal(false);
   const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation" | "terminal.resumeFailed">();
@@ -529,30 +529,30 @@ export function TerminalPane(props: {
       <Show when={uncertainOperation()}>
         {(operation) => (
           <Notice
-            tone={confirmingReset() ? "error" : "blocked"}
-            lead={confirmingReset() ? t("terminal.launchResetLead") : t("terminal.launchUncertainLead")}
+            tone="blocked"
+            lead={t("terminal.launchUncertainLead")}
             actions={
-              <Show
-                when={confirmingReset()}
-                fallback={<Button size="sm" onClick={() => setConfirmingReset(true)}>{t("terminal.launchReset")}</Button>}
-              >
-                <Button size="sm" variant="danger" onClick={async () => {
-                  if (!props.session?.key) return;
-                  try {
-                    await forgetUncertainLaunch(props.session.key, operation());
-                    setUncertainOperation(undefined);
-                    setConfirmingReset(false);
-                    setResetError(undefined);
-                    reopen();
-                  } catch (error) {
-                    setResetError(String(error));
-                  }
-                }}>{t("terminal.launchResetAnyway")}</Button>
-                <Button size="sm" onClick={() => setConfirmingReset(false)}>{t("terminal.launchResetCancel")}</Button>
-              </Show>
+              <Button size="sm" onClick={async () => {
+                if (!props.session?.key) return;
+                if (!await confirmDialog({
+                  title: t("terminal.launchResetLead"),
+                  body: t("terminal.launchResetNote"),
+                  confirmLabel: t("terminal.launchResetAnyway"),
+                  cancelLabel: t("terminal.launchResetCancel"),
+                  tone: "danger",
+                })) return;
+                try {
+                  await forgetUncertainLaunch(props.session.key, operation());
+                  setUncertainOperation(undefined);
+                  setResetError(undefined);
+                  reopen();
+                } catch (error) {
+                  setResetError(String(error));
+                }
+              }}>{t("terminal.launchReset")}</Button>
             }
           >
-            {confirmingReset() ? t("terminal.launchResetNote") : t("terminal.launchUncertainNote")}
+            {t("terminal.launchUncertainNote")}
             <Show when={resetError()}>{(message) => <>{" "}{message()}</>}</Show>
           </Notice>
         )}
