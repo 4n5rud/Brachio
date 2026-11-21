@@ -98,7 +98,7 @@ export function TaskList(props: {
         <h2>{t("sidebar.projects")}</h2>
         {/* Only shown when something needs the user, so a bare 0 is not mistaken for a project count. */}
         <Show when={props.needsYou > 0}>
-          <span class="count" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
+          <span class="count" role="img" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
         </Show>
         <Show when={props.onAddRepo}>
           <Button variant="primary" size="sm" onClick={() => props.onAddRepo?.()}>
@@ -123,7 +123,7 @@ export function TaskList(props: {
                   </button>
                   <Show when={id && props.onNewTask}>
                     <IconButton class="project-new-task" icon="plus" size="sm"
-                      title={t("sidebar.newTask")} label={`${t("sidebar.newTask")} · ${name()}`}
+                      title={t("sidebar.newTask")} label={t("sidebar.newTaskIn").replace("{project}", () => name())}
                       onClick={() => props.onNewTask?.(id)} />
                   </Show>
                 </div>

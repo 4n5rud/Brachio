@@ -150,7 +150,7 @@ export function TaskGitActions(props: {
       <InspectorSection title={t("git.commitSection")}>
         <Show when={blocked()}><InspectorNote>{t("git.conflictsBlock")}</InspectorNote></Show>
         <Show when={asked() === "commit"}><InspectorNote>{t("git.agentDraftReady")}</InspectorNote></Show>
-        <TextArea aria-label={t("git.message")} placeholder={t("git.message")} rows={2} disabled={busy() || blocked()}
+        <TextArea label={t("git.message")} rows={2} disabled={busy() || blocked()}
           value={message()} onInput={(event) => setMessage(event.currentTarget.value)} />
         {outcome(commitOutcome(), (failure) => (
           <>
@@ -198,9 +198,9 @@ export function TaskGitActions(props: {
             void createPr();
           }}>
             <Show when={asked() === "pr"}><InspectorNote>{t("git.agentDraftReady")}</InspectorNote></Show>
-            <Input aria-label={t("git.prTitle")} placeholder={t("git.prTitle")} type="text" disabled={busy()}
+            <Input label={t("git.prTitle")} type="text" disabled={busy()}
               value={prTitle()} onInput={(event) => setPrTitle(event.currentTarget.value)} />
-            <TextArea aria-label={t("git.prBody")} placeholder={t("git.prBody")} rows={3} disabled={busy()}
+            <TextArea label={t("git.prBody")} rows={3} disabled={busy()}
               value={prBody()} onInput={(event) => setPrBody(event.currentTarget.value)} />
             {outcome(prOutcome(), (failure) => (
               <InspectorNote tone="error">

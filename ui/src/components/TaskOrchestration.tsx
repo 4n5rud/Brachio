@@ -135,8 +135,8 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
                   void decide(handoff().id, false);
                 }}>
                   <Input type="text" maxLength={300} value={reason()}
+                    label={t("orchestration.reasonLabel")}
                     placeholder={t("orchestration.reasonPlaceholder")}
-                    aria-label={t("orchestration.reasonPlaceholder")}
                     onInput={(event) => setReason(event.currentTarget.value)} />
                   <Button type="submit" disabled={busy() || reason().trim() === ""}>
                     {t("orchestration.confirmReject")}

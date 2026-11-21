@@ -63,12 +63,30 @@
   font: var(--text-label);
   white-space: nowrap;
 }
+.tab-item {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.tab-item[data-selected="true"] {
+  background: var(--color-term-bg);
+  box-shadow: 1px 0 0 var(--color-line), -1px 0 0 var(--color-line);
+}
+.tab-item > .tab {
+  padding-right: 6px;
+  background: transparent;
+  box-shadow: none;
+}
 .tab-close {
   display: inline-grid;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
   place-items: center;
   width: 18px;
   height: 18px;
-  margin-right: -4px;
+  margin-right: var(--space-3);
   border-radius: var(--radius-xs);
   color: var(--color-text-3);
 }

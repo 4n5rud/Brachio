@@ -54,7 +54,7 @@ function LanguageRow() {
   const [anchor, setAnchor] = createSignal<HTMLElement>();
   const choose = (next: "en" | "ko") => { setLocale(next); setAnchor(undefined); };
   return (
-    <SettingRow label={t("settings.language")} hint={t("settings.languageHint")}>
+    <SettingRow label={t("settings.language")}>
       <Button size="sm" aria-haspopup="menu" aria-expanded={anchor() !== undefined}
         onClick={(event) => setAnchor(anchor() ? undefined : event.currentTarget)}>
         {locale() === "ko" ? "한국어" : "English"}
@@ -112,7 +112,7 @@ function ArchivedPage(props: {
           <SettingRow label={task.title} hint={
             <span class="setting-row-meta">
               <Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show>
-              <span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>{archivedAgo(task, props.now)}</span>
+              <span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString(locale()) : undefined}>{archivedAgo(task, props.now)}</span>
             </span>
           }>
             <div class="row-gap">
@@ -170,7 +170,11 @@ export function SettingsPanel(props: {
       <div class="settings-page">
         <h3>{page() === "agents" ? t("settings.agents") : title()}</h3>
         <Switch>
-          <Match when={page() === "general"}><LanguageRow /></Match>
+          <Match when={page() === "general"}>
+            <LanguageRow />
+            <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
+              onChange={props.onNotifications} />
+          </Match>
           <Match when={page() === "appearance"}>
             <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
             <p class="form-hint">{t("settings.themeNote")}</p>
