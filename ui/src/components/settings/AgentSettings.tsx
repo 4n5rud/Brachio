@@ -84,7 +84,7 @@ function AgentAccount(props: { agent: InstalledAgent }) {
     }))) return;
     setSigningIn(signIn);
     try {
-      await invoke("codex_auth_action", { action: signIn ? "sign_in" : "sign_out" });
+      await invoke<boolean>("codex_auth_action", { action: signIn ? "sign_in" : "sign_out" });
     } finally {
       setSigningIn(false);
       await refetch();
@@ -96,6 +96,7 @@ function AgentAccount(props: { agent: InstalledAgent }) {
       signingIn={signingIn()} busy={busy()} usage={usage.loading ? undefined : usage()} error={error()}
       onRefresh={() => { void refetch(); if (kind === "codex") void refetchUsage(); }}
       onSignIn={() => void changeAuth(true)} onSignOut={() => void changeAuth(false)}
+      onCancelSignIn={() => void invoke("codex_auth_cancel").catch((failure) => setError(String(failure)))}
       onClaudeUsage={() => void run(() => invoke("open_claude_usage"))} />
   );
 }

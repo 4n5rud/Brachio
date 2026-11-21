@@ -26,6 +26,8 @@ import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
+import { notificationSettings } from "./lib/notification-settings";
+import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
@@ -87,6 +89,7 @@ export function App() {
     };
     const needs = rows().filter((task) => taskGroup(task.status) === "needs").map(entry);
     const working = rows().filter((task) => taskGroup(task.status) === "working").map(entry);
+    const badge = notificationSettings().badge;
     const labels = {
       needs: t("group.needs"),
       working: t("group.working"),
@@ -96,7 +99,7 @@ export function App() {
     };
     // Status changes arrive in bursts; rebuild once they settle.
     const timer = setTimeout(() => {
-      void invoke("tray_update", { needs, working, labels })
+      void invoke("tray_update", { needs, working, labels, badge })
         .catch((error) => console.warn("Could not update the tray", error));
     }, 300);
     onCleanup(() => clearTimeout(timer));
@@ -278,7 +281,8 @@ export function App() {
   const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
   createEffect(() => {
     if (!inTauri) return;
-    void getCurrentWindow().setBadgeCount(needsYou() || undefined).catch(() => {});
+    const count = notificationSettings().badge ? needsYou() : 0;
+    void getCurrentWindow().setBadgeCount(count || undefined).catch(() => {});
   });
 
   // First prompts of tasks created in this run. Each is handed to the
@@ -373,6 +377,18 @@ export function App() {
 
   const report = (failure: unknown) => {
     const message = String(failure);
+    const blocked = blockedFolder(message);
+    if (blocked !== null) {
+      void confirmDialog({
+        title: t("folderAccess.title"),
+        error: t("folderAccess.cannotRead").replace("{path}", () => blocked),
+        body: t("folderAccess.how"),
+        confirmLabel: t("folderAccess.open"),
+        cancelLabel: t("workspace.close"),
+        tone: "primary",
+      }).then((open) => (open ? openFolderAccessSettings() : undefined)).catch(report);
+      return;
+    }
     pushToast({
       tone: "error",
       title: t("error.title"),

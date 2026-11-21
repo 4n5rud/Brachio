@@ -1,6 +1,7 @@
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 import { t, type MessageKey } from "../i18n";
+import { notificationKind, notificationSettings } from "./notification-settings";
 import type { AgentState } from "./status";
 
 /**
@@ -36,13 +37,23 @@ function allowed(): Promise<boolean> {
   return permission;
 }
 
+/** The system sound to name; Windows toasts play their own sound and take only files here. */
+function notificationSound(): string | undefined {
+  const platform = navigator.userAgent;
+  if (/Mac/i.test(platform)) return "Ping";
+  if (/Linux/i.test(platform)) return "message-new-instant";
+  return undefined;
+}
+
 /** Shows an OS notification, but only while the window is not in front. */
 export async function notifyIfAway(key: MessageKey, task: { id: string; title: string }, detail: string | null,
   sessionKey?: string) {
-  if (document.hasFocus() || !(await allowed())) return;
+  const settings = notificationSettings();
+  if (!settings[notificationKind(key)] || document.hasFocus() || !(await allowed())) return;
   sendNotification({
     title: t(key),
     body: detail ? `${task.title}: ${detail}` : task.title,
+    sound: settings.sound ? notificationSound() : undefined,
     extra: { brachioTaskId: task.id, brachioSessionKey: sessionKey },
   });
 }

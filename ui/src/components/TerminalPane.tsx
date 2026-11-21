@@ -1,6 +1,8 @@
 import { confirmDialog } from "./ui/ConfirmDialog";
 import { Notice, type NoticeTone } from "./ui/Notice";
 import { Button } from "./ui/Button";
+import { FolderAccessNotice } from "./FolderAccessNotice";
+import { blockedFolder } from "../lib/folder-access";
 import { pushToast } from "../lib/toasts";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
@@ -621,6 +623,8 @@ export function TerminalPane(props: {
           if (e.kind === "detached") {
             return <Notice tone="error" lead={t("terminal.detached")} actions={reopenAction(true)} />;
           }
+          const blocked = blockedFolder(e.reason);
+          if (blocked !== null) return <FolderAccessNotice path={blocked} onRetry={() => reopen()} />;
           return (
             <Notice tone="error" lead={t("terminal.startFailed")}
               actions={<>{reopenAction(false)}

@@ -7,6 +7,8 @@ import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
 import { CORE_AGENT, detectAgents } from "../lib/terminal";
 import { BranchField } from "./BranchField";
+import { FolderAccessNotice } from "./FolderAccessNotice";
+import { blockedFolder } from "../lib/folder-access";
 import { AgentIcon } from "./AgentIcon";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { repoCodexConversations, titleFromPrompt } from "../lib/workspace";
@@ -204,7 +206,10 @@ export function NewTaskDialog(props: {
           </For>
         </Select>
       </Show>
-      <Show when={createError()}>
+      <Show when={createError() && blockedFolder(createError() ?? "")}>
+        {(folder) => <FolderAccessNotice path={folder()} onRetry={() => void submit()} />}
+      </Show>
+      <Show when={createError() && blockedFolder(createError() ?? "") === null ? createError() : null}>
         {(message) => (
           <div class="create-failed" role="alert">
             <strong>{t("newTask.createFailed")}</strong>

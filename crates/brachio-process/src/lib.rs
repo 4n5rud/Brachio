@@ -12,6 +12,8 @@ use process_wrap::std::{ChildWrapper, CommandWrap};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 const POLL_EVERY: Duration = Duration::from_millis(10);
 /// Extra time to read the pipes when the deadline already passed as the child exited.
 const DRAIN_GRACE: Duration = Duration::from_millis(200);
@@ -82,17 +84,80 @@ pub fn output_capped_tree(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    capture(
+        Running::Tree(tree_command(command, false).spawn()?),
+        limit,
+        max_stdout,
+    )
+}
+
+/// `command` as the leader of a tree: a Job Object on Windows, a process group on Unix.
+/// `new_console` gives it a console of its own on Windows instead of none.
+fn tree_command(command: Command, new_console: bool) -> CommandWrap {
     let mut wrapped = CommandWrap::from(command);
     #[cfg(windows)]
     {
         use process_wrap::std::{CreationFlags, JobObject};
         use windows::Win32::System::Threading::PROCESS_CREATION_FLAGS;
-        wrapped.wrap(CreationFlags(PROCESS_CREATION_FLAGS(CREATE_NO_WINDOW)));
+        let flags = if new_console {
+            CREATE_NEW_CONSOLE
+        } else {
+            CREATE_NO_WINDOW
+        };
+        wrapped.wrap(CreationFlags(PROCESS_CREATION_FLAGS(flags)));
         wrapped.wrap(JobObject);
     }
     #[cfg(unix)]
-    wrapped.wrap(process_wrap::std::ProcessGroup::leader());
-    capture(Running::Tree(wrapped.spawn()?), limit, max_stdout)
+    {
+        let _ = new_console;
+        wrapped.wrap(process_wrap::std::ProcessGroup::leader());
+    }
+    wrapped
+}
+
+/// How a run from [`run_tree_cancellable`] ended.
+#[derive(Debug)]
+pub enum Ended {
+    /// The program finished by itself.
+    Exited(ExitStatus),
+    /// `cancel` was set and the whole tree was killed.
+    Cancelled,
+    /// `limit` passed and the whole tree was killed.
+    TimedOut,
+}
+
+/// Runs `command` and everything it starts as one tree until it exits, `cancel` is set, or
+/// `limit` passes; in the last two cases, and once it exits, the whole tree is killed and
+/// reaped. Standard streams are left as `command` configures them.
+///
+/// Limits: a descendant that deliberately leaves the group (`setsid`, a detached service) is out
+/// of reach, as for [`output_capped_tree`].
+///
+/// # Errors
+/// Fails when the program cannot start or when waiting on it fails.
+pub fn run_tree_cancellable(
+    command: Command,
+    new_console: bool,
+    limit: Duration,
+    cancel: &AtomicBool,
+) -> io::Result<Ended> {
+    let mut child = Running::Tree(tree_command(command, new_console).spawn()?);
+    let deadline = Instant::now() + limit;
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            child.stop()?;
+            return Ok(Ended::Cancelled);
+        }
+        if let Some(status) = child.try_wait()? {
+            let _ = child.stop();
+            return Ok(Ended::Exited(status));
+        }
+        if Instant::now() >= deadline {
+            child.stop()?;
+            return Ok(Ended::TimedOut);
+        }
+        thread::sleep(POLL_EVERY);
+    }
 }
 
 /// A started program, alone or together with the tree it leads.
@@ -487,6 +552,47 @@ mod tests {
             assert!(Instant::now() < deadline, "the grandchild never started");
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn cancelling_kills_the_whole_tree() {
+        let pid_file =
+            std::env::temp_dir().join(format!("brachio-process-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        let path = pid_file.display().to_string();
+        let command = if cfg!(windows) {
+            let script = format!(
+                "$p = Start-Process -PassThru -WindowStyle Hidden ping -ArgumentList '-n','60','127.0.0.1'; Set-Content -Path '{path}' -Value $p.Id; Wait-Process -Id $p.Id"
+            );
+            let mut command = Command::new("powershell.exe");
+            command.args(["-NoProfile", "-Command", &script]);
+            command
+        } else {
+            let script = format!("sh -c 'sleep 60 & echo $! > \"{path}\"; wait'");
+            let mut command = Command::new("sh");
+            command.args(["-c", &script]);
+            command
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let runner = {
+            let cancel = Arc::clone(&cancel);
+            thread::spawn(move || {
+                run_tree_cancellable(command, false, Duration::from_secs(120), &cancel)
+            })
+        };
+        let pid = wait_for_pid_file(&pid_file);
+        cancel.store(true, Ordering::Release);
+        let ended = runner.join().expect("runner thread").expect("run");
+        assert!(matches!(ended, Ended::Cancelled), "{ended:?}");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while process_is_alive(&pid) {
+            assert!(
+                Instant::now() < deadline,
+                "grandchild {pid} survived the cancel"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+        let _ = std::fs::remove_file(&pid_file);
     }
 
     #[test]
