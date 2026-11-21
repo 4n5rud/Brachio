@@ -17,6 +17,7 @@ import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
+import { detectKeepAwake, holdAwake, keepAwakeEnabled } from "./lib/keep-awake";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
@@ -103,6 +104,14 @@ export function App() {
         .catch((error) => console.warn("Could not update the tray", error));
     }, 300);
     onCleanup(() => clearTimeout(timer));
+  });
+  const anyAgentWorking = createMemo(() => rows().some((task) => taskGroup(task.status) === "working"));
+  createEffect(() => {
+    if (!inTauri) return;
+    const on = keepAwakeEnabled() && anyAgentWorking();
+    holdAwake(on).catch((failure) => {
+      if (on) pushToast({ tone: "error", title: t("settings.keepAwakeFailed"), message: String(failure) });
+    });
   });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
   const [diffByTask, setDiffByTask] = createSignal<ReadonlyMap<string, DiffTotals>>(new Map());
@@ -763,6 +772,7 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
+      detectKeepAwake();
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
