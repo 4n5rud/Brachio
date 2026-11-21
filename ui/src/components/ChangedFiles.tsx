@@ -15,6 +15,7 @@ export interface ChangesData {
   staged: readonly string[];
   untracked: readonly string[];
   conflicts: readonly string[];
+  operation?: "rebase" | "merge" | null;
   truncated: boolean;
 }
 

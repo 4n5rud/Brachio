@@ -241,7 +241,7 @@ function Catalog() {
           })}>Confirm, primary</Button>
         </Row>
         <Show when={dialog() === "newTask"}>
-          <NewTaskDialog repoName="brachio" defaultBranch="main" isGit onClose={() => setDialog(undefined)}
+          <NewTaskDialog repoId="sample" repoName="brachio" defaultBranch="main" isGit onClose={() => setDialog(undefined)}
             onCreate={() => new Promise<void>(() => {})} />
         </Show>
         <Show when={dialog() === "plain"}>

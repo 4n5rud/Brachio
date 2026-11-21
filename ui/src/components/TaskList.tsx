@@ -1,5 +1,6 @@
 import { IconButton } from "./ui/IconButton";
 import { Button } from "./ui/Button";
+import { Menu, MenuItem } from "./ui/Menu";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { orderWithChildren, taskGroup, type TaskRow } from "../lib/tasks";
@@ -29,7 +30,7 @@ export function TaskList(props: {
   onNewTask?: (repoId: string) => void;
   /** Adds a git repository found inside a folder project as a project of its own. */
   onAddFolderRepo?: (path: string) => Promise<void>;
-  onAddRepo?: () => void;
+  onAddRepo?: (kind: "git" | "folder") => void;
   onOpenArchived?: () => void;
   /** A project to show: its group opens when the object changes. */
   reveal?: { id: string };
@@ -41,6 +42,7 @@ export function TaskList(props: {
   now: number;
   unreadForTask?: (taskId: string) => number;
 }) {
+  const [addMenu, setAddMenu] = createSignal<HTMLElement>();
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const groupIds = createMemo(() => [...projects().keys(), ""]);
   const folderProjects = createMemo(() => new Set(props.repos.filter((repo) => repo.isGit === false).map((repo) => repo.id)));
@@ -101,9 +103,22 @@ export function TaskList(props: {
           <span class="count" role="img" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
         </Show>
         <Show when={props.onAddRepo}>
-          <Button variant="primary" size="sm" onClick={() => props.onAddRepo?.()}>
+          <Button variant="primary" size="sm" aria-haspopup="menu" aria-expanded={addMenu() !== undefined}
+            onClick={(event) => setAddMenu(addMenu() ? undefined : event.currentTarget)}>
             <Icon name="plus" />{t("sidebar.addProject")}
           </Button>
+          <Show when={addMenu()}>
+            {(anchor) => (
+              <Menu anchor={anchor()} label={t("sidebar.addProject")} onClose={() => setAddMenu(undefined)}>
+                <MenuItem hint={t("sidebar.addGitHint")} onSelect={() => { setAddMenu(undefined); props.onAddRepo?.("git"); }}>
+                  {t("sidebar.addGit")}
+                </MenuItem>
+                <MenuItem hint={t("sidebar.addFolderHint")} onSelect={() => { setAddMenu(undefined); props.onAddRepo?.("folder"); }}>
+                  {t("sidebar.addFolder")}
+                </MenuItem>
+              </Menu>
+            )}
+          </Show>
         </Show>
       </div>
       <nav class="task-groups" aria-label={t("sidebar.projects")}>

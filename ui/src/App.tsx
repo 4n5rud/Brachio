@@ -431,8 +431,8 @@ export function App() {
     restoreSelection();
   };
 
-  const addProject = async (path: string) => {
-    const added = await addRepo(path);
+  const addProject = async (path: string, gitOnly = false) => {
+    const added = await addRepo(path, gitOnly);
     const listed = repos().some((item) => item.id === added.id);
     if (!listed) setRepos((list) => [added, ...list]);
     const show = () => {
@@ -450,9 +450,9 @@ export function App() {
     }
   };
 
-  const chooseRepo = async () => {
+  const chooseRepo = async (kind: "git" | "folder") => {
     const path = await openFolder({ directory: true, multiple: false });
-    if (typeof path === "string") await addProject(path);
+    if (typeof path === "string") await addProject(path, kind === "git");
   };
 
   const addFolderRepo = async (path: string) => {
@@ -794,7 +794,7 @@ export function App() {
   };
 
   const noTask = () => (
-    <Show when={!inTauri || repo()} fallback={<EmptyRepo onAdd={() => void chooseRepo().catch(report)} />}>
+    <Show when={!inTauri || repo()} fallback={<EmptyRepo onAdd={() => void chooseRepo("git").catch(report)} />}>
       <EmptyState title={t("empty.task.title")} body={t("empty.task.body")} />
     </Show>
   );
@@ -832,7 +832,7 @@ export function App() {
           selectedId={selectedId()}
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
-          onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
+          onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           reveal={revealed()}
@@ -921,6 +921,7 @@ export function App() {
       <Show when={dialogOpen() && dialogRepo()}>
         {(current) => (
           <NewTaskDialog
+            repoId={current().id}
             repoName={current().name}
             defaultBranch={current().defaultBranch}
             isGit={current().isGit}

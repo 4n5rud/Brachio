@@ -1,11 +1,13 @@
 //! git operations for Brachio. Every write goes through the git CLI with an
 //! argument vector.
 
+mod branch_list;
 mod conflict_report;
 mod file_list;
 mod git;
 mod naming;
 mod nul_records;
+mod operation;
 mod port_pool;
 mod pull_request;
 mod pull_request_status;
@@ -14,10 +16,12 @@ mod repo_info;
 mod worktree;
 mod worktree_setup;
 
+pub use branch_list::{list_branches, BranchEntry, MAX_BRANCHES};
 pub use conflict_report::{merge_target, predict_conflict, ConflictReport, MergeTarget};
 pub use file_list::{list_files, MAX_FILES};
 pub use git::{Git, GitError};
 pub use naming::{branch_name, slugify};
+pub use operation::{stopped_operation, StoppedOperation};
 pub use port_pool::{PortBlock, PortPool};
 pub use pull_request::{create_pull_request, PullRequest, PullRequestError};
 pub use pull_request_status::{

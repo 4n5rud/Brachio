@@ -6,6 +6,7 @@ import { Input, Select, TextArea } from "./ui/Input";
 import { t } from "../i18n";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
 import { CORE_AGENT, detectAgents } from "../lib/terminal";
+import { BranchField } from "./BranchField";
 import { AgentIcon } from "./AgentIcon";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { titleFromPrompt } from "../lib/workspace";
@@ -26,6 +27,7 @@ const BAD_BASE = /invalid reference|not a valid (object name|commit)|unknown rev
 
 /** "New task" dialog: prompt, name, agent and base branch. */
 export function NewTaskDialog(props: {
+  repoId: string;
   repoName: string;
   defaultBranch: string;
   /** A plain folder has no branch to base a task on and no parent task. */
@@ -134,10 +136,10 @@ export function NewTaskDialog(props: {
         <Input label={t("newTask.name")} value={title()} placeholder={titleFromPrompt(prompt())}
           onInput={(event) => setTitle(event.currentTarget.value)} />
         <Show when={props.isGit}>
-          <Input mono label={t("newTask.base")} value={base()}
+          <BranchField repoId={props.repoId} value={base()}
             placeholder={props.parents?.find((task) => task.id === parentTaskId())?.branch ?? props.defaultBranch}
             error={baseError()}
-            onInput={(event) => { setBase(event.currentTarget.value); setError(null); }} />
+            onValue={(value) => { setBase(value); setError(null); }} />
         </Show>
       </div>
       <Show when={props.isGit && props.parents?.length}>

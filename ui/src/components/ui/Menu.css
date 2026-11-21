@@ -57,3 +57,11 @@
   margin: var(--space-1) 6px;
   background: var(--color-line);
 }
+.menu-item.on {
+  background: var(--color-hover);
+}
+.menu-label {
+  padding: 4px 10px;
+  color: var(--color-text-3);
+  font-size: var(--text-xs);
+}
