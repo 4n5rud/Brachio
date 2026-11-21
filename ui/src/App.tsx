@@ -14,6 +14,7 @@ import { pushToast } from "./lib/toasts";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
+import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
@@ -53,7 +54,7 @@ import { deleteBlock } from "./lib/delete-preview";
 import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
-  toTaskRow, type CreatedTask, type RepoRecord } from "./lib/workspace";
+  toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
 
 // Inside Tauri the core fills the lists. In a plain browser (`pnpm dev`) we
 // show example tasks so the layout can be reviewed.
@@ -181,6 +182,7 @@ export function App() {
   const [recent, setRecent] = createSignal<readonly string[]>([]);
   const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
+  const [importRepoId, setImportRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
   const [revealed, setRevealed] = createSignal<{ id: string }>();
   const [folderOverWindow, setFolderOverWindow] = createSignal(false);
@@ -283,6 +285,12 @@ export function App() {
     if (!inTauri || !id) return;
     setDialogRepoId(id);
     setDialogOpen(true);
+  };
+  const importRepo = createMemo(() => repos().find((item) => item.id === importRepoId()));
+  const adoptImported = (records: TaskRecord[]) => {
+    const rows = records.map(toTaskRow);
+    setTasks((list) => [...rows, ...list]);
+    if (rows[0]) open(rows[0].id);
   };
   const repoRows = createMemo(() => inTauri ? rows().filter((task) => task.repoId === repo()?.id) : rows());
   const selected = createMemo(() => rows().find((task) => task.id === selectedId()));
@@ -896,7 +904,7 @@ export function App() {
           return;
         }
       }
-      if (dialogOpen() || workspacePanel()) return;
+      if (dialogOpen() || importRepoId() || workspacePanel()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -992,6 +1000,7 @@ export function App() {
           selectedId={selectedId()}
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
+          onImportWorktrees={inTauri ? setImportRepoId : undefined}
           onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
@@ -1104,6 +1113,16 @@ export function App() {
             parents={repoRows()}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
+          />
+        )}
+      </Show>
+      <Show when={importRepo()}>
+        {(current) => (
+          <ImportWorktreesDialog
+            repoId={current().id}
+            repoName={current().name}
+            onImported={adoptImported}
+            onClose={() => setImportRepoId(undefined)}
           />
         )}
       </Show>

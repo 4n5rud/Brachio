@@ -15,6 +15,7 @@ mod pull_request_status;
 mod push_target;
 mod repo_info;
 mod worktree;
+mod worktree_list;
 mod worktree_setup;
 
 pub use branch_list::{list_branches, BranchEntry, MAX_BRANCHES};
@@ -35,6 +36,10 @@ pub use repo_info::{find_repositories, inspect_repo, RepoInfo};
 pub use worktree::{
     add_worktree, discard_worktree, remove_worktree, unsaved_work, worktree_path, AddWorktree,
     UnsavedWork,
+};
+pub use worktree_list::{
+    importable, list_worktrees, parse_worktree_list, path_key, select_importable, ImportError,
+    WorktreeEntry,
 };
 pub use worktree_setup::{
     copy_setup_files, read_setup, retry_setup_files, SetupConfig, SetupError, CONFIG_FILE,
