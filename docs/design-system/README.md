@@ -62,6 +62,7 @@ Every interactive component defines default, hover, pressed, focus, disabled and
 ## Iconography
 - Brachio's own 16px stroke icons: 1.5px stroke, round caps and joins, drawn on a 16px grid, in `currentColor` (see the Icons group). Sizes: 15px in buttons, 13px beside labels, 11px in dense meta lines.
 - An icon that stands alone sits in an IconButton with an `aria-label`.
+- Buttons are quiet by default: toolbar and header actions are ghost buttons or IconButtons; bordered or filled buttons are for primary actions in dialogs and forms.
 - Status uses the six glyphs in StatusBadge, never icons.
 
 ## Brand mark

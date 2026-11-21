@@ -10,7 +10,6 @@ import { AgentIcon } from "./AgentIcon";
 import { statusTone, type AgentState } from "../lib/status";
 import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
-import { MailboxInbox } from "./MailboxInbox";
 import { ApprovalBar } from "./ApprovalBar";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
@@ -20,7 +19,6 @@ import { onShellRequest } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { DropVeil } from "./DropVeil";
-import { taskIdOf } from "../lib/approvals";
 import { CORE_AGENT } from "../lib/terminal";
 import { MAX_MOUNTED_TERMINALS, drawnTaskIds, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
@@ -81,15 +79,12 @@ export function TaskView(props: {
   shouldResume?: (taskId: string) => boolean;
   registerDraftTarget: (taskId: string, target: () => DraftTarget | undefined) => () => void;
   unreadForTab?: (key: string | undefined) => number;
-  mailboxRevision: number;
-  onMailboxReminder?: (tabKey: string) => void;
   /** Files are being dragged over the terminal. */
   filesOver?: boolean;
   /** Opens the problem report with the error text. */
   onReportProblem?: (message: string) => void;
 }) {
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
-  const [inboxTab, setInboxTab] = createSignal<string>();
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredAgents = new Map<string, string>();
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
@@ -270,7 +265,7 @@ export function TaskView(props: {
   };
   return (
     <section class="task-view" classList={{ "view-hidden": !props.visible }}>
-      <TaskHeader title={props.task.title} status={props.task.status} agent={props.task.agent}
+      <TaskHeader title={props.task.title} status={props.task.status}
         branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
         actions={<>
           <Show when={props.workspaceTasks.length > 1}>
@@ -282,8 +277,8 @@ export function TaskView(props: {
             </Select>
           </Show>
           <Show when={props.task.worktreePath}>
-            <Button size="sm" disabled={!props.onArchive}
-              onClick={() => props.onArchive?.()}>{t("task.archive")}</Button>
+            <IconButton icon="archive" label={t("task.archive")} disabled={!props.onArchive}
+              onClick={() => props.onArchive?.()} />
           </Show>
         </>} />
       <div class="tabs" role="tablist">
@@ -347,18 +342,6 @@ export function TaskView(props: {
         </Show>
       </div>
       <div class="pane">
-        <div class="pane-head">
-          <Icon name="bot" class="icon-sm" />
-          {layout() === "shell" ? t("task.shell") :
-            AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
-          <div class="pane-actions">
-            <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
-              {(key) => <Button size="sm" icon="mail"
-                aria-expanded={inboxTab() === key()}
-                onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())}>{t("mailbox.inbox")}</Button>}
-            </Show>
-          </div>
-        </div>
         <Show when={props.task.prompt}>
           {(prompt) => (
             <details class="terminal-recovery">
@@ -486,12 +469,6 @@ export function TaskView(props: {
             }}
           </For>
         </div>
-        <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
-          {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
-            sourceTitle={(fromKey) => props.findTask(taskIdOf(fromKey))?.title ?? fromKey}
-            onReminder={() => props.onMailboxReminder?.(key)}
-            onClose={() => setInboxTab(undefined)} />}
-        </Show>
         <Show when={otherApproval()}>
           {(pending) => (
             <Notice tone="blocked" lead={t("approval.otherTabLead").replace("{agent}",

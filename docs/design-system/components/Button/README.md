@@ -9,6 +9,9 @@ A text button for one clear action; primary marks the single most likely next st
 - Labels are verbs that say what happens: "Allow once", "Create PR", "Create task". No "OK", no "Submit".
 - A shortcut hint goes inside the button as a Kbd, after the label.
 
+- Quiet by default: toolbar, header, banner and notice actions use `button-ghost` (no border, no fill until hover), or an IconButton when the icon is unmistakable (archive, add tab). The bordered secondary and the filled primary are for dialogs and forms.
+- Notice actions render ghost automatically; only a `button-primary` inside a Notice keeps its fill.
+
 ## Anatomy
 Height `size-row`, side padding `space-3`, radius `radius-sm`, 1px `color-line` border, `label` style (13/500; primary 600). Optional 13px icon before the label, gap 6px.
 

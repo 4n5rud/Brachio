@@ -34,7 +34,7 @@ import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
-import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
+import { watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
@@ -1116,14 +1116,8 @@ export function App() {
               onRetrySetup={() => void retrySetup(task().id)}
               registerDraftTarget={registerDraftTarget}
               unreadForTab={inTauri ? unreadForTab : undefined}
-              mailboxRevision={mailbox().revision}
               filesOver={filesOverTerminal()}
               onReportProblem={inTauri ? (message) => setIssueReport(message) : undefined}
-              onMailboxReminder={(key) => {
-                void draftComment(task().id, MAILBOX_REMINDER, key)
-                  .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
-                  .catch(report);
-              }}
             />
           )}
         </Show>
