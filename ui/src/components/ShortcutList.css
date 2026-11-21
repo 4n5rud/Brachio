@@ -1,0 +1,15 @@
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 150px;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 36px;
+}
+.shortcut-list-current .shortcut-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.shortcut-head {
+  min-height: 28px;
+  font: var(--text-group-label);
+  color: var(--color-text-3);
+}

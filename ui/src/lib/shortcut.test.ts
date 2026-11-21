@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTaskShortcut, isSettingsShortcut, panelToggleShortcut, recentTasksShortcut } from "./shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, recentTasksShortcut, SHORTCUT_LIST } from "./shortcut";
 
 const key = (pressed: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => ({
   altKey: false,
@@ -19,6 +19,26 @@ describe("isNewTaskShortcut", () => {
   it("leaves plain Ctrl+N to the terminal elsewhere", () => {
     expect(isNewTaskShortcut(key({ key: "n", ctrlKey: true }), false)).toBe(false);
     expect(isNewTaskShortcut(key({ key: "N", ctrlKey: true, shiftKey: true }), false)).toBe(true);
+  });
+});
+
+describe("isShortcutListShortcut", () => {
+  it("uses Cmd+/ on macOS", () => {
+    expect(isShortcutListShortcut(key({ key: "/", metaKey: true }), true)).toBe(true);
+    expect(isShortcutListShortcut(key({ key: "/", ctrlKey: true }), true)).toBe(false);
+  });
+
+  it("leaves plain Ctrl+/ to the shell elsewhere", () => {
+    expect(isShortcutListShortcut(key({ key: "/", ctrlKey: true }), false)).toBe(false);
+    expect(isShortcutListShortcut(key({ key: "?", ctrlKey: true, shiftKey: true }), false)).toBe(true);
+  });
+});
+
+describe("the shortcut list", () => {
+  it("names each platform's keys once, with no two shortcuts sharing a combination", () => {
+    const chords = SHORTCUT_LIST.filter((shortcut) => shortcut.mac !== "Esc" && shortcut.mac !== "↵");
+    expect(new Set(chords.map((shortcut) => shortcut.mac)).size).toBe(chords.length);
+    expect(new Set(chords.map((shortcut) => shortcut.other)).size).toBe(chords.length);
   });
 });
 

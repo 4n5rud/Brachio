@@ -35,9 +35,10 @@ import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
+import { ShortcutsDialog } from "./components/ShortcutList";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -181,6 +182,7 @@ export function App() {
   });
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const [recent, setRecent] = createSignal<readonly string[]>([]);
   const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
@@ -908,7 +910,7 @@ export function App() {
         setSwitcher({ ...switching, index: stepSwitchIndex(switching.index, switching.tasks.length, keys.back) });
         return;
       }
-      if (!switching && keys && !dialogOpen() && !workspacePanel()) {
+      if (!switching && keys && !dialogOpen() && !workspacePanel() && !shortcutsOpen()) {
         const candidates = recentTasks(recent(), rows());
         if (candidates.length > 1) {
           event.preventDefault();
@@ -917,11 +919,17 @@ export function App() {
           return;
         }
       }
-      if (dialogOpen() || importRepoId() || workspacePanel()) return;
+      if (dialogOpen() || importRepoId() || workspacePanel() || shortcutsOpen()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
         setWorkspacePanel("quickOpen");
+        return;
+      }
+      if (isShortcutListShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutsOpen(true);
         return;
       }
       if (isSettingsShortcut(event)) {
@@ -1092,6 +1100,7 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
       <Show when={switcher()} keyed>
         {(current) => (
           <RecentTasksSwitcher tasks={current.tasks} index={current.index}

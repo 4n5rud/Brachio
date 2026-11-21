@@ -8,8 +8,8 @@ import { notificationSettings, updateNotificationSettings } from "../../lib/noti
 import { openLogFolder } from "../../lib/workspace";
 import { Icon, type IconName } from "../Icon";
 import { Button } from "../ui/Button";
-import { Kbd } from "../ui/Kbd";
 import { Menu, MenuItem } from "../ui/Menu";
+import { ShortcutList, ShortcutsDialog } from "../ShortcutList";
 import { ThemePicker } from "../ui/ThemePicker";
 import { Toggle } from "../ui/Toggle";
 import { AgentSettings } from "./AgentSettings";
@@ -41,18 +41,6 @@ const PAGES: { page: SettingsPage; icon: IconName; label: () => string; desktopO
   { page: "shortcuts", icon: "keyboard", label: () => t("settings.navShortcuts") },
   { page: "updates", icon: "download", label: () => t("updates.title"), desktopOnly: true },
   { page: "archived", icon: "list", label: () => t("task.archived"), desktopOnly: true },
-];
-
-const SHORTCUTS: { label: () => string; mac: string; windows: string }[] = [
-  { label: () => t("quickOpen.title"), mac: "⌘P", windows: "Ctrl+Shift+P" },
-  { label: () => t("newTask.title"), mac: "⌘N", windows: "Ctrl+Shift+N" },
-  { label: () => t("titlebar.settings"), mac: "⌘,", windows: "Ctrl+," },
-  { label: () => t("settings.shortcutSidebar"), mac: "⌘B", windows: "Ctrl+Shift+B" },
-  { label: () => t("settings.shortcutInspector"), mac: "⌘⌥B", windows: "Ctrl+Shift+Alt+B" },
-  { label: () => t("settings.shortcutCreate"), mac: "⌘⏎", windows: "Ctrl+⏎" },
-  { label: () => t("settings.shortcutAllow"), mac: "↵", windows: "↵" },
-  { label: () => t("settings.shortcutDeny"), mac: "Esc", windows: "Esc" },
-  { label: () => t("settings.shortcutClose"), mac: "Esc", windows: "Esc" },
 ];
 
 function LanguageRow() {
@@ -168,6 +156,7 @@ export function SettingsPanel(props: {
   onReportProblem?: () => void;
 }) {
   const [page, setPage] = createSignal<SettingsPage>(props.page ?? "general");
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const title = () => PAGES.find((entry) => entry.page === page())?.label() ?? "";
   return (
     <div class="settings-grid">
@@ -222,18 +211,11 @@ export function SettingsPanel(props: {
               hint={t("settings.notifyBadgeHint")} onChange={(badge) => updateNotificationSettings({ badge })} />
           </Match>
           <Match when={page() === "shortcuts"}>
-            <div class="shortcut-row shortcut-head">
-              <span />
-              <span>{t("settings.macos")}</span>
-              <span>{t("settings.windows")}</span>
+            <ShortcutList platforms="both" />
+            <div>
+              <Button size="sm" icon="keyboard" onClick={() => setShortcutsOpen(true)}>{t("shortcuts.open")}</Button>
             </div>
-            <For each={SHORTCUTS}>{(row) => (
-              <div class="shortcut-row">
-                <span>{row.label()}</span>
-                <Kbd>{row.mac}</Kbd>
-                <Kbd>{row.windows}</Kbd>
-              </div>
-            )}</For>
+            <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
           </Match>
           <Match when={page() === "updates" && props.updates}>{(updates) => <UpdatesPage updates={updates()} />}</Match>
           <Match when={page() === "archived"}>
