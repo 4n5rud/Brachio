@@ -89,6 +89,8 @@ export const en = {
   "task.deleteIgnoredNote": "Ignored items were never committed, so deleting loses them for good.",
   "taskMenu.label": "Task actions",
   "taskMenu.open": "Open",
+  "taskMenu.pin": "Pin to top",
+  "taskMenu.unpin": "Unpin",
   "taskMenu.copyBranch": "Copy branch name",
   "taskMenu.showMac": "Show worktree in Finder",
   "taskMenu.showOther": "Show worktree in Explorer",

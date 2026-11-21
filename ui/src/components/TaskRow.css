@@ -51,6 +51,11 @@
   font: var(--text-meta);
   color: var(--color-text-3);
 }
+.task-pin {
+  margin-right: var(--space-1);
+  vertical-align: -2px;
+  color: var(--color-text-2);
+}
 .task-meta,
 .task-extra {
   grid-column: 2 / 4;

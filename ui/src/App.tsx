@@ -17,6 +17,7 @@ import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
+import { listPinnedTasks, setTaskPinned } from "./lib/task-pins";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
@@ -79,6 +80,7 @@ export function App() {
   const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
+  const [pinned, setPinned] = createSignal<ReadonlySet<string>>(new Set());
   const [trayReady, setTrayReady] = createSignal(false);
   createEffect(() => {
     if (!trayReady()) return;
@@ -445,14 +447,15 @@ export function App() {
   };
 
   const load = async () => {
-    const [storedRepos, storedTasks, storedArchives] = await Promise.all([
-      listRepos(), listTasks(), listArchivedTasks(),
+    const [storedRepos, storedTasks, storedArchives, storedPins] = await Promise.all([
+      listRepos(), listTasks(), listArchivedTasks(), listPinnedTasks().catch(() => [] as string[]),
     ]);
     const restoredTasks = loadOpenWorkspaceTasks(new Set(storedTasks.map((task) => task.id)));
     batch(() => {
       setRepos(storedRepos);
       setTasks(storedTasks.map(toTaskRow));
       setArchived(storedArchives.map(toTaskRow));
+      setPinned(new Set(storedPins));
       setWorkspaceTaskIds(restoredTasks);
       restoreSelection();
     });
@@ -615,6 +618,16 @@ export function App() {
       setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
     });
     void requestSetup(record.id, record.repoId, record.setupCommands);
+  };
+
+  const togglePin = (id: string, pin: boolean) => {
+    const before = pinned();
+    setPinned((current) => {
+      const next = new Set(current);
+      if (pin) next.add(id); else next.delete(id);
+      return next;
+    });
+    if (inTauri) setTaskPinned(id, pin).catch((failure) => { setPinned(before); report(failure); });
   };
 
   const archive = async (task: TaskRow) => {
@@ -928,6 +941,8 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
+          pinned={pinned()}
+          onTogglePin={togglePin}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}

@@ -3,7 +3,7 @@ import { Button } from "./ui/Button";
 import { Menu, MenuItem } from "./ui/Menu";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
-import { orderWithChildren, taskGroup, type TaskRow } from "../lib/tasks";
+import { orderWithChildren, pinnedFirst, taskGroup, type TaskRow } from "../lib/tasks";
 import type { PrChip } from "../lib/pr-status";
 import { FolderRepos } from "./FolderRepos";
 import { watchPrStatuses } from "../lib/pr-status-store";
@@ -33,6 +33,9 @@ export function TaskList(props: {
   onAddRepo?: (kind: "git" | "folder") => void;
   onOpenArchived?: () => void;
   onArchiveTask?: (id: string) => void;
+  /** Ids of the pinned tasks; they come first in their project. */
+  pinned?: ReadonlySet<string>;
+  onTogglePin?: (id: string, pinned: boolean) => void;
   onError?: (failure: unknown) => void;
   /** A project to show: its group opens when the object changes. */
   reveal?: { id: string };
@@ -127,7 +130,7 @@ export function TaskList(props: {
         <For each={groupIds()}>
           {(id) => {
             const name = () => projects().get(id) ?? t("sidebar.folderWorkspaces");
-            const tasks = () => orderWithChildren(tasksByGroup().get(id) ?? []);
+            const tasks = () => orderWithChildren(pinnedFirst(tasksByGroup().get(id) ?? [], props.pinned ?? new Set()));
             const expanded = () => !collapsed().has(id);
             return (
               <section>
@@ -155,6 +158,8 @@ export function TaskList(props: {
                         unread={props.unreadForTask?.(task.id) ?? 0}
                         pr={props.prFor?.(task.id)}
                         onSelect={() => props.onSelect(task.id)}
+                        pinned={props.pinned?.has(task.id)}
+                        onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(task.id, !props.pinned?.has(task.id)) : undefined}
                         onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}
                         onError={props.onError}
                       />
