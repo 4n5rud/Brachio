@@ -33,6 +33,8 @@ export interface TaskRow {
   agentSessionId?: string;
   /** Lead task that created this one. */
   parentTaskId?: string;
+  /** Shared by the tasks that run one prompt with different agents, to compare them. */
+  compareGroup?: string;
 }
 
 export type TaskGroup = "needs" | "working" | "review" | "done";
@@ -100,4 +102,29 @@ export function orderWithChildren(tasks: readonly TaskRow[]): TaskRow[] {
   // Tasks only reachable through a cycle are kept as roots.
   for (const task of tasks) visit(task);
   return out;
+}
+
+/** Moves the members of each comparison group next to the first of them, keeping every other task's place. */
+export function orderWithCompare(tasks: readonly TaskRow[]): TaskRow[] {
+  const members = new Map<string, TaskRow[]>();
+  for (const task of tasks) {
+    if (task.compareGroup) members.set(task.compareGroup, [...(members.get(task.compareGroup) ?? []), task]);
+  }
+  const out: TaskRow[] = [];
+  const placed = new Set<string>();
+  for (const task of tasks) {
+    if (placed.has(task.id)) continue;
+    for (const member of task.compareGroup ? members.get(task.compareGroup) ?? [task] : [task]) {
+      placed.add(member.id);
+      out.push(member);
+    }
+  }
+  return out;
+}
+
+/** The other tasks of the same comparison, in list order. */
+export function compareSiblings(tasks: readonly TaskRow[], task: TaskRow): TaskRow[] {
+  if (!task.compareGroup) return [];
+  return tasks.filter((other) => other.id !== task.id && other.compareGroup === task.compareGroup
+    && other.repoId === task.repoId);
 }

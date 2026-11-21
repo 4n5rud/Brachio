@@ -29,6 +29,10 @@ export function TaskRowItem(props: {
   /** The pull request chip to show; read from the pull request store when left out. */
   pr?: PrChipState | null;
   onSelect: () => void;
+  /** Other tasks run the same prompt with a different agent. */
+  comparing?: boolean;
+  /** Archives the other tasks of the comparison; left out when there is none. */
+  onKeepOnly?: () => void;
   pinned?: boolean;
   /** Pins or unpins the task; the menu item is left out when missing. */
   onTogglePin?: () => void;
@@ -67,6 +71,7 @@ export function TaskRowItem(props: {
         <AgentChip agent={props.task.agent} />
         <span class="task-branch">{shortBranch(props.task.branch)}</span>
         <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+        <Show when={props.comparing}><span class="task-compare">{t("task.compare")}</span></Show>
       </span>
       <Show when={chip() || props.unread > 0}>
         <span class="task-extra">
@@ -97,6 +102,10 @@ export function TaskRowItem(props: {
               <MenuItem hint={t("taskMenu.editorHint")} onSelect={() => act(() => openTaskFolder(props.task.id))}>
                 {t("taskMenu.editor")}
               </MenuItem>
+            </Show>
+            <Show when={props.onKeepOnly}>
+              <MenuSeparator />
+              <MenuItem onSelect={() => act(() => props.onKeepOnly?.())}>{t("taskMenu.keepOnly")}</MenuItem>
             </Show>
             <Show when={props.onArchive}>
               <MenuSeparator />

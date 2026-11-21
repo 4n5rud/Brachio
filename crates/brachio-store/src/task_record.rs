@@ -30,6 +30,8 @@ pub struct TaskRecord {
     pub agent_kind: Option<String>,
     /// Conversation id the agent resumes, when Brachio picked one.
     pub agent_session_id: Option<String>,
+    /// Shared by the sibling tasks that run one prompt with different agents, to compare them.
+    pub compare_group: Option<String>,
     /// When the task was created.
     pub created_at_ms: i64,
     /// Set once the task is archived.
@@ -57,6 +59,8 @@ pub struct NewTask<'a> {
     pub agent_kind: Option<&'a str>,
     /// Conversation id to start the agent with, when the agent accepts one.
     pub agent_session_id: Option<&'a str>,
+    /// Comparison group the task belongs to, if any.
+    pub compare_group: Option<&'a str>,
     /// Creation time.
     pub created_at_ms: i64,
 }
@@ -80,7 +84,7 @@ pub enum ChildInsertError {
 
 const COLUMNS: &str =
     "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms, \
-     agent_session_id, prompt, parent_task_id";
+     agent_session_id, prompt, parent_task_id, compare_group";
 
 impl TaskRecord {
     /// Adds a task.
@@ -90,8 +94,9 @@ impl TaskRecord {
     pub fn insert(connection: &Connection, task: &NewTask<'_>) -> Result<Self, StoreError> {
         connection.execute(
             "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path,
-                                agent_kind, state, created_at_ms, agent_session_id, parent_task_id)
-             VALUES (?1, ?2, ?3, ?9, ?4, ?5, ?6, 'active', ?7, ?8, ?10)",
+                                agent_kind, state, created_at_ms, agent_session_id, parent_task_id,
+                                compare_group)
+             VALUES (?1, ?2, ?3, ?9, ?4, ?5, ?6, 'active', ?7, ?8, ?10, ?11)",
             params![
                 task.id,
                 task.repo_id,
@@ -103,6 +108,7 @@ impl TaskRecord {
                 task.agent_session_id,
                 task.prompt,
                 task.parent_task_id,
+                task.compare_group,
             ],
         )?;
         Self::get(connection, task.id)
@@ -310,6 +316,7 @@ impl TaskRecord {
             agent_session_id: row.get(8)?,
             prompt: row.get(9)?,
             parent_task_id: row.get(10)?,
+            compare_group: row.get(11)?,
         })
     }
 }
@@ -345,6 +352,7 @@ mod tests {
             worktree_path: Path::new("/src/brachio.worktrees/fix-login-a1b2c3"),
             agent_kind: Some("claude_code"),
             agent_session_id: None,
+            compare_group: None,
             created_at_ms,
         }
     }
@@ -407,6 +415,19 @@ mod tests {
             TaskRecord::list_open(&connection).expect("list open").len(),
             1
         );
+    }
+
+    #[test]
+    fn the_comparison_group_is_stored_and_read_back() {
+        let connection = connection_with_repo();
+        let grouped = NewTask {
+            compare_group: Some("g1"),
+            ..sample("a", 0)
+        };
+        let record = TaskRecord::insert(&connection, &grouped).expect("insert");
+        assert_eq!(record.compare_group.as_deref(), Some("g1"));
+        let plain = TaskRecord::insert(&connection, &sample("b", 1)).expect("insert");
+        assert_eq!(plain.compare_group, None);
     }
 
     fn child<'a>(id: &'a str, parent: &'a str) -> NewTask<'a> {
