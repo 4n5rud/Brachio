@@ -19,6 +19,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod task_activity;
 mod task_folder;
+mod task_overlaps;
 mod task_ports;
 mod task_tabs;
 #[cfg(any(windows, test))]
@@ -254,6 +255,7 @@ pub fn run() {
         ))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
@@ -320,6 +322,7 @@ pub fn run() {
             workspace::task_file_preview,
             workspace::task_file_media,
             workspace::task_changes,
+            task_overlaps::task_overlaps,
             pr_status::task_pr_status,
             qa_run::qa_run,
             qa_run::qa_last_result,
