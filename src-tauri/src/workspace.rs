@@ -67,6 +67,9 @@ pub struct CreateTaskRequest {
     pub agent: AgentKind,
     /// Commit-ish to branch from. Defaults to the repository's default branch.
     pub base: Option<String>,
+    /// A Codex conversation recorded for the project folder that the new task continues.
+    #[serde(default)]
+    pub codex_conversation_id: Option<String>,
     /// Set for tasks an agent asked for: the parent's open children are counted again when the
     /// task is saved, since other requests may have been approved meanwhile.
     #[serde(skip)]
@@ -329,6 +332,7 @@ pub(crate) async fn create_task(
         };
         (repo, parent_branch)
     };
+    check_project_conversation(&repo.path, &request).await?;
     if !repo.is_git {
         return create_folder_task(database, &repo, &request);
     }
@@ -354,10 +358,7 @@ pub(crate) async fn create_task(
 
     // Pinning the conversation id lets the task resume exactly its own
     // conversation after a restart.
-    let session_id = request
-        .agent
-        .accepts_session_id()
-        .then(|| uuid::Uuid::new_v4().hyphenated().to_string());
+    let session_id = task_session_id(&request);
     let task = NewTask {
         id: &id,
         repo_id: &repo.id,
@@ -428,6 +429,67 @@ pub(crate) async fn create_task(
     })
 }
 
+/// The conversation id a new task starts with: the Codex conversation the user picked from the
+/// project, or a fresh id for agents that take one.
+fn task_session_id(request: &CreateTaskRequest) -> Option<String> {
+    request.codex_conversation_id.clone().or_else(|| {
+        request
+            .agent
+            .accepts_session_id()
+            .then(|| uuid::Uuid::new_v4().hyphenated().to_string())
+    })
+}
+
+/// Refuses a picked Codex conversation unless the task is a Codex task and Codex recorded the
+/// conversation for this project's own folder.
+async fn check_project_conversation(
+    project: &Path,
+    request: &CreateTaskRequest,
+) -> Result<(), String> {
+    let Some(chosen) = request.codex_conversation_id.clone() else {
+        return Ok(());
+    };
+    if request.agent != AgentKind::Codex {
+        return Err("A Codex conversation can only start a Codex task.".to_owned());
+    }
+    let project = project.to_path_buf();
+    let known = tauri::async_runtime::spawn_blocking(move || {
+        project_conversation_exists(&brachio_agent::codex_conversations(&project), &chosen)
+    })
+    .await
+    .map_err(to_text)?;
+    if known {
+        Ok(())
+    } else {
+        Err("The chosen Codex conversation is not recorded for this project.".to_owned())
+    }
+}
+
+/// Codex ids are UUIDs; anything else never reaches a command line.
+pub(crate) fn project_conversation_exists(
+    listed: &[brachio_agent::CodexConversation],
+    chosen: &str,
+) -> bool {
+    uuid::Uuid::parse_str(chosen).is_ok() && listed.iter().any(|item| item.id == chosen)
+}
+
+/// Codex conversations recorded for a project's own folder, offered before a task exists.
+#[tauri::command]
+pub async fn repo_codex_conversations(
+    database: State<'_, Database>,
+    id: String,
+) -> Result<Vec<brachio_agent::CodexConversation>, String> {
+    let repo = RepoRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        brachio_agent::codex_conversations(&repo.path)
+            .into_iter()
+            .filter(|item| uuid::Uuid::parse_str(&item.id).is_ok())
+            .collect()
+    })
+    .await
+    .map_err(to_text)
+}
+
 /// A task in a plain folder: it runs in the folder itself, so there is no branch to make and no
 /// setup to copy.
 fn create_folder_task(
@@ -436,10 +498,7 @@ fn create_folder_task(
     request: &CreateTaskRequest,
 ) -> Result<CreatedTask, String> {
     let id = new_id();
-    let session_id = request
-        .agent
-        .accepts_session_id()
-        .then(|| uuid::Uuid::new_v4().hyphenated().to_string());
+    let session_id = task_session_id(request);
     let task = NewTask {
         id: &id,
         repo_id: &repo.id,
@@ -1168,6 +1227,7 @@ mod folder_project_tests {
             prompt: String::new(),
             agent: AgentKind::ClaudeCode,
             base: Some("main".to_owned()),
+            codex_conversation_id: None,
             max_open_children: None,
             scheduled: false,
             after: Vec::new(),
@@ -1600,6 +1660,7 @@ mod agent_child_limit_tests {
             prompt: String::new(),
             agent: AgentKind::ClaudeCode,
             base: None,
+            codex_conversation_id: None,
             max_open_children: Some(4),
             scheduled: false,
             after: Vec::new(),

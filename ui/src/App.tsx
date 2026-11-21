@@ -549,6 +549,7 @@ export function App() {
       prompt: input.prompt,
       agent: CORE_AGENT[input.agent],
       base: input.base === "" ? null : input.base,
+      codexConversationId: input.codexConversationId ?? null,
     });
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;

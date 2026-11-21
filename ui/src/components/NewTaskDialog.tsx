@@ -9,7 +9,7 @@ import { CORE_AGENT, detectAgents } from "../lib/terminal";
 import { BranchField } from "./BranchField";
 import { AgentIcon } from "./AgentIcon";
 import { SUBMIT_KEYS } from "../lib/shortcut";
-import { titleFromPrompt } from "../lib/workspace";
+import { repoCodexConversations, titleFromPrompt } from "../lib/workspace";
 
 /** What the dialog hands back when the user creates a task. */
 export interface NewTaskInput {
@@ -19,7 +19,15 @@ export interface NewTaskInput {
   /** Empty means the repository's default branch. */
   base: string;
   parentTaskId?: string;
+  /** A Codex conversation recorded for the project that the task continues. */
+  codexConversationId?: string;
 }
+
+const conversationLabel = (item: { id: string; timestamp: string | null }) => {
+  const when = item.timestamp ? new Date(item.timestamp) : null;
+  const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : "";
+  return label ? `${label} · ${item.id.slice(0, 8)}` : item.id;
+};
 
 const AGENTS: readonly AgentKind[] = ["claude", "codex"];
 
@@ -41,6 +49,7 @@ export function NewTaskDialog(props: {
   const [agent, setAgent] = createSignal<AgentKind>("claude");
   const [base, setBase] = createSignal("");
   const [parentTaskId, setParentTaskId] = createSignal("");
+  const [conversationId, setConversationId] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [confirmingClose, setConfirmingClose] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -51,6 +60,17 @@ export function NewTaskDialog(props: {
       return undefined;
     }
   });
+  const [conversations] = createResource(
+    () => (agent() === "codex" ? props.repoId : false),
+    async (repoId) => {
+      try {
+        return await repoCodexConversations(repoId);
+      } catch {
+        return [];
+      }
+    },
+  );
+  const conversationChoices = () => (agent() === "codex" ? conversations() ?? [] : []);
   const agentInfo = (kind: AgentKind) => {
     const found = installed();
     if (!found) return { missing: false, version: null };
@@ -68,7 +88,7 @@ export function NewTaskDialog(props: {
   const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "";
   const requestClose = async () => {
     if (busy() || confirmingClose()) return;
-    if (!prompt().trim() && !title().trim() && !base().trim() && agent() === "claude") {
+    if (!prompt().trim() && !title().trim() && !base().trim() && agent() === "claude" && !conversationId()) {
       props.onClose();
       return;
     }
@@ -95,7 +115,8 @@ export function NewTaskDialog(props: {
     setError(null);
     try {
       await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(),
-        base: base().trim(), parentTaskId: parentTaskId() || undefined });
+        base: base().trim(), parentTaskId: parentTaskId() || undefined,
+        codexConversationId: agent() === "codex" && conversationId() ? conversationId() : undefined });
     } catch (failure) {
       setError(String(failure));
       setBusy(false);
@@ -160,7 +181,7 @@ export function NewTaskDialog(props: {
                   name="agent"
                   checked={agent() === kind}
                   disabled={agentInfo(kind).missing}
-                  onChange={() => setAgent(kind)}
+                  onChange={() => { setAgent(kind); setConversationId(""); }}
                 />
                 <b><AgentIcon agent={kind} />{AGENT_NAME[kind]}</b>
                 <Show when={agentInfo(kind).missing || agentInfo(kind).version}>
@@ -174,6 +195,15 @@ export function NewTaskDialog(props: {
           </For>
         </div>
       </fieldset>
+      <Show when={conversationChoices().length > 0}>
+        <Select label={t("newTask.codexConversation")} hint={t("newTask.codexConversationHint")}
+          value={conversationId()} onChange={(event) => setConversationId(event.currentTarget.value)}>
+          <option value="">{t("newTask.codexNewConversation")}</option>
+          <For each={conversationChoices()}>
+            {(item) => <option value={item.id}>{conversationLabel(item)}</option>}
+          </For>
+        </Select>
+      </Show>
       <Show when={createError()}>
         {(message) => (
           <div class="create-failed" role="alert">
