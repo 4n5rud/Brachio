@@ -571,10 +571,16 @@ pub async fn task_files(database: State<'_, Database>, id: String) -> Result<Vec
 }
 
 /// The files of a plain folder, relative and with `/`, skipping folders that only hold
-/// dependencies, build output or git data. Capped like a git listing.
+/// dependencies, build output or git data. Like a git listing, the first `MAX_FILES` in sorted
+/// order are kept, so the cut does not depend on the order the filesystem lists entries in.
 fn list_folder_files(root: &Path) -> Vec<String> {
+    list_folder_files_capped(root, brachio_git::MAX_FILES)
+}
+
+fn list_folder_files_capped(root: &Path, limit: usize) -> Vec<String> {
     const SKIPPED: [&str; 4] = [".git", "node_modules", "target", ".venv"];
-    let mut files = Vec::new();
+    // A max-heap of the smallest paths so far keeps memory at `limit` entries.
+    let mut smallest = std::collections::BinaryHeap::with_capacity(limit.saturating_add(1));
     let mut pending = vec![root.to_path_buf()];
     while let Some(folder) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(&folder) else {
@@ -592,17 +598,15 @@ fn list_folder_files(root: &Path) -> Vec<String> {
                 }
             } else if kind.is_file() {
                 if let Ok(relative) = path.strip_prefix(root) {
-                    files.push(relative.to_string_lossy().replace('\\', "/"));
+                    smallest.push(relative.to_string_lossy().replace('\\', "/"));
+                    if smallest.len() > limit {
+                        smallest.pop();
+                    }
                 }
-            }
-            if files.len() >= brachio_git::MAX_FILES {
-                files.sort();
-                return files;
             }
         }
     }
-    files.sort();
-    files
+    smallest.into_sorted_vec()
 }
 
 #[derive(Serialize)]
@@ -1034,6 +1038,21 @@ mod folder_project_tests {
         Database(Mutex::new(
             brachio_store::open_in_memory().expect("open database"),
         ))
+    }
+
+    #[test]
+    fn a_folder_listing_keeps_the_first_files_in_sorted_order_whatever_the_walk_order() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        for name in ["d.txt", "a.txt", "c.txt", "b.txt", "e.txt"] {
+            std::fs::write(folder.path().join(name), "").expect("write");
+        }
+        std::fs::create_dir(folder.path().join("sub")).expect("dir");
+        std::fs::write(folder.path().join("sub/a.txt"), "").expect("write");
+        let files = super::list_folder_files_capped(folder.path(), 4);
+        assert_eq!(files, ["a.txt", "b.txt", "c.txt", "d.txt"]);
+        let all = super::list_folder_files_capped(folder.path(), 100);
+        assert_eq!(all.len(), 6);
+        assert_eq!(all[5], "sub/a.txt");
     }
 
     #[test]
