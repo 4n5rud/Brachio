@@ -483,8 +483,10 @@ export const en = {
   "board.empty": "No tasks",
   "board.project": "Project",
 
-  "statusbar.coreOk": "Core OK",
-  "statusbar.coreStopped": "Core stopped",
+  "statusbar.ok": "Running",
+  "statusbar.usageUnavailable": "Cannot read resource use",
+  "statusbar.usageUnavailableNote": "Terminals keep running. Reloading the window reads them again.",
+  "statusbar.reload": "Reload window",
   "statusbar.sessions": "Sessions",
   "statusbar.memoryParts": "App and agents {app}, runtime {runtime}",
   "statusbar.memory": "Memory",

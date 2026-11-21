@@ -485,8 +485,10 @@ export const ko: Messages = {
   "board.empty": "작업 없음",
   "board.project": "프로젝트",
 
-  "statusbar.coreOk": "코어 정상",
-  "statusbar.coreStopped": "코어 멈춤",
+  "statusbar.ok": "실행 중",
+  "statusbar.usageUnavailable": "리소스 사용량을 읽을 수 없어요",
+  "statusbar.usageUnavailableNote": "터미널은 계속 실행돼요. 창을 다시 불러오면 다시 읽어요.",
+  "statusbar.reload": "창 다시 불러오기",
   "statusbar.sessions": "세션",
   "statusbar.memoryParts": "앱과 에이전트 {app}, 런타임 {runtime}",
   "statusbar.memory": "메모리",
