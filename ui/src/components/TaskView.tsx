@@ -10,8 +10,8 @@ import { AgentIcon } from "./AgentIcon";
 import { statusTone, type AgentState } from "../lib/status";
 import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
-import { MailboxInbox } from "./MailboxInbox";
 import { ApprovalBar } from "./ApprovalBar";
+import { MailboxInbox } from "./MailboxInbox";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
@@ -88,8 +88,8 @@ export function TaskView(props: {
   /** Opens the problem report with the error text. */
   onReportProblem?: (message: string) => void;
 }) {
-  const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [inboxTab, setInboxTab] = createSignal<string>();
+  const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredAgents = new Map<string, string>();
   const [secondary, setSecondary] = createSignal<ReadonlyMap<string, string>>(new Map());
@@ -270,7 +270,7 @@ export function TaskView(props: {
   };
   return (
     <section class="task-view" classList={{ "view-hidden": !props.visible }}>
-      <TaskHeader title={props.task.title} status={props.task.status} agent={props.task.agent}
+      <TaskHeader title={props.task.title} status={props.task.status}
         branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
         actions={<>
           <Show when={props.workspaceTasks.length > 1}>
@@ -282,8 +282,8 @@ export function TaskView(props: {
             </Select>
           </Show>
           <Show when={props.task.worktreePath}>
-            <Button size="sm" disabled={!props.onArchive}
-              onClick={() => props.onArchive?.()}>{t("task.archive")}</Button>
+            <IconButton icon="archive" label={t("task.archive")} disabled={!props.onArchive}
+              onClick={() => props.onArchive?.()} />
           </Show>
         </>} />
       <div class="tabs" role="tablist">
@@ -323,6 +323,12 @@ export function TaskView(props: {
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
+        <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
+          {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")}
+            badge={props.unreadForTab?.(key()) ?? 0}
+            aria-expanded={inboxTab() === key()}
+            onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
+        </Show>
         <Show when={tabMenu()}>
           {(anchor) => (
             <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
@@ -347,18 +353,6 @@ export function TaskView(props: {
         </Show>
       </div>
       <div class="pane">
-        <div class="pane-head">
-          <Icon name="bot" class="icon-sm" />
-          {layout() === "shell" ? t("task.shell") :
-            AGENT_NAME[isSecondarySelected(props.task.id) ? secondaryKind(props.task) : props.task.agent]}
-          <div class="pane-actions">
-            <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
-              {(key) => <Button size="sm" icon="mail"
-                aria-expanded={inboxTab() === key()}
-                onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())}>{t("mailbox.inbox")}</Button>}
-            </Show>
-          </div>
-        </div>
         <Show when={props.task.prompt}>
           {(prompt) => (
             <details class="terminal-recovery">

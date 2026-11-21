@@ -466,7 +466,7 @@ function Catalog() {
       <Section title="TaskHeader">
         <div class="catalog-stack" style={{ width: "100%" }}>
           <div class="catalog-frame">
-            <TaskHeader title={BLOCKED.title} status={BLOCKED.status} agent="claude" branch={BLOCKED.branch}
+            <TaskHeader title={BLOCKED.title} status={BLOCKED.status} branch={BLOCKED.branch}
               additions={128} deletions={14}
               actions={<Button size="sm">{t("task.reviewChanges")}</Button>} />
             <div class="tabs" role="tablist">
@@ -476,11 +476,11 @@ function Catalog() {
             </div>
           </div>
           <div class="catalog-frame">
-            <TaskHeader title={KOREAN.title} status={READY.status} agent="codex" branch="brachio/task-e" additions={12400} deletions={3}
+            <TaskHeader title={KOREAN.title} status={READY.status} branch="brachio/task-e" additions={12400} deletions={3}
               actions={<Button size="sm" variant="primary">Open PR</Button>} />
           </div>
           <div class="catalog-frame">
-            <TaskHeader title={CRASHED.title} status={CRASHED.status} agent="codex" branch={CRASHED.branch} additions={0} deletions={0} />
+            <TaskHeader title={CRASHED.title} status={CRASHED.status} branch={CRASHED.branch} additions={0} deletions={0} />
           </div>
         </div>
       </Section>

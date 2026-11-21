@@ -558,7 +558,7 @@ export function TerminalPane(props: {
             actions={
               <>
                 <For each={candidates()}>{(candidate) => (
-                  <Button size="sm" title={candidate.id}
+                  <Button size="sm" variant="ghost" title={candidate.id}
                     onClick={() => chooseConversation(candidate.id)}>
                     <Show when={candidate.timestamp && Number.isFinite(Date.parse(candidate.timestamp))}>
                       <span>{new Date(candidate.timestamp!).toLocaleString(locale(), CANDIDATE_TIME)}</span>
@@ -566,7 +566,7 @@ export function TerminalPane(props: {
                     <code>{candidate.id.slice(-8)}</code>
                   </Button>
                 )}</For>
-                <Button size="sm" onClick={() => chooseConversation()}>
+                <Button size="sm" variant="ghost" onClick={() => chooseConversation()}>
                   {t("terminal.startNewConversation")}
                 </Button>
               </>

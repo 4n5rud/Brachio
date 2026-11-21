@@ -1,4 +1,4 @@
-import { SegmentedControl, type SegmentOption } from "./ui/SegmentedControl";
+import { IconTabs, type IconTab } from "./ui/IconTabs";
 import { For, Match, Show, Switch, createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { TaskPorts } from "./TaskPorts";
@@ -82,17 +82,17 @@ export function Inspector(props: {
     const data = result.data;
     props.onDiffTotals(result.id, data && !data.truncated ? diffTotals(data.patch) : undefined);
   }));
-  const tabs = (): SegmentOption<Pane>[] => [
-    ...(isGit() ? [{ value: "changes" as const, label: t("inspector.changes") }] : []),
-    { value: "files", label: t("files.title") },
-    { value: "qa", label: t("inspector.qa") },
-    ...(isLead() ? [{ value: "tasks" as const, label: t("inspector.tasks") }] : []),
-    { value: "activity", label: t("inspector.activity") },
+  const tabs = (): IconTab<Pane>[] => [
+    ...(isGit() ? [{ value: "changes" as const, label: t("inspector.changes"), icon: "diff" as const }] : []),
+    { value: "files", label: t("files.title"), icon: "folder" as const },
+    { value: "qa", label: t("inspector.qa"), icon: "checkCircle" as const },
+    ...(isLead() ? [{ value: "tasks" as const, label: t("inspector.tasks"), icon: "list" as const }] : []),
+    { value: "activity", label: t("inspector.activity"), icon: "activity" as const },
   ];
   return (
     <aside class="inspector">
       <div class="inspector-head">
-        <SegmentedControl options={tabs()} value={pane()} onChange={setPane} />
+        <IconTabs tabs={tabs()} value={pane()} onChange={setPane} />
       </div>
       <Switch>
         <Match when={pane() === "files"}>

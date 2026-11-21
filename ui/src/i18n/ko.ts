@@ -313,7 +313,7 @@ export const ko: Messages = {
   "mailbox.unreadCount": "안 읽은 메시지 {count}개",
   "mailbox.unread": "읽지 않은 메시지: {count}건",
   "mailbox.reminder": "메시지 확인 안내 붙여넣기",
-  "mailbox.inbox": "받은편지함",
+  "mailbox.inbox": "에이전트 메시지",
   "mailbox.loading": "메시지를 불러오는 중…",
   "mailbox.empty": "읽지 않은 메시지가 없어요.",
   "mailbox.unavailable": "메시지를 불러오지 못했어요.",

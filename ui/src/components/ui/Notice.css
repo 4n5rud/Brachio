@@ -27,6 +27,15 @@
   flex: none;
   max-width: 60%;
 }
+.notice-actions .button:not(.button-primary):not(.button-danger) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-2);
+}
+.notice-actions .button:not(.button-primary):not(.button-danger):hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
 .notice-info .glyph {
   color: var(--color-text-3);
 }

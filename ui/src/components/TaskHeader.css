@@ -101,6 +101,10 @@
 .tab-close[aria-disabled="true"] {
   opacity: 0.45;
 }
+.tab-inbox {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
 .tab-add {
   align-self: center;
   margin-left: 2px;

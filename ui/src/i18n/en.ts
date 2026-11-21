@@ -311,7 +311,7 @@ export const en = {
   "mailbox.unreadCount": "{count} unread",
   "mailbox.unread": "Unread messages: {count}",
   "mailbox.reminder": "Paste mailbox reminder",
-  "mailbox.inbox": "Inbox",
+  "mailbox.inbox": "Agent messages",
   "mailbox.loading": "Loading messages…",
   "mailbox.empty": "No unread messages.",
   "mailbox.unavailable": "Could not load messages.",
