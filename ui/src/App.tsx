@@ -113,14 +113,6 @@ export function App() {
     }, 300);
     onCleanup(() => clearTimeout(timer));
   });
-  const anyAgentWorking = createMemo(() => rows().some((task) => taskGroup(task.status) === "working"));
-  createEffect(() => {
-    if (!inTauri) return;
-    const on = keepAwakeEnabled() && anyAgentWorking();
-    holdAwake(on).catch((failure) => {
-      if (on) pushToast({ tone: "error", title: t("settings.keepAwakeFailed"), message: String(failure) });
-    });
-  });
   const [archived, setArchived] = createSignal<TaskRow[]>([]);
   const [diffByTask, setDiffByTask] = createSignal<ReadonlyMap<string, DiffTotals>>(new Map());
   const recordDiffTotals = (id: string, totals: DiffTotals | undefined) => {
@@ -163,6 +155,14 @@ export function App() {
       return { ...task, status: report.status, note: report.message ?? undefined, updatedAt: report.at };
     }),
   );
+  const anyAgentWorking = createMemo(() => rows().some((task) => taskGroup(task.status) === "working"));
+  createEffect(() => {
+    if (!inTauri) return;
+    const on = keepAwakeEnabled() && anyAgentWorking();
+    holdAwake(on).catch((failure) => {
+      if (on) pushToast({ tone: "error", title: t("settings.keepAwakeFailed"), message: String(failure) });
+    });
+  });
   const [view, setView] = createSignal<View>("tasks");
   const [unreadFinish, setUnreadFinishMarks] = createSignal<ReadonlySet<string>>(new Set());
   const setUnreadFinish = (change: (marks: ReadonlySet<string>) => ReadonlySet<string>) => {
