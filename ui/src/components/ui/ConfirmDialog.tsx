@@ -26,6 +26,8 @@ export interface ConfirmRequest {
   error?: string;
   /** A verb that says what happens. */
   confirmLabel: string;
+  /** Nothing can be confirmed: only the cancel button shows. */
+  blocked?: boolean;
   cancelLabel?: string;
   /** Destructive steps use the danger variant; archiving loses nothing and stays primary. */
   tone?: "danger" | "primary";
@@ -47,9 +49,11 @@ export function ConfirmDialog(props: ConfirmRequest & { onResult: (confirmed: bo
           <Button ref={cancel} variant="ghost" onClick={() => props.onResult(false)}>
             {props.cancelLabel ?? t("confirm.cancel")}
           </Button>
-          <Button variant={props.tone === "primary" ? "primary" : "danger"} onClick={() => props.onResult(true)}>
-            {props.confirmLabel}
-          </Button>
+          <Show when={!props.blocked}>
+            <Button variant={props.tone === "primary" ? "primary" : "danger"} onClick={() => props.onResult(true)}>
+              {props.confirmLabel}
+            </Button>
+          </Show>
         </>
       }
     >
