@@ -8,7 +8,7 @@ Espacio de trabajo para agentes de programación
 
 Organiza sesiones de Claude Code y Codex y revisa cambios de Git. Un proceso local independiente mantiene las terminales.
 
-Incluye repositorios y carpetas, mensajes, tareas hijas con aprobación, revisión de cambios y QA.
+Incluye repositorios y carpetas, mensajes, tareas hijas con aprobación, dependencias entre tareas con inicio automático opcional, revisión de traspasos (handoff), QA que se ejecuta tras la aprobación, un servidor MCP (herramientas de solo lectura y herramientas que requieren aprobación; no se configura automáticamente para los agentes), habilidades de agente (brachio-send, brachio-lead), sistema de diseño y 8 temas.
 
 ## Desarrollo
 

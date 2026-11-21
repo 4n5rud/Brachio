@@ -8,7 +8,7 @@ Kodlama ajanları için masaüstü çalışma alanı
 
 Claude Code ve Codex oturumlarını yönetin ve Git değişikliklerini inceleyin. Ayrı bir yerel süreç terminalleri açık tutar.
 
-Git depoları ve klasörler, mesajlar, onaylı alt görevler, değişiklik inceleme ve QA.
+Git depoları ve klasörler, mesajlar, onaylı alt görevler, isteğe bağlı otomatik başlatmalı görev bağımlılıkları, devir (handoff) incelemesi, onaydan sonra çalışan QA, MCP sunucusu (salt okunur araçlar ve onay gerektiren araçlar; ajanlara otomatik yapılandırılmaz), ajan becerileri (brachio-send, brachio-lead), tasarım sistemi ve 8 tema.
 
 ## Geliştirme
 
