@@ -109,7 +109,7 @@ export function AgentList(props: {
   onRefresh: () => void;
   card: (agent: InstalledAgent) => JSX.Element;
 }) {
-  const refresh = () => <Button size="sm" icon="refresh" onClick={() => props.onRefresh()}>{t("settings.agentsRefresh")}</Button>;
+  const refresh = () => <Button size="sm" onClick={() => props.onRefresh()}>{t("settings.agentsRefresh")}</Button>;
   return (
     <Show when={!props.error} fallback={
       <Notice tone="error" actions={refresh()}>{t("settings.agentsUnavailable").replace("{detail}", props.error ?? "")}</Notice>

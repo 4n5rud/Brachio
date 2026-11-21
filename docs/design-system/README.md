@@ -67,9 +67,10 @@ The screens follow the combined design guideline (myWorkFlow and unslop-ui). Whe
 Every interactive component defines default, hover, pressed, focus, disabled and loading. Focus is always a 2px `color-focus` ring with a 2px offset. Disabled is opacity 0.45. Loading keeps the size and shows the working arc with words. Lists also define empty, one item, many items, long values and Korean text.
 
 ## Iconography
-- Brachio's own 16px stroke icons: 1.5px stroke, round caps and joins, drawn on a 16px grid, in `currentColor` (see the Icons group). Sizes: 15px in buttons, 13px beside labels, 11px in dense meta lines.
+- Brachio's own 16px stroke icons: 1.5px stroke, round caps and joins, drawn on a 16px grid, in `currentColor` (see the Icons group). Sizes come in three steps only: 16px (`icon`, in buttons), 14px (`icon-sm`, beside labels) and 12px (`icon-xs`, in dense meta lines).
 - An icon that stands alone sits in an IconButton with an `aria-label`.
 - Buttons are quiet by default: toolbar and header actions are ghost buttons or IconButtons; bordered or filled buttons are for primary actions in dialogs and forms.
+- The current row of a list (task, file, settings page) carries `data-current` and takes one shared raised surface; no list invents its own selected colour.
 - Status uses the six glyphs in StatusBadge, never icons.
 
 ## Brand mark

@@ -98,7 +98,7 @@ export function AgentCard(props: AgentCardProps) {
         <Show when={props.kind === "codex" && props.account.state === "signedIn"}>
           <Button size="sm" disabled={props.busy} onClick={() => props.onSignOut?.()}>{t("settings.agentSignOut")}</Button>
         </Show>
-        <Button size="sm" icon="refresh" disabled={props.busy || checking()} onClick={() => props.onRefresh()}>{t("settings.agentRefresh")}</Button>
+        <Button size="sm" variant="ghost" disabled={props.busy || checking()} onClick={() => props.onRefresh()}>{t("settings.agentRefresh")}</Button>
       </div>
     </div>
   );

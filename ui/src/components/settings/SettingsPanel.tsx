@@ -15,6 +15,7 @@ import { Toggle } from "../ui/Toggle";
 import { AgentSettings } from "./AgentSettings";
 import { archivedAgo, createArchiveActions } from "./archive-actions";
 import { SettingRow } from "./SettingRow";
+import { SettingsGroup } from "./SettingsGroup";
 import { TerminalSettings } from "./TerminalSettings";
 import "./SettingsPanel.css";
 
@@ -88,7 +89,7 @@ function UpdatesPage(props: { updates: UpdateSettingsProps }) {
     return u().status === "current" ? t("updates.current") : undefined;
   };
   return (
-    <>
+    <SettingsGroup>
       <Toggle checked={u().enabled} label={t("updates.auto")} onChange={(enabled) => u().onEnabled(enabled)} />
       <SettingRow label={u().current ? t("updates.version").replace("{version}", u().current ?? "") : t("updates.title")}
         hint={hint()} error={failed()}>
@@ -99,7 +100,7 @@ function UpdatesPage(props: { updates: UpdateSettingsProps }) {
           <Button size="sm" loading={u().status === "checking"} onClick={() => u().onCheck()}>{t("updates.check")}</Button>
         </div>
       </SettingRow>
-    </>
+    </SettingsGroup>
   );
 }
 
@@ -115,7 +116,7 @@ function ArchivedPage(props: {
   return (
     <>
       <Show when={props.archived.length > 0} fallback={<p class="form-hint">{t("task.noArchived")}</p>}>
-        <For each={props.archived}>{(task) => (
+        <SettingsGroup><For each={props.archived}>{(task) => (
           <SettingRow label={task.title} hint={
             <span class="setting-row-meta">
               <Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show>
@@ -127,7 +128,7 @@ function ArchivedPage(props: {
               <Button variant="ghost" size="sm" disabled={actions.busy()} onClick={() => void actions.remove(task)}>{t("task.deleteForGood")}</Button>
             </div>
           </SettingRow>
-        )}</For>
+        )}</For></SettingsGroup>
       </Show>
       <Show when={actions.error()}><p class="form-error" role="alert">{actions.error()}</p></Show>
     </>
@@ -162,7 +163,7 @@ export function SettingsPanel(props: {
     <div class="settings-grid">
       <nav class="settings-nav" aria-label={t("titlebar.settings")}>
         <For each={PAGES.filter((entry) => !entry.desktopOnly || props.updates)}>{(entry) => (
-          <button type="button" aria-current={page() === entry.page ? "page" : undefined} onClick={() => setPage(entry.page)}>
+          <button type="button" aria-current={page() === entry.page ? "page" : undefined} data-current={page() === entry.page || undefined} onClick={() => setPage(entry.page)}>
             <Icon name={entry.icon} class="icon-sm" />
             {entry.label()}
           </button>
@@ -176,9 +177,11 @@ export function SettingsPanel(props: {
         </Show>
       </nav>
       <div class="settings-page">
+        <div class="settings-column">
         <h3>{page() === "agents" ? t("settings.agents") : title()}</h3>
         <Switch>
           <Match when={page() === "general"}>
+            <SettingsGroup>
             <LanguageRow />
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
@@ -187,14 +190,16 @@ export function SettingsPanel(props: {
                 onChange={updateKeepAwake} />
             </Show>
             <Show when={"__TAURI_INTERNALS__" in window}><LogFilesRow /></Show>
+            </SettingsGroup>
           </Match>
           <Match when={page() === "appearance"}>
             <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
             <p class="form-hint">{t("settings.themeNote")}</p>
           </Match>
-          <Match when={page() === "terminal"}><TerminalSettings drafts={props.terminalDrafts} /></Match>
-          <Match when={page() === "agents"}>{props.agents ?? <AgentSettings />}</Match>
+          <Match when={page() === "terminal"}><SettingsGroup><TerminalSettings drafts={props.terminalDrafts} /></SettingsGroup></Match>
+          <Match when={page() === "agents"}><SettingsGroup>{props.agents ?? <AgentSettings />}</SettingsGroup></Match>
           <Match when={page() === "notifications"}>
+            <SettingsGroup>
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
             <Toggle checked={notificationSettings().needs} disabled={!props.notifications}
@@ -209,11 +214,12 @@ export function SettingsPanel(props: {
               onChange={(sound) => updateNotificationSettings({ sound })} />
             <Toggle checked={notificationSettings().badge} label={t("settings.notifyBadge")}
               hint={t("settings.notifyBadgeHint")} onChange={(badge) => updateNotificationSettings({ badge })} />
+            </SettingsGroup>
           </Match>
           <Match when={page() === "shortcuts"}>
             <ShortcutList platforms="both" />
             <div>
-              <Button size="sm" icon="keyboard" onClick={() => setShortcutsOpen(true)}>{t("shortcuts.open")}</Button>
+              <Button size="sm" onClick={() => setShortcutsOpen(true)}>{t("shortcuts.open")}</Button>
             </div>
             <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
           </Match>
@@ -222,6 +228,7 @@ export function SettingsPanel(props: {
             <ArchivedPage archived={props.archived} repos={props.repos} now={props.now} onRestore={props.onRestore} onDelete={props.onDelete} />
           </Match>
         </Switch>
+        </div>
       </div>
     </div>
   );

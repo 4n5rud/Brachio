@@ -593,6 +593,7 @@ export const ko: Messages = {
   "statusbar.memoryParts": "앱과 에이전트 {app}, 런타임 {runtime}",
   "statusbar.memory": "메모리",
   "statusbar.cpu": "CPU",
+  "statusbar.details": "리소스 사용",
 
   "empty.repo.title": "저장소를 추가하세요",
   "empty.repo.body": "Git 저장소 폴더를 고르세요.",

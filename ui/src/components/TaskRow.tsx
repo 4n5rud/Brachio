@@ -51,7 +51,8 @@ export function TaskRowItem(props: {
   return (
     <button
       class="task-item"
-      classList={{ "task-item-selected": props.selected, "task-item-child": props.child }}
+      classList={{ "task-item-child": props.child }}
+      data-current={props.selected || undefined}
       type="button"
       title={props.task.title}
       aria-current={props.selected ? "true" : undefined}

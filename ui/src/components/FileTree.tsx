@@ -112,7 +112,7 @@ export function FileTree(props: {
       <ul class="file-results" aria-label={t("files.results")}>
         <For each={props.paths.slice(0, props.limit)}>{(file) => (
           <li>
-            <button type="button" class="tree-row" classList={{ on: file === props.selected }} title={file}
+            <button type="button" class="tree-row" data-current={file === props.selected || undefined} title={file}
               onClick={() => props.onSelect(file)}>
               <Icon name="file" class="icon tree-icon" />
               <span class="tree-name"><Highlight text={baseName(file)} query={props.query} />
@@ -127,7 +127,7 @@ export function FileTree(props: {
     }>
       <div class="file-tree" role="tree" aria-label={t("files.tree")} onKeyDown={move}>
         <For each={rows()}>{(row) => (
-          <div role="treeitem" class="tree-row" classList={{ on: row.path === props.selected, dir: row.kind === "dir" }}
+          <div role="treeitem" class="tree-row" classList={{ dir: row.kind === "dir" }} data-current={row.path === props.selected || undefined}
             data-path={row.path} tabindex={tabbable(row) ? 0 : -1} title={row.path}
             aria-level={row.depth + 1} aria-expanded={row.kind === "dir" ? row.open : undefined}
             aria-selected={row.kind === "file" ? row.path === props.selected : undefined}

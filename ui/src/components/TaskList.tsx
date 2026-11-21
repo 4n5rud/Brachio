@@ -1,5 +1,4 @@
 import { IconButton } from "./ui/IconButton";
-import { Button } from "./ui/Button";
 import { Menu } from "./ui/Menu";
 import { AddProjectItems } from "./AddProjectItems";
 import type { AddProjectKind } from "../lib/project-choices";
@@ -194,7 +193,7 @@ export function TaskList(props: {
               onClick={() => props.onSettings?.()} />
           </Show>
           <Show when={props.onOpenArchived}>
-            <Button class="sidebar-foot-end" variant="ghost" size="sm" onClick={() => props.onOpenArchived?.()}>{t("task.archived")}</Button>
+            <IconButton class="sidebar-foot-end" icon="archive" label={t("task.archived")} onClick={() => props.onOpenArchived?.()} />
           </Show>
         </div>
       </Show>

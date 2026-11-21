@@ -17,10 +17,6 @@ button.file-row {
 .file-row:hover {
   background: var(--color-hover);
 }
-.file-row.on {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
 .file-row .name {
   flex: 1;
   min-width: 0;
