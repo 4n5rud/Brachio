@@ -650,10 +650,13 @@ export function App() {
           await deleteArchived(task);
           return;
         }
+        const busy = /file in use: (.*)$/u.exec(message);
         if (!await confirmDialog({
           title: t("task.deleteFailedTitle"),
-          error: t("task.deleteFailed").replace("{detail}", () => message),
-          body: t("task.deleteFailedBody"),
+          error: busy
+            ? t("task.deleteFileInUse").replace("{path}", () => busy[1] || t("task.deleteFileInUseSome"))
+            : t("task.deleteFailed").replace("{detail}", () => message),
+          body: busy ? t("task.deleteFileInUseBody") : t("task.deleteFailedBody"),
           confirmLabel: t("task.tryAgain"),
           tone: "danger",
         })) return;
@@ -832,6 +835,8 @@ export function App() {
           selectedId={selectedId()}
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
+          onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
+          onError={report}
           onAddRepo={inTauri ? () => void chooseRepo().catch(report) : undefined}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
           onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}

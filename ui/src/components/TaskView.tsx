@@ -15,6 +15,7 @@ import { ApprovalBar } from "./ApprovalBar";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
+import { onShellRequest } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { DropVeil } from "./DropVeil";
@@ -159,6 +160,9 @@ export function TaskView(props: {
       setShells((current) => new Map(current).set(props.task.id, next));
     }
   };
+  onCleanup(onShellRequest((id) => {
+    if (id === props.task.id) setLayout("shell");
+  }));
   const selectKey = (key: string) => {
     const id = props.task.id;
     if (key === terminalKey(id, "agent")) selectAgent(id, false);
