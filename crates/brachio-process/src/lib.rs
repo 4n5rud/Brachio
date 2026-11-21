@@ -160,6 +160,78 @@ pub fn run_tree_cancellable(
     }
 }
 
+/// Result of [`run_tree_reporting`].
+#[derive(Debug)]
+pub struct Reported {
+    /// How the run ended.
+    pub ended: Ended,
+    /// The end of what the program printed on standard error, for an error message.
+    pub stderr_tail: Vec<u8>,
+}
+
+/// Standard error kept by [`run_tree_reporting`]: the last bytes, where a failure is explained.
+const KEPT_STDERR_TAIL: usize = 16 * 1024;
+
+/// Like [`run_tree_cancellable`], but standard input and output are closed and every piece of
+/// standard error goes to `on_stderr` as it arrives, so a long step such as `git clone` can show
+/// progress. The tree is killed on exit, cancel and timeout alike.
+///
+/// # Errors
+/// Fails when the program cannot start or when waiting on it fails.
+pub fn run_tree_reporting(
+    mut command: Command,
+    limit: Duration,
+    cancel: &AtomicBool,
+    mut on_stderr: impl FnMut(&[u8]) + Send + 'static,
+) -> io::Result<Reported> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = Running::Tree(tree_command(command, false).spawn()?);
+    let (_, stderr) = child.take_pipes();
+    let reader = stderr.map(|mut pipe| {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut tail: Vec<u8> = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while let Ok(read) = pipe.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                on_stderr(&chunk[..read]);
+                tail.extend_from_slice(&chunk[..read]);
+                if tail.len() > KEPT_STDERR_TAIL {
+                    tail.drain(..tail.len() - KEPT_STDERR_TAIL);
+                }
+            }
+            let _ = sender.send(tail);
+        });
+        receiver
+    });
+    let deadline = Instant::now() + limit;
+    let ended = loop {
+        if cancel.load(Ordering::Acquire) {
+            child.stop()?;
+            break Ended::Cancelled;
+        }
+        if let Some(status) = child.try_wait()? {
+            let _ = child.stop();
+            break Ended::Exited(status);
+        }
+        if Instant::now() >= deadline {
+            child.stop()?;
+            break Ended::TimedOut;
+        }
+        thread::sleep(POLL_EVERY);
+    };
+    // The tree is dead, so the pipe closes; a stray descendant is not waited for.
+    let stderr_tail = reader
+        .and_then(|receiver| receiver.recv_timeout(DRAIN_GRACE * 5).ok())
+        .unwrap_or_default();
+    Ok(Reported { ended, stderr_tail })
+}
+
 /// A started program, alone or together with the tree it leads.
 enum Running {
     Single(Child),
@@ -524,6 +596,52 @@ mod tests {
         };
         output_within(&mut shell(script), Duration::from_secs(20))
             .expect("returns once stdin is closed");
+    }
+
+    #[test]
+    fn reports_standard_error_as_it_arrives_and_keeps_its_end() {
+        use std::sync::Mutex;
+        let script = if cfg!(windows) {
+            "echo first 1>&2 & echo last 1>&2"
+        } else {
+            "echo first >&2; echo last >&2"
+        };
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        let reported = run_tree_reporting(
+            shell(script),
+            Duration::from_secs(20),
+            &AtomicBool::new(false),
+            move |chunk| sink.lock().expect("lock").extend_from_slice(chunk),
+        )
+        .expect("command runs");
+        assert!(matches!(reported.ended, Ended::Exited(status) if status.success()));
+        let text = String::from_utf8_lossy(&reported.stderr_tail).into_owned();
+        assert!(text.contains("first") && text.contains("last"));
+        assert_eq!(
+            seen.lock().expect("lock").as_slice(),
+            reported.stderr_tail.as_slice()
+        );
+    }
+
+    #[test]
+    fn a_reported_run_stops_when_cancelled() {
+        let script = if cfg!(windows) {
+            "ping -n 30 127.0.0.1 >nul"
+        } else {
+            "sleep 30"
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancel);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            flag.store(true, Ordering::Release);
+        });
+        let started = Instant::now();
+        let reported = run_tree_reporting(shell(script), Duration::from_secs(60), &cancel, |_| {})
+            .expect("command runs");
+        assert!(matches!(reported.ended, Ended::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     fn process_is_alive(pid: &str) -> bool {

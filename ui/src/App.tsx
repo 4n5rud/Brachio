@@ -15,6 +15,8 @@ import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
+import { AddProjectDialog } from "./components/AddProjectDialog";
+import type { AddProjectKind, ProjectChoice } from "./lib/project-choices";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
 import type { SettingsPage } from "./components/settings/SettingsPanel";
@@ -55,7 +57,7 @@ import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
 import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
-import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
+import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
 
@@ -187,6 +189,15 @@ export function App() {
   const [recent, setRecent] = createSignal<readonly string[]>([]);
   const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
+  const [addProjectMode, setAddProjectMode] = createSignal<"clone" | "create">();
+  // Remotes are read when the new task dialog opens, to label each project with its owner/repo.
+  const [remoteUrls] = createResource(
+    () => (inTauri && dialogOpen() ? true : undefined),
+    () => listRemoteUrls().catch(() => ({} as Record<string, string>)),
+  );
+  const projectChoices = createMemo<ProjectChoice[]>(() => repos().map((item) => ({
+    id: item.id, name: item.name, path: item.path, isGit: item.isGit, remote: remoteUrls()?.[item.id],
+  })));
   const [importRepoId, setImportRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
   const [revealed, setRevealed] = createSignal<{ id: string }>();
@@ -533,8 +544,8 @@ export function App() {
     restoreSelection();
   };
 
-  const addProject = async (path: string, gitOnly = false) => {
-    const added = await addRepo(path, gitOnly);
+  const adoptProject = (added: RepoRecord) => {
+    if (dialogOpen()) setDialogRepoId(added.id);
     const listed = repos().some((item) => item.id === added.id);
     if (!listed) setRepos((list) => [added, ...list]);
     const show = () => {
@@ -552,9 +563,16 @@ export function App() {
     }
   };
 
+  const addProject = async (path: string, gitOnly = false) => adoptProject(await addRepo(path, gitOnly));
+
   const chooseRepo = async (kind: "git" | "folder") => {
     const path = await openFolder({ directory: true, multiple: false });
     if (typeof path === "string") await addProject(path, kind === "git");
+  };
+
+  const startAddProject = (kind: AddProjectKind) => {
+    if (kind === "folder") void chooseRepo("folder").catch(report);
+    else setAddProjectMode(kind);
   };
 
   const addFolderRepo = async (path: string) => {
@@ -1064,7 +1082,7 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onImportWorktrees={inTauri ? setImportRepoId : undefined}
-          onAddRepo={inTauri ? (kind) => void chooseRepo(kind).catch(report) : undefined}
+          onAddRepo={inTauri ? startAddProject : undefined}
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           pinned={pinned()}
           onTogglePin={togglePin}
@@ -1177,12 +1195,21 @@ export function App() {
           <NewTaskDialog
             repoId={current().id}
             repoName={current().name}
+            projects={projectChoices()}
+            onProjectChange={setDialogRepoId}
+            onAddProject={startAddProject}
             defaultBranch={current().defaultBranch}
             isGit={current().isGit}
-            parents={repoRows()}
+            parents={inTauri ? rows().filter((task) => task.repoId === current().id) : rows()}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
           />
+        )}
+      </Show>
+      <Show when={addProjectMode()}>
+        {(mode) => (
+          <AddProjectDialog mode={mode()} onAdded={(project) => { setAddProjectMode(undefined); adoptProject(project); }}
+            onClose={() => setAddProjectMode(undefined)} />
         )}
       </Show>
       <Show when={importRepo()}>

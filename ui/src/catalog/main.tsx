@@ -33,6 +33,8 @@ import { Button } from "../components/ui/Button";
 import { ConfirmHost, confirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
 import { NewTaskDialog } from "../components/NewTaskDialog";
+import { AddProjectDialog } from "../components/AddProjectDialog";
+import { AddProjectItems } from "../components/AddProjectItems";
 import { EmptyState } from "../components/ui/EmptyState";
 import { IconButton } from "../components/ui/IconButton";
 import { Input, Select, TextArea } from "../components/ui/Input";
@@ -147,7 +149,7 @@ function Catalog() {
   const [veil, setVeil] = createSignal(false);
   const [menuAnchor, setMenuAnchor] = createSignal<HTMLElement>();
   const [combo, setCombo] = createSignal("main");
-  const [dialog, setDialog] = createSignal<"plain" | "confirm" | "newTask" | undefined>();
+  const [dialog, setDialog] = createSignal<"plain" | "confirm" | "newTask" | "clone" | "create" | undefined>();
   const applyTheme = (value: string) => {
     setTheme(value);
     document.documentElement.dataset.theme = value;
@@ -277,6 +279,8 @@ function Catalog() {
         <Row cap="open">
           <Button onClick={() => setDialog("plain")}>Dialog</Button>
           <Button onClick={() => setDialog("newTask")}>New task</Button>
+          <Button onClick={() => setDialog("clone")}>Clone from URL</Button>
+          <Button onClick={() => setDialog("create")}>Create project</Button>
           <Button onClick={() => void confirmDialog({
             title: t("newTask.discardDraft"),
             body: t("newTask.discardBody"),
@@ -302,7 +306,16 @@ function Catalog() {
         </Row>
         <Show when={dialog() === "newTask"}>
           <NewTaskDialog repoId="sample" repoName="brachio" defaultBranch="main" isGit onClose={() => setDialog(undefined)}
+            projects={[
+              { id: "sample", name: "brachio", path: "/work/brachio", isGit: true, remote: "git@github.com:owner/brachio.git" },
+              { id: "notes", name: "notes", path: "/home/me/notes", isGit: false },
+            ]}
+            onProjectChange={() => {}} onAddProject={() => {}}
             onCreate={() => new Promise<void>(() => {})} />
+        </Show>
+        <Show when={dialog() === "clone" || dialog() === "create"}>
+          <AddProjectDialog mode={dialog() === "clone" ? "clone" : "create"} onAdded={() => setDialog(undefined)}
+            onClose={() => setDialog(undefined)} />
         </Show>
         <Show when={dialog() === "plain"}>
           <Dialog title="Dialog" escHint onClose={() => setDialog(undefined)} closeOnScrim
@@ -412,9 +425,8 @@ function Catalog() {
               <MenuItem icon={<AgentIcon agent="codex" />} hint={t("task.tabHintAgent")} disabled onSelect={() => {}}>Codex</MenuItem>
               <MenuSeparator />
               <MenuItem icon={<Icon name="split" class="icon-sm" />} keys={["Ctrl", "\\"]} onSelect={() => setMenuAnchor(undefined)}>{t("task.splitSideBySide")}</MenuItem>
-              <MenuSubmenu icon={<Icon name="folder" class="icon-sm" />} label="Add project">
-                <MenuItem onSelect={() => setMenuAnchor(undefined)}>Choose folder</MenuItem>
-                <MenuItem onSelect={() => setMenuAnchor(undefined)}>Clone from URL</MenuItem>
+              <MenuSubmenu icon={<Icon name="plus" class="icon-sm" />} label={t("project.addNew")}>
+                <AddProjectItems onPick={() => setMenuAnchor(undefined)} />
               </MenuSubmenu>
             </Menu>)}</Show>
         </Row>
