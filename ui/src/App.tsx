@@ -29,10 +29,13 @@ import { taskGroup, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
+import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
-import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut } from "./lib/shortcut";
+import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
+import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
+import { isNewTaskShortcut, isSettingsShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -47,6 +50,7 @@ import { checkForRelease, openRelease } from "./lib/updates";
 import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
+import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
@@ -148,8 +152,26 @@ export function App() {
     }),
   );
   const [view, setView] = createSignal<View>("tasks");
+  const [unreadFinish, setUnreadFinishMarks] = createSignal<ReadonlySet<string>>(new Set());
+  const setUnreadFinish = (change: (marks: ReadonlySet<string>) => ReadonlySet<string>) => {
+    const next = change(unreadFinish());
+    setUnreadFinishMarks(next);
+    saveUnreadFinish(next);
+  };
+  const [windowFocused, setWindowFocused] = createSignal(document.hasFocus());
+  onMount(() => {
+    const sync = () => setWindowFocused(document.hasFocus());
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    onCleanup(() => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+    });
+  });
   const [selectedId, setSelectedId] = createSignal<string | undefined>(tasks()[0]?.id);
   const [dialogOpen, setDialogOpen] = createSignal(false);
+  const [recent, setRecent] = createSignal<readonly string[]>([]);
+  const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [importRepoId, setImportRepoId] = createSignal<string>();
   const [archiving, setArchiving] = createSignal(false);
@@ -267,6 +289,15 @@ export function App() {
     const task = selected();
     if (task?.repoId) localStorage.setItem(`brachio.task.${task.repoId}`, task.id);
   });
+  createEffect(() => {
+    const id = selectedId();
+    if (id === undefined || view() !== "tasks" || !windowFocused() || !unreadFinish().has(id)) return;
+    setUnreadFinish((marks) => {
+      const next = new Set(marks);
+      next.delete(id);
+      return next;
+    });
+  });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
   const [workspaceTaskIds, setWorkspaceTaskIds] = createSignal<readonly string[]>([]);
@@ -284,6 +315,10 @@ export function App() {
     if (id !== undefined && !workspaceTaskIds().includes(id)) {
       setWorkspaceTaskIds((ids) => [...ids, id]);
     }
+  });
+  createEffect(() => {
+    const id = selectedId();
+    if (id !== undefined) setRecent((current) => touchRecent(current, id));
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
   const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
@@ -439,6 +474,8 @@ export function App() {
     const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
     const at = Date.now();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
+    if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     const key = notificationKey(previous, status);
     if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
     recordActivity(task, sessionKey, key, message, at);
@@ -462,6 +499,7 @@ export function App() {
       setTasks(storedTasks.map(toTaskRow));
       setArchived(storedArchives.map(toTaskRow));
       setWorkspaceTaskIds(restoredTasks);
+      setUnreadFinishMarks(loadUnreadFinish(new Set(storedTasks.map((task) => task.id))));
       restoreSelection();
     });
   };
@@ -593,37 +631,25 @@ export function App() {
     void requestSetup(record.id, current.id, record.setupCommands);
   };
 
-  // A task created by an agent: start its tab without moving the user's selection.
-  // A task the scheduler starts may already be listed, because it was created earlier and waited.
-  const adoptCreatedTask = async (record: CreatedTask, startListed = false) => {
-    if (findTask(record.id) && !startListed) return;
-    if (!repos().some((item) => item.id === record.repoId)) {
-      const stored = await listRepos();
-      if (!stored.some((item) => item.id === record.repoId)) return;
-      setRepos(stored);
-      if (findTask(record.id) && !startListed) return;
-    }
-    createdThisRun.add(record.id);
-    const setupCopyError = record.setupCopyError;
-    if (setupCopyError) {
-      setSetupFailures((items) => new Map(items).set(record.id, setupCopyError));
-    }
-    if (record.prompt) firstPrompts.set(record.id, record.prompt);
-    const listed = findTask(record.id);
-    if (listed && !startListed) return;
-    if (!listed && record.parentTaskId) {
-      pushToast({
-        tone: "info",
-        message: t("task.childCreated").replace("{title}", () => record.title),
-        action: { label: t("task.open"), onClick: () => open(record.id) },
-      });
-    }
-    batch(() => {
-      if (!listed) setTasks((list) => [toTaskRow(record), ...list]);
-      setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
-    });
-    void requestSetup(record.id, record.repoId, record.setupCommands);
-  };
+  const adoptCreated = (record: CreatedTask, startListed = false) => adoptCreatedTask({
+    isListed: (id) => findTask(id) !== undefined,
+    hasRepo: (repoId) => repos().some((item) => item.id === repoId),
+    listRepos,
+    showRepos: setRepos,
+    markCreatedHere: (id) => createdThisRun.add(id),
+    failSetupCopy: (id, error) => setSetupFailures((items) => new Map(items).set(id, error)),
+    rememberPrompt: (id, prompt) => firstPrompts.set(id, prompt),
+    announceChild: (task) => pushToast({
+      tone: "info",
+      message: t("task.childCreated").replace("{title}", () => task.title),
+      action: { label: t("task.open"), onClick: () => open(task.id) },
+    }),
+    open: (task, listed) => batch(() => {
+      if (!listed) setTasks((list) => [toTaskRow(task), ...list]);
+      setOpenIds((ids) => (ids.includes(task.id) ? ids : [...ids, task.id]));
+    }),
+    requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
+  }, record, startListed);
 
   const archive = async (task: TaskRow) => {
     if (archiving()) return;
@@ -774,8 +800,8 @@ export function App() {
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
       }));
-      onCleanup(watchCreatedTasks((record) => void adoptCreatedTask(record).catch(report)));
-      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreatedTask(record, true).catch(report)));
+      onCleanup(watchCreatedTasks((record) => void adoptCreated(record).catch(report)));
+      onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreated(record, true).catch(report)));
       let disposed = false;
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
@@ -849,7 +875,26 @@ export function App() {
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(clock));
     const onKey = (event: KeyboardEvent) => {
-      if (event.isComposing || dialogOpen() || importRepoId() || workspacePanel()) return;
+      if (event.isComposing) return;
+      const inTerminal = event.target instanceof Element && event.target.closest(".xterm") !== null;
+      const switching = switcher();
+      const keys = recentTasksShortcut(event, inTerminal && !switching);
+      if (switching && keys) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSwitcher({ ...switching, index: stepSwitchIndex(switching.index, switching.tasks.length, keys.back) });
+        return;
+      }
+      if (!switching && keys && !dialogOpen() && !workspacePanel()) {
+        const candidates = recentTasks(recent(), rows());
+        if (candidates.length > 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSwitcher({ tasks: candidates, index: firstSwitchIndex(candidates.length, keys.back), hold: keys.hold, terminal: inTerminal });
+          return;
+        }
+      }
+      if (dialogOpen() || importRepoId() || workspacePanel()) return;
       if (isQuickOpenShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -879,6 +924,16 @@ export function App() {
     // Capture phase: the terminal swallows key events it handles.
     window.addEventListener("keydown", onKey, true);
     onCleanup(() => window.removeEventListener("keydown", onKey, true));
+    // Letting go of the held key opens the highlighted task.
+    const onKeyUp = (event: KeyboardEvent) => {
+      const switching = switcher();
+      if (!switching || event.key !== switching.hold) return;
+      const target = switching.tasks[switching.index];
+      setSwitcher(undefined);
+      if (target) open(target.id);
+    };
+    window.addEventListener("keyup", onKeyUp, true);
+    onCleanup(() => window.removeEventListener("keyup", onKeyUp, true));
   });
   createEffect(() => {
     if (inTauri && repos().length > 0) saveOpenWorkspaceTasks(workspaceTaskIds());
@@ -944,6 +999,7 @@ export function App() {
           reveal={revealed()}
           needsYou={needsYou()}
           unreadForTask={unreadForTask}
+          finishedUnread={(id) => unreadFinish().has(id)}
           now={now()}
         />
         </Show>
@@ -1011,6 +1067,13 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} />
+      <Show when={switcher()} keyed>
+        {(current) => (
+          <RecentTasksSwitcher tasks={current.tasks} index={current.index}
+            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS : RECENT_TASKS_KEYS}
+            onPick={(id) => { setSwitcher(undefined); open(id); }} onClose={() => setSwitcher(undefined)} />
+        )}
+      </Show>
       <Show when={workspacePanel()} keyed>
         {(panel) => <WorkspaceDialog panel={panel} tasks={rows()} mode={theme()} colorTheme={colorTheme()}
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}

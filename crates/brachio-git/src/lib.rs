@@ -2,6 +2,7 @@
 //! argument vector.
 
 mod branch_list;
+mod changed_paths;
 mod conflict_report;
 mod file_list;
 mod git;
@@ -18,6 +19,7 @@ mod worktree_list;
 mod worktree_setup;
 
 pub use branch_list::{list_branches, BranchEntry, MAX_BRANCHES};
+pub use changed_paths::{changed_paths, shared_paths};
 pub use conflict_report::{merge_target, predict_conflict, ConflictReport, MergeTarget};
 pub use file_list::{list_files, MAX_FILES};
 pub use git::{Git, GitError};

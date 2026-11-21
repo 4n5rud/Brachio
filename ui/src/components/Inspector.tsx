@@ -20,6 +20,7 @@ import { TaskQaRun } from "./TaskQaRun";
 import { TaskOrchestration } from "./TaskOrchestration";
 import { TaskActivityList } from "./TaskActivityList";
 import { TaskAlwaysAllow } from "./TaskAlwaysAllow";
+import { TaskOverlaps } from "./TaskOverlaps";
 import { listTaskActivity } from "../lib/task-activity";
 
 /** How often the open Activity tab reloads, since the core records events the interface never sees. */
@@ -116,6 +117,7 @@ export function Inspector(props: {
                         if (result && !result.ok) pushToast({ tone: "error", title: t("error.title"), message: result.failure.output });
                       })}
                       onDraft={(text) => props.onDraft(id, text)} />
+                    <TaskOverlaps taskId={id} changesRevision={currentChanges()?.data} />
                     <Show when={currentChanges()?.data}>
                       {(data) => (
                         <>

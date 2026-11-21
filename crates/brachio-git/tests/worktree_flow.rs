@@ -494,3 +494,18 @@ fn worktrees_made_outside_brachio_are_listed_and_importable() {
     );
     assert!(brachio_git::importable(&entries, &[outside]).is_empty());
 }
+
+#[test]
+fn changed_paths_cover_commits_edits_and_untracked_files_since_the_base() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    let tree = trees.path().join("a");
+    add(&git, "brachio/a-1", &tree);
+    commit_in(&tree, "committed\n");
+    fs::write(tree.join("new.txt"), "untracked\n").expect("write new.txt");
+    let tree_git = Git::new(&tree);
+    let base = tree_git.run(&["merge-base", "HEAD", "main"]).expect("base");
+    let paths = brachio_git::changed_paths(&tree_git, &base).expect("changed paths");
+    assert_eq!(paths, ["a.txt", "new.txt"]);
+}

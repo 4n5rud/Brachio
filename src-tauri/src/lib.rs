@@ -19,6 +19,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod task_activity;
 mod task_folder;
+mod task_overlaps;
 mod task_ports;
 mod task_tabs;
 #[cfg(any(windows, test))]
@@ -30,6 +31,9 @@ mod tray_menu;
 mod update_release;
 mod workspace;
 mod worktree_import;
+
+#[cfg(test)]
+mod ui_event_tests;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -244,6 +248,7 @@ pub fn run() {
                 show_main_window(app);
             },
         ))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(
@@ -252,6 +257,7 @@ pub fn run() {
         ))
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
@@ -320,6 +326,7 @@ pub fn run() {
             workspace::task_changes,
             worktree_import::worktree_import_candidates,
             worktree_import::worktree_import,
+            task_overlaps::task_overlaps,
             pr_status::task_pr_status,
             qa_run::qa_run,
             qa_run::qa_last_result,
@@ -355,20 +362,7 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let delivered_app = app.handle().clone();
     let approvals = hook_socket::Approvals::with_delivery(
         move |key| task_is_open(&knows, key),
-        move |notice| {
-            let sent = match notice {
-                hook_socket::Notice::Asked(question) => notify.emit("approval-asked", question),
-                hook_socket::Notice::Closed(id) => notify.emit("approval-closed", id),
-                hook_socket::Notice::HungUp(id) => notify.emit("approval-hung-up", id),
-                hook_socket::Notice::AutoAllowed { key, summary } => {
-                    record_auto_allowed(&notify, &key, &summary);
-                    Ok(())
-                }
-            };
-            if let Err(error) = sent {
-                tracing::debug!(%error, "could not tell the window about a permission question");
-            }
-        },
+        move |notice| forward_notice(&notify, notice),
         move |request| mailbox::serve(&mail_app, request),
         move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
@@ -384,7 +378,23 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Writes a request that a remembered rule allowed into the task's Activity history.
-fn record_auto_allowed(app: &tauri::AppHandle, key: &str, summary: &str) {
+/// Tells the window about a change to the permission questions.
+fn forward_notice<R: tauri::Runtime>(app: &AppHandle<R>, notice: hook_socket::Notice) {
+    let sent = match notice {
+        hook_socket::Notice::Asked(question) => app.emit("approval-asked", question),
+        hook_socket::Notice::Closed(id) => app.emit("approval-closed", id),
+        hook_socket::Notice::HungUp(id) => app.emit("approval-hung-up", id),
+        hook_socket::Notice::AutoAllowed { key, summary } => {
+            record_auto_allowed(app, &key, &summary);
+            Ok(())
+        }
+    };
+    if let Err(error) = sent {
+        tracing::debug!(%error, "could not tell the window about a permission question");
+    }
+}
+
+fn record_auto_allowed<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, summary: &str) {
     let task_id = always_allow::task_of(key);
     let detail: String = brachio_qa::redact_secrets(summary, false)
         .lines()
