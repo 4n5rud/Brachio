@@ -19,9 +19,12 @@ mod task_activity;
 mod task_folder;
 mod task_ports;
 mod task_tabs;
+#[cfg(any(windows, test))]
+mod taskbar_badge;
 mod terminal;
 mod terminal_authorization;
 mod terminal_status;
+mod tray_menu;
 mod update_release;
 mod workspace;
 
@@ -29,56 +32,114 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 use brachio_pty::SessionManager;
-use serde::Deserialize;
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Emitter, Manager};
 
 const TRAY_TASK_PREFIX: &str = "task:";
-const TRAY_TASK_LIMIT: usize = 15;
 
-struct TrayTasks(Submenu<tauri::Wry>);
+struct TrayHandle(tauri::tray::TrayIcon<tauri::Wry>);
 
-#[derive(Deserialize)]
-struct TrayTask {
-    id: String,
-    label: String,
-}
-
+/// Rebuilds the tray menu from the sections the window lists and sets the taskbar badge.
+/// The window owns task statuses, so it sends the lists rather than Rust re-deriving them.
 #[tauri::command]
-fn tray_update_tasks(app: AppHandle, tasks: Vec<TrayTask>, label: String) -> Result<(), String> {
+fn tray_update(
+    app: AppHandle,
+    needs: Vec<tray_menu::TrayTask>,
+    working: Vec<tray_menu::TrayTask>,
+    labels: tray_menu::TrayLabels,
+) -> Result<(), String> {
     let handle = app.clone();
     app.run_on_main_thread(move || {
-        let Some(menu) = handle.try_state::<TrayTasks>() else {
-            return;
-        };
-        if let Err(error) = update_tray_tasks(&handle, &menu.0, tasks, label) {
-            tracing::warn!(%error, "could not update tray tasks");
+        if let Err(error) = apply_tray(&handle, &needs, &working, &labels) {
+            tracing::warn!(%error, "could not update the tray");
         }
     })
     .map_err(|error| error.to_string())
 }
 
-fn update_tray_tasks(
+fn apply_tray(
     app: &AppHandle,
-    menu: &Submenu<tauri::Wry>,
-    tasks: Vec<TrayTask>,
-    label: String,
+    needs: &[tray_menu::TrayTask],
+    working: &[tray_menu::TrayTask],
+    labels: &tray_menu::TrayLabels,
 ) -> tauri::Result<()> {
-    let mut items = Vec::new();
-    for task in tasks.into_iter().take(TRAY_TASK_LIMIT) {
-        let id = format!("{TRAY_TASK_PREFIX}{}", task.id);
-        let title = task.label.replace('&', "&&");
-        items.push(MenuItem::with_id(app, id, title, true, None::<&str>)?);
+    if let Some(tray) = app.try_state::<TrayHandle>() {
+        tray.0
+            .set_menu(Some(build_tray_menu(app, needs, working, labels)?))?;
     }
-    for item in menu.items()? {
-        menu.remove(&item)?;
+    set_taskbar_badge(app, needs.len());
+    Ok(())
+}
+
+fn build_tray_menu(
+    app: &AppHandle,
+    needs: &[tray_menu::TrayTask],
+    working: &[tray_menu::TrayTask],
+    labels: &tray_menu::TrayLabels,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::new(app)?;
+    let entries = tray_menu::task_entries(labels, needs, working);
+    for entry in &entries {
+        match entry {
+            tray_menu::Entry::Header(title) => {
+                let title = title.replace('&', "&&");
+                menu.append(&MenuItem::new(app, title, false, None::<&str>)?)?;
+            }
+            tray_menu::Entry::Task { id, label } => {
+                let id = format!("{TRAY_TASK_PREFIX}{id}");
+                let title = label.replace('&', "&&");
+                menu.append(&MenuItem::with_id(app, id, title, true, None::<&str>)?)?;
+            }
+            tray_menu::Entry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
+        }
     }
-    for item in &items {
-        menu.append(item)?;
+    if !entries.is_empty() {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
-    menu.set_text(label)?;
-    menu.set_enabled(!items.is_empty())
+    menu.append(&MenuItem::with_id(
+        app,
+        "new-task",
+        &labels.new_task,
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "show",
+        &labels.show,
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "quit",
+        &labels.quit,
+        true,
+        None::<&str>,
+    )?)?;
+    Ok(menu)
+}
+
+/// Windows shows the count as an overlay on the taskbar button; macOS keeps the Dock badge the
+/// window sets, and Linux has no equivalent.
+fn set_taskbar_badge(app: &AppHandle, count: usize) {
+    #[cfg(windows)]
+    if let Some(window) = app.get_webview_window("main") {
+        let icon = (count > 0).then(|| {
+            tauri::image::Image::new_owned(
+                taskbar_badge::badge_rgba(count),
+                taskbar_badge::badge_size(),
+                taskbar_badge::badge_size(),
+            )
+        });
+        if let Err(error) = window.set_overlay_icon(icon) {
+            tracing::warn!(%error, "could not set the taskbar badge");
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (app, count);
 }
 
 /// The app version, for the about box.
@@ -199,7 +260,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             resource_usage::resource_usage,
-            tray_update_tasks,
+            tray_update,
             terminal::agents_detect,
             update_release::open_update_release,
             terminal::terminal_open,
@@ -313,16 +374,26 @@ fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
 }
 
 fn install_tray(app: &App) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show Brachio", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Brachio", true, None::<&str>)?;
-    let tasks = Submenu::with_id(app, "open-tasks", "Open tasks", false)?;
-    let menu = Menu::with_items(app, &[&show, &tasks, &quit])?;
+    let labels = tray_menu::TrayLabels {
+        needs: "Needs you".into(),
+        working: "Working".into(),
+        new_task: "New task".into(),
+        show: "Show Brachio".into(),
+        quit: "Quit Brachio".into(),
+    };
+    let menu = build_tray_menu(app.handle(), &[], &[], &labels)?;
     let mut tray = TrayIconBuilder::new()
         .tooltip("Brachio")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "quit" => app.exit(0),
+            "new-task" => {
+                show_main_window(app);
+                if let Err(error) = app.emit_to("main", "tray-new-task", ()) {
+                    tracing::warn!(%error, "could not start a new task from the tray");
+                }
+            }
             id => {
                 if let Some(task_id) = id.strip_prefix(TRAY_TASK_PREFIX) {
                     show_main_window(app);
@@ -335,8 +406,8 @@ fn install_tray(app: &App) -> tauri::Result<()> {
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
-    tray.build(app)?;
-    app.manage(TrayTasks(tasks));
+    let tray = tray.build(app)?;
+    app.manage(TrayHandle(tray));
     Ok(())
 }
 
