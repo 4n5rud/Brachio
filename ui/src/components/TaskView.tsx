@@ -1,7 +1,7 @@
 import { IconButton } from "./ui/IconButton";
 import { Select } from "./ui/Input";
 import { Button } from "./ui/Button";
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createComputed, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
@@ -22,7 +22,7 @@ import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { DropVeil } from "./DropVeil";
 import { taskIdOf } from "../lib/approvals";
 import { CORE_AGENT } from "../lib/terminal";
-import { MAX_MOUNTED_TERMINALS, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
+import { MAX_MOUNTED_TERMINALS, drawnTaskIds, mountedTaskIds, touchRecent } from "../lib/terminal-parking";
 import type { ApprovalQuestion } from "../lib/approvals";
 import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts, saveSecondaryAgents,
   saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
@@ -220,6 +220,23 @@ export function TaskView(props: {
     setRecent((history) => touchRecent(history, id));
   });
   const mounted = createMemo(() => mountedTaskIds(props.openIds, recent(), unhosted(), MAX_MOUNTED_TERMINALS));
+  // Tasks beyond the six most recent are parked: the program runs on, the screen is dropped.
+  const parkedIds = new Set<string>();
+  const [waking, setWaking] = createSignal<ReadonlySet<string>>(new Set());
+  createComputed(() => {
+    const live = new Set(mounted());
+    for (const id of props.openIds) if (!live.has(id)) parkedIds.add(id);
+    for (const id of live) {
+      if (!parkedIds.delete(id)) continue;
+      setWaking((current) => new Set(current).add(id));
+      requestAnimationFrame(() => setTimeout(() => setWaking((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      }), 0));
+    }
+  });
+  const drawn = createMemo(() => drawnTaskIds(mounted(), waking()));
   const mountedBefore = new Set<string>();
   // Called once per terminal: the first prompt goes only to the first session.
   const sessionFor = (id: string): TerminalSession | undefined => {
@@ -371,7 +388,14 @@ export function TaskView(props: {
         </Show>
         <div class="pane-body">
           <Show when={props.filesOver}><DropVeil target="terminal" /></Show>
-          <For each={mounted()}>
+          <Show when={waking().has(props.task.id)}>
+            <Notice tone="info" lead={props.task.status.state === "exited"
+              ? t("terminal.parkedStopped").replace("{agent}", AGENT_NAME[props.task.agent])
+              : t("terminal.parkedRunning").replace("{agent}", AGENT_NAME[props.task.agent])}>
+              {t("terminal.parkedNote")}
+            </Notice>
+          </Show>
+          <For each={drawn()}>
             {(id) => {
               const primarySession = sessionFor(id);
               const selected = () => props.visible && id === props.task.id;
