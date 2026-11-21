@@ -9,6 +9,7 @@ mod folder_access;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
+mod keep_awake;
 mod log_file;
 mod mailbox;
 mod orchestration;
@@ -249,6 +250,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(keep_awake::KeepAwake::start())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(
             Arc::new(SessionManager::default()),
@@ -272,6 +274,8 @@ pub fn run() {
             app_version,
             resource_usage::resource_usage,
             tray_update,
+            keep_awake::keep_awake_supported,
+            keep_awake::keep_awake_set,
             terminal::agents_detect,
             update_release::open_update_release,
             terminal::terminal_open,

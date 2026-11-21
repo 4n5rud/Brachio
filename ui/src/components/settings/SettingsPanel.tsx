@@ -3,6 +3,7 @@ import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
 import { isMac } from "../../lib/shortcut";
+import { keepAwakeEnabled, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
 import { notificationSettings, updateNotificationSettings } from "../../lib/notification-settings";
 import { openLogFolder } from "../../lib/workspace";
 import { Icon, type IconName } from "../Icon";
@@ -192,6 +193,10 @@ export function SettingsPanel(props: {
             <LanguageRow />
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
+            <Show when={keepAwakeSupported()}>
+              <Toggle checked={keepAwakeEnabled()} label={t("settings.keepAwake")} hint={t("settings.keepAwakeHint")}
+                onChange={updateKeepAwake} />
+            </Show>
             <Show when={"__TAURI_INTERNALS__" in window}><LogFilesRow /></Show>
           </Match>
           <Match when={page() === "appearance"}>
