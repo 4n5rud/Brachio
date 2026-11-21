@@ -19,9 +19,9 @@ mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
 mod task_activity;
-mod task_pin;
 mod task_folder;
 mod task_overlaps;
+mod task_pin;
 mod task_ports;
 mod task_tabs;
 #[cfg(any(windows, test))]
