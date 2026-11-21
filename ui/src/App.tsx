@@ -352,17 +352,19 @@ export function App() {
         && !questions().some((question) => question.key === target.key);
     };
     if (!stillAvailable()) return false;
-    const insert = target.prepare(draft);
-    if (!insert) return false;
+    const prepared = target.prepare(draft);
+    if (!prepared) return false;
+    const { insert, userTyped } = prepared;
     const body = [
       t("draft.target").replace("{agent}", () => target.agent).replace("{task}", () => task.title),
       t("draft.review"),
       draft,
     ].join("\n\n");
     const agreed = await confirmDialog({
-      title: t("draft.title"),
+      title: userTyped ? t("draft.typedTitle") : t("draft.title"),
+      error: userTyped ? t("draft.typedNote") : undefined,
       body,
-      confirmLabel: t("draft.insert"),
+      confirmLabel: userTyped ? t("draft.pasteAfter") : t("draft.insert"),
       cancelLabel: t("workspace.close"),
       tone: "primary",
     });
