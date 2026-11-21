@@ -27,6 +27,8 @@ export function Dialog(props: {
   centered?: boolean;
   /** A palette: the title is only for assistive technology and the body has no padding. */
   bare?: boolean;
+  /** A body that lays out its own regions, such as settings: no padding, fixed height, a rule under the head. */
+  flush?: boolean;
   role?: "dialog" | "alertdialog";
   children: JSX.Element;
 }) {
@@ -63,7 +65,7 @@ export function Dialog(props: {
     <Portal>
       <div class="scrim" classList={{ "scrim-center": props.centered }}
         onClick={(event) => { if (props.closeOnScrim && event.target === event.currentTarget) props.onClose(); }}>
-        <section ref={panel} class={`modal modal-${props.size ?? "sheet"}`} classList={{ "modal-bare": props.bare }} role={props.role ?? "dialog"}
+        <section ref={panel} class={`modal modal-${props.size ?? "sheet"}`} classList={{ "modal-bare": props.bare, "modal-flush": props.flush }} role={props.role ?? "dialog"}
           aria-modal="true" aria-labelledby={titleId} tabindex="-1" onKeyDown={trapTab}>
           <div class="modal-head">
             <h2 id={titleId}>{props.title}</h2>

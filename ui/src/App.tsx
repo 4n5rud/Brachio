@@ -1,4 +1,4 @@
-import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, batch, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openFolder } from "@tauri-apps/plugin-dialog";
@@ -36,6 +36,7 @@ import type { DiffTotals } from "./lib/diff";
 import { pasteText } from "./lib/terminal-paste";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
+import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
@@ -177,6 +178,7 @@ export function App() {
   const [issueReport, setIssueReport] = createSignal<string>();
   const [automaticUpdates, setAutomaticUpdates] = createSignal(localStorage.getItem("brachio.updateChecks") !== "off");
   const [updateVersion, setUpdateVersion] = createSignal<string | null>(null);
+  const [currentVersion] = createResource(() => (inTauri ? appVersion().catch(() => null) : null));
   const [dismissedVersion, setDismissedVersion] = createSignal<string>();
   const [updateStatus, setUpdateStatus] = createSignal<"idle" | "checking" | "current" | "unavailable">("idle");
   const checkUpdates = async (manual: boolean) => {
@@ -882,11 +884,10 @@ export function App() {
           activity={activity()} now={now()} activeTaskIds={activeTaskIds()}
           archived={archived()} onRestore={restore} onDelete={deleteArchived}
           repos={repos()}
-          onOpenArchived={inTauri ? () => setWorkspacePanel("archived") : undefined}
           onReportProblem={inTauri ? () => { setWorkspacePanel(undefined); setIssueReport(""); } : undefined}
           notifications={notifications()} onMode={setTheme} onColorTheme={setColorTheme} onNotifications={setNotifications}
           updates={inTauri ? {
-            enabled: automaticUpdates(), status: updateStatus(), version: updateVersion(),
+            enabled: automaticUpdates(), status: updateStatus(), version: updateVersion(), current: currentVersion(),
             onEnabled: setAutomaticUpdates, onCheck: () => void checkUpdates(true),
             onDownload: () => void openRelease().catch(report),
           } : undefined}

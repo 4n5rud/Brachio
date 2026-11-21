@@ -116,3 +116,8 @@
   border-radius: var(--radius-md);
   overflow: hidden;
 }
+.catalog-settings {
+  display: flex;
+  flex-direction: column;
+  height: 520px;
+}

@@ -128,18 +128,3 @@
   font: var(--text-meta);
   color: var(--color-text-3);
 }
-.quick-open-results {
-  max-height: 19rem;
-  overflow: auto;
-}
-.archive-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 40px;
-  padding: var(--space-1) var(--space-2);
-  border-radius: 8px;
-}
-.archive-row:hover {
-  background: var(--color-hover);
-}

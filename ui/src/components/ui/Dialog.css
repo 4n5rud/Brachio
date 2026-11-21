@@ -83,3 +83,17 @@
   padding: var(--space-2) 14px;
   background: transparent;
 }
+.modal-flush {
+  height: min(600px, calc(100vh - 32px));
+}
+.modal-flush .modal-head {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+.modal-flush .modal-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
