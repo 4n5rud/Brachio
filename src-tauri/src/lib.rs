@@ -245,6 +245,7 @@ pub fn run() {
             pr_status::task_pr_status,
             qa_run::qa_run,
             qa_run::qa_last_result,
+            qa_run::qa_delete_output,
             external_link::open_external_link,
             issue_report::open_issue_draft,
             workspace::task_merge_preview,

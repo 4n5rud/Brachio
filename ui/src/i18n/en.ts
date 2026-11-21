@@ -395,6 +395,7 @@ export const en = {
   "inspector.qa.unverified": "not verified: the checked-out commit changed",
   "inspector.qa.truncated": "Output was cut to fit the limit.",
   "inspector.qa.last": "Last result",
+  "inspector.qa.deleteOutput": "Delete stored output",
   "inspector.qa.counts": "QA counts",
   "inspector.qa.command": "command",
   "inspector.qa.folder": "folder",
