@@ -8,6 +8,8 @@ import { Board } from "./components/Board";
 import { answerApproval, answerApprovalAlways, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
+import { SystemCheckHost, openSystemCheck } from "./components/SystemCheckDialog";
+import { firstRunPending } from "./lib/system-check";
 import { alertSoundKind, playAlertSound } from "./lib/alert-sound";
 import { quitConfirmEnabled, runningAgentKeys, setQuitConfirmEnabled } from "./lib/quit-confirm";
 import { EmptyRepo } from "./components/EmptyRepo";
@@ -51,6 +53,7 @@ import { CuesDialog } from "./components/CuesDialog";
 import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
 import { pushUndoToast } from "./lib/undo";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
+import { typingTarget } from "./lib/typing-target";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RenameDialog } from "./components/RenameDialog";
 import { attentionOf, nextAttentionId } from "./lib/attention";
@@ -236,15 +239,15 @@ export function App() {
     onCleanup(loadFilesUnlessCancelled(() => listTaskFiles(task.id), setQuickFiles));
   });
   onCleanup(registerActions(
-    { id: "app.newTask", label: () => t("quickOpen.cmd.newTask"), group: () => t("action.groupApp"), keys: NEW_TASK_KEYS,
+    { id: "app.newTask", label: () => t("quickOpen.cmd.newTask"), group: () => t("action.groupApp"), get keys() { return NEW_TASK_KEYS(); },
       run: () => { openNewTask(); } },
-    { id: "app.settings", label: () => t("quickOpen.cmd.settings"), group: () => t("action.groupApp"), keys: SETTINGS_KEYS,
+    { id: "app.settings", label: () => t("quickOpen.cmd.settings"), group: () => t("action.groupApp"), get keys() { return SETTINGS_KEYS(); },
       run: () => { setWorkspacePanel("settings"); } },
     { id: "app.archived", label: () => t("quickOpen.cmd.archived"), group: () => t("action.groupApp"),
       run: () => { setWorkspacePanel("archived"); } },
     { id: "app.activity", label: () => t("action.activity"), group: () => t("action.groupApp"),
       run: () => { setWorkspacePanel("activity"); } },
-    { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), keys: SHORTCUT_LIST_KEYS,
+    { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), get keys() { return SHORTCUT_LIST_KEYS(); },
       run: () => { setShortcutsOpen(true); } },
   ));
   onCleanup(registerPromptCueSender((id, text) => draftComment(id, text)));
@@ -414,7 +417,7 @@ export function App() {
     if (id !== undefined) setRecent((current) => touchRecent(current, id));
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
-  const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
+  const needsYou = createMemo(() => rows().filter((task) => attentionOf(task.status, false) === "blocked").length);
   createEffect(() => {
     if (!inTauri) return;
     const count = notificationSettings().badge ? needsYou() : 0;
@@ -1019,6 +1022,13 @@ export function App() {
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
       });
+      if (firstRunPending()) openSystemCheck();
+      const activateListener = listen("tray-activate", () => {
+        const next = nextAttentionId(rows().filter((task) => taskGroup(task.status) === "needs"),
+          (task) => attentionOf(task.status, false), undefined);
+        if (next) open(next);
+      });
+      onCleanup(() => { void activateListener.then((unlisten) => unlisten(), () => {}); });
       const quitListener = listen("quit-requested", () => void requestQuit().catch(report));
       onCleanup(() => { void quitListener.then((unlisten) => unlisten(), () => {}); });
       const closeListener = getCurrentWindow().onCloseRequested(async (event) => {
@@ -1154,6 +1164,12 @@ export function App() {
         event.stopPropagation();
         const next = nextAttentionId(rows(), (task) => attentionOf(task.status, unreadFinish().has(task.id)), selectedId());
         if (next) open(next);
+        return;
+      }
+      if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey && !typingTarget(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutsOpen(true);
         return;
       }
       const panel = panelToggleShortcut(event);
@@ -1341,7 +1357,7 @@ export function App() {
       <Show when={switcher()} keyed>
         {(current) => (
           <RecentTasksSwitcher tasks={current.tasks} index={current.index}
-            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS : RECENT_TASKS_KEYS}
+            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS() : RECENT_TASKS_KEYS()}
             onPick={(id) => { setSwitcher(undefined); open(id); }} onClose={() => setSwitcher(undefined)} />
         )}
       </Show>
@@ -1404,6 +1420,7 @@ export function App() {
       </Show>
       <ConfirmHost />
       <QuitConfirmHost />
+      <SystemCheckHost />
       <ToastHost />
     </div>
   );

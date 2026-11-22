@@ -8,8 +8,8 @@ use brachio_runtime::mailbox::{
     DEFAULT_BATCH, MAX_BATCH, MAX_WAIT_SECS,
 };
 use brachio_store::{
-    child_reports, mark_read, peek_next_batch, peek_unread, recent_messages, reply_recipient,
-    send_message, unread_counts, Message, NewMessage, TaskRecord,
+    child_reports, dismiss_messages, mark_read, peek_inbox, peek_next_batch, recent_messages,
+    reply_recipient, send_message, unread_counts, Message, NewMessage, TaskRecord,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -365,7 +365,7 @@ pub fn mailbox_inbox(
 ) -> Result<Vec<InboxRow>, String> {
     let connection = database.lock()?;
     let waiting =
-        peek_unread(&connection, &tab_key, MAX_BATCH).map_err(|error| error.to_string())?;
+        peek_inbox(&connection, &tab_key, MAX_BATCH).map_err(|error| error.to_string())?;
     Ok(waiting
         .into_iter()
         .map(|message| InboxRow {
@@ -376,6 +376,30 @@ pub fn mailbox_inbox(
             created_at_ms: message.created_at_ms,
         })
         .collect())
+}
+
+/// Hides messages of one terminal from the inbox. The agent still receives them. With no ids,
+/// hides every message the inbox shows for the terminal.
+#[tauri::command]
+pub fn mailbox_dismiss(
+    app: AppHandle,
+    database: State<'_, Database>,
+    tab_key: String,
+    ids: Option<Vec<String>>,
+) -> Result<(), String> {
+    let mut connection = database.lock()?;
+    dismiss_messages(
+        &mut connection,
+        &tab_key,
+        ids.as_deref(),
+        crate::pr_status::now_ms(),
+    )
+    .map_err(|error| error.to_string())?;
+    drop(connection);
+    if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+        tracing::debug!(%error, "could not tell the window about dismissed mail");
+    }
+    Ok(())
 }
 
 /// Marks messages read after the answer that carried them was written to the client.

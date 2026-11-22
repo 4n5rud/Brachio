@@ -1,4 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
 import { For, Show, createResource } from "solid-js";
 import { t } from "../i18n";
 import { readMailbox } from "../lib/mailbox";
@@ -26,6 +28,14 @@ export function MailboxInbox(props: {
       }
     },
   );
+  const dismiss = async (ids?: string[]) => {
+    try {
+      await invoke("mailbox_dismiss", { tabKey: props.tabKey, ids });
+    } catch (error) {
+      console.warn("Could not dismiss messages", error);
+    }
+    void refetch();
+  };
   return (
     <section class="mailbox-inbox" aria-label={t("mailbox.inbox")}>
       <div class="mailbox-head">
@@ -50,12 +60,15 @@ export function MailboxInbox(props: {
                   <strong>{t("mailbox.from").replace("{title}", props.sourceTitle(message.fromKey))}</strong>
                   {" "}{message.preview}
                   <span class="mailbox-age">{formatAge(message.createdAtMs, Date.now())}</span>
+                  <IconButton icon="x" size="sm" class="mailbox-dismiss" label={t("mailbox.dismiss")}
+                    onClick={() => void dismiss([message.id])} />
                 </article>
               )}
             </For>
             <Show when={messages().length > 0}>
               <div class="mailbox-actions">
                 <Button size="sm" onClick={props.onReminder}>{t("mailbox.reminder")}</Button>
+                <Button size="sm" variant="ghost" onClick={() => void dismiss()}>{t("mailbox.markAllRead")}</Button>
               </div>
               <p class="mailbox-note">{t("mailbox.hint")}</p>
             </Show>

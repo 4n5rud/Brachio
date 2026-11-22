@@ -13,7 +13,7 @@ import { StatusGlyph } from "./ui/StatusBadge";
 import { statusTone, type StatusTone } from "../lib/status";
 import { Kbd } from "./ui/Kbd";
 import { SettingsPanel, type SettingsPage, type UpdateSettingsProps } from "./settings/SettingsPanel";
-import { archivedAgo, createArchiveActions } from "./settings/archive-actions";
+import { ArchiveGrid } from "./ArchiveGrid";
 
 
 const ACTIVITY_TONE: Partial<Record<MessageKey, StatusTone>> = {
@@ -119,7 +119,6 @@ export function WorkspaceDialog(props: {
       props.onClose();
     }
   };
-  const archive = createArchiveActions(props.onRestore, props.onDelete);
   const title = () => {
     if (props.panel === "quickOpen") return t("quickOpen.title");
     if (props.panel === "archived") {
@@ -251,22 +250,8 @@ export function WorkspaceDialog(props: {
               onRestore={props.onRestore} onDelete={props.onDelete} onReportProblem={props.onReportProblem} />
           </Match>
           <Match when={props.panel === "archived"}>
-            <Show when={props.archived.length > 0}
-              fallback={<p class="palette-empty">{t("task.noArchived")}</p>}>
-              <div class="palette-list">
-                <For each={props.archived}>{(task) => (
-                  <div class="palette-row">
-                    <PaletteItem lead={<Icon name="branch" class="icon-sm" />} name={task.title} title={task.title}
-                      detail={<><Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show><span>{shortBranch(task.branch)}</span><span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString() : undefined}>{archivedAgo(task, props.now)}</span></>} />
-                    <Button size="sm" disabled={archive.busy()}
-                      onClick={() => void archive.restore(task)}>{t("task.restore")}</Button>
-                    <Button variant="ghost" size="sm" disabled={archive.busy()}
-                      onClick={() => void archive.remove(task)}>{t("task.deleteForGood")}</Button>
-                  </div>
-                )}</For>
-              </div>
-            </Show>
-            <Show when={archive.error()}><p class="form-error" role="alert">{archive.error()}</p></Show>
+            <ArchiveGrid archived={props.archived} repos={props.repos} now={props.now}
+              onRestore={props.onRestore} onDelete={props.onDelete} />
           </Match>
         </Switch>
     </Dialog>
