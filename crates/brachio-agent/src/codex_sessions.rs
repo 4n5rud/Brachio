@@ -53,6 +53,61 @@ pub fn latest_session_in(sessions: &Path, cwd: &Path) -> Option<String> {
         .map(|session| session.id)
 }
 
+/// The rollout file of a Codex conversation: the one named for `session_id` when it is known and
+/// present, otherwise the newest conversation started in `cwd`.
+#[must_use]
+pub fn codex_rollout_path(cwd: &Path, session_id: Option<&str>) -> Option<PathBuf> {
+    rollout_in(&codex_home()?.join("sessions"), cwd, session_id)
+}
+
+/// Same as [`codex_rollout_path`], searching `sessions` instead of the default folder.
+#[must_use]
+pub fn rollout_in(sessions: &Path, cwd: &Path, session_id: Option<&str>) -> Option<PathBuf> {
+    if let Some(id) =
+        session_id.filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+    {
+        let suffix = format!("-{id}.jsonl");
+        let mut budget = MAX_FILES_CHECKED;
+        let named = find_rollout(sessions, 0, &mut budget, &|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(&suffix))
+        });
+        if named.is_some() {
+            return named;
+        }
+    }
+    let wanted = normalize(cwd);
+    let mut budget = MAX_FILES_CHECKED;
+    find_rollout(sessions, 0, &mut budget, &|path| {
+        read_meta(path).is_some_and(|meta| normalize(Path::new(&meta.cwd)) == wanted)
+    })
+}
+
+fn find_rollout(
+    folder: &Path,
+    depth: usize,
+    budget: &mut usize,
+    matches: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    for (path, is_folder) in newest_entries(folder, depth, *budget) {
+        if *budget == 0 {
+            break;
+        }
+        if is_folder {
+            if let Some(found) = find_rollout(&path, depth + 1, budget, matches) {
+                return Some(found);
+            }
+        } else {
+            *budget -= 1;
+            if matches(&path) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 fn conversations_in(sessions: &Path, cwd: &Path, limit: usize) -> Vec<CodexConversation> {
     let wanted = normalize(cwd);
     let mut budget = MAX_FILES_CHECKED;
