@@ -183,6 +183,20 @@ pub async fn terminal_forget_uncertain_launch(
         .map_err(|error| error.to_string())
 }
 
+/// The last screen of a terminal whose program is gone, without starting anything.
+#[tauri::command]
+pub async fn terminal_saved_screen(
+    hosted: State<'_, RuntimeTerminals>,
+    database: State<'_, Database>,
+    key: String,
+) -> CommandResult<Option<crate::runtime_terminals::SavedScreen>> {
+    terminal_authorization::resolve(&*database.lock()?, &key)?;
+    hosted
+        .saved_screen(&key)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Opens a terminal and streams its events to `on_event`.
 #[tauri::command]
 pub async fn terminal_open(

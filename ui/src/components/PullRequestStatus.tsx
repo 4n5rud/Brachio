@@ -126,7 +126,7 @@ function Snapshot(props: { snapshot: PullRequestSnapshot; report: PrStatusReport
   return (
     <>
       <div class="row-gap">
-        <PrChip chip={chip()} />
+        <PrChip chip={chip()} url={props.snapshot.url} />
         <button type="button" class="link-button" onClick={() => open(props.snapshot.url)}>
           {props.snapshot.repository}
         </button>

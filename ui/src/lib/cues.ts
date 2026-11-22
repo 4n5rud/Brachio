@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
+import { rememberPrompt } from "./prompt-history";
 
 export type CueKind = "prompt" | "shell";
 
@@ -61,6 +62,10 @@ export function registerShellCueRunner(runner: ShellCueRunner): () => void {
 
 /** Runs one cue for a task. A prompt is typed without Enter; a shell command runs only after the shell is ready. */
 export async function runCue(taskId: string, cue: ProjectCue): Promise<boolean> {
-  if (cue.kind === "prompt") return (await promptSender?.(taskId, cue.body)) ?? false;
+  if (cue.kind === "prompt") {
+    const sent = (await promptSender?.(taskId, cue.body)) ?? false;
+    if (sent) rememberPrompt(cue.repoId, taskId, "cue", cue.body);
+    return sent;
+  }
   return (await shellRunner()?.(taskId, cue.body)) ?? false;
 }
