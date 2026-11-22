@@ -40,14 +40,16 @@ import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
-import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
+import { registerActions, registerGoToSource } from "./lib/actions";
+import { pushUndoToast } from "./lib/undo";
+import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
-import type { AgentState } from "./lib/status";
+import { statusTone, type AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
 import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
 import { sendShellInput } from "./lib/shell-input";
@@ -224,14 +226,29 @@ export function App() {
     }
     onCleanup(loadFilesUnlessCancelled(() => listTaskFiles(task.id), setQuickFiles));
   });
-  const runCommand = (id: CommandId) => {
-    if (id === "newTask") {
-      setWorkspacePanel(undefined);
-      openNewTask();
-    } else {
-      setWorkspacePanel(id);
-    }
-  };
+  onCleanup(registerActions(
+    { id: "app.newTask", label: () => t("quickOpen.cmd.newTask"), group: () => t("action.groupApp"), keys: NEW_TASK_KEYS,
+      run: () => { openNewTask(); } },
+    { id: "app.settings", label: () => t("quickOpen.cmd.settings"), group: () => t("action.groupApp"), keys: SETTINGS_KEYS,
+      run: () => { setWorkspacePanel("settings"); } },
+    { id: "app.archived", label: () => t("quickOpen.cmd.archived"), group: () => t("action.groupApp"),
+      run: () => { setWorkspacePanel("archived"); } },
+    { id: "app.activity", label: () => t("action.activity"), group: () => t("action.groupApp"),
+      run: () => { setWorkspacePanel("activity"); } },
+    { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), keys: SHORTCUT_LIST_KEYS,
+      run: () => { setShortcutsOpen(true); } },
+  ));
+  // Agents; terminal tabs are added by their owner through registerGoToSource.
+  onCleanup(registerGoToSource(() => rows().map((task) => ({
+    id: `agent:${task.id}`,
+    projectId: task.repoId ?? "",
+    projectName: repos().find((item) => item.id === task.repoId)?.name ?? "",
+    kind: "agent" as const,
+    title: task.title,
+    path: task.worktreePath ?? undefined,
+    tone: statusTone(task.status),
+    focus: () => open(task.id),
+  }))));
   const insertFile = (path: string) => {
     const task = selected();
     if (task) void draftComment(task.id, `@${path} `).catch(report);
@@ -789,6 +806,7 @@ export function App() {
         tone: "primary",
       })) return;
       await archiveNow(task);
+      pushUndoToast(t("undo.archived"), () => restore(task.id));
     } catch (failure) {
       pushToast({
         tone: "error",
@@ -1247,7 +1265,6 @@ export function App() {
             onDownload: () => void openRelease().catch(report),
           } : undefined}
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
-          onCommand={runCommand}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
       </Show>

@@ -33,6 +33,7 @@ import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, 
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
+import { registerGoToSource } from "../lib/actions";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
 
@@ -139,6 +140,16 @@ export function TaskView(props: {
   const shellName = (id: string | null) =>
     installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id)?.name ?? t("task.shell");
   const labels = createMemo(() => tabLabels(props.task.agent, tabsOf(props.task.id), shellName));
+  onCleanup(registerGoToSource(() => tabsOf(props.task.id).map((tab) => ({
+    id: `tab:${props.task.id}:${tab.id}`,
+    projectId: props.task.repoId ?? "",
+    projectName: "",
+    kind: tab.kind === "shell" ? "terminal" as const : "agent" as const,
+    title: labels().get(tab.id) ?? "",
+    path: props.task.worktreePath ?? undefined,
+    tone: tab.kind === "shell" ? "unknown" as const : statusTone(props.task.status),
+    focus: () => selectTab(props.task.id, tab),
+  }))));
   const agentTabs = (id: string) => tabsOf(id).filter((tab) => tab.kind !== "shell");
   createEffect(() => {
     props.onSecondaryKeys?.(new Map([...tabsByTask()].map(([id, list]) =>
