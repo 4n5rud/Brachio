@@ -59,7 +59,7 @@ See changed files and diffs, comment on diff lines, stage, commit, push, and ope
 A lead task splits work into child tasks (`brachio task create`), with dependencies (`--after`). Each child hands back its commit, changed files and summary, and you review the result before dependent tasks start. Tasks can also message each other.
 
 ### Built for daily use
-Agent usage in the status bar, a file tree with search, a project picker that can clone or create a repository, task search, and eight color themes.
+Agent usage in the status bar, a file tree with search, a project picker that can clone or create a repository, drag-to-reorder, task search, and eight color themes.
 
 ### CLI, MCP and skills
 The `brachio` CLI drives tasks from any terminal. `brachio mcp` serves task tools over stdio. The `brachio-send` and `brachio-lead` skills teach Claude Code and Codex how to use them.
