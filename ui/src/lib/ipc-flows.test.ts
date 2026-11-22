@@ -86,6 +86,7 @@ describe("handoff review", () => {
     reason: null,
     dependencies: [],
     handoff: null,
+    gates: [],
     ...extra,
   });
   const view = (children: ChildView[]): OrchestrationView => ({
