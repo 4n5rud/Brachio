@@ -12,11 +12,12 @@ import { openLogFolder } from "../../lib/workspace";
 import { Icon, type IconName } from "../Icon";
 import { Button } from "../ui/Button";
 import { Menu, MenuItem } from "../ui/Menu";
-import { ShortcutList, ShortcutsDialog } from "../ShortcutList";
+import { ShortcutList } from "../ShortcutList";
+import { ArchiveGrid } from "../ArchiveGrid";
+import { sidebarRowParts, updateSidebarRowParts } from "../../lib/sidebar-rows";
 import { ThemePicker } from "../ui/ThemePicker";
 import { Toggle } from "../ui/Toggle";
 import { AgentSettings } from "./AgentSettings";
-import { archivedAgo, createArchiveActions } from "./archive-actions";
 import { SettingRow } from "./SettingRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { TerminalSettings } from "./TerminalSettings";
@@ -114,28 +115,7 @@ function ArchivedPage(props: {
   onRestore: (id: string) => Promise<void>;
   onDelete: (task: TaskRow) => Promise<void>;
 }) {
-  const actions = createArchiveActions(props.onRestore, props.onDelete);
-  const repoName = (task: TaskRow) => props.repos.find((repo) => repo.id === task.repoId)?.name;
-  return (
-    <>
-      <Show when={props.archived.length > 0} fallback={<p class="form-hint">{t("task.noArchived")}</p>}>
-        <SettingsGroup><For each={props.archived}>{(task) => (
-          <SettingRow label={task.title} hint={
-            <span class="setting-row-meta">
-              <Show when={repoName(task)}>{(name) => <span>{name()}</span>}</Show>
-              <span title={task.archivedAt ? new Date(task.archivedAt).toLocaleString(locale()) : undefined}>{archivedAgo(task, props.now)}</span>
-            </span>
-          }>
-            <div class="row-gap">
-              <Button size="sm" disabled={actions.busy()} onClick={() => void actions.restore(task)}>{t("task.restore")}</Button>
-              <Button variant="ghost" size="sm" disabled={actions.busy()} onClick={() => void actions.remove(task)}>{t("task.deleteForGood")}</Button>
-            </div>
-          </SettingRow>
-        )}</For></SettingsGroup>
-      </Show>
-      <Show when={actions.error()}><p class="form-error" role="alert">{actions.error()}</p></Show>
-    </>
-  );
+  return <ArchiveGrid archived={props.archived} repos={props.repos} now={props.now} onRestore={props.onRestore} onDelete={props.onDelete} />;
 }
 
 /** Settings: a page list on the left, the chosen page on the right. */
@@ -160,7 +140,6 @@ export function SettingsPanel(props: {
   onReportProblem?: () => void;
 }) {
   const [page, setPage] = createSignal<SettingsPage>(props.page ?? "general");
-  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const title = () => PAGES.find((entry) => entry.page === page())?.label() ?? "";
   return (
     <div class="settings-grid">
@@ -201,6 +180,17 @@ export function SettingsPanel(props: {
           </Match>
           <Match when={page() === "appearance"}>
             <ThemePicker mode={props.mode} theme={props.colorTheme} onMode={props.onMode} onTheme={props.onColorTheme} />
+            <h3>{t("settings.sidebarRows")}</h3>
+            <SettingsGroup>
+              <Toggle checked={sidebarRowParts().agent} label={t("settings.rowAgent")}
+                onChange={(agent) => updateSidebarRowParts({ agent })} />
+              <Toggle checked={sidebarRowParts().branch} label={t("settings.rowBranch")}
+                onChange={(branch) => updateSidebarRowParts({ branch })} />
+              <Toggle checked={sidebarRowParts().changes} label={t("settings.rowChanges")}
+                onChange={(changes) => updateSidebarRowParts({ changes })} />
+              <Toggle checked={sidebarRowParts().statusText} label={t("settings.rowStatusText")}
+                onChange={(statusText) => updateSidebarRowParts({ statusText })} />
+            </SettingsGroup>
             <p class="form-hint">{t("settings.themeNote")}</p>
           </Match>
           <Match when={page() === "terminal"}><SettingsGroup><TerminalSettings drafts={props.terminalDrafts} /></SettingsGroup></Match>
@@ -225,11 +215,7 @@ export function SettingsPanel(props: {
             <SettingsGroup><AlertSoundSettings /></SettingsGroup>
           </Match>
           <Match when={page() === "shortcuts"}>
-            <ShortcutList platforms="both" />
-            <div>
-              <Button size="sm" onClick={() => setShortcutsOpen(true)}>{t("shortcuts.open")}</Button>
-            </div>
-            <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
+            <ShortcutList editable />
           </Match>
           <Match when={page() === "updates" && props.updates}>{(updates) => <UpdatesPage updates={updates()} />}</Match>
           <Match when={page() === "archived"}>

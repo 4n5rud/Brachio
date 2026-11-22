@@ -46,6 +46,7 @@ import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { registerActions, registerGoToSource } from "./lib/actions";
 import { pushUndoToast } from "./lib/undo";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
+import { typingTarget } from "./lib/typing-target";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RenameDialog } from "./components/RenameDialog";
 import { attentionOf, nextAttentionId } from "./lib/attention";
@@ -231,15 +232,15 @@ export function App() {
     onCleanup(loadFilesUnlessCancelled(() => listTaskFiles(task.id), setQuickFiles));
   });
   onCleanup(registerActions(
-    { id: "app.newTask", label: () => t("quickOpen.cmd.newTask"), group: () => t("action.groupApp"), keys: NEW_TASK_KEYS,
+    { id: "app.newTask", label: () => t("quickOpen.cmd.newTask"), group: () => t("action.groupApp"), get keys() { return NEW_TASK_KEYS(); },
       run: () => { openNewTask(); } },
-    { id: "app.settings", label: () => t("quickOpen.cmd.settings"), group: () => t("action.groupApp"), keys: SETTINGS_KEYS,
+    { id: "app.settings", label: () => t("quickOpen.cmd.settings"), group: () => t("action.groupApp"), get keys() { return SETTINGS_KEYS(); },
       run: () => { setWorkspacePanel("settings"); } },
     { id: "app.archived", label: () => t("quickOpen.cmd.archived"), group: () => t("action.groupApp"),
       run: () => { setWorkspacePanel("archived"); } },
     { id: "app.activity", label: () => t("action.activity"), group: () => t("action.groupApp"),
       run: () => { setWorkspacePanel("activity"); } },
-    { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), keys: SHORTCUT_LIST_KEYS,
+    { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), get keys() { return SHORTCUT_LIST_KEYS(); },
       run: () => { setShortcutsOpen(true); } },
   ));
   // Agents; terminal tabs are added by their owner through registerGoToSource.
@@ -1117,6 +1118,12 @@ export function App() {
         if (next) open(next);
         return;
       }
+      if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey && !typingTarget(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutsOpen(true);
+        return;
+      }
       const panel = panelToggleShortcut(event);
       if (panel) {
         event.preventDefault();
@@ -1302,7 +1309,7 @@ export function App() {
       <Show when={switcher()} keyed>
         {(current) => (
           <RecentTasksSwitcher tasks={current.tasks} index={current.index}
-            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS : RECENT_TASKS_KEYS}
+            keys={current.terminal ? RECENT_TASKS_TERMINAL_KEYS() : RECENT_TASKS_KEYS()}
             onPick={(id) => { setSwitcher(undefined); open(id); }} onClose={() => setSwitcher(undefined)} />
         )}
       </Show>
