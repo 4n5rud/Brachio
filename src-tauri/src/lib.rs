@@ -296,6 +296,7 @@ pub fn run() {
             update_release::open_update_release,
             terminal::terminal_open,
             terminal::terminal_forget_uncertain_launch,
+            terminal::terminal_saved_screen,
             terminal::terminal_codex_conversations,
             workspace::repo_codex_conversations,
             terminal::terminal_write,

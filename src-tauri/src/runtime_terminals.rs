@@ -61,6 +61,35 @@ struct Attached {
     forwarding: Arc<AtomicBool>,
 }
 
+/// What a terminal that is gone last displayed, with how it ended.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedScreen {
+    /// Escape sequences that redraw the screen.
+    pub ansi: String,
+    /// Frame height in rows.
+    pub rows: u16,
+    /// Frame width in columns.
+    pub cols: u16,
+    /// Whether the program ended by itself rather than being lost with its runtime.
+    pub exited: bool,
+    /// Its exit code, when it ended.
+    pub exit_code: Option<u32>,
+}
+
+fn saved_screen_from(result: ResponseResult) -> Option<SavedScreen> {
+    let ResponseResult::Recovered { lost, screen } = result else {
+        return None;
+    };
+    Some(SavedScreen {
+        ansi: screen.ansi,
+        rows: screen.rows,
+        cols: screen.cols,
+        exited: lost.exited,
+        exit_code: lost.exit_code,
+    })
+}
+
 /// App state for runtime-hosted terminals. Whether the runtime is used is decided once, so
 /// terminals of the two kinds never share the session id space.
 #[derive(Default)]
@@ -135,6 +164,37 @@ impl RuntimeTerminals {
             }
         }
         Ok(live)
+    }
+
+    /// The last screen of a terminal that is gone, from the current runtime or an older one that is
+    /// still up. `None` when the terminal is still running, was never saved, or the runtime is
+    /// not used. Reading starts nothing.
+    ///
+    /// # Errors
+    /// Fails when the current runtime cannot be reached.
+    pub async fn saved_screen(&self, key: &str) -> Result<Option<SavedScreen>> {
+        let Some(current) = self.client().await? else {
+            return Ok(None);
+        };
+        let mut clients = vec![current];
+        clients.extend(runtime_client::older_clients().await);
+        for client in clients {
+            let reply = client
+                .call(Action::Recover {
+                    key: key.to_owned(),
+                })
+                .await;
+            match reply {
+                Ok(Reply { result, .. }) => {
+                    if let Some(screen) = saved_screen_from(result) {
+                        return Ok(Some(screen));
+                    }
+                }
+                Err(ClientError::Refused(_) | ClientError::NotRunning) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(None)
     }
 
     /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
@@ -890,7 +950,49 @@ mod handle_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::task_terminal_keys;
+    use std::path::PathBuf;
+
+    use brachio_runtime::wire::{LostInfo, ResponseResult, ScreenSnapshot};
+
+    use super::{saved_screen_from, task_terminal_keys, SavedScreen};
+
+    #[test]
+    fn a_recovered_screen_keeps_its_frame_and_how_the_program_ended() {
+        let result = ResponseResult::Recovered {
+            lost: LostInfo {
+                key: "t1:agent".into(),
+                cwd: PathBuf::from("w"),
+                former_instance: "i".into(),
+                former_pid: 7,
+                exited: true,
+                exit_code: Some(2),
+                output_bytes: 9,
+                saved_at_ms: 1,
+            },
+            screen: ScreenSnapshot {
+                ansi: "done".into(),
+                cursor: (0, 4),
+                rows: 24,
+                cols: 80,
+                alternate_screen: false,
+                resume_offset: None,
+            },
+        };
+        assert_eq!(
+            saved_screen_from(result),
+            Some(SavedScreen {
+                ansi: "done".into(),
+                rows: 24,
+                cols: 80,
+                exited: true,
+                exit_code: Some(2),
+            })
+        );
+        assert_eq!(
+            saved_screen_from(ResponseResult::Lost { lost: vec![] }),
+            None
+        );
+    }
 
     #[test]
     fn a_task_names_its_fixed_terminals_and_every_extra_tab() {
