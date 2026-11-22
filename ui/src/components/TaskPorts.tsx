@@ -73,7 +73,7 @@ export function PortsPanel(props: {
       )}</For>
       <Show when={props.ports.length < MAX_PORTS}>
         <form class="insp-form" onSubmit={(event) => { event.preventDefault(); props.onAdd(); }}>
-          <div class="row-gap">
+          <div class="port-add">
             <Input mono aria-label={t("ports.number")} type="number" min="1" max="65535" step="1" required
               value={props.input} onInput={(event) => props.onInput(event.currentTarget.value)} />
             <Button size="sm" type="submit" variant="primary" disabled={!validPort(Number(props.input))}>{t("ports.add")}</Button>

@@ -38,6 +38,7 @@
 }
 .insp-form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
 }
 .insp-sec .link-button {
@@ -47,4 +48,14 @@
   background: none;
   font: inherit;
   text-decoration: underline;
+}
+.port-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+.port-add .input,
+.port-add .button {
+  min-height: 32px;
 }

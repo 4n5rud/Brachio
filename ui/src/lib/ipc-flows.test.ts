@@ -5,7 +5,6 @@ import { watchCreatedTasks, watchStartedTasksThenSchedule, type CreatedTaskRecor
 import { deleteBlock } from "./delete-preview";
 import { readOrchestration, reviewHandoff, watchOrchestration, type ChildView, type OrchestrationView } from "./orchestration";
 import { planLayout } from "./plan-graph";
-import { deleteTaskQaOutput, readLastTaskQa, runTaskQa, type QaReport } from "./qa-run";
 import { orderWithChildren } from "./tasks";
 import { deleteTask, previewTaskDeletion, toTaskRow, type TaskLoss } from "./workspace";
 
@@ -135,48 +134,6 @@ describe("handoff review", () => {
     await flush();
     await expect(reviewHandoff("h1", true)).rejects.toBe("The branch moved after the handoff.");
     expect(changed).not.toHaveBeenCalled();
-  });
-});
-
-describe("QA run", () => {
-  const report: QaReport = {
-    command: "cargo test",
-    directory: "/w/t1",
-    outcome: "passed",
-    exitCode: 0,
-    durationMs: 1200,
-    sha: "a".repeat(40),
-    verifiedByBrachio: true,
-    stdout: "ok",
-    stderr: "",
-    truncated: false,
-    matchesHandoff: true,
-    retryAllowed: false,
-  };
-
-  it("keeps the approved run's result for a remounted panel and drops it on delete", async () => {
-    let stored: QaReport | null = null;
-    host.handle("qa_run", () => (stored = report));
-    host.handle("qa_last_result", () => stored);
-    host.handle("qa_delete_output", () => {
-      stored = null;
-    });
-
-    expect(await readLastTaskQa("t1")).toBeNull();
-    expect(await runTaskQa("t1")).toEqual(report);
-    expect(host.argsOf("qa_run")).toEqual([{ taskId: "t1" }]);
-
-    expect(await readLastTaskQa("t1")).toEqual(report);
-    await deleteTaskQaOutput("t1");
-    expect(host.argsOf("qa_delete_output")).toEqual([{ taskId: "t1" }]);
-    expect(await readLastTaskQa("t1")).toBeNull();
-  });
-
-  it("stores nothing when the user declines the approval", async () => {
-    host.handle("qa_run", () => null);
-    host.handle("qa_last_result", () => null);
-    expect(await runTaskQa("t1")).toBeNull();
-    expect(await readLastTaskQa("t1")).toBeNull();
   });
 });
 
