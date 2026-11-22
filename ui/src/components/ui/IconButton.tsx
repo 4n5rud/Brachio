@@ -1,5 +1,6 @@
 import { Show, splitProps, type JSX } from "solid-js";
 import { Icon, type IconName } from "../Icon";
+import { StatusGlyph } from "./StatusBadge";
 import { Tooltip } from "./Tooltip";
 import "./IconButton.css";
 
@@ -13,13 +14,17 @@ export interface IconButtonProps
   size?: "md" | "sm";
   /** Count of things waiting on the person, shown top right. */
   badge?: number;
+  /** Working: the icon spins, the button is disabled and marked aria-busy. */
+  busy?: boolean;
+  /** Just succeeded: the icon shows a check for a moment. */
+  done?: boolean;
   /** Extra class for placement by the consumer. */
   class?: string;
 }
 
 /** Square icon-only chrome button; hovering or focusing it names the action in a tooltip. */
 export function IconButton(props: IconButtonProps) {
-  const [own, rest] = splitProps(props, ["icon", "label", "keys", "size", "badge", "class", "type"]);
+  const [own, rest] = splitProps(props, ["icon", "label", "keys", "size", "badge", "busy", "done", "class", "type"]);
   return (
     <Tooltip label={own.label} keys={own.keys}>
       {(tip) => (
@@ -27,10 +32,16 @@ export function IconButton(props: IconButtonProps) {
           {...rest}
           {...tip}
           type={own.type ?? "button"}
-          class={`icon-button${own.size === "sm" ? " icon-button-sm" : ""}${own.class ? ` ${own.class}` : ""}`}
+          class={`icon-button${own.size === "sm" ? " icon-button-sm" : ""}${own.busy ? " is-busy" : ""}${own.class ? ` ${own.class}` : ""}`}
           aria-label={own.label}
+          aria-busy={own.busy ? "true" : undefined}
+          disabled={rest.disabled || own.busy}
         >
-          <Icon name={own.icon} />
+          <Show when={own.busy && own.icon !== "refresh"} fallback={
+            <Icon name={own.done && !own.busy ? "check" : own.icon} class={own.busy ? "icon icon-spin" : "icon"} />
+          }>
+            <StatusGlyph tone="working" />
+          </Show>
           <Show when={own.badge}>{(count) => <span class="count-badge">{count()}</span>}</Show>
         </button>
       )}

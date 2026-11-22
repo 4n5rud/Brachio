@@ -137,7 +137,7 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
             </Show>
             <Show when={handoff().canReview}>
               <div class="orchestration-actions">
-                <Button variant="primary" disabled={busy()}
+                <Button variant="primary" busy={busy()}
                   onClick={() => void decide(handoff().id, true)}>
                   {t("orchestration.approve")}
                 </Button>

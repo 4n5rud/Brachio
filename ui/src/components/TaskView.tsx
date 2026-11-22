@@ -18,7 +18,6 @@ import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
 import type { SetupOutcome, SetupResult } from "../lib/setup-signal";
 import { onShellRequest } from "../lib/shell-request";
-import { pushToast } from "../lib/toasts";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { DropVeil } from "./DropVeil";
 import { taskIdOf } from "../lib/approvals";
@@ -36,6 +35,9 @@ import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
+import { isMac } from "../lib/shortcut";
+import { clearSelectionRequest, fencedSelection, selectionRequest } from "../lib/selection-send";
+import { pushToast } from "../lib/toasts";
 import { tokenUsage } from "../lib/token-usage";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
@@ -138,6 +140,7 @@ export function TaskView(props: {
   const isTabSelected = (id: string, tab: TaskTab) => selectedTab(id)?.id === tab.id;
   const isSecondarySelected = (id: string) => selectedTab(id) !== undefined;
   const secondaryWriters = new Map<string, PrepareDraft>();
+  const primaryWriters = new Map<string, PrepareDraft>();
   const shellOf = (id: string | null) =>
     installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id) ?? { id: id ?? "" };
   const shellName = (id: string | null) =>
@@ -273,6 +276,24 @@ export function TaskView(props: {
   createEffect(on([() => props.requestedTab, tabsReady], ([request, ready]) => {
     if (request && ready) selectKey(request.key);
   }));
+  const selectionTargets = (sourceKey: string) => {
+    const id = props.task.id;
+    const primary = terminalKey(id, "agent");
+    const targets = [{ key: primary, label: AGENT_NAME[props.task.agent] }];
+    for (const tab of agentTabs(id)) {
+      targets.push({ key: tabKey(id, tab), label: labels().get(tab.id) ?? "" });
+    }
+    return targets.filter((target) => target.key !== sourceKey);
+  };
+  const sendSelection = async (key: string, text: string) => {
+    selectKey(key);
+    // The destination tab becomes active first; a hidden terminal refuses input.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const writer = key === terminalKey(props.task.id, "agent") ? primaryWriters.get(props.task.id) : secondaryWriters.get(key);
+    const prepared = writer?.(fencedSelection(text));
+    if (prepared && await prepared.insert()) pushToast({ tone: "success", message: t("selection.sent") });
+    else pushToast({ tone: "error", message: t("selection.notReady") });
+  };
   const activeAgentTab = () => {
     if (layout() === "shell") return undefined;
     const id = props.task.id;
@@ -464,6 +485,13 @@ export function TaskView(props: {
               hint={t("rename.tabHint")} onSave={(name) => renameTab(tab(), name)} onClose={() => setRenamingTab(undefined)} />
           )}
         </Show>
+        <Show when={selectionRequest()?.taskId === props.task.id ? selectionRequest() : undefined}>
+          {(request) => (
+            <SelectionMenu request={request()} targets={selectionTargets(request().sourceKey)}
+              onPick={(key) => { clearSelectionRequest(); void sendSelection(key, request().text); }}
+              onClose={clearSelectionRequest} />
+          )}
+        </Show>
         <Show when={tabMenu()}>
           {(anchor) => (
             <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
@@ -575,7 +603,9 @@ export function TaskView(props: {
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
-                        registerDraftWriter={(prepare) => props.registerDraftTarget(id, () => {
+                        registerDraftWriter={(prepare) => {
+                          primaryWriters.set(id, prepare);
+                          const unregister = props.registerDraftTarget(id, () => {
                           const task = props.findTask(id);
                           if (!task || !selected() || mode() === "shell") return undefined;
                           if (!extraSelected()) {
@@ -588,7 +618,12 @@ export function TaskView(props: {
                           return extra
                             ? { key, agent: AGENT_NAME[UI_AGENT[tab.kind]], prepare: extra }
                             : undefined;
-                        })}
+                          });
+                          return () => {
+                            unregister();
+                            if (primaryWriters.get(id) === prepare) primaryWriters.delete(id);
+                          };
+                        }}
                       />
                     </div>
                     <For each={tabsOf(id)}>
@@ -718,5 +753,28 @@ function TabClose(props: { onClose: () => void; disabled?: boolean }) {
     <button class="tab-close" type="button" aria-label={t("task.closeTab")} aria-disabled={props.disabled} onClick={close}>
       <Icon name="x" class="icon-xs" />
     </button>
+  );
+}
+
+/** Choose the agent tab that receives the selection; with one candidate there is a single item. */
+function SelectionMenu(props: {
+  request: { x: number; y: number };
+  targets: readonly { key: string; label: string }[];
+  onPick: (key: string) => void;
+  onClose: () => void;
+}) {
+  const anchor = document.createElement("span");
+  anchor.style.cssText = `position:fixed;left:${props.request.x}px;top:${props.request.y - 4}px;width:0;height:0`;
+  document.body.append(anchor);
+  onCleanup(() => anchor.remove());
+  return (
+    <Menu anchor={anchor} label={t("selection.send")} onClose={props.onClose}>
+      <For each={props.targets}>{(target) => (
+        <MenuItem keys={props.targets.length === 1 ? [isMac ? "⌘" : "Ctrl", "Shift", "E"] : undefined}
+          onSelect={() => props.onPick(target.key)}>
+          {props.targets.length === 1 ? t("selection.send") : `${t("selection.send")}: ${target.label}`}
+        </MenuItem>
+      )}</For>
+    </Menu>
   );
 }

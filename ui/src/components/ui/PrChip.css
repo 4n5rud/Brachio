@@ -33,3 +33,7 @@
 .pr-chip-stale {
   border-style: dashed;
 }
+.pr-chip-action {
+  cursor: copy;
+  background: none;
+}

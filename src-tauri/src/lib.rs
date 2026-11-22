@@ -19,6 +19,7 @@ mod orchestration;
 mod pr_status;
 mod project_add;
 mod project_cues;
+mod prompt_history;
 mod qa_run;
 mod quit;
 mod resource_usage;
@@ -300,6 +301,7 @@ pub fn run() {
             update_release::open_update_release,
             terminal::terminal_open,
             terminal::terminal_forget_uncertain_launch,
+            terminal::terminal_saved_screen,
             terminal::terminal_codex_conversations,
             workspace::repo_codex_conversations,
             terminal::terminal_write,
@@ -318,6 +320,8 @@ pub fn run() {
             project_cues::cue_list,
             project_cues::cue_add,
             project_cues::cue_delete,
+            prompt_history::prompt_history_list,
+            prompt_history::prompt_history_add,
             system_check::system_check,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
