@@ -39,9 +39,10 @@ import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
+import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -998,6 +999,13 @@ export function App() {
         event.preventDefault();
         event.stopPropagation();
         openSettings();
+        return;
+      }
+      if (isNextAttentionShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = nextAttentionId(rows(), (task) => attentionOf(task.status, unreadFinish().has(task.id)), selectedId());
+        if (next) open(next);
         return;
       }
       const panel = panelToggleShortcut(event);
