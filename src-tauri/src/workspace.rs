@@ -756,10 +756,16 @@ fn list_folder_files_capped(root: &Path, limit: usize) -> Vec<String> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FilePreview {
     text: Option<String>,
     truncated: bool,
+    /// Over `PREVIEW_MAX_BYTES`: the file was not read.
+    too_large: bool,
 }
+
+/// Files larger than this are not previewed.
+const PREVIEW_MAX_BYTES: u64 = 1024 * 1024;
 
 #[tauri::command]
 pub async fn task_file_preview(
@@ -851,6 +857,13 @@ fn read_preview_bytes(file: &Path, limit: usize) -> Result<Vec<u8>, String> {
 fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String> {
     const LIMIT: usize = 64 * 1024;
     let file = resolve_preview_path(worktree, path)?;
+    if std::fs::metadata(&file).map_err(to_text)?.len() > PREVIEW_MAX_BYTES {
+        return Ok(FilePreview {
+            text: None,
+            truncated: false,
+            too_large: true,
+        });
+    }
     let mut bytes = read_preview_bytes(&file, LIMIT)?;
     let truncated = bytes.len() > LIMIT;
     bytes.truncate(LIMIT);
@@ -867,7 +880,11 @@ fn read_file_preview(worktree: &Path, path: &str) -> Result<FilePreview, String>
             Err(_) => None,
         }
     };
-    Ok(FilePreview { text, truncated })
+    Ok(FilePreview {
+        text,
+        truncated,
+        too_large: false,
+    })
 }
 
 /// What deleting an archived task would destroy.
@@ -2216,5 +2233,26 @@ mod git_task_deletion_tests {
         assert!(!worktree.exists());
         assert!(TaskRecord::get(&database.lock().expect("lock"), &id).is_err());
         assert!(!git(&repo_path, &["branch", "--format=%(refname:short)"]).contains(&branch));
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn a_file_over_one_mebibyte_is_not_read_and_outside_paths_are_refused() {
+        let root = std::env::temp_dir().join(format!("brachio-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("create");
+        std::fs::write(root.join("big.txt"), vec![b'a'; 1024 * 1024 + 1]).expect("write");
+        std::fs::write(root.join("small.txt"), "hi").expect("write");
+
+        let big = read_file_preview(&root, "big.txt").expect("preview");
+        assert!(big.too_large && big.text.is_none());
+        let small = read_file_preview(&root, "small.txt").expect("preview");
+        assert_eq!(small.text.as_deref(), Some("hi"));
+        assert!(read_file_preview(&root, "../outside.txt").is_err());
+
+        std::fs::remove_dir_all(&root).expect("clean");
     }
 }

@@ -284,6 +284,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             resource_usage::resource_usage,
+            resource_usage::task_processes,
+            resource_usage::task_process_kill,
             tray_update,
             keep_awake::keep_awake_supported,
             keep_awake::keep_awake_set,
