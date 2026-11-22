@@ -12,7 +12,8 @@ import { locale, t } from "../i18n";
 import type { AgentState } from "../lib/status";
 import { terminalSettings } from "../lib/terminal-settings";
 import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
-import { bracketedPaste, terminalClipboardText } from "../lib/terminal-paste";
+import { bracketedPaste, pasteText, terminalClipboardText } from "../lib/terminal-paste";
+import { registerShellDropTarget } from "../lib/terminal-drop";
 import { SetupMarkerFilter, type SetupResult } from "../lib/setup-signal";
 import { onShellInput } from "../lib/shell-input";
 import { typedSinceSubmit } from "../lib/typed-input";
@@ -387,6 +388,18 @@ export function TerminalPane(props: {
       return { insert, userTyped };
     });
 
+    // Typed like a paste and never submitted, so dropped paths wait for the person to press Enter.
+    const stopShellDrop = session && !session.agent ? registerShellDropTarget(host, {
+      insert: async (text) => {
+        const destination = handle;
+        if (!destination || exited || disposed) return false;
+        inputRevision += 1;
+        await destination.write(term.modes.bracketedPasteMode ? bracketedPaste(text) : pasteText(text));
+        term.focus();
+        return true;
+      },
+    }) : undefined;
+
     const setupMarkers = session && !session.agent ? new SetupMarkerFilter() : undefined;
     function writeOutput(bytes: Uint8Array) {
       if (!setupMarkers) {
@@ -504,6 +517,7 @@ export function TerminalPane(props: {
       unregister?.();
       host.removeEventListener("paste", noteUserInput, true);
       host.removeEventListener("compositionstart", noteUserInput, true);
+      stopShellDrop?.();
       keys.dispose();
       observer.disconnect();
       host.removeEventListener("paste", pasteClipboard, true);

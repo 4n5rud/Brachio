@@ -11,6 +11,9 @@ import { EmptyRepo } from "./components/EmptyRepo";
 import { EmptyState } from "./components/ui/EmptyState";
 import { ToastHost } from "./components/ui/Toast";
 import { pushToast } from "./lib/toasts";
+import { clearOsDrop, dropOnTree, hoverOsDrop, overTree as overFilesTree } from "./lib/tree-drop";
+import { terminalAt } from "./lib/terminal-drop";
+import { quoteShellPaths } from "./lib/shell-quote";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
@@ -869,7 +872,7 @@ export function App() {
     if (!selected()?.worktreePath || view() !== "tasks") return false;
     const ratio = window.devicePixelRatio;
     const target = document.elementFromPoint(position.x / ratio, position.y / ratio);
-    return !!target?.closest(".task-view [data-agent-terminal]");
+    return !!target?.closest(".task-view [data-agent-terminal], .task-view [data-shell-terminal]");
   };
 
   const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
@@ -877,6 +880,11 @@ export function App() {
     if (!task?.worktreePath || dialogOpen() || workspacePanel() || !dropTargetsTerminal(position)) return;
     const files = await resolveDroppedTaskPaths(task.id, paths);
     if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+    const shell = terminalAt(position.x / window.devicePixelRatio, position.y / window.devicePixelRatio);
+    if (shell?.kind === "shell") {
+      if (!(await shell.target.insert(quoteShellPaths(await shellKind(), files)))) report(t("diff.notReady"));
+      return;
+    }
     const draft = files.map((path) => `@${/[\s"]/u.test(path) ? `"${path.replaceAll('"', '\\"')}"` : path}`).join(" ");
     if (!(await draftComment(task.id, draft + " "))) report(t("diff.notReady"));
   };
@@ -911,16 +919,23 @@ export function App() {
       listener.catch(report);
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
       const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
+        const ratio = window.devicePixelRatio;
+        const free = !dialogOpen() && !workspacePanel();
+        const overTree = payload.type !== "leave" && free && overFilesTree(payload.position.x / ratio, payload.position.y / ratio);
         if (payload.type === "enter" || payload.type === "over") {
-          const overTerminal = !dialogOpen() && !workspacePanel() && dropTargetsTerminal(payload.position);
-          setFolderOverWindow(!dialogOpen() && !workspacePanel() && !overTerminal);
+          const overTerminal = free && dropTargetsTerminal(payload.position);
+          setFolderOverWindow(free && !overTerminal && !overTree);
           setFilesOverTerminal(overTerminal);
+          if (overTree) hoverOsDrop(payload.position.x / ratio, payload.position.y / ratio); else clearOsDrop();
         } else {
           setFolderOverWindow(false);
           setFilesOverTerminal(false);
+          clearOsDrop();
         }
         if (payload.type !== "drop") return;
-        if (dropTargetsTerminal(payload.position)) {
+        if (overTree) {
+          dropOnTree(payload.position.x / ratio, payload.position.y / ratio, payload.paths);
+        } else if (dropTargetsTerminal(payload.position)) {
           void dropFiles(payload.paths, payload.position).catch(report);
         } else if (!dialogOpen() && !workspacePanel()) {
           void (async () => {

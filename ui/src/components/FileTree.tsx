@@ -1,6 +1,11 @@
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
+import { startFileDrag } from "../lib/file-drag";
+import { osDropDir, treeDirAt } from "../lib/tree-drop";
+import { terminalAt, type TerminalDrop } from "../lib/terminal-drop";
 import { Icon } from "./Icon";
+import { FileMoveDialog, canMoveInto } from "./FileMoveDialog";
+import { Menu, MenuItem } from "./ui/Menu";
 import "./FileTree.css";
 
 interface Node { name: string; path: string; dirs: Map<string, Node>; files: string[] }
@@ -27,6 +32,9 @@ function build(paths: readonly string[]): Node {
 
 const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+const parentOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+/** How long a dragged item must rest on a closed folder before it opens. */
+const HOVER_OPEN_MS = 600;
 
 function Highlight(props: { text: string; query: string }) {
   const at = () => (props.query ? props.text.toLowerCase().indexOf(props.query.toLowerCase()) : -1);
@@ -45,6 +53,10 @@ export function FileTree(props: {
   selected: string;
   onSelect: (path: string) => void;
   limit: number;
+  /** Moves an item into a folder ("" is the root); the caller reports failures. */
+  onMove?: (from: string, toDir: string) => void;
+  /** An item was dropped on a terminal. */
+  onTerminalDrop?: (path: string, terminal: TerminalDrop) => void;
 }) {
   const [open, setOpen] = createSignal(openByTask.get(props.treeKey) ?? new Set<string>());
   const [focus, setFocus] = createSignal("");
@@ -71,6 +83,53 @@ export function FileTree(props: {
     return out;
   });
   const searching = () => props.query !== "";
+  let treeEl: HTMLDivElement | undefined;
+  const [dragTarget, setDragTarget] = createSignal<string>();
+  const [menu, setMenu] = createSignal<{ row: Row; anchor: HTMLElement }>();
+  const [moving, setMoving] = createSignal<string>();
+  const hoverDir = () => dragTarget() ?? osDropDir();
+  const folders = createMemo(() => {
+    const out: string[] = [];
+    const walk = (node: Node) => {
+      for (const dir of node.dirs.values()) { out.push(dir.path); walk(dir); }
+    };
+    walk(root());
+    return out.sort(byName);
+  });
+
+  // A folder opens after a dragged item rests on it, so the destination can be a nested folder.
+  createEffect(() => {
+    const dir = hoverDir();
+    if (!dir || open().has(dir)) return;
+    const timer = setTimeout(() => toggle(dir, true), HOVER_OPEN_MS);
+    onCleanup(() => clearTimeout(timer));
+  });
+
+  let overTerminal: Element | undefined;
+  const markTerminal = (host?: Element) => {
+    if (host === overTerminal) return;
+    overTerminal?.removeAttribute("data-drop-over");
+    host?.setAttribute("data-drop-over", "");
+    overTerminal = host;
+  };
+  const beginDrag = (event: PointerEvent, row: Row) => {
+    startFileDrag(event, {
+      label: row.name,
+      onMove: (x, y) => {
+        const terminal = terminalAt(x, y);
+        markTerminal(terminal?.host);
+        const dir = terminal ? undefined : treeDirAt(x, y, treeEl);
+        setDragTarget(dir !== undefined && canMoveInto(row.path, dir) ? dir : undefined);
+      },
+      onDrop: (x, y) => {
+        const terminal = terminalAt(x, y);
+        const dir = dragTarget();
+        if (terminal) props.onTerminalDrop?.(row.path, terminal);
+        else if (dir !== undefined) props.onMove?.(row.path, dir);
+      },
+      onEnd: () => { markTerminal(undefined); setDragTarget(undefined); },
+    });
+  };
 
   const move = (event: KeyboardEvent) => {
     const list = rows();
@@ -125,14 +184,18 @@ export function FileTree(props: {
         )}</For>
       </ul>
     }>
-      <div class="file-tree" role="tree" aria-label={t("files.tree")} onKeyDown={move}>
+      <div ref={treeEl} class="file-tree" role="tree" aria-label={t("files.tree")} onKeyDown={move}
+        data-drop-dir="" classList={{ "drop-root": hoverDir() === "" }}>
         <For each={rows()}>{(row) => (
-          <div role="treeitem" class="tree-row" classList={{ dir: row.kind === "dir" }} data-current={row.path === props.selected || undefined}
+          <div role="treeitem" class="tree-row" classList={{ dir: row.kind === "dir", "drop-target": row.kind === "dir" && hoverDir() === row.path }}
+            data-drop-dir={row.kind === "dir" ? row.path : parentOf(row.path)} data-current={row.path === props.selected || undefined}
             data-path={row.path} tabindex={tabbable(row) ? 0 : -1} title={row.path}
             aria-level={row.depth + 1} aria-expanded={row.kind === "dir" ? row.open : undefined}
             aria-selected={row.kind === "file" ? row.path === props.selected : undefined}
             style={{ "--depth": row.depth }}
             onFocus={() => setFocus(row.path)}
+            onPointerDown={(event) => beginDrag(event, row)}
+            onContextMenu={(event) => { event.preventDefault(); setMenu({ row, anchor: event.currentTarget }); }}
             onClick={() => (row.kind === "dir" ? toggle(row.path) : props.onSelect(row.path))}>
             <Show when={row.kind === "dir"} fallback={<span class="tree-chevron" />}>
               <Icon name={row.open ? "chevronDown" : "chevronRight"} class="icon tree-chevron" />
@@ -142,6 +205,21 @@ export function FileTree(props: {
           </div>
         )}</For>
       </div>
+      <Show when={menu()}>
+        {(current) => (
+          <Menu anchor={current().anchor} label={t("files.menu")} onClose={() => setMenu(undefined)}>
+            <MenuItem disabled={!props.onMove} onSelect={() => { setMoving(current().row.path); setMenu(undefined); }}>
+              {t("files.move")}
+            </MenuItem>
+          </Menu>
+        )}
+      </Show>
+      <Show when={moving()}>
+        {(from) => (
+          <FileMoveDialog from={from()} folders={folders()} onClose={() => setMoving(undefined)}
+            onPick={(dir) => { setMoving(undefined); props.onMove?.(from(), dir); }} />
+        )}
+      </Show>
     </Show>
   );
 }
