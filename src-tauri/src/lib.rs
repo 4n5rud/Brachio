@@ -342,6 +342,7 @@ pub fn run() {
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,
+            workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,
             project_add::project_clone,
