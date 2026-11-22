@@ -1,0 +1,16 @@
+{
+  "description": "A resumed session replays its screen, asks for the protocol again, clears any stale record, and starts a new turn.",
+  "steps": [
+    { "at_ms": 0, "output": "\u001b[2J\u001b[H\u001b[1mResuming conversation...\u001b[0m\r\n" },
+    { "at_ms": 100, "output": "\u001b]7501;?\u001b\\" },
+    { "at_ms": 100, "expect_replies": 1 },
+    { "at_ms": 150, "output": "\u001b]7501;state=idle\u001b\\" },
+    { "at_ms": 200, "expect": { "state": "unknown" } },
+    { "at_ms": 500, "expect": { "state": "idle" } },
+    { "at_ms": 2000, "output": "\u001b]7501;state=clear\u001b\\" },
+    { "at_ms": 2100, "expect": { "state": "idle" } },
+    { "at_ms": 2200, "output": "\u001b]7501;state=working\u001b\\" },
+    { "at_ms": 2300, "expect": { "state": "working" } },
+    { "at_ms": 2600, "expect": { "state": "working" } }
+  ]
+}

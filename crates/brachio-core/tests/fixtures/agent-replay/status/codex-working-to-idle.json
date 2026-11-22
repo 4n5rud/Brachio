@@ -1,0 +1,13 @@
+{
+  "description": "Codex CLI turn that ends its sequences with BEL instead of ST.",
+  "steps": [
+    { "at_ms": 0, "output": "\u001b]7501;?\u0007" },
+    { "at_ms": 0, "expect_replies": 1 },
+    { "at_ms": 50, "output": "\u001b]7501;state=working\u0007" },
+    { "at_ms": 100, "expect": { "state": "unknown" } },
+    { "at_ms": 350, "expect": { "state": "working" } },
+    { "at_ms": 2000, "output": "\u001b]7501;state=idle\u0007" },
+    { "at_ms": 2100, "expect": { "state": "working" } },
+    { "at_ms": 2400, "expect": { "state": "idle" } }
+  ]
+}
