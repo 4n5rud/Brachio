@@ -1,6 +1,8 @@
 import "./CuesDialog.css";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { pushToast } from "../lib/toasts";
+import { confirmDialog } from "./ui/ConfirmDialog";
 import { addCue, cuesOf, deleteCue, type CueKind } from "../lib/cues";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
@@ -14,14 +16,33 @@ export function CuesDialog(props: { repoId: string; repoName: string; onClose: (
   const [label, setLabel] = createSignal("");
   const [body, setBody] = createSignal("");
   const [error, setError] = createSignal("");
+  const [saving, setSaving] = createSignal(false);
+  const removeCue = async (cue: Parameters<typeof deleteCue>[0]) => {
+    const agreed = await confirmDialog({
+      title: t("cue.deleteTitle").replace("{label}", () => cue.label),
+      body: t("cue.deleteBody"),
+      confirmLabel: t("cue.delete"),
+      tone: "danger",
+    });
+    if (!agreed) return;
+    try {
+      await deleteCue(cue);
+      pushToast({ tone: "success", message: t("cue.deleted") });
+    } catch (failure) {
+      setError(String(failure));
+    }
+  };
   const add = async () => {
     setError("");
+    setSaving(true);
     try {
       await addCue(props.repoId, kind(), label(), body());
       setLabel("");
       setBody("");
     } catch (failure) {
       setError(String(failure));
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -33,7 +54,7 @@ export function CuesDialog(props: { repoId: string; repoName: string; onClose: (
             <li class="cue-row">
               <span class="cue-kind">{cue.kind === "prompt" ? t("cue.prompt") : t("cue.shell")}</span>
               <span class="cue-label" title={cue.body}>{cue.label}</span>
-              <IconButton icon="x" size="sm" label={t("cue.delete")} onClick={() => void deleteCue(cue).catch((failure) => setError(String(failure)))} />
+              <IconButton icon="x" size="sm" label={t("cue.delete")} onClick={() => void removeCue(cue)} />
             </li>
           )}</For>
         </ul>
@@ -45,7 +66,7 @@ export function CuesDialog(props: { repoId: string; repoName: string; onClose: (
         hint={kind() === "prompt" ? t("cue.promptHint") : t("cue.shellHint")}
         value={body()} onInput={(event) => setBody(event.currentTarget.value)} />
       <Show when={error()}><p class="form-error" role="alert">{error()}</p></Show>
-      <Button size="sm" variant="primary" disabled={!label().trim() || !body().trim()} onClick={() => void add()}>{t("cue.add")}</Button>
+      <Button size="sm" variant="primary" busy={saving()} disabled={!label().trim() || !body().trim()} onClick={() => void add()}>{t("cue.add")}</Button>
     </Dialog>
   );
 }

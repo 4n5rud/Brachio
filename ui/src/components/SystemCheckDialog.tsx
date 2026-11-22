@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { diagnosticReport, markFirstRunSeen, runSystemCheck, type CheckId, type CheckState } from "../lib/system-check";
+import { pushToast } from "../lib/toasts";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
 import { StatusGlyph } from "./ui/StatusBadge";
@@ -26,8 +27,9 @@ function SystemCheckDialog(props: { onClose: () => void }) {
     try {
       await navigator.clipboard.writeText(diagnosticReport(list, navigator.platform));
       setCopied(true);
-    } catch {
+    } catch (failure) {
       setCopied(false);
+      pushToast({ tone: "error", title: t("error.title"), message: String(failure) });
     }
   };
   return (
