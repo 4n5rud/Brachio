@@ -12,11 +12,14 @@ const TONE_CLASS: Record<ChipTone, string> = {
   neutral: "pr-chip-quiet",
 };
 
-const STATE_ICON: Partial<Record<PrChipState["key"], IconName>> = {
+export const STATE_ICON: Partial<Record<PrChipState["key"], IconName>> = {
   "prChip.merged": "ghMerge",
   "prChip.closed": "ghPrClosed",
   "prChip.draft": "ghPrDraft",
 };
+
+/** The glyph for a pull request state: merged, closed, draft, or the plain open one. */
+export const prChipIcon = (chip: PrChipState): IconName => STATE_ICON[chip.key] ?? "ghPr";
 
 /** The one fact about a task's pull request that decides what to do next. A dashed edge means the answer is the last one GitHub gave. */
 export function PrChip(props: { chip: PrChipState }) {

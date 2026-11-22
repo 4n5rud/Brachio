@@ -23,6 +23,7 @@ mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
 mod session_tokens;
+mod system_check;
 mod task_activity;
 mod task_file_ops;
 mod task_folder;
@@ -306,6 +307,7 @@ pub fn run() {
             project_cues::cue_list,
             project_cues::cue_add,
             project_cues::cue_delete,
+            system_check::system_check,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
             task_activity::task_activity_list,
@@ -328,6 +330,7 @@ pub fn run() {
             hook_socket::pending_approvals,
             mailbox::mailbox_unread,
             mailbox::mailbox_inbox,
+            mailbox::mailbox_dismiss,
             orchestration::orchestration_view,
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
@@ -501,6 +504,26 @@ fn install_tray(app: &App) -> tauri::Result<()> {
         });
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
+    }
+    // macOS keeps its convention of a menu on left click; elsewhere left click jumps to a waiting task.
+    #[cfg(not(target_os = "macos"))]
+    {
+        tray = tray
+            .show_menu_on_left_click(false)
+            .on_tray_icon_event(|tray, event| {
+                if let tauri::tray::TrayIconEvent::Click {
+                    button: tauri::tray::MouseButton::Left,
+                    button_state: tauri::tray::MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    let app = tray.app_handle();
+                    show_main_window(app);
+                    if let Err(error) = app.emit_to("main", "tray-activate", ()) {
+                        tracing::warn!(%error, "could not jump to the waiting task");
+                    }
+                }
+            });
     }
     let tray = tray.build(app)?;
     app.manage(TrayHandle(tray));

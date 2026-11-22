@@ -705,7 +705,7 @@ const AGENT_SPECS: readonly TabSpec[] = [{ kind: "claude_code", shell: null }, {
 /** The shortcut that opens the kind used last, shown on that kind's row. */
 // TODO: replace with the shared Menu shortcut chip once the primitive lands.
 function RecentChip(props: { show: boolean }) {
-  return <Show when={props.show}><kbd class="menu-chip">{NEW_TAB_KEYS}</kbd></Show>;
+  return <Show when={props.show}><kbd class="menu-chip">{NEW_TAB_KEYS()}</kbd></Show>;
 }
 
 /** Sits beside its tab, not inside it, so a button never nests in a button. */

@@ -1,15 +1,34 @@
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.shortcut-group-title {
+  font: var(--text-group-label);
+  color: var(--color-text-3);
+  margin: 0 0 var(--space-1);
+}
 .shortcut-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 150px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   min-height: 36px;
 }
-.shortcut-list-current .shortcut-row {
-  grid-template-columns: minmax(0, 1fr) auto;
+.shortcut-row-editable {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
-.shortcut-head {
-  min-height: 28px;
-  font: var(--text-group-label);
-  color: var(--color-text-3);
+.shortcut-actions {
+  display: flex;
+  gap: var(--space-1);
+  min-width: 132px;
+  justify-content: flex-end;
+}
+.shortcut-recording {
+  font: var(--text-caption);
+  color: var(--color-text-2);
+}
+.shortcut-problem {
+  grid-column: 1 / -1;
+  margin: 0;
 }

@@ -336,6 +336,60 @@ pub fn peek_unread(
     unread(connection, to_key, limit)
 }
 
+/// The oldest unread messages for `to_key` that the person has not dismissed from the inbox.
+/// Dismissing is only a view setting: `peek_next_batch` and `mark_read` ignore it, so the agent
+/// still receives every message.
+///
+/// # Errors
+/// Fails when the database cannot be read.
+pub fn peek_inbox(
+    connection: &Connection,
+    to_key: &str,
+    limit: usize,
+) -> Result<Vec<Message>, StoreError> {
+    let mut statement = connection.prepare(&format!(
+        "SELECT {COLUMNS} FROM messages WHERE to_key = ?1 AND read_at_ms IS NULL          AND dismissed_at_ms IS NULL ORDER BY created_at_ms, rowid LIMIT ?2"
+    ))?;
+    let rows = statement.query_map(
+        params![to_key, i64::try_from(limit).unwrap_or(i64::MAX)],
+        message_from,
+    )?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Hides messages from the person's inbox without changing what the agent will receive. With no
+/// ids, hides every message still showing for `to_key`.
+///
+/// # Errors
+/// Fails when the database cannot be written.
+pub fn dismiss_messages<S: AsRef<str>>(
+    connection: &mut Connection,
+    to_key: &str,
+    ids: Option<&[S]>,
+    now_ms: i64,
+) -> Result<usize, StoreError> {
+    let transaction = connection.transaction()?;
+    let mut changed = 0;
+    match ids {
+        Some(ids) => {
+            for id in ids {
+                changed += transaction.execute(
+                    "UPDATE messages SET dismissed_at_ms = ?3                      WHERE id = ?1 AND to_key = ?2 AND dismissed_at_ms IS NULL",
+                    params![id.as_ref(), to_key, now_ms],
+                )?;
+            }
+        }
+        None => {
+            changed += transaction.execute(
+                "UPDATE messages SET dismissed_at_ms = ?2                  WHERE to_key = ?1 AND read_at_ms IS NULL AND dismissed_at_ms IS NULL",
+                params![to_key, now_ms],
+            )?;
+        }
+    }
+    transaction.commit()?;
+    Ok(changed)
+}
+
 fn unread(connection: &Connection, to_key: &str, limit: usize) -> Result<Vec<Message>, StoreError> {
     let mut statement = connection.prepare(&format!(
         "SELECT {COLUMNS} FROM messages WHERE to_key = ?1 AND read_at_ms IS NULL \
@@ -375,7 +429,7 @@ pub fn recent_messages(
 pub fn unread_counts(connection: &Connection) -> Result<Vec<(String, u32)>, StoreError> {
     let mut statement = connection.prepare(
         "SELECT to_key, COUNT(*) FROM messages WHERE read_at_ms IS NULL \
-         GROUP BY to_key ORDER BY to_key",
+         AND dismissed_at_ms IS NULL GROUP BY to_key ORDER BY to_key",
     )?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -437,6 +491,35 @@ mod tests {
             request_id: None,
             created_at_ms: at,
         }
+    }
+
+    #[test]
+    fn a_dismissed_message_leaves_the_inbox_but_is_still_delivered_to_the_agent() {
+        let mut connection = open_in_memory().expect("open");
+        send_message(&connection, &message("m1", "b:agent", 10)).expect("send");
+        send_message(&connection, &message("m2", "b:agent", 20)).expect("send");
+
+        dismiss_messages(&mut connection, "b:agent", Some(&["m1"]), 99).expect("dismiss");
+        let shown: Vec<_> = peek_inbox(&connection, "b:agent", 10).expect("inbox");
+        assert_eq!(
+            shown.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["m2"]
+        );
+        assert_eq!(
+            unread_counts(&connection).expect("counts"),
+            vec![("b:agent".to_owned(), 1)]
+        );
+
+        dismiss_messages::<&str>(&mut connection, "b:agent", None, 100).expect("dismiss all");
+        assert!(peek_inbox(&connection, "b:agent", 10)
+            .expect("inbox")
+            .is_empty());
+
+        let delivered = peek_next_batch(&connection, "b:agent", 10).expect("batch");
+        assert_eq!(
+            delivered.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["m1", "m2"]
+        );
     }
 
     #[test]
