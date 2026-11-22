@@ -126,3 +126,18 @@
   background: var(--color-term-bg);
   box-shadow: 1px 0 0 var(--color-line), -1px 0 0 var(--color-line);
 }
+.task-header-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: copy;
+}
+.task-header-branch:hover {
+  color: var(--color-text-2);
+}
