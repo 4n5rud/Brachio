@@ -224,6 +224,8 @@ export const ko: Messages = {
   "terminal.launchResetAnyway": "그래도 지우고 다시 열기",
   "terminal.launchResetCancel": "계속 기다리기",
   "terminal.reopen": "세션 다시 열기",
+  "terminal.savedScreen": "종료된 세션의 마지막 화면",
+  "terminal.startAgain": "이어하기",
   "terminal.reopening": "세션을 다시 여는 중",
   "terminal.restored": "마지막 화면 복구됨",
   "terminal.liveAttached": "실행 중인 터미널에 다시 연결됨",
