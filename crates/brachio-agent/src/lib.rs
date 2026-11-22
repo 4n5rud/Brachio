@@ -6,6 +6,7 @@ mod agent_kind;
 mod codex_sessions;
 mod installed;
 mod session_tokens;
+mod usage_scan;
 
 pub use agent_kind::{AgentKind, Launch};
 pub use codex_sessions::{
@@ -18,4 +19,8 @@ pub use installed::{
 };
 pub use session_tokens::{
     claude_log_in, claude_log_path, encode_claude_cwd, LogFormat, TokenUsage, UsageTracker,
+};
+pub use usage_scan::{
+    claude_logs_in, codex_logs_in, providers, Bucket, ClaudeProvider, CodexProvider, FileState,
+    LogFile, Scanned, UsageProvider, MAX_LOG_FILES,
 };

@@ -40,6 +40,7 @@ mod terminal_shells;
 mod terminal_status;
 mod tray_menu;
 mod update_release;
+mod usage_analytics;
 mod workspace;
 mod worktree_import;
 
@@ -271,6 +272,7 @@ pub fn run() {
         .manage(project_add::CloneJobs::default())
         .manage(pr_status::PrStatuses::default())
         .manage(session_tokens::TokenTrackers::default())
+        .manage(usage_analytics::UsageScanLock::default())
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(claude_usage::ClaudeUsageCache::default())
@@ -307,6 +309,10 @@ pub fn run() {
             quit::terminals_stop,
             quit::app_quit,
             session_tokens::tasks_token_usage,
+            usage_analytics::usage_providers,
+            usage_analytics::usage_scan,
+            usage_analytics::usage_report,
+            usage_analytics::usage_limit_snapshot,
             project_cues::cue_list,
             project_cues::cue_add,
             project_cues::cue_delete,
