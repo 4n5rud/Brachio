@@ -662,7 +662,8 @@ mod tests {
     }
 
     fn wait_for_pid_file(path: &std::path::Path) -> String {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // PowerShell can take many seconds to start on a busy CI runner; this only detects a stall.
+        let deadline = Instant::now() + Duration::from_secs(90);
         loop {
             if let Ok(text) = std::fs::read_to_string(path) {
                 let pid = text.trim().trim_start_matches('\u{feff}').to_owned();
