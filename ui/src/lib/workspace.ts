@@ -178,3 +178,11 @@ export function titleFromPrompt(prompt: string): string {
 
 export const resolveDroppedTaskPaths = (id: string, paths: string[]) =>
   invoke<string[]>("task_drop_paths", { id, paths });
+
+export const moveTaskPath = (id: string, from: string, toDir: string) =>
+  invoke<string>("task_move_path", { id, from, toDir });
+/** Names in the folder that copying the dropped paths there would replace. */
+export const taskCopyConflicts = (id: string, sources: string[], toDir: string) =>
+  invoke<string[]>("task_copy_conflicts", { id, sources, toDir });
+export const copyIntoTask = (id: string, sources: string[], toDir: string, overwrite: boolean) =>
+  invoke<string[]>("task_copy_in", { id, sources, toDir, overwrite });

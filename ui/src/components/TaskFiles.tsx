@@ -4,8 +4,14 @@ import { FileTree } from "./FileTree";
 import { InspectorNote, OutputLog } from "./InspectorNote";
 import { InspectorSection } from "./InspectorSection";
 import { Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { confirmDialog } from "./ui/ConfirmDialog";
+import { pushToast } from "../lib/toasts";
+import { registerTreeDrop } from "../lib/tree-drop";
+import type { TerminalDrop } from "../lib/terminal-drop";
+import { quoteShellPaths } from "../lib/shell-quote";
+import { shellKind } from "../lib/terminal";
 import { t } from "../i18n";
-import { listTaskFiles, previewTaskFile, previewTaskMedia } from "../lib/workspace";
+import { copyIntoTask, listTaskFiles, moveTaskPath, previewTaskFile, previewTaskMedia, taskCopyConflicts } from "../lib/workspace";
 
 const RESULT_LIMIT = 100;
 const mediaTypes = new Map([
@@ -35,6 +41,8 @@ export function FilesPanel(props: {
   onSelect: (path: string) => void;
   onRefresh: () => void;
   preview?: FilePreview;
+  onMove?: (from: string, toDir: string) => void;
+  onTerminalDrop?: (path: string, terminal: TerminalDrop) => void;
 }) {
   return (
     <>
@@ -47,7 +55,8 @@ export function FilesPanel(props: {
           <InspectorNote>{t("files.empty")}</InspectorNote>
         </Show>
         <FileTree paths={props.matches} query={props.filter.trim()} treeKey={props.treeKey ?? ""}
-          selected={props.selected} onSelect={props.onSelect} limit={RESULT_LIMIT} />
+          selected={props.selected} onSelect={props.onSelect} limit={RESULT_LIMIT}
+          onMove={props.onMove} onTerminalDrop={props.onTerminalDrop} />
         <Show when={props.filter.trim() && props.matches.length > RESULT_LIMIT}><InspectorNote>{t("files.more")}</InspectorNote></Show>
       </InspectorSection>
       <Show when={props.preview}>
@@ -126,8 +135,54 @@ export function TaskFiles(props: { taskId: string; onInsert: (path: string) => v
     props.onInsert(file);
   };
 
+  const failed = (title: string, failure: unknown) =>
+    pushToast({ tone: "error", title, message: String(failure) });
+  const move = async (from: string, toDir: string) => {
+    try {
+      const next = await moveTaskPath(props.taskId, from, toDir);
+      if (path() === from || path().startsWith(`${from}/`)) setPath(next + path().slice(from.length));
+      await refetch();
+      pushToast({ tone: "success", message: t("files.moved").replace("{path}", () => next) });
+    } catch (failure) {
+      failed(t("files.moveFailed"), failure);
+    }
+  };
+  // Agents take an @path reference in their own input; a shell gets the path quoted for it.
+  const dropOnTerminal = async (file: string, terminal: TerminalDrop) => {
+    try {
+      if (terminal.kind === "agent") {
+        props.onInsert(/[\s"]/u.test(file) ? `"${file.replaceAll('"', '\\"')}"` : file);
+      } else {
+        await terminal.target.insert(quoteShellPaths(await shellKind(), [file]));
+      }
+    } catch (failure) {
+      failed(t("terminal.inputFailed"), failure);
+    }
+  };
+  const copyInto = async (dir: string, sources: string[]) => {
+    const folder = dir || t("files.dropTargetRoot");
+    try {
+      const clashes = await taskCopyConflicts(props.taskId, sources, dir);
+      if (clashes.length > 0) {
+        const replace = await confirmDialog({
+          title: t("files.overwriteTitle"),
+          body: t("files.overwriteBody").replace("{folder}", () => folder).replace("{names}", () => clashes.join("\n")),
+          confirmLabel: t("files.overwriteConfirm"),
+        });
+        if (!replace) return;
+      }
+      const made = await copyIntoTask(props.taskId, sources, dir, clashes.length > 0);
+      await refetch();
+      pushToast({ tone: "success", message: t("files.copied").replace("{count}", String(made.length)).replace("{folder}", () => folder) });
+    } catch (failure) {
+      failed(t("files.copyFailed"), failure);
+    }
+  };
+  onCleanup(registerTreeDrop({ copyInto }));
+
   return (
     <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading} error={files()?.error}
-      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()} />
+      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()}
+      onMove={(from, toDir) => void move(from, toDir)} onTerminalDrop={(file, terminal) => void dropOnTerminal(file, terminal)} />
   );
 }
