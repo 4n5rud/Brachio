@@ -7,6 +7,9 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
 import { answerApproval, answerApprovalAlways, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
+import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
+import { alertSoundKind, playAlertSound } from "./lib/alert-sound";
+import { quitConfirmEnabled, runningAgentKeys, setQuitConfirmEnabled } from "./lib/quit-confirm";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { EmptyState } from "./components/ui/EmptyState";
 import { ToastHost } from "./components/ui/Toast";
@@ -37,15 +40,17 @@ import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
-import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
+import { registerActions, registerGoToSource } from "./lib/actions";
+import { pushUndoToast } from "./lib/undo";
+import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RenameDialog } from "./components/RenameDialog";
 import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
-import type { AgentState } from "./lib/status";
+import { statusTone, type AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
 import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
 import { sendShellInput } from "./lib/shell-input";
@@ -222,14 +227,29 @@ export function App() {
     }
     onCleanup(loadFilesUnlessCancelled(() => listTaskFiles(task.id), setQuickFiles));
   });
-  const runCommand = (id: CommandId) => {
-    if (id === "newTask") {
-      setWorkspacePanel(undefined);
-      openNewTask();
-    } else {
-      setWorkspacePanel(id);
-    }
-  };
+  onCleanup(registerActions(
+    { id: "app.newTask", label: () => t("quickOpen.cmd.newTask"), group: () => t("action.groupApp"), keys: NEW_TASK_KEYS,
+      run: () => { openNewTask(); } },
+    { id: "app.settings", label: () => t("quickOpen.cmd.settings"), group: () => t("action.groupApp"), keys: SETTINGS_KEYS,
+      run: () => { setWorkspacePanel("settings"); } },
+    { id: "app.archived", label: () => t("quickOpen.cmd.archived"), group: () => t("action.groupApp"),
+      run: () => { setWorkspacePanel("archived"); } },
+    { id: "app.activity", label: () => t("action.activity"), group: () => t("action.groupApp"),
+      run: () => { setWorkspacePanel("activity"); } },
+    { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), keys: SHORTCUT_LIST_KEYS,
+      run: () => { setShortcutsOpen(true); } },
+  ));
+  // Agents; terminal tabs are added by their owner through registerGoToSource.
+  onCleanup(registerGoToSource(() => rows().map((task) => ({
+    id: `agent:${task.id}`,
+    projectId: task.repoId ?? "",
+    projectName: repos().find((item) => item.id === task.repoId)?.name ?? "",
+    kind: "agent" as const,
+    title: task.title,
+    path: task.worktreePath ?? undefined,
+    tone: statusTone(task.status),
+    focus: () => open(task.id),
+  }))));
   const insertFile = (path: string) => {
     const task = selected();
     if (task) void draftComment(task.id, `@${path} `).catch(report);
@@ -497,6 +517,9 @@ export function App() {
     const kind = activityKindOf(key);
     if (inTauri && kind) recordTaskActivity(task.id, kind, detail, at).catch(report);
     if (notifications()) notifyIfAway(key, task, detail, sessionKey).catch(report);
+    const sound = alertSoundKind(key);
+    const watching = selectedId() === task.id && view() === "tasks" && windowFocused();
+    if (sound && !watching) playAlertSound(sound);
   };
 
   const onStatus = (taskId: string, sessionKey: string, status: AgentState, message: string | null) => {
@@ -510,6 +533,27 @@ export function App() {
     const key = notificationKey(previous, status);
     if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
     recordActivity(task, sessionKey, key, message, at);
+  };
+  /** Quits, asking first when agents are running. The runtime keeps hosted terminals across a quit. */
+  const requestQuit = async () => {
+    const keys = runningAgentKeys(live());
+    if (!quitConfirmEnabled() || keys.length === 0) {
+      await invoke("app_quit", { stop: [] });
+      return;
+    }
+    const { choice, dontAsk } = await askQuit({ count: keys.length, scope: "app" });
+    if (choice === "cancel") return;
+    if (dontAsk) setQuitConfirmEnabled(false);
+    await invoke("app_quit", { stop: choice === "stop" ? keys : [] });
+  };
+  /** Before the last tab of a task closes; false keeps the tab. */
+  const confirmCloseLastTab = async (taskId: string): Promise<boolean> => {
+    const keys = runningAgentKeys(live(), taskId);
+    if (!quitConfirmEnabled() || keys.length === 0) return true;
+    const { choice } = await askQuit({ count: keys.length, scope: "tab" });
+    if (choice === "cancel") return false;
+    if (choice === "stop") await invoke("terminals_stop", { keys });
+    return true;
   };
   const closeSecondarySession = (taskId: string, key: string) => {
     setQuestions((items) => items.filter((question) => question.key !== key));
@@ -784,6 +828,7 @@ export function App() {
         tone: "primary",
       })) return;
       await archiveNow(task);
+      pushUndoToast(t("undo.archived"), () => restore(task.id));
     } catch (failure) {
       pushToast({
         tone: "error",
@@ -927,6 +972,14 @@ export function App() {
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
       });
+      const quitListener = listen("quit-requested", () => void requestQuit().catch(report));
+      onCleanup(() => { void quitListener.then((unlisten) => unlisten(), () => {}); });
+      const closeListener = getCurrentWindow().onCloseRequested(async (event) => {
+        if (!quitConfirmEnabled() || runningAgentKeys(live()).length === 0) return;
+        event.preventDefault();
+        await requestQuit();
+      });
+      onCleanup(() => { void closeListener.then((unlisten) => unlisten(), () => {}); });
       const newTaskListener = listen("tray-new-task", () => { if (canCreate()) openNewTask(); });
       onCleanup(() => { void newTaskListener.then((unlisten) => unlisten(), () => {}); });
       void trayListener.then(() => {
@@ -1175,6 +1228,7 @@ export function App() {
               requestedTab={requestedTab()}
               onSecondaryKeys={setSecondaryKeys}
               onSecondaryClosed={closeSecondarySession}
+              confirmCloseLastTab={confirmCloseLastTab}
               onAnswer={(id, allow) => void answer(id, allow)}
               onAnswerAlways={(id) => void answer(id, true, true)}
               closedElsewhere={closedElsewhere().filter((key) => taskIdOf(key) === task().id)}
@@ -1250,7 +1304,6 @@ export function App() {
             onDownload: () => void openRelease().catch(report),
           } : undefined}
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
-          onCommand={runCommand}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
       </Show>
@@ -1290,6 +1343,7 @@ export function App() {
         )}
       </Show>
       <ConfirmHost />
+      <QuitConfirmHost />
       <ToastHost />
     </div>
   );

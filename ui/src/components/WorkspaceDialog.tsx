@@ -1,14 +1,14 @@
 import { Button } from "./ui/Button";
 import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
-import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
-import { NEW_TASK_KEYS, SETTINGS_KEYS } from "../lib/shortcut";
+import { matchesAll, rankFiles, type QuickEntry } from "../lib/quick-open";
+import { availableActions, goToTargets, groupByProject } from "../lib/actions";
 import { shortBranch, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
 import type { ColorTheme, ThemeMode } from "../lib/theme";
 import { Dialog } from "./ui/Dialog";
 import { Marked, PaletteGroup, PaletteItem, PaletteSearch } from "./Palette";
-import { Icon, type IconName } from "./Icon";
+import { Icon } from "./Icon";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { statusTone, type StatusTone } from "../lib/status";
 import { Kbd } from "./ui/Kbd";
@@ -21,21 +21,12 @@ const ACTIVITY_TONE: Partial<Record<MessageKey, StatusTone>> = {
   "notify.crashed": "error",
   "notify.finished": "ready",
 };
-const COMMAND_ICON: Record<CommandId, IconName> = { newTask: "plus", settings: "sliders", archived: "list" };
 const GROUPS = [
   { kind: "task", label: () => t("quickOpen.groupTasks") },
   { kind: "file", label: () => t("quickOpen.groupFiles") },
-  { kind: "command", label: () => t("quickOpen.groupCommands") },
 ] as const;
 const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const fileDir = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
-
-const COMMANDS: readonly CommandId[] = ["newTask", "settings", "archived"];
-const COMMAND_LABEL: Record<CommandId, () => string> = {
-  newTask: () => t("quickOpen.cmd.newTask"),
-  settings: () => t("quickOpen.cmd.settings"),
-  archived: () => t("quickOpen.cmd.archived"),
-};
 
 export interface TaskActivity {
   taskId: string;
@@ -69,7 +60,6 @@ export function WorkspaceDialog(props: {
   /** Files of the selected task, offered when the query is two characters or more. */
   files?: readonly string[];
   onInsertFile?: (path: string) => void;
-  onCommand?: (id: CommandId) => void;
   onClose: () => void;
   repos: readonly { id: string; name: string }[];
 }) {
@@ -77,20 +67,28 @@ export function WorkspaceDialog(props: {
   const [highlight, setHighlight] = createSignal(0);
   const repoNames = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const repoName = (task: TaskRow) => task.repoId ? repoNames().get(task.repoId) : undefined;
+  /** ">" lists only actions, "@" goes to an agent or terminal tab; otherwise one mixed list. */
+  const mode = () => (query().startsWith("@") ? "goto" : query().startsWith(">") ? "actions" : "all");
+  const text = () => (mode() === "all" ? query() : query().slice(1));
   const entries = createMemo<QuickEntry[]>(() => {
-    const text = query();
-    const tasks = (text.trim() === "" ? [...props.tasks].sort((a, b) => b.updatedAt - a.updatedAt) : props.tasks)
-      .filter((task) => matchesAll([task.title, task.branch, repoName(task), task.worktreePath].filter(Boolean).join(" "), text))
+    if (mode() === "goto") return [];
+    const actions = availableActions().filter((action) => matchesAll(`${action.label()} ${action.group()}`, text()))
+      .map((action): QuickEntry => ({ kind: "action", action }));
+    if (mode() === "actions") return actions;
+    const tasks = (text().trim() === "" ? [...props.tasks].sort((a, b) => b.updatedAt - a.updatedAt) : props.tasks)
+      .filter((task) => matchesAll([task.title, task.branch, repoName(task), task.worktreePath].filter(Boolean).join(" "), text()))
       .map((task): QuickEntry => ({ kind: "task", task }));
-    const commands = props.onCommand
-      ? COMMANDS.filter((id) => matchesAll(COMMAND_LABEL[id](), text))
-          .map((id): QuickEntry => ({ kind: "command", id }))
-      : [];
     const files = props.onInsertFile
-      ? rankFiles(props.files ?? [], text).map((path): QuickEntry => ({ kind: "file", path }))
+      ? rankFiles(props.files ?? [], text()).map((path): QuickEntry => ({ kind: "file", path }))
       : [];
-    return [...tasks, ...files, ...commands];
+    return [...tasks, ...files, ...actions];
   });
+  const goGroups = createMemo(() => groupByProject(goToTargets()
+    .filter((target) => matchesAll([target.title, target.path, target.projectName].filter(Boolean).join(" "), text()))));
+  const [goProject, setGoProject] = createSignal(0);
+  const goIndex = () => Math.max(0, Math.min(goProject(), goGroups().length - 1));
+  const goGroup = () => goGroups()[goIndex()];
+  const shown = () => (mode() === "goto" ? goGroup()?.targets.length ?? 0 : entries().length);
   let searchBox: HTMLInputElement | undefined;
 
   const choose = (id: string, sessionKey?: string) => {
@@ -100,9 +98,9 @@ export function WorkspaceDialog(props: {
   const activate = (entry: QuickEntry) => {
     if (entry.kind === "task") {
       choose(entry.task.id);
-    } else if (entry.kind === "command") {
-      // Commands that open another panel reuse this dialog, so it stays open.
-      props.onCommand?.(entry.id);
+    } else if (entry.kind === "action") {
+      props.onClose();
+      void entry.action.run();
     } else {
       props.onInsertFile?.(entry.path);
       props.onClose();
@@ -127,7 +125,9 @@ export function WorkspaceDialog(props: {
         <div class="palette-hints">
           <span><Kbd>↑</Kbd><Kbd>↓</Kbd>{t("quickOpen.hintMove")}</span>
           <span><Kbd>↵</Kbd>{t("quickOpen.hintOpen")}</span>
+          <Show when={mode() === "goto"}><span><Kbd>←</Kbd><Kbd>→</Kbd>{t("quickOpen.hintProject")}</span></Show>
           <span><Kbd>Esc</Kbd>{t("quickOpen.hintClose")}</span>
+          <span>{t("quickOpen.hintActions")}</span>
         </div>
       ) : undefined}>
         <Switch>
@@ -148,14 +148,26 @@ export function WorkspaceDialog(props: {
           </Match>
           <Match when={props.panel === "quickOpen"}>
             <PaletteSearch ref={(element) => { searchBox = element; }} label={t("titlebar.search")}
-              placeholder={t("quickOpen.placeholder")} value={query()}
-              onInput={(value) => { setQuery(value); setHighlight(0); }}
+              placeholder={mode() === "goto" ? t("quickOpen.goToPlaceholder") : t("quickOpen.placeholder")} value={query()}
+              onInput={(value) => { setQuery(value); setHighlight(0); setGoProject(0); }}
               onKeyDown={(event) => {
                 if (event.isComposing) return;
-                const count = entries().length;
+                if (mode() === "goto" && (event.key === "ArrowLeft" || event.key === "ArrowRight") && goGroups().length > 1) {
+                  event.preventDefault();
+                  const step = event.key === "ArrowRight" ? 1 : -1;
+                  setGoProject((goIndex() + goGroups().length + step) % goGroups().length);
+                  setHighlight(0);
+                  return;
+                }
+                const count = shown();
                 if (!count) return;
                 if (event.key === "Enter") {
                   event.preventDefault();
+                  if (mode() === "goto") {
+                    const target = goGroup()?.targets[highlight()] ?? goGroup()?.targets[0];
+                    if (target) { props.onClose(); target.focus(); }
+                    return;
+                  }
                   const entry = entries()[highlight()] ?? entries()[0];
                   if (entry) activate(entry);
                 } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -166,29 +178,55 @@ export function WorkspaceDialog(props: {
                   document.querySelectorAll(".modal .palette-item")[next]?.scrollIntoView({ block: "nearest" });
                 }
               }} />
-            <Show when={entries().length > 0} fallback={<p class="palette-empty">{t("quickOpen.empty")}</p>}>
-              <div class="palette-list">
-                <For each={GROUPS}>{(group) => (
-                  <Show when={entries().some((entry) => entry.kind === group.kind)}>
-                    <PaletteGroup label={group.label()} />
-                    <For each={entries()}>{(entry, index) => entry.kind === group.kind && (
-                      <PaletteItem on={highlight() === index()} onClick={() => activate(entry)}
-                        lead={entry.kind === "task" ? <StatusGlyph tone={statusTone(entry.task.status)} />
-                          : <Icon name={entry.kind === "file" ? "folder" : COMMAND_ICON[entry.kind === "command" ? entry.id : "newTask"]} class="icon-sm" />}
-                        name={<Marked text={entry.kind === "task" ? entry.task.title : entry.kind === "command"
-                          ? COMMAND_LABEL[entry.id]() : fileName(entry.path)} query={query()} />}
-                        detail={entry.kind === "task"
-                          ? <><span>{repoName(entry.task)}</span><span>{shortBranch(entry.task.branch)}</span></>
-                          : entry.kind === "file"
-                            ? <><span>{fileDir(entry.path)}</span><span>{t("quickOpen.file")}</span></>
-                            : <span>{t("quickOpen.command")}</span>}
-                        end={highlight() === index() ? <Kbd>↵</Kbd>
-                          : entry.kind === "command" && entry.id === "newTask" ? <Kbd>{NEW_TASK_KEYS}</Kbd>
-                            : entry.kind === "command" && entry.id === "settings" ? <Kbd>{SETTINGS_KEYS}</Kbd> : undefined} />
+            <Show when={mode() === "goto"}>
+              <Show when={goGroup()} fallback={<p class="palette-empty">{t("quickOpen.goToEmpty")}</p>}>
+                {(group) => (
+                  <div class="palette-list">
+                    <PaletteGroup label={`${group().projectName} (${goIndex() + 1}/${goGroups().length})`} />
+                    <For each={group().targets}>{(target, index) => (
+                      <PaletteItem on={highlight() === index()} onClick={() => { props.onClose(); target.focus(); }}
+                        lead={<StatusGlyph tone={target.tone} />}
+                        name={<Marked text={target.title} query={text()} />}
+                        detail={<><span>{target.kind === "agent" ? t("quickOpen.kindAgent") : t("quickOpen.kindTerminal")}</span>
+                          <Show when={target.path}>{(path) => <span>{path()}</span>}</Show></>}
+                        end={highlight() === index() ? <Kbd>↵</Kbd> : undefined} />
                     )}</For>
-                  </Show>
-                )}</For>
-              </div>
+                  </div>
+                )}
+              </Show>
+            </Show>
+            <Show when={mode() !== "goto"}>
+              <Show when={entries().length > 0} fallback={<p class="palette-empty">{t("quickOpen.empty")}</p>}>
+                <div class="palette-list">
+                  <For each={GROUPS}>{(group) => (
+                    <Show when={entries().some((entry) => entry.kind === group.kind)}>
+                      <PaletteGroup label={group.label()} />
+                      <For each={entries()}>{(entry, index) => entry.kind === group.kind && (
+                        <PaletteItem on={highlight() === index()} onClick={() => activate(entry)}
+                          lead={entry.kind === "task" ? <StatusGlyph tone={statusTone(entry.task.status)} />
+                            : <Icon name="folder" class="icon-sm" />}
+                          name={<Marked text={entry.kind === "task" ? entry.task.title : entry.kind === "file" ? fileName(entry.path) : ""} query={text()} />}
+                          detail={entry.kind === "task"
+                            ? <><span>{repoName(entry.task)}</span><span>{shortBranch(entry.task.branch)}</span></>
+                            : <><span>{entry.kind === "file" ? fileDir(entry.path) : ""}</span><span>{t("quickOpen.file")}</span></>}
+                          end={highlight() === index() ? <Kbd>↵</Kbd> : undefined} />
+                      )}</For>
+                    </Show>
+                  )}</For>
+                  <For each={[...new Set(entries().flatMap((entry) => entry.kind === "action" ? [entry.action.group()] : []))]}>{(heading) => (
+                    <>
+                      <PaletteGroup label={heading} />
+                      <For each={entries()}>{(entry, index) => entry.kind === "action" && entry.action.group() === heading && (
+                        <PaletteItem on={highlight() === index()} onClick={() => activate(entry)}
+                          lead={<Icon name="sliders" class="icon-sm" />}
+                          name={<Marked text={entry.action.label()} query={text()} />}
+                          detail={<span>{t("quickOpen.command")}</span>}
+                          end={highlight() === index() ? <Kbd>↵</Kbd> : entry.action.keys ? <Kbd>{entry.action.keys}</Kbd> : undefined} />
+                      )}</For>
+                    </>
+                  )}</For>
+                </div>
+              </Show>
             </Show>
           </Match>
           <Match when={props.panel === "settings"}>
