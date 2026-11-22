@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { shortSha } from "../lib/qa-run";
 import {
   readOrchestration,
+  reopenChild,
   reviewHandoff,
   setScheduler,
   testEvidence,
@@ -41,6 +42,26 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
         <StateChip state={props.child.state} />
       </div>
       <Show when={props.child.reason}>{(reason) => <p class="muted">{reason()}</p>}</Show>
+      <Show when={props.child.startBlocked}>
+        <Button
+          type="button"
+          disabled={busy()}
+          onClick={async () => {
+            setBusy(true);
+            setError(undefined);
+            try {
+              await reopenChild(props.child.id);
+              props.onChanged();
+            } catch (failure) {
+              setError(String(failure));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {t("orchestration.reopen")}
+        </Button>
+      </Show>
       <Show when={props.child.dependencies.length > 0}>
         <p class="muted">
           {t("orchestration.dependsOn")}{" "}
