@@ -64,13 +64,13 @@ export function TitleBar(props: {
       data-tauri-drag-region>
       <AppIcon />
       <IconButton icon="panelLeft" aria-pressed={props.sidebarOpen}
-        label={t("titlebar.toggleSidebar")} title={`${t("titlebar.toggleSidebar")} (${TOGGLE_SIDEBAR_KEYS})`}
+        label={t("titlebar.toggleSidebar")} title={`${t("titlebar.toggleSidebar")} (${TOGGLE_SIDEBAR_KEYS()})`}
         onClick={props.onToggleSidebar} />
       <span class="active-project" title={props.repo}>{props.repo}</span>
       <button class="search" type="button" onClick={props.onQuickOpen}>
         <Icon name="search" class="icon-sm" />
         <span>{t("titlebar.search")}</span>
-        <Kbd>{QUICK_OPEN_KEYS}</Kbd>
+        <Kbd>{QUICK_OPEN_KEYS()}</Kbd>
       </button>
       <div class="titlebar-end">
         <SegmentedControl label={t("titlebar.view")} value={props.view} onChange={props.onView}
@@ -79,7 +79,7 @@ export function TitleBar(props: {
             { value: "board", label: t("view.board"), icon: "board" },
           ]} />
         <IconButton icon="panelRight" aria-pressed={props.inspectorOpen}
-          label={t("titlebar.toggleInspector")} title={`${t("titlebar.toggleInspector")} (${TOGGLE_INSPECTOR_KEYS})`}
+          label={t("titlebar.toggleInspector")} title={`${t("titlebar.toggleInspector")} (${TOGGLE_INSPECTOR_KEYS()})`}
           onClick={props.onToggleInspector} />
         <IconButton icon="bell" aria-haspopup="dialog" badge={props.needsYou}
           label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity} />

@@ -184,7 +184,7 @@ export function NewTaskDialog(props: {
           <Button variant="ghost" disabled={busy() || confirmingClose()} onClick={() => void requestClose()}>
             {t("newTask.cancel")}
           </Button>
-          <Button variant="primary" icon="plus" kbd={SUBMIT_KEYS} disabled={!canCreate()}
+          <Button variant="primary" icon="plus" kbd={SUBMIT_KEYS()} disabled={!canCreate()}
             loading={busy()} loadingLabel={t("newTask.creating")} onClick={() => void submit()}>
             {createError() ? t("newTask.retry") : t("newTask.create")}
           </Button>

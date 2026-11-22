@@ -1,10 +1,17 @@
 import type { MessageKey } from "../i18n";
 
-/** Whether the app runs on macOS, where shortcuts use ⌘. */
-export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+import { chordMatches, formatChord, isMac, overrideFor, type RebindableId } from "./shortcut-bindings";
+
+export { isMac };
+
+/** Where a shortcut applies, for the grouped overlay. */
+export type ShortcutGroup = "global" | "task" | "terminal" | "palette";
+
+export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = ["global", "task", "terminal", "palette"];
 
 interface ShortcutDef {
   label: MessageKey;
+  group: ShortcutGroup;
   mac: string;
   /** Windows and Linux. */
   other: string;
@@ -15,26 +22,34 @@ interface ShortcutDef {
  * list are all read from here, so they cannot disagree.
  */
 export const SHORTCUTS = {
-  quickOpen: { label: "quickOpen.title", mac: "⌘P", other: "Ctrl+Shift+P" },
-  newTask: { label: "newTask.title", mac: "⌘N", other: "Ctrl+Shift+N" },
-  newTab: { label: "task.newTabShortcut", mac: "⌘T", other: "Ctrl+Shift+T" },
-  jumpToTask: { label: "shortcuts.jumpToTask", mac: "⌘1-9", other: "Ctrl+1-9" },
-  nextAttention: { label: "shortcuts.nextAttention", mac: "⌘J", other: "Ctrl+Shift+J" },
-  recentTasks: { label: "recent.title", mac: "⌃Tab", other: "Ctrl+Tab" },
-  recentTasksTerminal: { label: "recent.title", mac: "⌘L", other: "Ctrl+Shift+L" },
-  settings: { label: "titlebar.settings", mac: "⌘,", other: "Ctrl+," },
-  shortcutList: { label: "shortcuts.show", mac: "⌘/", other: "Ctrl+Shift+/" },
-  sidebar: { label: "settings.shortcutSidebar", mac: "⌘B", other: "Ctrl+Shift+B" },
-  inspector: { label: "settings.shortcutInspector", mac: "⌘⌥B", other: "Ctrl+Shift+Alt+B" },
-  submit: { label: "settings.shortcutCreate", mac: "⌘⏎", other: "Ctrl+⏎" },
-  allow: { label: "settings.shortcutAllow", mac: "↵", other: "↵" },
-  deny: { label: "settings.shortcutDeny", mac: "Esc", other: "Esc" },
-  close: { label: "settings.shortcutClose", mac: "Esc", other: "Esc" },
+  quickOpen: { label: "quickOpen.title", group: "global", mac: "⌘P", other: "Ctrl+Shift+P" },
+  newTask: { label: "newTask.title", group: "global", mac: "⌘N", other: "Ctrl+Shift+N" },
+  newTab: { label: "task.newTabShortcut", group: "terminal", mac: "⌘T", other: "Ctrl+Shift+T" },
+  jumpToTask: { label: "shortcuts.jumpToTask", group: "task", mac: "⌘1-9", other: "Ctrl+1-9" },
+  nextAttention: { label: "shortcuts.nextAttention", group: "global", mac: "⌘J", other: "Ctrl+Shift+J" },
+  recentTasks: { label: "recent.title", group: "task", mac: "⌃Tab", other: "Ctrl+Tab" },
+  recentTasksTerminal: { label: "recent.title", group: "terminal", mac: "⌘L", other: "Ctrl+Shift+L" },
+  settings: { label: "titlebar.settings", group: "global", mac: "⌘,", other: "Ctrl+," },
+  shortcutList: { label: "shortcuts.show", group: "global", mac: "⌘/", other: "Ctrl+Shift+/" },
+  sidebar: { label: "settings.shortcutSidebar", group: "global", mac: "⌘B", other: "Ctrl+Shift+B" },
+  inspector: { label: "settings.shortcutInspector", group: "global", mac: "⌘⌥B", other: "Ctrl+Shift+Alt+B" },
+  submit: { label: "settings.shortcutCreate", group: "palette", mac: "⌘⏎", other: "Ctrl+⏎" },
+  allow: { label: "settings.shortcutAllow", group: "task", mac: "↵", other: "↵" },
+  deny: { label: "settings.shortcutDeny", group: "task", mac: "Esc", other: "Esc" },
+  close: { label: "settings.shortcutClose", group: "palette", mac: "Esc", other: "Esc" },
 } as const satisfies Record<string, ShortcutDef>;
 
 export const SHORTCUT_LIST: readonly ShortcutDef[] = Object.values(SHORTCUTS);
 
 const keysOf = (shortcut: ShortcutDef, mac = isMac): string => (mac ? shortcut.mac : shortcut.other);
+
+const REBINDABLE_IDS: readonly string[] = ["quickOpen", "newTask", "newTab", "nextAttention", "settings", "shortcutList", "sidebar", "inspector"];
+
+/** The keys of a shortcut as shown now: the person's own chord when they rebound it. */
+export function shortcutKeys(id: keyof typeof SHORTCUTS, mac = isMac): string {
+  const own = REBINDABLE_IDS.includes(id) ? overrideFor(id as RebindableId) : undefined;
+  return own ? formatChord(own, mac) : keysOf(SHORTCUTS[id], mac);
+}
 
 /**
  * "New task": ⌘N on macOS. Elsewhere Ctrl+Shift+N, because plain Ctrl+N
@@ -43,17 +58,23 @@ const keysOf = (shortcut: ShortcutDef, mac = isMac): string => (mac ? shortcut.m
 type KeyPress = Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">;
 
 export function isNewTaskShortcut(event: KeyPress, mac = isMac): boolean {
+  const own = overrideFor("newTask");
+  if (own) return chordMatches(event, own);
   if (event.key.toLowerCase() !== "n" || event.altKey) return false;
   return mac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey;
 }
 
 /** "New tab": ⌘T on macOS, Ctrl+Shift+T elsewhere, because plain Ctrl+T belongs to the terminal. */
 export function isNewTabShortcut(event: KeyPress, mac = isMac): boolean {
+  const own = overrideFor("newTab");
+  if (own) return chordMatches(event, own);
   if (event.key.toLowerCase() !== "t" || event.altKey) return false;
   return mac ? event.metaKey && !event.shiftKey && !event.ctrlKey : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
 export function isQuickOpenShortcut(event: KeyPress, mac = isMac): boolean {
+  const own = overrideFor("quickOpen");
+  if (own) return chordMatches(event, own);
   if (event.key.toLowerCase() !== "p" || event.altKey) return false;
   return mac
     ? event.metaKey && !event.shiftKey && !event.ctrlKey
@@ -65,6 +86,15 @@ export function isQuickOpenShortcut(event: KeyPress, mac = isMac): boolean {
  * Ctrl+B belongs to the terminal (readline backward-char, tmux prefix).
  */
 export function panelToggleShortcut(event: KeyPress & { code?: string }, mac = isMac): "sidebar" | "inspector" | undefined {
+  const sidebar = overrideFor("sidebar");
+  const inspector = overrideFor("inspector");
+  if (sidebar && chordMatches(event, sidebar)) return "sidebar";
+  if (inspector && chordMatches(event, inspector)) return "inspector";
+  const legacy = defaultPanelToggle(event, mac);
+  return (legacy === "sidebar" && !sidebar) || (legacy === "inspector" && !inspector) ? legacy : undefined;
+}
+
+function defaultPanelToggle(event: KeyPress & { code?: string }, mac: boolean): "sidebar" | "inspector" | undefined {
   if (event.key.toLowerCase() !== "b" && event.code !== "KeyB") return undefined;
   if (mac ? !event.metaKey || event.ctrlKey || event.shiftKey : !event.ctrlKey || !event.shiftKey || event.metaKey) {
     return undefined;
@@ -77,6 +107,8 @@ export function panelToggleShortcut(event: KeyPress & { code?: string }, mac = i
  * the shell (the same byte as Ctrl+_).
  */
 export function isShortcutListShortcut(event: KeyPress & { code?: string }, mac = isMac): boolean {
+  const own = overrideFor("shortcutList");
+  if (own) return chordMatches(event, own);
   if (event.altKey || (event.key !== "/" && event.key !== "?" && event.code !== "Slash")) return false;
   return mac
     ? event.metaKey && !event.ctrlKey && !event.shiftKey
@@ -117,33 +149,37 @@ export function taskNumberShortcut(event: KeyPress, mac = isMac): number | undef
 
 /** "Next task that needs me": ⌘J on macOS, Ctrl+Shift+J elsewhere, because plain Ctrl+J is a newline in the shell. */
 export function isNextAttentionShortcut(event: KeyPress, mac = isMac): boolean {
+  const own = overrideFor("nextAttention");
+  if (own) return chordMatches(event, own);
   if (event.key.toLowerCase() !== "j" || event.altKey) return false;
   return mac ? event.metaKey && !event.shiftKey && !event.ctrlKey : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
 /** "Settings": ⌘, on macOS and Ctrl+, elsewhere, as in most desktop apps. */
 export function isSettingsShortcut(event: KeyPress, mac = isMac): boolean {
+  const own = overrideFor("settings");
+  if (own) return chordMatches(event, own);
   if (event.key !== "," || event.altKey || event.shiftKey) return false;
   return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
-export const SETTINGS_KEYS = keysOf(SHORTCUTS.settings);
+export const SETTINGS_KEYS = (): string => shortcutKeys("settings");
 
-export const TOGGLE_SIDEBAR_KEYS = keysOf(SHORTCUTS.sidebar);
+export const TOGGLE_SIDEBAR_KEYS = (): string => shortcutKeys("sidebar");
 
-export const TOGGLE_INSPECTOR_KEYS = keysOf(SHORTCUTS.inspector);
+export const TOGGLE_INSPECTOR_KEYS = (): string => shortcutKeys("inspector");
 
-export const QUICK_OPEN_KEYS = keysOf(SHORTCUTS.quickOpen);
+export const QUICK_OPEN_KEYS = (): string => shortcutKeys("quickOpen");
 
-export const NEW_TASK_KEYS = keysOf(SHORTCUTS.newTask);
+export const NEW_TASK_KEYS = (): string => shortcutKeys("newTask");
 
-export const NEW_TAB_KEYS = keysOf(SHORTCUTS.newTab);
+export const NEW_TAB_KEYS = (): string => shortcutKeys("newTab");
 
-export const SHORTCUT_LIST_KEYS = keysOf(SHORTCUTS.shortcutList);
+export const SHORTCUT_LIST_KEYS = (): string => shortcutKeys("shortcutList");
 
-export const RECENT_TASKS_KEYS = keysOf(SHORTCUTS.recentTasks);
+export const RECENT_TASKS_KEYS = (): string => shortcutKeys("recentTasks");
 
-export const RECENT_TASKS_TERMINAL_KEYS = keysOf(SHORTCUTS.recentTasksTerminal);
+export const RECENT_TASKS_TERMINAL_KEYS = (): string => shortcutKeys("recentTasksTerminal");
 
 /** "Submit": ⌘⏎ on macOS, Ctrl+Enter elsewhere. */
-export const SUBMIT_KEYS = keysOf(SHORTCUTS.submit);
+export const SUBMIT_KEYS = (): string => shortcutKeys("submit");

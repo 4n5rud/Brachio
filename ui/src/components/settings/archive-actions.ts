@@ -27,6 +27,10 @@ export function createArchiveActions(
     error,
     restore: (task: TaskRow) => run(task.id, () => onRestore(task.id)),
     remove: (task: TaskRow) => run(task.id, () => onDelete(task)),
+    /** Restores the tasks one after another and stops at the first failure. */
+    restoreMany: (tasks: readonly TaskRow[]) => run("many", async () => {
+      for (const task of tasks) await onRestore(task.id);
+    }),
   };
 }
 
