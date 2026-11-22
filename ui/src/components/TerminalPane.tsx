@@ -10,7 +10,16 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { locale, t } from "../i18n";
 import type { AgentState } from "../lib/status";
-import { terminalSettings } from "../lib/terminal-settings";
+import { FONT_SIZE_RANGE, terminalSettings, updateTerminalSettings } from "../lib/terminal-settings";
+import { SearchAddon } from "@xterm/addon-search";
+import { TerminalSearch } from "./TerminalSearch";
+import { registerActions } from "../lib/actions";
+import { registerShellCueRunner } from "../lib/cues";
+import { openInEditor } from "../lib/editor";
+import { noteRecentFile } from "../lib/recent-files";
+import { openExternalLink } from "../lib/pr-status";
+import { isMac } from "../lib/shortcut";
+import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
@@ -53,6 +62,37 @@ const RESUME_GRACE_MS = 5_000;
 const TYPE_IN_DELAY_MS = 1_000;
 /** How long the size must stay unchanged before the PTY is told, so a window drag sends one resize. */
 const RESIZE_SETTLE_MS = 80;
+
+/** How long a shell must stay quiet after its output starts before a cue command is typed. */
+const SHELL_QUIET_MS = 250;
+const SHELL_READY_TIMEOUT_MS = 15_000;
+
+interface ShellPane {
+  taskId: string;
+  active: () => boolean;
+  run: (command: string) => Promise<boolean>;
+}
+const shellPanes = new Set<ShellPane>();
+let stopCueRunner: (() => void) | undefined;
+
+async function runShellCue(taskId: string, command: string): Promise<boolean> {
+  const panes = [...shellPanes].filter((pane) => pane.taskId === taskId);
+  const pane = panes.find((candidate) => candidate.active()) ?? panes[0];
+  return pane ? pane.run(command) : false;
+}
+
+/** Makes this shell terminal the target of its task's shell cues until the returned remover runs. */
+function addShellPane(pane: ShellPane): () => void {
+  shellPanes.add(pane);
+  if (shellPanes.size === 1) stopCueRunner = registerShellCueRunner(runShellCue);
+  return () => {
+    shellPanes.delete(pane);
+    if (shellPanes.size === 0) {
+      stopCueRunner?.();
+      stopCueRunner = undefined;
+    }
+  };
+}
 
 type Ended = { kind: "exited"; code: number | null } | { kind: "detached" } | { kind: "failed"; reason: string };
 
@@ -119,6 +159,8 @@ export function TerminalPane(props: {
   const [outputTrimmed, setOutputTrimmed] = createSignal(false);
   const [promptNote, setPromptNote] = createSignal<"notSent" | "deferred">();
   const [authNeeded, setAuthNeeded] = createSignal(false);
+  const [searching, setSearching] = createSignal(false);
+  let findInTerminal: (query: string, backwards: boolean) => boolean = () => false;
   let copyTail: () => string = () => "";
   let reopen: () => void;
   let chooseConversation: (id?: string) => void;
@@ -142,6 +184,9 @@ export function TerminalPane(props: {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const search = new SearchAddon();
+    term.loadAddon(search);
+    findInTerminal = (query, backwards) => backwards ? search.findPrevious(query) : search.findNext(query);
     let hostAnswersQueries = false;
     silenceDeviceAttributes(term, () => hostAnswersQueries);
     term.open(host);
@@ -204,6 +249,7 @@ export function TerminalPane(props: {
     let blocked = false;
     let working = false;
     let inputRevision = 0;
+    let lastOutputAt = 0;
     let editedBeforePrompt = false;
     let userTyped = false;
     let disposed = false;
@@ -389,6 +435,24 @@ export function TerminalPane(props: {
     });
 
     // Typed like a paste and never submitted, so dropped paths wait for the person to press Enter.
+    const sessionTask = session?.key?.split(":")[0];
+    const stopShellPane = sessionTask && session && !session.agent ? addShellPane({
+      taskId: sessionTask,
+      active: () => props.active !== false,
+      run: async (command) => {
+        const deadline = Date.now() + SHELL_READY_TIMEOUT_MS;
+        const ready = () => handle !== null && !exited && (handle.attached || (lastOutputAt > 0 && Date.now() - lastOutputAt >= SHELL_QUIET_MS));
+        while (!ready()) {
+          if (disposed || exited || Date.now() > deadline) return false;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const destination = handle;
+        if (!destination) return false;
+        inputRevision += 1;
+        await destination.write(`${pasteText(command)}\r`);
+        return true;
+      },
+    }) : undefined;
     const stopShellDrop = session && !session.agent ? registerShellDropTarget(host, {
       insert: async (text) => {
         const destination = handle;
@@ -402,6 +466,7 @@ export function TerminalPane(props: {
 
     const setupMarkers = session && !session.agent ? new SetupMarkerFilter() : undefined;
     function writeOutput(bytes: Uint8Array) {
+      lastOutputAt = Date.now();
       if (!setupMarkers) {
         term.write(bytes, schedulePrompt);
         return;
@@ -466,8 +531,83 @@ export function TerminalPane(props: {
       if (text) term.paste(text);
     };
     host.addEventListener("paste", pasteClipboard, true);
+    const changeFontSize = (step: number) => {
+      const size = step === 0 ? FONT_SIZE_RANGE.default : terminalSettings().fontSize + step;
+      updateTerminalSettings({ fontSize: Math.min(FONT_SIZE_RANGE.max, Math.max(FONT_SIZE_RANGE.min, size)) });
+    };
+    const clearScreen = () => term.clear();
+    // Links light up only while Ctrl (⌘ on macOS) is held, so plain clicks still select text.
+    let modifierHeld = false;
+    const trackModifier = (event: KeyboardEvent | MouseEvent) => {
+      const held = event.ctrlKey || event.metaKey;
+      if (held === modifierHeld) return;
+      modifierHeld = held;
+      host.classList.toggle("links-armed", held);
+    };
+    const releaseModifier = () => { modifierHeld = false; host.classList.remove("links-armed"); };
+    window.addEventListener("keydown", trackModifier, true);
+    window.addEventListener("keyup", trackModifier, true);
+    window.addEventListener("blur", releaseModifier);
+    host.addEventListener("mousemove", trackModifier);
+    const openLink = (link: ReturnType<typeof findTerminalLinks>[number]) => {
+      if (link.kind === "url") {
+        openExternalLink(link.url).catch((failure: unknown) => pushToast({ tone: "error", message: String(failure) }));
+        return;
+      }
+      const taskId = session?.key?.split(":")[0];
+      const relative = session ? taskRelativePath(link.path, session.cwd) : undefined;
+      if (!taskId || !relative) {
+        pushToast({ tone: "error", message: t("terminal.linkOutside") });
+        return;
+      }
+      noteRecentFile(taskId, relative);
+      void openInEditor(taskId, relative, link.line);
+    };
+    const linkProvider = term.registerLinkProvider({
+      provideLinks(row, callback) {
+        const buffer = term.buffer.active;
+        if (!modifierHeld) { callback(undefined); return; }
+        // A line the terminal wrapped is one logical line, so a long URL is still one link.
+        let first = row - 1;
+        while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
+        let last = row - 1;
+        while (buffer.getLine(last + 1)?.isWrapped) last++;
+        const rows: CellText[][] = [];
+        for (let index = first; index <= last; index++) {
+          const line = buffer.getLine(index);
+          const cells: CellText[] = [];
+          for (let x = 0; line && x < term.cols; x++) {
+            const cell = line.getCell(x);
+            if (cell) cells.push({ chars: cell.getChars(), width: cell.getWidth() });
+          }
+          rows.push(cells);
+        }
+        const { text, starts, ends } = joinCells(rows, term.cols);
+        // Cell numbers, not string positions: wide characters take two cells.
+        const at = (cell: number) => ({ x: (cell % term.cols) + 1, y: first + Math.floor(cell / term.cols) + 1 });
+        const links = findTerminalLinks(text)
+          .map((link) => ({ link, start: at(starts[link.start] ?? 0), end: at(ends[link.end - 1] ?? 0) }))
+          .filter(({ start, end }) => start.y <= row && end.y >= row)
+          .map(({ link, start, end }) => ({
+            range: { start, end },
+            text: text.slice(link.start, link.end),
+            activate: (event: MouseEvent) => { if (event.ctrlKey || event.metaKey) openLink(link); },
+          }));
+        callback(links.length > 0 ? links : undefined);
+      },
+    });
     term.attachCustomKeyEventHandler((event) => {
       if (event.isComposing || event.altKey || (!event.ctrlKey && !event.metaKey)) return true;
+      const primary = isMac ? event.metaKey : event.ctrlKey;
+      if (primary && event.type === "keydown") {
+        const name = event.key.toLowerCase();
+        const handled = (action: () => void) => { event.preventDefault(); action(); return false; };
+        if (name === "f" && !event.shiftKey) return handled(() => setSearching(true));
+        if (name === "+" || name === "=") return handled(() => changeFontSize(1));
+        if (name === "-" || name === "_") return handled(() => changeFontSize(-1));
+        if (name === "0") return handled(() => changeFontSize(0));
+        if (name === "k" && (isMac ? !event.shiftKey : event.shiftKey)) return handled(clearScreen);
+      }
       const key = event.key.toLowerCase();
       if (key === "v") return false; // Let the WebView dispatch the native paste event.
       if (key !== "c" || (!event.shiftKey && !term.hasSelection())) return true;
@@ -508,6 +648,19 @@ export function TerminalPane(props: {
       if (props.active !== false && props.focus !== false) term.focus();
     });
 
+    // Palette actions follow the visible terminal; one with the same id replaces the other pane's.
+    createEffect(() => {
+      if (props.active === false) return;
+      const group = () => t("action.groupTerminal");
+      onCleanup(registerActions(
+        { id: "terminal.search", label: () => t("terminal.search"), group, keys: isMac ? "⌘F" : "Ctrl+F", run: () => { setSearching(true); } },
+        { id: "terminal.clear", label: () => t("terminal.clear"), group, keys: isMac ? "⌘K" : "Ctrl+Shift+K", run: clearScreen },
+        { id: "terminal.fontBigger", label: () => t("terminal.fontBigger"), group, keys: isMac ? "⌘+" : "Ctrl++", run: () => changeFontSize(1) },
+        { id: "terminal.fontSmaller", label: () => t("terminal.fontSmaller"), group, keys: isMac ? "⌘-" : "Ctrl+-", run: () => changeFontSize(-1) },
+        { id: "terminal.fontReset", label: () => t("terminal.fontReset"), group, keys: isMac ? "⌘0" : "Ctrl+0", run: () => changeFontSize(0) },
+      ));
+    });
+
     const observer = new ResizeObserver(fitVisible);
     observer.observe(host);
     onCleanup(() => {
@@ -518,6 +671,12 @@ export function TerminalPane(props: {
       host.removeEventListener("paste", noteUserInput, true);
       host.removeEventListener("compositionstart", noteUserInput, true);
       stopShellDrop?.();
+      stopShellPane?.();
+      linkProvider.dispose();
+      window.removeEventListener("keydown", trackModifier, true);
+      window.removeEventListener("keyup", trackModifier, true);
+      window.removeEventListener("blur", releaseModifier);
+      host.removeEventListener("mousemove", trackModifier);
       keys.dispose();
       observer.disconnect();
       host.removeEventListener("paste", pasteClipboard, true);
@@ -558,6 +717,9 @@ export function TerminalPane(props: {
     : undefined;
   return (
     <div class="terminal-content">
+      <Show when={searching()}>
+        <TerminalSearch find={findInTerminal} onClose={() => { setSearching(false); host.querySelector("textarea")?.focus(); }} />
+      </Show>
       <Show when={restoredFrame()}>
         <Notice tone="info" lead={t("terminal.restored")}>{t("terminal.restoredNote")}</Notice>
       </Show>
