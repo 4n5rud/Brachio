@@ -33,6 +33,8 @@ export function TaskRowItem(props: {
   comparing?: boolean;
   /** Archives the other tasks of the comparison; left out when there is none. */
   onKeepOnly?: () => void;
+  /** Drag and keyboard reorder handlers from the list. */
+  reorder?: Record<string, unknown>;
   pinned?: boolean;
   /** Pins or unpins the task; the menu item is left out when missing. */
   onTogglePin?: () => void;
@@ -59,6 +61,7 @@ export function TaskRowItem(props: {
       aria-haspopup="menu"
       onClick={() => props.onSelect()}
       onContextMenu={(event) => { event.preventDefault(); setMenu(event.currentTarget); }}
+      {...props.reorder}
     >
       <StatusGlyph tone={tone()} />
       <span class="task-title">{props.task.title}</span>

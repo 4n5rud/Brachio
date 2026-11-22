@@ -89,7 +89,7 @@ pub fn load_task_tabs(
     let mut tabs: HashMap<String, Vec<TaskTab>> = HashMap::new();
     {
         let mut statement = transaction
-            .prepare("SELECT tab_id, kind, shell_id, task_id FROM task_tabs ORDER BY rowid")?;
+            .prepare("SELECT tab_id, kind, shell_id, task_id FROM task_tabs ORDER BY sort_order IS NULL, sort_order, rowid")?;
         let rows = statement.query_map([], |row| Ok((read_tab(row)?, row.get::<_, String>(3)?)))?;
         for row in rows {
             let (tab, task_id) = row?;
@@ -108,7 +108,8 @@ pub fn load_task_tabs(
 /// Fails when the database cannot be read.
 pub fn task_tabs(connection: &Connection, task_id: &str) -> Result<Vec<TaskTab>, StoreError> {
     let mut statement = connection.prepare(
-        "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1 ORDER BY rowid",
+        "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1
+         ORDER BY sort_order IS NULL, sort_order, rowid",
     )?;
     let rows = statement.query_map([task_id], read_tab)?;
     let mut tabs = Vec::new();
@@ -116,6 +117,32 @@ pub fn task_tabs(connection: &Connection, task_id: &str) -> Result<Vec<TaskTab>,
         tabs.extend(row?);
     }
     Ok(tabs)
+}
+
+/// Places a task's open tabs in the given order. Tabs left out keep sorting after them.
+///
+/// # Errors
+/// Fails with `NotFound` when a tab is not open on the task, and changes nothing.
+pub fn reorder_task_tabs(
+    connection: &mut Connection,
+    task_id: &str,
+    tab_ids: &[String],
+) -> Result<(), StoreError> {
+    let transaction = connection.transaction()?;
+    for (position, tab_id) in tab_ids.iter().enumerate() {
+        let changed = transaction.execute(
+            "UPDATE task_tabs SET sort_order = ?3 WHERE task_id = ?1 AND tab_id = ?2",
+            params![task_id, tab_id, i64::try_from(position).unwrap_or(i64::MAX)],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound {
+                table: "task_tabs",
+                id: tab_id.clone(),
+            });
+        }
+    }
+    transaction.commit()?;
+    Ok(())
 }
 
 /// One open tab of a task, if it is still open.

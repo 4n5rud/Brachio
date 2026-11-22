@@ -11,6 +11,8 @@ import { FolderRepos } from "./FolderRepos";
 import { watchPrStatuses } from "../lib/pr-status-store";
 import { Icon } from "./Icon";
 import { TaskRowItem } from "./TaskRow";
+import { createReorder } from "../lib/drag-reorder";
+import "./ui/Reorder.css";
 
 const COLLAPSED_KEY = "brachio.collapsedProjects";
 
@@ -38,6 +40,10 @@ export function TaskList(props: {
   onOpenArchived?: () => void;
   /** Opens Settings; its button sits at the foot of the sidebar. */
   onSettings?: () => void;
+  /** Saves the project order after a drag or Alt+arrow move. */
+  onReorderProjects?: (ids: string[]) => void;
+  /** Saves one project's task order. */
+  onReorderTasks?: (repoId: string, ids: string[]) => void;
   onArchiveTask?: (id: string) => void;
   /** Archives the other tasks of a comparison and keeps this one. */
   onKeepOnly?: (id: string) => void;
@@ -56,6 +62,16 @@ export function TaskList(props: {
   unreadForTask?: (taskId: string) => number;
   finishedUnread?: (taskId: string) => boolean;
 }) {
+  let groupsEl: HTMLElement | undefined;
+  const projectReorder = createReorder({
+    axis: "y",
+    ids: () => props.repos.map((repo) => repo.id),
+    container: () => groupsEl,
+    scroller: () => groupsEl,
+    handle: ".project-heading",
+    label: (id) => projects().get(id) ?? "",
+    onReorder: (ids) => props.onReorderProjects?.(ids),
+  });
   const [addMenu, setAddMenu] = createSignal<HTMLElement>();
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const groupIds = createMemo(() => [...projects().keys(), ""]);
@@ -129,14 +145,23 @@ export function TaskList(props: {
           </Show>
         </Show>
       </div>
-      <nav class="task-groups" aria-label={t("sidebar.projects")}>
+      <nav class="task-groups" aria-label={t("sidebar.projects")} ref={groupsEl}>
         <For each={groupIds()}>
           {(id) => {
             const name = () => projects().get(id) ?? t("sidebar.folderWorkspaces");
             const tasks = () => orderWithCompare(orderWithChildren(pinnedFirst(tasksByGroup().get(id) ?? [], props.pinned ?? new Set())));
             const expanded = () => !collapsed().has(id);
+            let card: HTMLElement | undefined;
+            const taskReorder = createReorder({
+              axis: "y",
+              ids: () => tasks().map((task) => task.id),
+              container: () => card,
+              scroller: () => groupsEl,
+              label: (taskId) => tasks().find((task) => task.id === taskId)?.title ?? "",
+              onReorder: (ids) => props.onReorderTasks?.(id, ids),
+            });
             return (
-              <section>
+              <section class="project-card" ref={card} {...(id && props.onReorderProjects ? projectReorder.item(id) : {})}>
                 <div class="project-heading">
                   <button class="group-head" type="button" aria-expanded={expanded()}
                     title={expanded() ? undefined : countsTitle(tasks())} onClick={() => toggle(id)}>
@@ -145,12 +170,12 @@ export function TaskList(props: {
                     <span class="count">{tasks().length}</span>
                   </button>
                   <Show when={id && !folderProjects().has(id) && props.onImportWorktrees}>
-                    <IconButton class="project-import" icon="download" size="sm"
+                    <IconButton class="project-import" data-no-drag icon="download" size="sm"
                       title={t("sidebar.importWorktrees")} label={t("sidebar.importWorktreesIn").replace("{project}", () => name())}
                       onClick={() => props.onImportWorktrees?.(id)} />
                   </Show>
                   <Show when={id && props.onNewTask}>
-                    <IconButton class="project-new-task" icon="plus" size="sm"
+                    <IconButton class="project-new-task" data-no-drag icon="plus" size="sm"
                       title={t("sidebar.newTask")} label={t("sidebar.newTaskIn").replace("{project}", () => name())}
                       onClick={() => props.onNewTask?.(id)} />
                   </Show>
@@ -167,6 +192,7 @@ export function TaskList(props: {
                         finished={props.finishedUnread?.(task.id)}
                         pr={props.prFor?.(task.id)}
                         onSelect={() => props.onSelect(task.id)}
+                        reorder={props.onReorderTasks ? taskReorder.item(task.id) : undefined}
                         pinned={props.pinned?.has(task.id)}
                         onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(task.id, !props.pinned?.has(task.id)) : undefined}
                         onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}

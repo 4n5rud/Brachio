@@ -48,6 +48,10 @@ export interface CreateTaskRequest {
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
+/** Saves the order the projects were dragged into. */
+export const reorderRepos = (ids: readonly string[]) => invoke<void>("repo_reorder", { ids });
+/** Saves the order one project's tasks were dragged into. */
+export const reorderTasks = (ids: readonly string[]) => invoke<void>("task_reorder", { ids });
 /** With `gitOnly`, a folder that is not a Git repository is refused instead of added as a folder workspace. */
 export const addRepo = (path: string, gitOnly = false) => invoke<RepoRecord>("repo_add", { path, gitOnly });
 /** Clones `url` into a new folder inside `parent` and adds it. Rejects with "cancelled" when stopped. */
