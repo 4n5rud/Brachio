@@ -19,7 +19,7 @@ import { openInEditor } from "../lib/editor";
 import { noteRecentFile } from "../lib/recent-files";
 import { openExternalLink } from "../lib/pr-status";
 import { isMac } from "../lib/shortcut";
-import { findTerminalLinks, taskRelativePath } from "../lib/terminal-links";
+import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
@@ -572,11 +572,21 @@ export function TerminalPane(props: {
         while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
         let last = row - 1;
         while (buffer.getLine(last + 1)?.isWrapped) last++;
-        let text = "";
-        for (let index = first; index <= last; index++) text += buffer.getLine(index)?.translateToString(index === last) ?? "";
-        const at = (offset: number) => ({ x: (offset % term.cols) + 1, y: first + Math.floor(offset / term.cols) + 1 });
+        const rows: CellText[][] = [];
+        for (let index = first; index <= last; index++) {
+          const line = buffer.getLine(index);
+          const cells: CellText[] = [];
+          for (let x = 0; line && x < term.cols; x++) {
+            const cell = line.getCell(x);
+            if (cell) cells.push({ chars: cell.getChars(), width: cell.getWidth() });
+          }
+          rows.push(cells);
+        }
+        const { text, starts, ends } = joinCells(rows, term.cols);
+        // Cell numbers, not string positions: wide characters take two cells.
+        const at = (cell: number) => ({ x: (cell % term.cols) + 1, y: first + Math.floor(cell / term.cols) + 1 });
         const links = findTerminalLinks(text)
-          .map((link) => ({ link, start: at(link.start), end: at(link.end - 1) }))
+          .map((link) => ({ link, start: at(starts[link.start] ?? 0), end: at(ends[link.end - 1] ?? 0) }))
           .filter(({ start, end }) => start.y <= row && end.y >= row)
           .map(({ link, start, end }) => ({
             range: { start, end },

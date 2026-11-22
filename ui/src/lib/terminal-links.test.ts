@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findTerminalLinks, taskRelativePath } from "./terminal-links";
+import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "./terminal-links";
 
 describe("findTerminalLinks", () => {
   it("finds a URL without the punctuation after it", () => {
@@ -33,5 +33,39 @@ describe("taskRelativePath", () => {
     expect(taskRelativePath("../a.ts", "/home/me/proj")).toBeUndefined();
     expect(taskRelativePath("/home/me/other/a.ts", "/home/me/proj")).toBeUndefined();
     expect(taskRelativePath("/home/me/project/a.ts", "/home/me/proj")).toBeUndefined();
+  });
+});
+
+describe("links in a line with wide characters", () => {
+  // A wide character is one cell of width 2 followed by an empty width-0 cell.
+  const rowOf = (text: string, columns: number): CellText[] => {
+    const cells: CellText[] = [];
+    for (const char of text) {
+      const wide = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u{1f300}-\u{1faff}]/u.test(char);
+      cells.push({ chars: char, width: wide ? 2 : 1 });
+      if (wide) cells.push({ chars: "", width: 0 });
+    }
+    while (cells.length < columns) cells.push({ chars: "", width: 1 });
+    return cells;
+  };
+
+  it("puts the URL and the file:line at their cells after Korean text and an emoji", () => {
+    const { text, starts, ends } = joinCells([rowOf("오류 \u{1f600} https://a.io/x 와 src/m.ts:9", 40)], 40);
+    const [url, file] = findTerminalLinks(text);
+    expect(url?.kind).toBe("url");
+    // "오류 " is 5 cells, the emoji 2 and a space 1, so the URL starts at cell 8.
+    expect(starts[url?.start ?? 0]).toBe(8);
+    expect(ends[(url?.end ?? 1) - 1]).toBe(8 + "https://a.io/x".length - 1);
+    expect(file?.kind === "file" && file.path).toBe("src/m.ts");
+    // After the URL come a space, the wide "와" (2 cells) and a space.
+    expect(starts[file?.start ?? 0]).toBe(8 + 14 + 1 + 2 + 1);
+  });
+
+  it("keeps a URL that wraps onto the next row in order", () => {
+    const columns = 12;
+    const { text, starts } = joinCells([rowOf("한글 https:/", columns), rowOf("/ex.com/path", columns)], columns);
+    const [url] = findTerminalLinks(text);
+    expect(url?.kind === "url" && url.url).toBe("https://ex.com/path");
+    expect(starts[url?.start ?? 0]).toBe(5);
   });
 });

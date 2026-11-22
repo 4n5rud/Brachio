@@ -55,3 +55,33 @@ export function taskRelativePath(path: string, cwd: string): string | undefined 
   const parts = relative.split("/");
   return relative !== "" && parts.every((part) => part !== ".." && part !== "") ? relative : undefined;
 }
+
+/** One terminal cell: its text (empty for the second half of a wide character) and how many columns it spans. */
+export interface CellText {
+  chars: string;
+  width: number;
+}
+
+/**
+ * Joins wrapped terminal rows into one line of text. `starts[i]` and `ends[i]` are the first and
+ * last cell, counted from the top of the first row, of the character at string index `i`, so
+ * links keep their place when wide characters (Korean, emoji) are in the line.
+ */
+export function joinCells(rows: readonly (readonly CellText[])[], columns: number): { text: string; starts: number[]; ends: number[] } {
+  let text = "";
+  const starts: number[] = [];
+  const ends: number[] = [];
+  rows.forEach((row, rowIndex) => {
+    row.forEach((cell, column) => {
+      if (cell.width === 0) return;
+      const chars = cell.chars === "" ? " " : cell.chars;
+      const first = rowIndex * columns + column;
+      for (let unit = 0; unit < chars.length; unit++) {
+        starts.push(first);
+        ends.push(first + cell.width - 1);
+      }
+      text += chars;
+    });
+  });
+  return { text, starts, ends };
+}
