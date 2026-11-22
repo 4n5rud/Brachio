@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { watchMailbox } from "./mailbox";
+import { keysWithNewMail, watchMailbox } from "./mailbox";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -32,4 +32,10 @@ test("coalesces mailbox events and discards counts superseded by an event", asyn
   stop();
   await Promise.resolve();
   expect(unlisten).toHaveBeenCalledOnce();
+});
+
+test("only tabs whose unread count grew have new mail", () => {
+  const before = new Map([["a:agent", 2], ["b:agent", 1], ["c:agent", 1]]);
+  const after = new Map([["a:agent", 2], ["b:agent", 3], ["c:agent", 0], ["d:agent", 1]]);
+  expect(keysWithNewMail(before, after)).toEqual(["b:agent", "d:agent"]);
 });
