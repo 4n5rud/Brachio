@@ -14,7 +14,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The most bytes one refresh reads, so a huge log is caught up over several refreshes.
@@ -23,7 +23,7 @@ pub const MAX_READ_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_LINE_BYTES: usize = 2 * 1024 * 1024;
 
 /// Token counts of one session. Cache reads and writes are kept apart from plain input.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsage {
     /// Input tokens that were not served from the cache.

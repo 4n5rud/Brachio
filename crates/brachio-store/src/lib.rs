@@ -13,6 +13,7 @@ mod task_activity_record;
 mod task_pin_record;
 mod task_record;
 mod task_tabs;
+mod usage_record;
 
 pub use child_report::{child_reports, ChildReport};
 pub use database::{open, open_in_memory, StoreError};
@@ -51,4 +52,8 @@ pub use task_tabs::{
     add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs, rename_task_tab,
     reorder_task_tabs, retired_secondary_tabs, task_tab, task_tab_names, task_tabs, TabKind,
     TaskTab,
+};
+pub use usage_record::{
+    limit_history, record_limit_snapshot, usage_apply, usage_file_state, usage_reset, usage_rows,
+    LimitSnapshot, UsageRow, SNAPSHOT_GAP_MS,
 };

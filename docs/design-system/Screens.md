@@ -185,7 +185,7 @@ Whole windows for every failure. Each one says what broke, what is kept, and off
 | Card | What |
 |---|---|
 | ScreenPlan | task dependencies as a graph and the handoff review with its QA result (#176 data is stored; #178 links QA to the handoff) |
-| LaterConvenience | from the Orca parity list: pinned tasks, unread finish, overlap warning across tasks, compare agents on one prompt, switch recent tasks, import worktrees, keep awake, shortcut list |
+| LaterConvenience | planned workflow improvements: pinned tasks, unread finish, overlap warning across tasks, compare agents on one prompt, switch recent tasks, import worktrees, keep awake, shortcut list |
 
 ## Moving between screens
 - Tasks and Board show the same tasks. Opening a tile opens that task in Tasks.
