@@ -1,6 +1,7 @@
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { isMac } from "../lib/shortcut";
+import { pushToast } from "../lib/toasts";
 import { openTaskFolder, revealTask } from "../lib/workspace";
 import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { chipOf, type PrChip as PrChipState } from "../lib/pr-status";
@@ -126,7 +127,7 @@ export function TaskRowItem(props: {
               </For>
             </Show>
             <MenuItem disabled={!props.task.branch}
-              onSelect={() => act(() => navigator.clipboard.writeText(props.task.branch ?? ""))}>
+              onSelect={() => act(async () => { await navigator.clipboard.writeText(props.task.branch ?? ""); pushToast({ tone: "success", message: t("taskMenu.branchCopied") }); })}>
               {t("taskMenu.copyBranch")}
             </MenuItem>
             <Show when={inApp && props.task.worktreePath}>

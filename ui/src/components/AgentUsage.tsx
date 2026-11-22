@@ -20,6 +20,13 @@ const percentText = (window: UsageWindow | null) => (window ? `${Math.round(wind
 const remainingText = (window: UsageWindow | null | undefined, now: number): string | null =>
   window?.resetsAt == null ? null : formatRemaining(window.resetsAt - now, unit);
 
+function updatedText(refreshing: boolean | undefined, updatedAt: number | undefined, now: number): string {
+  if (refreshing) return t("usage.refreshing");
+  if (updatedAt === undefined) return "";
+  const elapsed = now - updatedAt;
+  return elapsed < 60 ? t("usage.updatedNow") : t("usage.updatedAgo").replace("{time}", formatRemaining(elapsed, unit));
+}
+
 /** One window's share used. The fill is the only encoding; the number beside it is text. */
 export function UsageMeter(props: { window: UsageWindow | null; label: string }) {
   return (
@@ -62,7 +69,7 @@ export function UsageReadout(props: {
             </span>
           )}</For>
         </button>
-        <IconButton icon="refresh" size="sm" label={t("usage.refresh")} disabled={props.refreshing}
+        <IconButton icon="refresh" size="sm" label={t("usage.refresh")} busy={props.refreshing}
           class="usage-refresh" onClick={() => props.onRefresh()} />
       </span>
     </Show>
@@ -89,6 +96,8 @@ export function UsagePanel(props: {
   mode: UsageMode;
   onMode: (mode: UsageMode) => void;
   refreshing?: boolean;
+  /** Unix seconds of the last finished read. */
+  updatedAt?: number;
   onRefresh: () => void;
   onAccounts: () => void;
   /** Opens the provider usage page; offered while Claude Code is signed in. */
@@ -98,11 +107,12 @@ export function UsagePanel(props: {
     <div class="usage-panel">
       <div class="usage-panel-head">
         <h3>{t("usage.title")}</h3>
-        <IconButton icon="refresh" size="sm" label={t("usage.refresh")} disabled={props.refreshing}
+        <IconButton icon="refresh" size="sm" label={t("usage.refresh")} busy={props.refreshing}
           onClick={() => props.onRefresh()} />
         <SegmentedControl label={t("usage.view")} value={props.mode} onChange={props.onMode}
           options={[{ value: "detailed", label: t("usage.detailed") }, { value: "compact", label: t("usage.compact") }]} />
       </div>
+      <p class="usage-updated" role="status">{updatedText(props.refreshing, props.updatedAt, props.now)}</p>
       <For each={props.usages}>{(usage) => (
         <button type="button" class="usage-agent-row" onClick={() => props.onAccounts()}
           aria-label={t("usage.agentAccount").replace("{agent}", AGENT_NAME[usage.agent])}>
@@ -148,6 +158,7 @@ export function UsageStatus(props: {
   usages: readonly AgentUsage[];
   now: number;
   refreshing?: boolean;
+  updatedAt?: number;
   onRefresh: () => void;
   onAccounts: () => void;
   onDetails?: () => void;
@@ -161,7 +172,7 @@ export function UsageStatus(props: {
       <Show when={anchor()}>
         {(element) => (
           <Popover anchor={element()} label={t("usage.title")} onClose={() => setAnchor(undefined)}>
-            <UsagePanel usages={props.usages} now={props.now} mode={mode()} onMode={setMode} refreshing={props.refreshing}
+            <UsagePanel usages={props.usages} now={props.now} mode={mode()} onMode={setMode} refreshing={props.refreshing} updatedAt={props.updatedAt}
               onRefresh={props.onRefresh}
               onAccounts={() => { setAnchor(undefined); props.onAccounts(); }}
               onDetails={props.onDetails ? () => { setAnchor(undefined); props.onDetails?.(); } : undefined} />

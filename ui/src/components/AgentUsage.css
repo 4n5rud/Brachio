@@ -76,6 +76,12 @@
   font-size: var(--text-sm);
   font-weight: 600;
 }
+.usage-updated {
+  min-height: 16px;
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--color-text-3);
+  font-size: var(--text-xs);
+}
 .usage-agent-row {
   display: grid;
   gap: 6px;

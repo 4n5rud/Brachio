@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
+import { useAsyncAction } from "../lib/async-action";
 import {
   openExternalLink,
   shortSha,
@@ -48,6 +49,7 @@ export function PullRequestStatus(props: { taskId: string }) {
   // The answer is shared with the task list, which keeps it fresh in the background.
   const [now, setNow] = createSignal(Date.now());
   const refresh = (force: boolean) => refreshPrStatus(props.taskId, force).then(() => setNow(Date.now()));
+  const manual = useAsyncAction(() => refresh(true));
 
   onMount(() => {
     void refresh(false);
@@ -56,8 +58,8 @@ export function PullRequestStatus(props: { taskId: string }) {
   });
 
   return (
-    <PullRequestPanel report={prReport(props.taskId)} failure={prFailure(props.taskId)} busy={prRefreshing(props.taskId)}
-      now={now()} onRefresh={() => void refresh(true)} />
+    <PullRequestPanel report={prReport(props.taskId)} failure={prFailure(props.taskId)} busy={prRefreshing(props.taskId) || manual.pending()} done={manual.done()}
+      now={now()} onRefresh={() => void manual.run()} />
   );
 }
 
@@ -65,6 +67,8 @@ export function PullRequestPanel(props: {
   report?: PrStatusReport;
   failure?: string;
   busy: boolean;
+  /** The last manual refresh just finished. */
+  done?: boolean;
   now: number;
   onRefresh: () => void;
 }) {
@@ -72,7 +76,7 @@ export function PullRequestPanel(props: {
 
   return (
     <InspectorSection title={t("prStatus.title")}
-      end={<IconButton size="sm" icon="refresh" label={t("prStatus.refresh")} disabled={props.busy}
+      end={<IconButton size="sm" icon="refresh" label={t("prStatus.refresh")} busy={props.busy} done={props.done}
         onClick={props.onRefresh} />}>
       <Show when={props.failure}>{(message) => <InspectorNote tone="error">{message()}</InspectorNote>}</Show>
       <Show when={!props.report && !props.failure}>
