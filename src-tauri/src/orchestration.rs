@@ -9,10 +9,11 @@ use brachio_core::task_graph::TaskState;
 use brachio_git::Git;
 use brachio_runtime::mailbox::MailResponse;
 use brachio_store::{
-    decide_handoff, decide_handoff_then, fail_lost, fail_running, load_graph, qa_result_by_id,
-    running_children, schedule_next, scheduled_leads, scheduler_enabled, send_message,
-    set_scheduler_enabled, state_reason, submit_handoff, Handoff, HandoffReview, HandoffSource,
-    NewHandoff, NewMessage, RepoRecord, TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
+    decide_handoff, decide_handoff_then, fail_lost, fail_running, load_graph, pending_gates,
+    qa_result_by_id, running_children, schedule_next, scheduled_leads, scheduler_enabled,
+    send_message, set_scheduler_enabled, state_reason, submit_handoff, Handoff, HandoffReview,
+    HandoffSource, NewHandoff, NewMessage, RepoRecord, TaskRecord, LOST_AFTER_RESTART,
+    MAX_RUNNING_CHILDREN,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -57,6 +58,19 @@ pub struct ChildView {
     pub reason: Option<String>,
     pub dependencies: Vec<DependencyView>,
     pub handoff: Option<HandoffView>,
+    /// Decisions the child asked the user to make; they hold back what depends on it.
+    pub gates: Vec<GateView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GateView {
+    pub id: String,
+    /// The child's words; untrusted.
+    pub subject: String,
+    pub body: String,
+    pub options: Vec<String>,
+    pub created_at_ms: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -149,6 +163,17 @@ pub fn build_view(connection: &Connection, lead_id: &str) -> Result<Orchestratio
             reason: state_reason(connection, id).map_err(|e| e.to_string())?,
             dependencies,
             handoff,
+            gates: pending_gates(connection, id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|gate| GateView {
+                    id: gate.message_id,
+                    subject: gate.subject,
+                    body: gate.body,
+                    options: gate.options,
+                    created_at_ms: gate.created_at_ms,
+                })
+                .collect(),
         });
     }
     Ok(OrchestrationView {
@@ -327,6 +352,14 @@ pub fn review_decision(
     let handoff = Handoff::get(connection, handoff_id).map_err(|e| e.to_string())?;
     let task = TaskRecord::get(connection, &handoff.task_id).map_err(|e| e.to_string())?;
     if approved {
+        if !pending_gates(connection, &task.id)
+            .map_err(|e| e.to_string())?
+            .is_empty()
+        {
+            return Err(
+                "This task has an unanswered decision. Answer it before approving.".to_owned(),
+            );
+        }
         let head = head_of(&task.worktree_path)?;
         if head != handoff.commit_sha {
             return Err(format!(

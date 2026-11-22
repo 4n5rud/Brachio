@@ -5,6 +5,7 @@
 use brachio_core::task_graph::TaskState;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+use crate::decision_gate_record::pending_gates;
 use crate::orchestration_record::{load_graph, transition_in, OrchestrationError};
 
 /// Children of one lead that may run at the same time.
@@ -107,10 +108,19 @@ pub fn schedule_next(
         rows.collect::<Result<_, _>>()?
     };
     let graph = load_graph(&transaction, lead_id)?;
+    let mut gated = Vec::new();
+    for id in &open {
+        for dependency in graph.dependencies_of(id)? {
+            if !pending_gates(&transaction, dependency)?.is_empty() {
+                gated.push(id.clone());
+                break;
+            }
+        }
+    }
     let promote: Vec<String> = graph
         .ready_tasks()
         .into_iter()
-        .filter(|id| open.iter().any(|open_id| open_id == id))
+        .filter(|id| open.iter().any(|open_id| open_id == id) && !gated.iter().any(|g| g == id))
         .map(str::to_owned)
         .collect();
     for id in &promote {
@@ -128,7 +138,7 @@ pub fn schedule_next(
         if running >= MAX_RUNNING_CHILDREN {
             break;
         }
-        if graph.state(id)? == TaskState::Ready {
+        if graph.state(id)? == TaskState::Ready && !gated.contains(id) {
             transition_in(&transaction, id, TaskState::Running, now_ms)?;
             started.push(id.clone());
             running += 1;
@@ -330,5 +340,48 @@ mod tests {
         );
         assert!(fail_lost(&mut db, &lost, 6).unwrap().is_empty());
         assert!(schedule_next(&mut db, "lead", 7).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_open_decision_gate_holds_back_dependents_until_it_is_answered() {
+        use crate::{send_message, NewMessage};
+        let mut db = db(&["a", "b"]);
+        add_dependency(&mut db, "b", "a").unwrap();
+        set_scheduler_enabled(&db, "lead", true).unwrap();
+        db.execute(
+            "INSERT INTO task_orchestration (task_id, state, updated_at_ms) VALUES ('a', 'completed', 0)",
+            [],
+        )
+        .unwrap();
+        let message = |id: &'static str, reply_to: Option<&'static str>| NewMessage {
+            id,
+            from_key: if reply_to.is_some() {
+                "lead:agent"
+            } else {
+                "a:agent"
+            },
+            to_key: if reply_to.is_some() {
+                "a:agent"
+            } else {
+                "lead:agent"
+            },
+            kind: if reply_to.is_some() {
+                "status"
+            } else {
+                "decision_gate"
+            },
+            priority: "normal",
+            subject: "Pick",
+            body: "",
+            payload_json: reply_to.is_none().then_some(r#"{"options":["x","y"]}"#),
+            reply_to,
+            request_id: None,
+            created_at_ms: 1,
+        };
+        send_message(&db, &message("g1", None)).unwrap();
+        assert!(schedule_next(&mut db, "lead", 1).unwrap().is_empty());
+        assert_eq!(state(&db, "b"), TaskState::Queued);
+        send_message(&db, &message("r1", Some("g1"))).unwrap();
+        assert_eq!(schedule_next(&mut db, "lead", 2).unwrap(), vec!["b"]);
     }
 }

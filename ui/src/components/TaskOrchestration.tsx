@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { shortSha } from "../lib/qa-run";
 import {
   readOrchestration,
+  answerGate,
   reviewHandoff,
   setScheduler,
   testEvidence,
@@ -34,6 +35,18 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
       setBusy(false);
     }
   };
+  const choose = async (gateId: string, choice: number) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await answerGate(gateId, choice);
+      props.onChanged();
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <li class="orchestration-child">
       <div class="orchestration-child-head">
@@ -41,6 +54,22 @@ function ChildCard(props: { child: ChildView; onChanged: () => void }) {
         <StateChip state={props.child.state} />
       </div>
       <Show when={props.child.reason}>{(reason) => <p class="muted">{reason()}</p>}</Show>
+      <For each={props.child.gates}>
+        {(gate) => (
+          <div class="orchestration-gate" role="group" aria-label={t("orchestration.gate")}>
+            <p><strong>{t("orchestration.gate")}</strong> {gate.subject}</p>
+            <Show when={gate.body}><p class="muted">{gate.body}</p></Show>
+            <p class="muted">{t("orchestration.gateNote")}</p>
+            <div class="orchestration-actions">
+              <For each={gate.options}>
+                {(option, index) => (
+                  <Button disabled={busy()} onClick={() => void choose(gate.id, index())}>{option}</Button>
+                )}
+              </For>
+            </div>
+          </div>
+        )}
+      </For>
       <Show when={props.child.dependencies.length > 0}>
         <p class="muted">
           {t("orchestration.dependsOn")}{" "}

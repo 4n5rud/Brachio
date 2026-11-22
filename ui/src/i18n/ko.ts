@@ -671,6 +671,8 @@ export const ko: Messages = {
   "orchestration.schedulerNote": "기다리는 작업이 모두 확인되면 하위 작업이 시작됩니다. 아무것도 병합하지 않습니다. 동시에 실행되는 작업은 최대",
   "orchestration.empty": "나눠 맡긴 작업 없음",
   "orchestration.noHandoff": "아직 결과 보고 없음",
+  "orchestration.gate": "결정 필요",
+  "orchestration.gateNote": "이 작업에 의존하는 작업은 선택할 때까지 기다립니다. 선택은 에이전트에게 답장으로 전달됩니다.",
   "orchestration.dependsOn": "먼저 끝나야 하는 작업:",
   "orchestration.commit": "커밋",
   "orchestration.files": "개 파일 변경",
