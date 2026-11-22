@@ -58,7 +58,8 @@ import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
 import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
-import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
+import { placeInOrder } from "./lib/drag-reorder";
+import { addRepo, archiveTask, reorderRepos, reorderTasks, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
 
@@ -704,6 +705,16 @@ export function App() {
     requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
   }, record, startListed);
 
+  const reorderProjects = (ids: string[]) => {
+    const before = repos();
+    setRepos((list) => placeInOrder(list, ids));
+    reorderRepos(ids).catch((failure) => { setRepos(before); report(failure); });
+  };
+  const reorderProjectTasks = (_repoId: string, ids: string[]) => {
+    const before = tasks();
+    setTasks((list) => placeInOrder(list, ids));
+    reorderTasks(ids).catch((failure) => { setTasks(before); report(failure); });
+  };
   const togglePin = (id: string, pin: boolean) => {
     const before = pinned();
     setPinned((current) => {
@@ -1093,6 +1104,8 @@ export function App() {
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           pinned={pinned()}
           onTogglePin={togglePin}
+          onReorderProjects={inTauri ? reorderProjects : undefined}
+          onReorderTasks={inTauri ? reorderProjectTasks : undefined}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}

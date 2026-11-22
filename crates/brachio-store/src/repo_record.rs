@@ -65,16 +65,38 @@ impl RepoRecord {
         Self::get(connection, repo.id)
     }
 
-    /// All repositories, oldest first.
+    /// All repositories in the order the user placed them, then the rest oldest first.
     ///
     /// # Errors
     /// Fails when the query fails.
     pub fn list(connection: &Connection) -> Result<Vec<Self>, StoreError> {
-        let sql = format!("SELECT {COLUMNS} FROM repos ORDER BY added_at_ms, name");
+        let sql = format!("SELECT {COLUMNS} FROM repos ORDER BY sort_order IS NULL, sort_order, added_at_ms, name");
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([], Self::from_row)?;
         let repos: Vec<Self> = rows.collect::<Result<_, _>>()?;
         Ok(repos)
+    }
+
+    /// Places the repositories in the given order. Repositories left out keep sorting after them.
+    ///
+    /// # Errors
+    /// Fails with `NotFound` for an unknown id, and changes nothing.
+    pub fn reorder(connection: &mut Connection, ids: &[String]) -> Result<(), StoreError> {
+        let transaction = connection.transaction()?;
+        for (position, id) in ids.iter().enumerate() {
+            let changed = transaction.execute(
+                "UPDATE repos SET sort_order = ?2 WHERE id = ?1",
+                params![id, i64::try_from(position).unwrap_or(i64::MAX)],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::NotFound {
+                    table: "repos",
+                    id: id.clone(),
+                });
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     /// One repository by id.

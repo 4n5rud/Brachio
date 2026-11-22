@@ -43,6 +43,6 @@ pub use task_activity_record::{
 pub use task_pin_record::{pinned_task_ids, set_task_pinned};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{
-    add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
+    add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs, reorder_task_tabs,
     retired_secondary_tabs, task_tab, task_tabs, TabKind, TaskTab,
 };

@@ -59,6 +59,9 @@ The screens follow the combined design guideline (myWorkFlow and unslop-ui). Whe
 - Radii: `radius-xs` 4px (kbd, chips), `radius-sm` 6px (buttons), 7px for rows, fields and segmented tracks, `radius-md` 9px (tiles, toasts), `radius-lg` 12px (dialogs).
 - Panels are separated by 1px `color-line` hairlines, never by shadow. Only layers above the app (dialogs, toasts, menus) take `shadow-overlay`.
 
+## Reordering
+- Projects, tasks and tabs reorder by pointer drag or Alt+arrow. See `drag-reorder.md`.
+
 ## Motion
 - The working arc is the only repeating animation (1.1s per turn). Status glyphs, badges and dots never pulse or bounce.
 - Other motion is short and functional: 120ms for hover and toggles. Under `prefers-reduced-motion`, everything stops, the arc included.

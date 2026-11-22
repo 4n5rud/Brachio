@@ -94,6 +94,18 @@ pub fn repo_list(database: State<'_, Database>) -> Result<Vec<RepoRecord>, Strin
     RepoRecord::list(&*database.lock()?).map_err(to_text)
 }
 
+/// Saves the order the user dragged the projects into.
+#[tauri::command]
+pub fn repo_reorder(database: State<'_, Database>, ids: Vec<String>) -> Result<(), String> {
+    RepoRecord::reorder(&mut *database.lock()?, &ids).map_err(to_text)
+}
+
+/// Saves the order the user dragged one project's tasks into.
+#[tauri::command]
+pub fn task_reorder(database: State<'_, Database>, ids: Vec<String>) -> Result<(), String> {
+    TaskRecord::reorder(&mut *database.lock()?, &ids).map_err(to_text)
+}
+
 /// Adds the repository that contains `path`, or the folder itself when it is not in a git
 /// repository: a folder project runs its tasks in the folder, with no branch or worktree. Adding
 /// it twice returns the existing entry. With `git_only`, a folder that is not in a git repository
