@@ -112,3 +112,23 @@
   color: var(--color-accent-text);
   white-space: nowrap;
 }
+.task-pr {
+  display: inline-grid;
+  place-items: center;
+  color: var(--color-text-3);
+}
+.task-pr-good {
+  color: var(--color-status-ready);
+}
+.task-pr-bad,
+.task-pr-error {
+  color: var(--color-status-error);
+}
+.task-pr-wait,
+.task-pr-working {
+  color: var(--color-status-working);
+}
+.task-pr-warn,
+.task-pr-blocked {
+  color: var(--color-status-blocked);
+}

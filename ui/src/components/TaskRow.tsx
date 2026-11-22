@@ -12,7 +12,7 @@ import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
 import { AgentChip } from "./ui/AgentChip";
 import { DiffStat } from "./ui/DiffStat";
-import { PrChip } from "./ui/PrChip";
+import { prChipIcon } from "./ui/PrChip";
 import { StatusGlyph } from "./ui/StatusBadge";
 import "./TaskRow.css";
 
@@ -55,6 +55,11 @@ export function TaskRowItem(props: {
   };
   const tone = () => statusTone(props.task.status);
   const chip = () => (props.pr !== undefined ? props.pr : chipOf(prReport(props.task.id)));
+  /** One glyph slot: a spinner beats the pull request glyph, which beats the status dot. Waiting and failed states keep their own glyph. */
+  const prGlyph = () => {
+    const current = chip();
+    return current && tone() !== "working" && tone() !== "blocked" && tone() !== "error" ? current : null;
+  };
   return (
     <button
       class="task-item"
@@ -68,7 +73,13 @@ export function TaskRowItem(props: {
       onContextMenu={(event) => { event.preventDefault(); setMenu(event.currentTarget); }}
       {...props.reorder}
     >
-      <StatusGlyph tone={tone()} />
+      <Show when={prGlyph()} fallback={<StatusGlyph tone={tone()} />}>
+        {(current) => (
+          <span class={`task-pr task-pr-${current().tone}`} title={`#${current().number} ${t(current().key)}`}>
+            <Icon name={prChipIcon(current())} class="icon-xs" />
+          </span>
+        )}
+      </Show>
       <span class="task-title">{props.task.title}</span>
       <Show when={props.finished} fallback={<span class="task-age"><Show when={props.pinned}><Icon name="pin" class="icon-xs task-pin" /></Show>{formatAge(props.task.updatedAt, props.now)}</span>}>
         <span class="task-age task-age-new" title={t("task.finishedUnread")}>
@@ -82,9 +93,8 @@ export function TaskRowItem(props: {
         <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
         <Show when={props.comparing}><span class="task-compare">{t("task.compare")}</span></Show>
       </span>
-      <Show when={chip() || props.unread > 0}>
+      <Show when={props.unread > 0}>
         <span class="task-extra">
-          <Show when={chip()}>{(current) => <PrChip chip={current()} />}</Show>
           <MailboxBadge count={props.unread} />
         </span>
       </Show>

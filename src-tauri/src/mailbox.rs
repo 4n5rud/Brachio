@@ -378,6 +378,33 @@ pub fn mailbox_inbox(
         .collect())
 }
 
+/// Marks messages of one terminal read from the inbox, so its agent no longer receives them. With
+/// no ids, every unread message of the terminal is marked.
+#[tauri::command]
+pub fn mailbox_dismiss(
+    app: AppHandle,
+    database: State<'_, Database>,
+    tab_key: String,
+    ids: Option<Vec<String>>,
+) -> Result<(), String> {
+    let mut connection = database.lock()?;
+    let ids = match ids {
+        Some(ids) => ids,
+        None => peek_unread(&connection, &tab_key, usize::MAX >> 1)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|message| message.id)
+            .collect(),
+    };
+    mark_read(&mut connection, &ids, crate::pr_status::now_ms())
+        .map_err(|error| error.to_string())?;
+    drop(connection);
+    if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+        tracing::debug!(%error, "could not tell the window about dismissed mail");
+    }
+    Ok(())
+}
+
 /// Marks messages read after the answer that carried them was written to the client.
 pub fn mark_delivered(app: &AppHandle, ids: &[String]) {
     let database = app.state::<Database>();

@@ -8,6 +8,8 @@ import { Board } from "./components/Board";
 import { answerApproval, answerApprovalAlways, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
+import { SystemCheckHost, openSystemCheck } from "./components/SystemCheckDialog";
+import { firstRunPending } from "./lib/system-check";
 import { alertSoundKind, playAlertSound } from "./lib/alert-sound";
 import { quitConfirmEnabled, runningAgentKeys, setQuitConfirmEnabled } from "./lib/quit-confirm";
 import { EmptyRepo } from "./components/EmptyRepo";
@@ -372,7 +374,7 @@ export function App() {
     if (id !== undefined) setRecent((current) => touchRecent(current, id));
   });
   const findTask = (id: string) => tasks().find((task) => task.id === id);
-  const needsYou = createMemo(() => rows().filter((task) => taskGroup(task.status) === "needs").length);
+  const needsYou = createMemo(() => rows().filter((task) => attentionOf(task.status, false) === "blocked").length);
   createEffect(() => {
     if (!inTauri) return;
     const count = notificationSettings().badge ? needsYou() : 0;
@@ -972,6 +974,13 @@ export function App() {
       const trayListener = listen<string>("tray-open-task", ({ payload: id }) => {
         if (findTask(id)) open(id);
       });
+      if (firstRunPending()) openSystemCheck();
+      const activateListener = listen("tray-activate", () => {
+        const next = nextAttentionId(rows().filter((task) => taskGroup(task.status) === "needs"),
+          (task) => attentionOf(task.status, false), undefined);
+        if (next) open(next);
+      });
+      onCleanup(() => { void activateListener.then((unlisten) => unlisten(), () => {}); });
       const quitListener = listen("quit-requested", () => void requestQuit().catch(report));
       onCleanup(() => { void quitListener.then((unlisten) => unlisten(), () => {}); });
       const closeListener = getCurrentWindow().onCloseRequested(async (event) => {
@@ -1344,6 +1353,7 @@ export function App() {
       </Show>
       <ConfirmHost />
       <QuitConfirmHost />
+      <SystemCheckHost />
       <ToastHost />
     </div>
   );
