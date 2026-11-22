@@ -9,6 +9,7 @@ import { AGENT_NAME } from "../lib/tasks";
 import { AgentIcon } from "./AgentIcon";
 import { statusTone, type AgentState } from "../lib/status";
 import { Icon } from "./Icon";
+import { ShellIcon } from "./BrandIcon";
 import { MailboxBadge } from "./MailboxBadge";
 import { ApprovalBar } from "./ApprovalBar";
 import { MailboxInbox } from "./MailboxInbox";
@@ -132,6 +133,8 @@ export function TaskView(props: {
   const isTabSelected = (id: string, tab: TaskTab) => selectedTab(id)?.id === tab.id;
   const isSecondarySelected = (id: string) => selectedTab(id) !== undefined;
   const secondaryWriters = new Map<string, PrepareDraft>();
+  const shellOf = (id: string | null) =>
+    installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id) ?? { id: id ?? "" };
   const shellName = (id: string | null) =>
     installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id)?.name ?? t("task.shell");
   const labels = createMemo(() => tabLabels(props.task.agent, tabsOf(props.task.id), shellName));
@@ -378,7 +381,7 @@ export function TaskView(props: {
                 aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
                 onClick={() => { selectTab(props.task.id, tab); }}
                 onContextMenu={(event) => { event.preventDefault(); setTabActions({ anchor: event.currentTarget, tab }); }}>
-                <Show when={tab.kind !== "shell"} fallback={<Icon name="terminal" class="icon-sm" />}>
+                <Show when={tab.kind !== "shell"} fallback={<ShellIcon shell={shellOf(tab.shell)} class="icon-sm" />}>
                   <StatusGlyph tone={tabTone(tabKey(props.task.id, tab))} />
                   <AgentIcon agent={UI_AGENT[tab.kind as Exclude<TabKind, "shell">]} />
                 </Show>
@@ -465,7 +468,7 @@ export function TaskView(props: {
                 </MenuItem>
               }>
                 {(shell) => (
-                  <MenuItem icon={<Icon name="terminal" class="icon-sm" />} disabled={!tabsReady() || tabsSaving()}
+                  <MenuItem icon={<ShellIcon shell={shell} class="icon-sm" />} disabled={!tabsReady() || tabsSaving()}
                     onSelect={() => { setTabMenu(undefined); void openTab({ kind: "shell", shell: shell.id }); }}>
                     {shell.name}
                     <RecentChip show={sameSpec({ kind: "shell", shell: shell.id }, quickSpec())
