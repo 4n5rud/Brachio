@@ -8,6 +8,14 @@ interface UnreadRow {
 
 export const MAILBOX_REMINDER = "Brachio message: run brachio check";
 
+/** Tabs whose unread count grew since `before`. */
+export function keysWithNewMail(
+  before: ReadonlyMap<string, number>,
+  after: ReadonlyMap<string, number>,
+): string[] {
+  return [...after].filter(([key, count]) => count > (before.get(key) ?? 0)).map(([key]) => key);
+}
+
 export interface MailboxMessage {
   id: string;
   fromKey: string;
