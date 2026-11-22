@@ -10,6 +10,8 @@ import type { PrChip } from "../lib/pr-status";
 import { FolderRepos } from "./FolderRepos";
 import { watchPrStatuses } from "../lib/pr-status-store";
 import { Icon } from "./Icon";
+import { attentionOf, sortByAttention } from "../lib/attention";
+import { prioritySortEnabled } from "../lib/sidebar-sort";
 import { TaskRowItem } from "./TaskRow";
 import { createReorder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
@@ -149,7 +151,13 @@ export function TaskList(props: {
         <For each={groupIds()}>
           {(id) => {
             const name = () => projects().get(id) ?? t("sidebar.folderWorkspaces");
-            const tasks = () => orderWithCompare(orderWithChildren(pinnedFirst(tasksByGroup().get(id) ?? [], props.pinned ?? new Set())));
+            const tasks = () => {
+              const listed = tasksByGroup().get(id) ?? [];
+              const ordered = prioritySortEnabled()
+                ? sortByAttention(listed, (task) => attentionOf(task.status, props.finishedUnread?.(task.id) ?? false))
+                : listed;
+              return orderWithCompare(orderWithChildren(pinnedFirst(ordered, props.pinned ?? new Set())));
+            };
             const expanded = () => !collapsed().has(id);
             let card: HTMLElement | undefined;
             const taskReorder = createReorder({
