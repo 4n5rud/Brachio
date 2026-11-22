@@ -22,6 +22,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0015_task_pins.sql"),
     include_str!("../migrations/0016_task_compare_group.sql"),
     include_str!("../migrations/0017_task_tabs.sql"),
+    include_str!("../migrations/0018_manual_order.sql"),
+    include_str!("../migrations/0019_task_tab_name.sql"),
 ];
 
 /// Why a storage call failed.
@@ -191,5 +193,57 @@ mod tests {
             bad_mode.is_err(),
             "the mode column must reject unknown modes"
         );
+    }
+
+    #[test]
+    fn an_existing_database_keeps_its_order_and_can_then_be_reordered() {
+        let mut connection = Connection::open_in_memory().expect("open");
+        for sql in &MIGRATIONS[..17] {
+            connection.execute_batch(sql).expect("old migration");
+        }
+        connection
+            .pragma_update(None, "user_version", 17)
+            .expect("version");
+        connection
+            .execute_batch(
+                "INSERT INTO repos (id, name, path, default_branch, added_at_ms) VALUES
+                    ('r1', 'one', '/1', 'main', 1), ('r2', 'two', '/2', 'main', 2);
+                 INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+                 VALUES ('t1', 'r1', 't', 'p', 'b1', '/w1', 'active', 1),
+                        ('t2', 'r1', 't', 'p', 'b2', '/w2', 'active', 2);
+                 INSERT INTO task_tabs (task_id, tab_id, kind) VALUES ('t1', 'a', 'shell'), ('t1', 'b', 'shell');",
+            )
+            .expect("old rows");
+
+        migrate(&mut connection).expect("upgrade");
+
+        let repos: Vec<String> = crate::RepoRecord::list(&connection)
+            .expect("repos")
+            .into_iter()
+            .map(|repo| repo.id)
+            .collect();
+        assert_eq!(repos, ["r1", "r2"]);
+        crate::RepoRecord::reorder(&mut connection, &["r2".to_owned(), "r1".to_owned()])
+            .expect("reorder");
+        let repos: Vec<String> = crate::RepoRecord::list(&connection)
+            .expect("repos")
+            .into_iter()
+            .map(|repo| repo.id)
+            .collect();
+        assert_eq!(repos, ["r2", "r1"]);
+        let tasks: Vec<String> = crate::TaskRecord::list_open(&connection)
+            .expect("tasks")
+            .into_iter()
+            .map(|task| task.id)
+            .collect();
+        assert_eq!(tasks, ["t2", "t1"]);
+        crate::reorder_task_tabs(&mut connection, "t1", &["b".to_owned(), "a".to_owned()])
+            .expect("tabs");
+        let tabs: Vec<String> = crate::task_tabs(&connection, "t1")
+            .expect("tabs")
+            .into_iter()
+            .map(|tab| tab.tab_id)
+            .collect();
+        assert_eq!(tabs, ["b", "a"]);
     }
 }

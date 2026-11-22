@@ -1,4 +1,4 @@
-import { Show, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { isMac } from "../lib/shortcut";
 import { openTaskFolder, revealTask } from "../lib/workspace";
@@ -6,7 +6,7 @@ import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
 import { chipOf, type PrChip as PrChipState } from "../lib/pr-status";
 import { prReport } from "../lib/pr-status-store";
 import { statusTone } from "../lib/status";
-import { shortBranch, type TaskRow } from "../lib/tasks";
+import { AGENT_NAME, shortBranch, type AgentKind, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
 import { Icon } from "./Icon";
 import { MailboxBadge } from "./MailboxBadge";
@@ -33,6 +33,13 @@ export function TaskRowItem(props: {
   comparing?: boolean;
   /** Archives the other tasks of the comparison; left out when there is none. */
   onKeepOnly?: () => void;
+  /** Renames the task; the item is left out when missing. */
+  onRename?: () => void;
+  /** Agents the same prompt can be started with in a new task. */
+  duplicateAgents?: readonly AgentKind[];
+  onDuplicate?: (agent: AgentKind) => void;
+  /** Drag and keyboard reorder handlers from the list. */
+  reorder?: Record<string, unknown>;
   pinned?: boolean;
   /** Pins or unpins the task; the menu item is left out when missing. */
   onTogglePin?: () => void;
@@ -59,6 +66,7 @@ export function TaskRowItem(props: {
       aria-haspopup="menu"
       onClick={() => props.onSelect()}
       onContextMenu={(event) => { event.preventDefault(); setMenu(event.currentTarget); }}
+      {...props.reorder}
     >
       <StatusGlyph tone={tone()} />
       <span class="task-title">{props.task.title}</span>
@@ -91,6 +99,18 @@ export function TaskRowItem(props: {
               <MenuItem onSelect={() => act(() => props.onTogglePin?.())}>
                 {props.pinned ? t("taskMenu.unpin") : t("taskMenu.pin")}
               </MenuItem>
+            </Show>
+            <Show when={props.onRename}>
+              <MenuItem onSelect={() => act(() => props.onRename?.())}>{t("taskMenu.rename")}</MenuItem>
+            </Show>
+            <Show when={props.onDuplicate && props.task.prompt}>
+              <For each={props.duplicateAgents ?? []}>
+                {(agent) => (
+                  <MenuItem onSelect={() => act(() => props.onDuplicate?.(agent))}>
+                    {t("taskMenu.duplicate").replace("{agent}", () => AGENT_NAME[agent])}
+                  </MenuItem>
+                )}
+              </For>
             </Show>
             <MenuItem disabled={!props.task.branch}
               onSelect={() => act(() => navigator.clipboard.writeText(props.task.branch ?? ""))}>

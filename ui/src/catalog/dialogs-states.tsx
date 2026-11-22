@@ -66,7 +66,7 @@ export function DialogsStates() {
             activeTaskIds={new Set(["a", "b"])} now={NOW} archived={sheet().empty ? [] : tasks().slice(0, 2).map((task) => ({ ...task, archivedAt: NOW - 3_600_000 }))}
             onRestore={async () => {}} onDelete={async () => {}} mode="system" colorTheme="mint" notifications
             onMode={none} onColorTheme={none} onNotifications={none} onOpen={none} onClose={() => setOpen(undefined)}
-            files={FILES} onInsertFile={none} onCommand={none} repos={REPOS} />}
+            files={FILES} onInsertFile={none} repos={REPOS} />}
       </Show>
       <div class="catalog-cells">
         <Cell cap="Board, columns by status" width={1180}>

@@ -10,6 +10,8 @@ export interface TaskTab {
   kind: TabKind;
   /** The shell a shell tab runs; null is the default shell. */
   shell: string | null;
+  /** A name the user gave the tab; absent keeps the automatic label. */
+  name?: string | null;
 }
 
 /** What the "+" menu opens: an agent, or one of the installed shells. */
@@ -41,7 +43,7 @@ export function tabLabels(
     const base = tab.kind === "shell" ? shellName(tab.shell) : AGENT_NAME[UI_AGENT[tab.kind]];
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
-    labels.set(tab.id, count > 1 ? `${base} ${count}` : base);
+    labels.set(tab.id, tab.name || (count > 1 ? `${base} ${count}` : base));
   }
   return labels;
 }

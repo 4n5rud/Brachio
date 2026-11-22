@@ -82,6 +82,9 @@ pub enum ChildInsertError {
     Store(#[from] StoreError),
 }
 
+/// Longest title a task can be renamed to.
+pub const MAX_TITLE_CHARS: usize = 200;
+
 const COLUMNS: &str =
     "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms, \
      agent_session_id, prompt, parent_task_id, compare_group";
@@ -193,12 +196,69 @@ impl TaskRecord {
     /// Fails when the query fails.
     pub fn list_open(connection: &Connection) -> Result<Vec<Self>, StoreError> {
         let sql = format!(
-            "SELECT {COLUMNS} FROM tasks WHERE archived_at_ms IS NULL ORDER BY created_at_ms DESC"
+            "SELECT {COLUMNS} FROM tasks WHERE archived_at_ms IS NULL ORDER BY sort_order IS NOT NULL, sort_order, created_at_ms DESC"
         );
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([], Self::from_row)?;
         let tasks: Vec<Self> = rows.collect::<Result<_, _>>()?;
         Ok(tasks)
+    }
+
+    /// Gives a task a new title.
+    ///
+    /// # Errors
+    /// Fails with `Invalid` for a blank or over-long title, and `NotFound` for an unknown task.
+    pub fn rename(connection: &Connection, id: &str, title: &str) -> Result<(), StoreError> {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+            return Err(StoreError::Invalid(format!(
+                "A task title needs 1 to {MAX_TITLE_CHARS} characters."
+            )));
+        }
+        let changed = connection.execute(
+            "UPDATE tasks SET title = ?2 WHERE id = ?1",
+            params![id, title],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound {
+                table: "tasks",
+                id: id.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Places the open tasks of one project in the given order.
+    ///
+    /// # Errors
+    /// Fails when an id is unknown or belongs to another project than the first one, and changes
+    /// nothing.
+    pub fn reorder(connection: &mut Connection, ids: &[String]) -> Result<(), StoreError> {
+        let transaction = connection.transaction()?;
+        let mut project: Option<String> = None;
+        for (position, id) in ids.iter().enumerate() {
+            let repo_id: Option<String> = transaction
+                .query_row("SELECT repo_id FROM tasks WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .optional()?
+                .ok_or_else(|| StoreError::NotFound {
+                    table: "tasks",
+                    id: id.clone(),
+                })?;
+            let repo_id = repo_id.unwrap_or_default();
+            if *project.get_or_insert_with(|| repo_id.clone()) != repo_id {
+                return Err(StoreError::Invalid(
+                    "Tasks can only be reordered inside their own project.".to_owned(),
+                ));
+            }
+            transaction.execute(
+                "UPDATE tasks SET sort_order = ?2 WHERE id = ?1",
+                params![id, i64::try_from(position).unwrap_or(i64::MAX)],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Number of tasks, archived or not, in a repository.
@@ -377,6 +437,43 @@ mod tests {
             .collect();
 
         assert_eq!(ids, vec!["t2", "t1"]);
+    }
+
+    #[test]
+    fn renaming_trims_and_refuses_blank_titles() {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert");
+        TaskRecord::rename(&connection, "t1", "  new name ").expect("rename");
+        assert_eq!(
+            TaskRecord::get(&connection, "t1").expect("get").title,
+            "new name"
+        );
+        assert!(TaskRecord::rename(&connection, "t1", "  ").is_err());
+        assert!(TaskRecord::rename(&connection, "missing", "x").is_err());
+    }
+
+    #[test]
+    fn a_manual_order_wins_and_new_tasks_still_come_first() {
+        let mut connection = connection_with_repo();
+        for (id, at) in [("t1", 1), ("t2", 2), ("t3", 3)] {
+            TaskRecord::insert(&connection, &sample(id, at)).expect("insert");
+        }
+        let order = |connection: &Connection| -> Vec<String> {
+            TaskRecord::list_open(connection)
+                .expect("list")
+                .into_iter()
+                .map(|task| task.id)
+                .collect()
+        };
+        TaskRecord::reorder(
+            &mut connection,
+            &["t1".to_owned(), "t3".to_owned(), "t2".to_owned()],
+        )
+        .expect("reorder");
+        assert_eq!(order(&connection), ["t1", "t3", "t2"]);
+        TaskRecord::insert(&connection, &sample("t4", 4)).expect("insert");
+        assert_eq!(order(&connection), ["t4", "t1", "t3", "t2"]);
+        assert!(TaskRecord::reorder(&mut connection, &["nope".to_owned()]).is_err());
     }
 
     #[test]

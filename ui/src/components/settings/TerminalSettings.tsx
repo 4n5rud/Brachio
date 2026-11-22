@@ -11,6 +11,7 @@ import {
   updateTerminalSettings,
   type TerminalSettings as TerminalValues,
 } from "../../lib/terminal-settings";
+import { BrandIcon, ShellIcon, type BrandName } from "../BrandIcon";
 import { SettingRow } from "./SettingRow";
 
 type Range = { min: number; max: number };
@@ -58,6 +59,7 @@ export function TerminalSettings(props: { drafts?: Partial<Record<keyof Terminal
   return (
     <>
       <SettingRow label={t("settings.defaultShell")} hint={t("settings.defaultShellHint")}>
+        <ShellIcon shell={installedShells().find((shell) => chosenShell() === null ? shell.isDefault : shell.id === chosenShell()) ?? { id: "" }} />
         <Select aria-label={t("settings.defaultShell")} value={chosenShell() ?? ""}
           onChange={(event) => chooseShell(event.currentTarget.value || null)}>
           <option value="">{t("settings.systemShell")}</option>
@@ -65,6 +67,7 @@ export function TerminalSettings(props: { drafts?: Partial<Record<keyof Terminal
         </Select>
       </SettingRow>
       <SettingRow label={t("settings.defaultEditor")} hint={t("settings.defaultEditorHint")}>
+        <BrandIcon brand={chosenEditor() as BrandName} fallback="file" />
         <Select aria-label={t("settings.defaultEditor")} value={chosenEditor()}
           onChange={(event) => chooseEditor(event.currentTarget.value)}>
           <option value="">{t("settings.systemEditor")}</option>

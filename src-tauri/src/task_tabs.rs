@@ -15,6 +15,7 @@ pub struct TabInfo {
     id: String,
     kind: &'static str,
     shell: Option<String>,
+    name: Option<String>,
 }
 
 impl From<TaskTab> for TabInfo {
@@ -23,6 +24,7 @@ impl From<TaskTab> for TabInfo {
             id: tab.tab_id,
             kind: tab.kind.as_str(),
             shell: tab.shell_id,
+            name: None,
         }
     }
 }
@@ -36,9 +38,22 @@ pub fn task_open_tabs(
     let mut connection = database.lock()?;
     let tabs = brachio_store::load_task_tabs(&mut connection, &legacy)
         .map_err(|error| error.to_string())?;
+    let names = brachio_store::task_tab_names(&connection).map_err(|error| error.to_string())?;
     Ok(tabs
         .into_iter()
-        .map(|(task, tabs)| (task, tabs.into_iter().map(TabInfo::from).collect()))
+        .map(|(task, tabs)| {
+            let tabs = tabs
+                .into_iter()
+                .map(|tab| {
+                    let name = names.get(&tab.tab_id).cloned();
+                    TabInfo {
+                        name,
+                        ..TabInfo::from(tab)
+                    }
+                })
+                .collect();
+            (task, tabs)
+        })
         .collect())
 }
 
@@ -83,4 +98,27 @@ pub fn task_close_tab(
 ) -> Result<(), String> {
     let connection = database.lock()?;
     brachio_store::close_task_tab(&connection, &task_id, &tab_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn task_rename_tab(
+    database: State<'_, Database>,
+    task_id: String,
+    tab_id: String,
+    name: Option<String>,
+) -> Result<(), String> {
+    let connection = database.lock()?;
+    brachio_store::rename_task_tab(&connection, &task_id, &tab_id, name.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn task_reorder_tabs(
+    database: State<'_, Database>,
+    task_id: String,
+    tab_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut connection = database.lock()?;
+    brachio_store::reorder_task_tabs(&mut connection, &task_id, &tab_ids)
+        .map_err(|error| error.to_string())
 }

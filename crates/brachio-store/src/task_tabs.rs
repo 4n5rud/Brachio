@@ -89,7 +89,7 @@ pub fn load_task_tabs(
     let mut tabs: HashMap<String, Vec<TaskTab>> = HashMap::new();
     {
         let mut statement = transaction
-            .prepare("SELECT tab_id, kind, shell_id, task_id FROM task_tabs ORDER BY rowid")?;
+            .prepare("SELECT tab_id, kind, shell_id, task_id FROM task_tabs ORDER BY sort_order IS NULL, sort_order, rowid")?;
         let rows = statement.query_map([], |row| Ok((read_tab(row)?, row.get::<_, String>(3)?)))?;
         for row in rows {
             let (tab, task_id) = row?;
@@ -108,7 +108,8 @@ pub fn load_task_tabs(
 /// Fails when the database cannot be read.
 pub fn task_tabs(connection: &Connection, task_id: &str) -> Result<Vec<TaskTab>, StoreError> {
     let mut statement = connection.prepare(
-        "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1 ORDER BY rowid",
+        "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1
+         ORDER BY sort_order IS NULL, sort_order, rowid",
     )?;
     let rows = statement.query_map([task_id], read_tab)?;
     let mut tabs = Vec::new();
@@ -116,6 +117,75 @@ pub fn task_tabs(connection: &Connection, task_id: &str) -> Result<Vec<TaskTab>,
         tabs.extend(row?);
     }
     Ok(tabs)
+}
+
+/// Longest name a tab can be given.
+pub const MAX_TAB_NAME_CHARS: usize = 60;
+
+/// Names a tab, or clears the name with `None` or blank text so the automatic label returns.
+///
+/// # Errors
+/// Fails with `NotFound` when the tab is not open, or `Invalid` when the name is too long.
+pub fn rename_task_tab(
+    connection: &Connection,
+    task_id: &str,
+    tab_id: &str,
+    name: Option<&str>,
+) -> Result<(), StoreError> {
+    let name = name.map(str::trim).filter(|text| !text.is_empty());
+    if name.is_some_and(|text| text.chars().count() > MAX_TAB_NAME_CHARS) {
+        return Err(StoreError::Invalid(format!(
+            "A tab name can have at most {MAX_TAB_NAME_CHARS} characters."
+        )));
+    }
+    let changed = connection.execute(
+        "UPDATE task_tabs SET name = ?3 WHERE task_id = ?1 AND tab_id = ?2",
+        params![task_id, tab_id, name],
+    )?;
+    if changed == 0 {
+        return Err(StoreError::NotFound {
+            table: "task_tabs",
+            id: tab_id.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// The names users gave tabs, by tab id.
+///
+/// # Errors
+/// Fails when the database cannot be read.
+pub fn task_tab_names(connection: &Connection) -> Result<HashMap<String, String>, StoreError> {
+    let mut statement =
+        connection.prepare("SELECT tab_id, name FROM task_tabs WHERE name IS NOT NULL")?;
+    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Places a task's open tabs in the given order. Tabs left out keep sorting after them.
+///
+/// # Errors
+/// Fails with `NotFound` when a tab is not open on the task, and changes nothing.
+pub fn reorder_task_tabs(
+    connection: &mut Connection,
+    task_id: &str,
+    tab_ids: &[String],
+) -> Result<(), StoreError> {
+    let transaction = connection.transaction()?;
+    for (position, tab_id) in tab_ids.iter().enumerate() {
+        let changed = transaction.execute(
+            "UPDATE task_tabs SET sort_order = ?3 WHERE task_id = ?1 AND tab_id = ?2",
+            params![task_id, tab_id, i64::try_from(position).unwrap_or(i64::MAX)],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound {
+                table: "task_tabs",
+                id: tab_id.clone(),
+            });
+        }
+    }
+    transaction.commit()?;
+    Ok(())
 }
 
 /// One open tab of a task, if it is still open.
@@ -219,7 +289,8 @@ mod tests {
 
     use super::{
         add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
-        retired_secondary_tabs, task_tab, task_tabs, TabKind, TaskTab,
+        rename_task_tab, retired_secondary_tabs, task_tab, task_tab_names, task_tabs, TabKind,
+        TaskTab,
     };
     use crate::database::open_in_memory;
     use crate::{NewRepo, NewTask, RepoRecord, TaskRecord};
@@ -284,6 +355,18 @@ mod tests {
         assert!(retired_secondary_tabs(&connection, "t1")
             .expect("list")
             .is_empty());
+    }
+
+    #[test]
+    fn a_tab_name_is_kept_trimmed_and_cleared_by_blank_text() {
+        let connection = connection_with_task();
+        add_task_tab(&connection, "t1", &tab("a", TabKind::Shell)).expect("tab");
+        rename_task_tab(&connection, "t1", "a", Some("  build  ")).expect("rename");
+        assert_eq!(task_tab_names(&connection).expect("names")["a"], "build");
+        assert!(rename_task_tab(&connection, "t1", "a", Some(&"x".repeat(61))).is_err());
+        assert!(rename_task_tab(&connection, "t1", "gone", Some("x")).is_err());
+        rename_task_tab(&connection, "t1", "a", Some(" ")).expect("clear");
+        assert!(task_tab_names(&connection).expect("names").is_empty());
     }
 
     #[test]

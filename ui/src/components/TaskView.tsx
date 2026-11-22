@@ -9,6 +9,7 @@ import { AGENT_NAME } from "../lib/tasks";
 import { AgentIcon } from "./AgentIcon";
 import { statusTone, type AgentState } from "../lib/status";
 import { Icon } from "./Icon";
+import { ShellIcon } from "./BrandIcon";
 import { MailboxBadge } from "./MailboxBadge";
 import { ApprovalBar } from "./ApprovalBar";
 import { MailboxInbox } from "./MailboxInbox";
@@ -29,7 +30,11 @@ import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayo
 import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, type TabKind, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
+import { RenameDialog } from "./RenameDialog";
+import { createReorder, placeInOrder } from "../lib/drag-reorder";
+import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
+import { registerGoToSource } from "../lib/actions";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
 
@@ -62,6 +67,8 @@ export function TaskView(props: {
   requestedTab?: { key: string };
   onSecondaryKeys?: (keys: ReadonlyMap<string, readonly string[]>) => void;
   onSecondaryClosed?: (taskId: string, key: string) => void;
+  /** Asked before the last tab of a task closes; resolves false to keep it. */
+  confirmCloseLastTab?: (taskId: string) => Promise<boolean>;
   onAnswer?: (id: number, allow: boolean) => void;
   /** Allows the request and remembers it for this task for the app session. */
   onAnswerAlways?: (id: number) => void;
@@ -129,9 +136,21 @@ export function TaskView(props: {
   const isTabSelected = (id: string, tab: TaskTab) => selectedTab(id)?.id === tab.id;
   const isSecondarySelected = (id: string) => selectedTab(id) !== undefined;
   const secondaryWriters = new Map<string, PrepareDraft>();
+  const shellOf = (id: string | null) =>
+    installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id) ?? { id: id ?? "" };
   const shellName = (id: string | null) =>
     installedShells().find((shell) => id === null ? shell.isDefault : shell.id === id)?.name ?? t("task.shell");
   const labels = createMemo(() => tabLabels(props.task.agent, tabsOf(props.task.id), shellName));
+  onCleanup(registerGoToSource(() => tabsOf(props.task.id).map((tab) => ({
+    id: `tab:${props.task.id}:${tab.id}`,
+    projectId: props.task.repoId ?? "",
+    projectName: "",
+    kind: tab.kind === "shell" ? "terminal" as const : "agent" as const,
+    title: labels().get(tab.id) ?? "",
+    path: props.task.worktreePath ?? undefined,
+    tone: tab.kind === "shell" ? "unknown" as const : statusTone(props.task.status),
+    focus: () => selectTab(props.task.id, tab),
+  }))));
   const agentTabs = (id: string) => tabsOf(id).filter((tab) => tab.kind !== "shell");
   createEffect(() => {
     props.onSecondaryKeys?.(new Map([...tabsByTask()].map(([id, list]) =>
@@ -173,6 +192,7 @@ export function TaskView(props: {
   const closeTab = async (tab: TaskTab) => {
     const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
+    if (tabsOf(id).length === 1 && props.confirmCloseLastTab && !(await props.confirmCloseLastTab(id))) return;
     setTabsSaving(true);
     setTabError("");
     try {
@@ -188,6 +208,41 @@ export function TaskView(props: {
       setTabsSaving(false);
     }
   };
+  const [tabActions, setTabActions] = createSignal<{ anchor: HTMLElement; tab: TaskTab }>();
+  const [renamingTab, setRenamingTab] = createSignal<TaskTab>();
+  const renameTab = (tab: TaskTab, name: string) => {
+    const id = props.task.id;
+    setRenamingTab(undefined);
+    const stored = name === "" ? null : name;
+    const update = (value: string | null | undefined) =>
+      setTabsByTask((current) => new Map(current).set(id, tabsOf(id).map((other) => (other.id === tab.id ? { ...other, name: value } : other))));
+    const before = tab.name;
+    update(stored);
+    invoke("task_rename_tab", { taskId: id, tabId: tab.id, name: stored }).catch((failure) => {
+      update(before);
+      setTabError(String(failure));
+    });
+  };
+  const closeTabs = async (tabs: readonly TaskTab[]) => {
+    for (const tab of tabs) await closeTab(tab);
+  };
+  let tabRow: HTMLDivElement | undefined;
+  const tabReorder = createReorder({
+    axis: "x",
+    ids: () => tabsOf(props.task.id).map((tab) => tab.id),
+    container: () => tabRow,
+    scroller: () => tabRow,
+    label: (tabId) => labels().get(tabId) ?? "",
+    onReorder: (ids) => {
+      const id = props.task.id;
+      const before = tabsOf(id);
+      setTabsByTask((current) => new Map(current).set(id, placeInOrder(before, ids)));
+      invoke("task_reorder_tabs", { taskId: id, tabIds: ids }).catch((failure) => {
+        setTabsByTask((current) => new Map(current).set(id, before));
+        setTabError(String(failure));
+      });
+    },
+  });
   const quickSpec = (): TabSpec => recentSpec() ?? { kind: "shell", shell: null };
   onCleanup(onNewTabRequest((id) => {
     if (id === props.task.id && props.task.worktreePath) void openTab(quickSpec());
@@ -323,7 +378,7 @@ export function TaskView(props: {
               onClick={() => props.onArchive?.()} />
           </Show>
         </>} />
-      <div class="tabs" role="tablist">
+      <div class="tabs" role="tablist" ref={tabRow}>
         <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={tabTone(terminalKey(props.task.id, "agent"))} />
@@ -334,11 +389,13 @@ export function TaskView(props: {
         <For each={tabsOf(props.task.id)}>
           {(tab) => (
             <div class="tab-item" role="presentation"
-              data-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}>
-              <button class="tab" role="tab" type="button"
+              data-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
+              {...tabReorder.item(tab.id)}>
+              <button class="tab" role="tab" type="button" aria-haspopup="menu"
                 aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
-                onClick={() => { selectTab(props.task.id, tab); }}>
-                <Show when={tab.kind !== "shell"} fallback={<Icon name="terminal" class="icon-sm" />}>
+                onClick={() => { selectTab(props.task.id, tab); }}
+                onContextMenu={(event) => { event.preventDefault(); setTabActions({ anchor: event.currentTarget, tab }); }}>
+                <Show when={tab.kind !== "shell"} fallback={<ShellIcon shell={shellOf(tab.shell)} class="icon-sm" />}>
                   <StatusGlyph tone={tabTone(tabKey(props.task.id, tab))} />
                   <AgentIcon agent={UI_AGENT[tab.kind as Exclude<TabKind, "shell">]} />
                 </Show>
@@ -372,6 +429,37 @@ export function TaskView(props: {
             aria-expanded={inboxTab() === key()}
             onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
         </Show>
+        <Show when={tabActions()}>
+          {(current) => (
+            <Menu anchor={current().anchor} label={t("tabMenu.label")} onClose={() => setTabActions(undefined)}>
+              <MenuItem onSelect={() => { setTabActions(undefined); setRenamingTab(current().tab); }}>{t("tabMenu.rename")}</MenuItem>
+              <MenuItem disabled={!tabsReady() || tabsSaving()}
+                onSelect={() => { setTabActions(undefined); void openTab({ kind: current().tab.kind, shell: current().tab.shell }); }}>
+                {t("tabMenu.duplicate")}
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem disabled={tabsSaving()} onSelect={() => { setTabActions(undefined); void closeTab(current().tab); }}>{t("tabMenu.close")}</MenuItem>
+              <MenuItem disabled={tabsSaving() || tabsOf(props.task.id).length < 2}
+                onSelect={() => { setTabActions(undefined); void closeTabs(tabsOf(props.task.id).filter((tab) => tab.id !== current().tab.id)); }}>
+                {t("tabMenu.closeOthers")}
+              </MenuItem>
+              <MenuItem disabled={tabsSaving() || tabsOf(props.task.id).findIndex((tab) => tab.id === current().tab.id) === tabsOf(props.task.id).length - 1}
+                onSelect={() => {
+                  const tabs = tabsOf(props.task.id);
+                  setTabActions(undefined);
+                  void closeTabs(tabs.slice(tabs.findIndex((tab) => tab.id === current().tab.id) + 1));
+                }}>
+                {t("tabMenu.closeRight")}
+              </MenuItem>
+            </Menu>
+          )}
+        </Show>
+        <Show when={renamingTab()}>
+          {(tab) => (
+            <RenameDialog title={t("rename.tab")} value={labels().get(tab().id) ?? ""} maxLength={60} allowEmpty
+              hint={t("rename.tabHint")} onSave={(name) => renameTab(tab(), name)} onClose={() => setRenamingTab(undefined)} />
+          )}
+        </Show>
         <Show when={tabMenu()}>
           {(anchor) => (
             <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
@@ -394,7 +482,7 @@ export function TaskView(props: {
                 </MenuItem>
               }>
                 {(shell) => (
-                  <MenuItem icon={<Icon name="terminal" class="icon-sm" />} disabled={!tabsReady() || tabsSaving()}
+                  <MenuItem icon={<ShellIcon shell={shell} class="icon-sm" />} disabled={!tabsReady() || tabsSaving()}
                     onSelect={() => { setTabMenu(undefined); void openTab({ kind: "shell", shell: shell.id }); }}>
                     {shell.name}
                     <RecentChip show={sameSpec({ kind: "shell", shell: shell.id }, quickSpec())

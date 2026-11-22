@@ -21,7 +21,8 @@ One version, in two files that must match: `[workspace.package] version` in `Car
    ```
 
 3. The **Release** workflow checks that the tag matches both version files and is on `main`, drafts a GitHub release with generated notes, builds the Windows and macOS installers and attaches them.
-4. Open the draft. Read the notes, install the build on a real machine, and publish. A draft that should not ship is deleted together with its tag.
+4. Update the download links in `README.md` and `docs/readme/README.*.md` to the new version in a small pull request, merged right after you publish.
+5. Open the draft. Read the notes, install the build on a real machine, and publish. A draft that should not ship is deleted together with its tag.
 
 ## Release notes
 

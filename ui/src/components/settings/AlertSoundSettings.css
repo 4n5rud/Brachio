@@ -1,0 +1,7 @@
+.sound-volume {
+  width: 120px;
+  accent-color: var(--color-accent);
+}
+.sound-file {
+  display: none;
+}

@@ -16,7 +16,6 @@ import { FileRow } from "./FileRow";
 import { InspectorNote } from "./InspectorNote";
 import { InspectorSection } from "./InspectorSection";
 import { TaskFiles } from "./TaskFiles";
-import { TaskQaRun } from "./TaskQaRun";
 import { TaskOrchestration } from "./TaskOrchestration";
 import { TaskActivityList } from "./TaskActivityList";
 import { TaskAlwaysAllow } from "./TaskAlwaysAllow";
@@ -30,7 +29,7 @@ import { discardTaskFile, discardTaskHunk } from "../lib/workspace";
 /** How often the open Activity tab reloads, since the core records events the interface never sees. */
 const ACTIVITY_REFRESH_MS = 5_000;
 
-type Pane = "changes" | "files" | "qa" | "tasks" | "activity";
+type Pane = "changes" | "files" | "tasks" | "activity";
 
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: {
@@ -90,7 +89,6 @@ export function Inspector(props: {
   const tabs = (): IconTab<Pane>[] => [
     ...(isGit() ? [{ value: "changes" as const, label: t("inspector.changes"), icon: "diff" as const }] : []),
     { value: "files", label: t("files.title"), icon: "folder" as const },
-    { value: "qa", label: t("inspector.qa"), icon: "checkCircle" as const },
     ...(isLead() ? [{ value: "tasks" as const, label: t("inspector.tasks"), icon: "list" as const }] : []),
     { value: "activity", label: t("inspector.activity"), icon: "activity" as const },
   ];
@@ -103,7 +101,12 @@ export function Inspector(props: {
         <Match when={pane() === "files"}>
           <Show when={props.task.worktreePath && props.task.id} keyed
             fallback={<InspectorSection title={t("files.title")}><InspectorNote>{t("files.empty")}</InspectorNote></InspectorSection>}>
-            {(id) => <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />}
+            {(id) => (
+              <>
+                <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
+                <TaskPorts taskId={id} />
+              </>
+            )}
           </Show>
         </Match>
         <Match when={pane() === "changes"}>
@@ -173,22 +176,6 @@ export function Inspector(props: {
             </Show>
           </div>
         </Match>
-        <Match when={pane() === "qa"}>
-          <Show when={props.task.qa}>
-            {(qa) => (
-              <InspectorSection title={t("inspector.qa.counts")}>
-                <dl class="kv2">
-                  <dt>{t("inspector.qa.passed")}</dt><dd>{qa().passed}</dd>
-                  <dt>{t("inspector.qa.failed")}</dt><dd>{qa().failed}</dd>
-                </dl>
-              </InspectorSection>
-            )}
-          </Show>
-          <Show when={isGit() && props.task.worktreePath && props.task.id} keyed
-            fallback={<InspectorSection title={t("inspector.qa")}><InspectorNote>{t("inspector.qa.none")}</InspectorNote></InspectorSection>}>
-            {(id) => <TaskQaRun taskId={id} onDraft={(text) => props.onDraft(id, text)} />}
-          </Show>
-        </Match>
         <Match when={pane() === "tasks" && isLead()}>
           <section class="inspector-section">
             <TaskOrchestration leadTaskId={props.task.id} />
@@ -199,9 +186,6 @@ export function Inspector(props: {
           <TaskActivityList items={history.latest?.id === props.task.id ? history.latest.items : []} now={props.now} />
         </Match>
       </Switch>
-      <Show when={props.task.worktreePath && props.task.id} keyed>
-        {(id) => <TaskPorts taskId={id} />}
-      </Show>
     </aside>
   );
 }

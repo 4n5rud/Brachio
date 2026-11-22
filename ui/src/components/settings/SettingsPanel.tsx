@@ -3,7 +3,10 @@ import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
 import { isMac } from "../../lib/shortcut";
+import { prioritySortEnabled, updatePrioritySort } from "../../lib/sidebar-sort";
 import { keepAwakeEnabled, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
+import { AlertSoundSettings } from "./AlertSoundSettings";
+import { quitConfirmEnabled, setQuitConfirmEnabled } from "../../lib/quit-confirm";
 import { notificationSettings, updateNotificationSettings } from "../../lib/notification-settings";
 import { openLogFolder } from "../../lib/workspace";
 import { Icon, type IconName } from "../Icon";
@@ -185,10 +188,14 @@ export function SettingsPanel(props: {
             <LanguageRow />
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
+            <Toggle checked={prioritySortEnabled()} label={t("settings.prioritySort")} hint={t("settings.prioritySortHint")}
+              onChange={updatePrioritySort} />
             <Show when={keepAwakeSupported()}>
               <Toggle checked={keepAwakeEnabled()} label={t("settings.keepAwake")} hint={t("settings.keepAwakeHint")}
                 onChange={updateKeepAwake} />
             </Show>
+            <Toggle checked={quitConfirmEnabled()} label={t("settings.confirmQuit")} hint={t("settings.confirmQuitHint")}
+              onChange={setQuitConfirmEnabled} />
             <Show when={"__TAURI_INTERNALS__" in window}><LogFilesRow /></Show>
             </SettingsGroup>
           </Match>
@@ -215,6 +222,7 @@ export function SettingsPanel(props: {
             <Toggle checked={notificationSettings().badge} label={t("settings.notifyBadge")}
               hint={t("settings.notifyBadgeHint")} onChange={(badge) => updateNotificationSettings({ badge })} />
             </SettingsGroup>
+            <SettingsGroup><AlertSoundSettings /></SettingsGroup>
           </Match>
           <Match when={page() === "shortcuts"}>
             <ShortcutList platforms="both" />

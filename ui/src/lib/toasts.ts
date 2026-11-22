@@ -11,6 +11,8 @@ export interface ToastInput {
   action?: { label: string; onClick: () => void };
   /** Label of the dismiss button; defaults to the generic one. */
   dismissLabel?: string;
+  /** Stays this many milliseconds even with an action; undo toasts use it. */
+  lifetimeMs?: number;
   /** Called when the toast leaves, by the person or by time. */
   onDismiss?: () => void;
 }
@@ -22,7 +24,8 @@ export interface ToastItem extends ToastInput {
 export const CONFIRMATION_MS = 3000;
 
 /** How long a toast stays: confirmations leave on their own; errors and toasts with an action wait. */
-export function toastLifetime(toast: Pick<ToastInput, "tone" | "action">): number | null {
+export function toastLifetime(toast: Pick<ToastInput, "tone" | "action" | "lifetimeMs">): number | null {
+  if (toast.lifetimeMs) return toast.lifetimeMs;
   if (toast.tone === "error" || toast.action) return null;
   return CONFIRMATION_MS;
 }
