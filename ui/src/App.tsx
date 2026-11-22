@@ -64,6 +64,7 @@ import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./l
 import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import { statusTone, type AgentState } from "./lib/status";
+import { recordTurnBoundary, turnActive } from "./lib/checkpoints";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
 import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
 import { sendShellInput } from "./lib/shell-input";
@@ -600,7 +601,10 @@ export function App() {
     if (!task || !activeAgentKey(taskId, sessionKey)) return;
     const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
     const at = Date.now();
+    const taskActive = () => [...(live().get(taskId)?.values() ?? [])].some((report) => turnActive(report.status));
+    const wasActive = taskActive();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    if (inTauri && wasActive !== taskActive()) void recordTurnBoundary(taskId, taskActive());
     const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
     if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     const key = notificationKey(previous, status);
