@@ -84,6 +84,7 @@ describe("handoff review", () => {
     branch: `brachio/${id}`,
     state,
     reason: null,
+    startBlocked: false,
     dependencies: [],
     handoff: null,
     ...extra,

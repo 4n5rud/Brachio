@@ -28,6 +28,7 @@ import { onShellInput } from "../lib/shell-input";
 import { typedSinceSubmit } from "../lib/typed-input";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 import { silenceDeviceAttributes } from "../lib/terminal-queries";
+import { requestSelectionSend } from "../lib/selection-send";
 
 /** What to run. Without it the pane stays an empty terminal. */
 export interface TerminalSession {
@@ -356,7 +357,7 @@ export function TerminalPane(props: {
           else if (resume) setContinuity(opened.resumed ? "terminal.conversationResuming" : "terminal.newConversation");
           // The size may have changed while the session was starting.
           void opened.resize(term.rows, term.cols).catch(() => {});
-          if (opened.promptDelivery === "type_in") typeInPrompt = initialPrompt;
+          if (opened.promptDelivery === "type_in") typeInPrompt = opened.firstPrompt ?? initialPrompt;
           // A shell that was already running has had its setup typed in before.
           else if (initialInputPending !== null && !opened.resumed) typeInPrompt = initialInputPending;
           initialInputPending = null;
@@ -536,6 +537,21 @@ export function TerminalPane(props: {
       updateTerminalSettings({ fontSize: Math.min(FONT_SIZE_RANGE.max, Math.max(FONT_SIZE_RANGE.min, size)) });
     };
     const clearScreen = () => term.clear();
+    const taskOfSession = session?.key?.split(":")[0];
+    const sendSelection = (x: number, y: number) => {
+      if (!taskOfSession || !session?.key || !term.hasSelection()) return;
+      requestSelectionSend({ taskId: taskOfSession, sourceKey: session.key, text: term.getSelection(), x, y });
+    };
+    const sendSelectionFromKeys = () => {
+      const box = host.getBoundingClientRect();
+      sendSelection(box.left + 24, box.top + 24);
+    };
+    const selectionMenu = (event: MouseEvent) => {
+      if (!term.hasSelection() || !taskOfSession) return;
+      event.preventDefault();
+      sendSelection(event.clientX, event.clientY);
+    };
+    host.addEventListener("contextmenu", selectionMenu);
     // Links light up only while Ctrl (⌘ on macOS) is held, so plain clicks still select text.
     let modifierHeld = false;
     const trackModifier = (event: KeyboardEvent | MouseEvent) => {
@@ -607,6 +623,7 @@ export function TerminalPane(props: {
         if (name === "-" || name === "_") return handled(() => changeFontSize(-1));
         if (name === "0") return handled(() => changeFontSize(0));
         if (name === "k" && (isMac ? !event.shiftKey : event.shiftKey)) return handled(clearScreen);
+        if (name === "e" && event.shiftKey && term.hasSelection()) return handled(sendSelectionFromKeys);
       }
       const key = event.key.toLowerCase();
       if (key === "v") return false; // Let the WebView dispatch the native paste event.
@@ -655,6 +672,8 @@ export function TerminalPane(props: {
       onCleanup(registerActions(
         { id: "terminal.search", label: () => t("terminal.search"), group, keys: isMac ? "⌘F" : "Ctrl+F", run: () => { setSearching(true); } },
         { id: "terminal.clear", label: () => t("terminal.clear"), group, keys: isMac ? "⌘K" : "Ctrl+Shift+K", run: clearScreen },
+        { id: "terminal.sendSelection", label: () => t("selection.send"), group, keys: isMac ? "⌘⇧E" : "Ctrl+Shift+E",
+          available: () => term.hasSelection(), run: sendSelectionFromKeys },
         { id: "terminal.fontBigger", label: () => t("terminal.fontBigger"), group, keys: isMac ? "⌘+" : "Ctrl++", run: () => changeFontSize(1) },
         { id: "terminal.fontSmaller", label: () => t("terminal.fontSmaller"), group, keys: isMac ? "⌘-" : "Ctrl+-", run: () => changeFontSize(-1) },
         { id: "terminal.fontReset", label: () => t("terminal.fontReset"), group, keys: isMac ? "⌘0" : "Ctrl+0", run: () => changeFontSize(0) },
@@ -680,6 +699,7 @@ export function TerminalPane(props: {
       keys.dispose();
       observer.disconnect();
       host.removeEventListener("paste", pasteClipboard, true);
+      host.removeEventListener("contextmenu", selectionMenu);
       input.dispose();
       resized.dispose();
       stopWebgl();

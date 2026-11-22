@@ -1,6 +1,7 @@
 import { Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { DiffStat } from "./ui/DiffStat";
+import { StatusGlyph } from "./ui/StatusBadge";
 import "./FileRow.css";
 
 export type FileMark = "A" | "M" | "D" | "R" | "U" | "C" | "failed";
@@ -18,6 +19,8 @@ export function FileRow(props: {
   actionLabel?: string;
   onAction?: () => void;
   actionDisabled?: boolean;
+  /** The verb is running: shows the working arc and disables it. */
+  actionBusy?: boolean;
   /** Makes the whole row a button, for lists a person picks from. */
   onSelect?: () => void;
   selected?: boolean;
@@ -42,8 +45,9 @@ export function FileRow(props: {
       </Show>
       <Show when={props.actionLabel}>
         {(label) => (
-          <button type="button" class="act" disabled={props.actionDisabled} onClick={() => props.onAction?.()}>
-            {label()}
+          <button type="button" class="act" disabled={props.actionDisabled || props.actionBusy} aria-busy={props.actionBusy ? "true" : undefined}
+            onClick={() => props.onAction?.()}>
+            <Show when={props.actionBusy}><StatusGlyph tone="working" /></Show>{label()}
           </button>
         )}
       </Show>

@@ -1,9 +1,11 @@
 import { Input, TextArea } from "./ui/Input";
 import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
 import { For, Show, createSignal, type JSX } from "solid-js";
 import { t } from "../i18n";
 import { requestShell } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
+import { holdMinimum } from "../lib/async-action";
 import { openExternalLink } from "../lib/pr-status";
 import { prReport, refreshPrStatus } from "../lib/pr-status-store";
 import type { DiffFile } from "../lib/diff";
@@ -12,6 +14,15 @@ import type { GitRunner } from "../lib/task-git-runner";
 import { FileRow } from "./FileRow";
 import { InspectorNote, OutputLog } from "./InspectorNote";
 import { ActionRow, InspectorSection } from "./InspectorSection";
+
+/** A disabled control cannot be hovered, so its reason sits on a wrapper. */
+function Reason(props: { text?: string; children: JSX.Element }) {
+  return (
+    <Show when={props.text} fallback={props.children}>
+      {(text) => <Tooltip label={text()}>{(tip) => <span {...tip} class="reason-wrap">{props.children}</span>}</Tooltip>}
+    </Show>
+  );
+}
 
 export type Outcome = { ok: string } | { failure: GitFailure } | undefined;
 
@@ -45,8 +56,11 @@ export function TaskGitActions(props: {
   const [commitOutcome, setCommitOutcome] = createSignal<Outcome>(props.initial?.commit);
   const [pushOutcome, setPushOutcome] = createSignal<Outcome>(props.initial?.push);
   const [prOutcome, setPrOutcome] = createSignal<Outcome>(props.initial?.pr);
+  const [working, setWorking] = createSignal<string | undefined>();
   const busy = () => props.runner.busy();
   const blocked = () => props.conflicts.length > 0;
+  const commitReason = () => (blocked() ? t("git.conflictsBlock") : !message().trim() ? t("git.reasonMessage") : undefined);
+  const prReason = () => (failureOf(prOutcome())?.kind === "exists" ? t("git.prExists") : !prTitle().trim() ? t("git.reasonPrTitle") : undefined);
   const fail = (error: unknown) => pushToast({ tone: "error", title: t("error.title"), message: String(error) });
   const statOf = (path: string) => props.files.find((file) => file.path === path);
   const existing = () => prReport(props.taskId)?.snapshot ?? undefined;
@@ -69,13 +83,23 @@ export function TaskGitActions(props: {
   };
 
   const stage = async (action: "stageFile" | "unstageFile", path: string) => {
-    const result = await props.runner.run({ action, path });
-    if (result && !result.ok) fail(result.failure.output);
+    setWorking(path);
+    try {
+      const result = await holdMinimum(props.runner.run({ action, path }));
+      if (result && !result.ok) fail(result.failure.output);
+    } finally {
+      setWorking(undefined);
+    }
   };
 
   const stageTracked = async () => {
-    const result = await props.runner.run({ action: "stageTracked" });
-    if (result && !result.ok) fail(result.failure.output);
+    setWorking("stage");
+    try {
+      const result = await holdMinimum(props.runner.run({ action: "stageTracked" }));
+      if (result && !result.ok) fail(result.failure.output);
+    } finally {
+      setWorking(undefined);
+    }
   };
 
   const commit = async () => {
@@ -92,7 +116,8 @@ export function TaskGitActions(props: {
 
   const push = async () => {
     setPushOutcome(undefined);
-    const result = await props.runner.run({ action: "push" });
+    setWorking("push");
+    const result = await holdMinimum(props.runner.run({ action: "push" })).finally(() => setWorking(undefined));
     if (!result) return;
     setPushOutcome(result.ok
       ? { ok: t("git.pushed").replace("{branch}", props.branch ?? "") }
@@ -132,18 +157,18 @@ export function TaskGitActions(props: {
           <For each={props.staged}>{(path) => (
             <FileRow mark={statOf(path)?.status ?? "M"} path={path}
               additions={statOf(path)?.additions} deletions={statOf(path)?.deletions}
-              actionLabel={t("git.unstageFile")} actionDisabled={busy()}
+              actionLabel={t("git.unstageFile")} actionDisabled={busy()} actionBusy={working() === path}
               onAction={() => void stage("unstageFile", path)} />
           )}</For>
         </Show>
         <ActionRow>
-          <Button size="sm" disabled={busy()} onClick={() => void stageTracked()}>{t("git.stageTracked")}</Button>
+          <Button size="sm" busy={working() === "stage"} disabled={busy()} onClick={() => void stageTracked()}>{t("git.stageTracked")}</Button>
         </ActionRow>
       </InspectorSection>
       <Show when={props.untracked.length > 0}>
         <InspectorSection title={t("inspector.untracked")}>
           <For each={props.untracked}>{(path) => (
-            <FileRow mark="U" path={path} actionLabel={t("git.stageFile")} actionDisabled={busy()}
+            <FileRow mark="U" path={path} actionLabel={t("git.stageFile")} actionDisabled={busy()} actionBusy={working() === path}
               onAction={() => void stage("stageFile", path)} />
           )}</For>
         </InspectorSection>
@@ -160,8 +185,10 @@ export function TaskGitActions(props: {
           </>
         ))}
         <ActionRow>
-          <Button variant="primary" size="sm" disabled={!message().trim() || blocked()} loading={busy()}
-            onClick={() => void commit()}>{t("git.commit")}</Button>
+          <Reason text={commitReason()}>
+            <Button variant="primary" size="sm" disabled={!message().trim() || blocked()} loading={busy()}
+              onClick={() => void commit()}>{t("git.commit")}</Button>
+          </Reason>
           <Button size="sm" icon="bot" disabled={busy() || requesting() || blocked()}
             onClick={() => void askAgent("commit")}>{t("git.askCommit")}</Button>
           <Show when={failureOf(commitOutcome())}>
@@ -191,7 +218,7 @@ export function TaskGitActions(props: {
           </>
         ))}
         <ActionRow>
-          <Button size="sm" icon="download" disabled={busy()} onClick={() => void push()}>{t("git.push")}</Button>
+          <Button size="sm" icon="download" busy={working() === "push"} disabled={busy()} onClick={() => void push()}>{t("git.push")}</Button>
           <Show when={failureOf(pushOutcome())?.kind === "rejected"}>
             <Button size="sm" icon="terminal" onClick={() => requestShell(props.taskId)}>{t("git.openShell")}</Button>
           </Show>
@@ -213,10 +240,12 @@ export function TaskGitActions(props: {
               </InspectorNote>
             ))}
             <ActionRow>
-              <Button variant="primary" size="sm" icon="pr" type="submit" loading={busy()}
-                disabled={!prTitle().trim() || failureOf(prOutcome())?.kind === "exists"}>
-                {t("git.createPr")}
-              </Button>
+              <Reason text={prReason()}>
+                <Button variant="primary" size="sm" icon="pr" type="submit" loading={busy()}
+                  disabled={!prTitle().trim() || failureOf(prOutcome())?.kind === "exists"}>
+                  {t("git.createPr")}
+                </Button>
+              </Reason>
               <Button size="sm" icon="bot" disabled={busy() || requesting()} onClick={() => void askAgent("pr")}>
                 {t("git.askPr")}
               </Button>

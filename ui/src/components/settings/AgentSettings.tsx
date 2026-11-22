@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createResource, createSignal, type JSX } from "solid-js";
 import { locale, t } from "../../i18n";
+import { useAsyncAction } from "../../lib/async-action";
 import { detectAgents, type InstalledAgent } from "../../lib/terminal";
 import { Button } from "../ui/Button";
 import { confirmDialog } from "../ui/ConfirmDialog";
@@ -75,6 +76,7 @@ function AgentAccount(props: { agent: InstalledAgent }) {
       setBusy(false);
     }
   };
+  const reload = useAsyncAction(async () => { await Promise.all([refetch(), kind === "codex" ? refetchUsage() : undefined]); });
   const changeAuth = (signIn: boolean) => run(async () => {
     if (!signIn && !(await confirmDialog({
       title: t("settings.agentSignOutTitle"),
@@ -92,9 +94,9 @@ function AgentAccount(props: { agent: InstalledAgent }) {
   });
   return (
     <AgentCard kind={kind} version={props.agent.version} path={props.agent.path}
-      account={account.loading ? { state: "checking" } : account() ?? { state: "checking" }}
+      account={account.loading || reload.pending() ? { state: "checking" } : account() ?? { state: "checking" }}
       signingIn={signingIn()} busy={busy()} usage={usage.loading ? undefined : usage()} error={error()}
-      onRefresh={() => { void refetch(); if (kind === "codex") void refetchUsage(); }}
+      onRefresh={() => void reload.run()}
       onSignIn={() => void changeAuth(true)} onSignOut={() => void changeAuth(false)}
       onCancelSignIn={() => void invoke("codex_auth_cancel").catch((failure) => setError(String(failure)))}
       onClaudeUsage={() => void run(() => invoke("open_claude_usage"))} />
@@ -109,7 +111,7 @@ export function AgentList(props: {
   onRefresh: () => void;
   card: (agent: InstalledAgent) => JSX.Element;
 }) {
-  const refresh = () => <Button size="sm" onClick={() => props.onRefresh()}>{t("settings.agentsRefresh")}</Button>;
+  const refresh = () => <Button size="sm" busy={props.agents === undefined && !props.error} onClick={() => props.onRefresh()}>{t("settings.agentsRefresh")}</Button>;
   return (
     <Show when={!props.error} fallback={
       <Notice tone="error" actions={refresh()}>{t("settings.agentsUnavailable").replace("{detail}", props.error ?? "")}</Notice>

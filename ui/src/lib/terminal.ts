@@ -36,6 +36,19 @@ export interface OpenOptions {
 export const forgetUncertainLaunch = (key: string, operationId: string) =>
   invoke<void>("terminal_forget_uncertain_launch", { key, operationId });
 
+/** What a terminal whose program is gone last displayed. */
+export interface SavedScreen {
+  /** Escape sequences that redraw the screen. */
+  ansi: string;
+  rows: number;
+  cols: number;
+  exited: boolean;
+  exitCode: number | null;
+}
+
+export const savedScreen = (key: string) =>
+  invoke<SavedScreen | null>("terminal_saved_screen", { key });
+
 export interface CodexConversation {
   id: string;
   timestamp: string | null;
@@ -74,6 +87,8 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
 
 interface OpenedTerminal {
   id: number;
+  /** The first prompt as the agent gets it, with a child task's preamble above it. */
+  firstPrompt: string | null;
   promptDelivery: PromptDelivery;
   resumed: boolean;
   attached: boolean;
@@ -82,6 +97,8 @@ interface OpenedTerminal {
 
 export interface TerminalHandle {
   id: number;
+  /** Type this, not the caller's own prompt, when `promptDelivery` is `type_in`. */
+  firstPrompt: string | null;
   /** `type_in` means the caller still has to type the prompt. */
   promptDelivery: PromptDelivery;
   /** Whether setup input and first prompts should be suppressed. */
@@ -115,6 +132,7 @@ export async function openTerminal(
   const id = opened.id;
   return {
     id,
+    firstPrompt: opened.firstPrompt ?? null,
     promptDelivery: opened.promptDelivery,
     resumed: opened.resumed,
     attached: opened.attached,

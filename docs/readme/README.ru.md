@@ -1,36 +1,66 @@
 <p align="center"><img src="../../src-tauri/icons/128x128@2x.png" width="96" alt="Brachio"></p>
 <h1 align="center">Brachio</h1>
-<p align="center"><b>Запускайте Claude Code и Codex рядом, каждую задачу — в своём worktree.<br>Brachio зовёт вас, только когда нужно принять решение.</b></p>
+<p align="center"><b>Запускайте несколько кодинг-агентов. Сохраняйте контроль.</b></p>
+<p align="center">Лёгкое настольное рабочее пространство с открытым исходным кодом для Claude Code и Codex.<br>Запускайте агентов параллельно, изолируйте задачи с помощью worktree Git и проверяйте их работу в одном месте.</p>
+
+<p align="center">Windows · macOS (экспериментально) · MIT · Пре-альфа</p>
+<p align="center"><a href="https://github.com/4n5rud/Brachio/releases"><b>Скачать</b></a> · <a href="https://github.com/4n5rud/Brachio/issues/new/choose">Сообщить о проблеме</a></p>
 
 <p align="center">
-  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="release"></a>
-  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/downloads/4n5rud/Brachio/total?color=2ea043" alt="downloads"></a>
-  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Windows%20%7C%20macOS-555?style=flat" alt="Windows | macOS">
-  <a href="../../LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="MIT"></a>
-  <a href="https://x.com/4n5rud08"><img src="https://img.shields.io/badge/X-000000?logo=x&logoColor=white" alt="X"></a>
+  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="Последний релиз"></a>
+  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="Статус CI"></a>
+  <a href="../../LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="Лицензия: MIT"></a>
 </p>
 
-<h3 align="center"><a href="https://github.com/4n5rud/Brachio/releases">Скачать Brachio</a></h3>
+<!-- screenshot: main window -->
 
 <p align="center">
 <a href="../../README.md">English</a> · <a href="README.ko.md">한국어</a> · <a href="README.ja.md">日本語</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a> · <a href="README.pt.md">Português</a> · <a href="README.tr.md">Türkçe</a> · Русский
 </p>
 
-> **Пре-альфа.** Ранняя версия, которая быстро меняется. Если что-то сломалось, [создайте issue](https://github.com/4n5rud/Brachio/issues/new/choose).
+> **Пре-альфа.** Brachio молод и быстро меняется. Ожидайте шероховатостей и, пожалуйста, [сообщайте, что сломалось](https://github.com/4n5rud/Brachio/issues/new/choose).
+
+## Почему Brachio?
+
+### Параллельная работа, изолированные изменения
+В проекте Git у каждой задачи своя ветка и worktree, поэтому агенты правят разные рабочие каталоги. Worktree не предотвращает конфликты слияния в будущем и не изолирует среду выполнения: порты, базы данных и внешние сервисы всё ещё могут конфликтовать, а сам worktree не является песочницей безопасности. В задаче может быть несколько вкладок агентов и оболочек, в том числе нескольких одинаковых агентов. Обычные папки тоже работают, без веток.
+
+### Работа продолжается после перезапуска окна
+Терминалы живут в отдельном локальном процессе, а не в окне. Закройте окно — агенты в нём продолжат работать; откройте снова и переподключитесь. Если остановится сам процесс, запущенные процессы пропадут, но сохранённые экраны и продолжение разговора агента позволят вернуться к разговору.
+
+### Делегируйте работу, проверяйте результаты
+Ведущая задача делит работу на подзадачи (`brachio task create`) с зависимостями (`--after`).
+
+1. Ведущая задача делит работу на подзадачи, а вы подтверждаете их в приложении.
+2. Каждый исполнитель работает в своём worktree и своей ветке.
+3. Завершивший исполнитель возвращает свой коммит, изменённые файлы и сводку.
+4. Вы проверяете результат и подтверждаете; только после этого начинаются зависимые задачи.
+
+Задачи также могут обмениваться сообщениями. Ничего не сливается само.
+
+### Встроенный рабочий процесс Git
+Смотрите изменённые файлы и diff, комментируйте строки diff, индексируйте, делайте commit и push и открывайте pull request; статус pull request и CI виден рядом с задачей. Поддерживаемые запросы разрешений Claude Code, команды настройки и запуски QA ждут в панели подтверждения, пока вы не решите.
+
+### Локально и с открытым исходным кодом
+Brachio работает на вашем компьютере по лицензии MIT. Он использует ваш существующий аккаунт Claude Code или Codex и никогда не предоставляет и не проксирует аккаунты агентов. Это приложение на Rust и Tauri.
 
 ## Загрузка
 
 | Платформа | Установщик |
 |---|---|
-| Windows 10/11 (x64) | [Brachio_0.2.0_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0/Brachio_0.2.0_x64-setup.exe) · [.msi](https://github.com/4n5rud/Brachio/releases/download/v0.2.0/Brachio_0.2.0_x64_en-US.msi) |
-| macOS (Apple silicon) | [Brachio_0.2.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0/Brachio_0.2.0_aarch64.dmg) |
+| Windows 10/11 (x64) | [Brachio_0.1.0_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64-setup.exe) · [.msi](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64_en-US.msi) |
+| macOS (Apple silicon, экспериментально) | [Brachio_0.1.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_aarch64.dmg) |
 
-Все версии и заметки к выпускам — на [странице релизов](https://github.com/4n5rud/Brachio/releases). В каждом релизе есть SHA-256 в `SHA256SUMS.txt`.
+Все версии и заметки к выпускам — на [странице релизов](https://github.com/4n5rud/Brachio/releases). В каждом релизе контрольные суммы SHA-256 указаны в `SHA256SUMS.txt`.
 
-Установщики пока не подписаны. В Windows, если SmartScreen блокирует запуск, выберите **Подробнее → Выполнить в любом случае**. В macOS щёлкните Brachio в «Программах» с нажатой Control и выберите **Открыть**.
+Установщики пока не подписаны. Скачивайте их только со страницы официальных релизов выше и сверяйте SHA-256 файла с `SHA256SUMS.txt`. Совпадение контрольной суммы показывает, что файл дошёл целым; оно не доказывает, что программа безопасна.
 
-**Нужно:** Git 2.38 или новее и ваш собственный аккаунт [Claude Code](https://docs.anthropic.com/en/docs/claude-code) или [Codex](https://github.com/openai/codex). Brachio работает на вашем компьютере и не предоставляет и не проксирует аккаунты агентов.
+- **Windows:** если SmartScreen блокирует установщик, выберите **Подробнее**, затем **Выполнить в любом случае**.
+- **macOS:** откройте **Системные настройки > Конфиденциальность и безопасность** и нажмите **Всё равно открыть** для Brachio.
+
+Поддержка macOS экспериментальная: CI собирает и тестирует код на Rust на macOS, но среда терминалов ещё не проверялась на настоящем Mac.
+
+**Требования:** Git 2.38 или новее и ваш собственный аккаунт [Claude Code](https://docs.anthropic.com/en/docs/claude-code) или [Codex](https://github.com/openai/codex).
 
 ## Поддерживаемые агенты
 
@@ -41,28 +71,11 @@
 
 Любую оболочку на вашем компьютере тоже можно открыть во вкладке: PowerShell, командная строка, Git Bash и WSL в Windows; оболочка входа, zsh, bash или fish в macOS.
 
-## Возможности
+## Также включено
 
-### Несколько агентов в одном месте
-У каждой задачи своя ветка Git и worktree, поэтому агенты не мешают друг другу. Открывайте в задаче сколько угодно вкладок агентов и оболочек, в том числе несколько одинаковых агентов. Обычные папки тоже поддерживаются.
-
-### Терминалы, которые не закрываются
-Терминалы работают в отдельной локальной среде. Закройте окно — агенты продолжат работу; откройте снова и переподключитесь. Если среда остановится, сохранённые экраны и продолжение разговора вернут сессию.
-
-### Решаете вы
-Поддерживаемые запросы разрешений Claude Code, команды настройки, запуски QA и новые подзадачи ждут в панели подтверждения внутри приложения. Ничего не сливается само.
-
-### Ревью и Git
-Смотрите изменённые файлы и diff, комментируйте строки, индексируйте, делайте commit и push, открывайте pull request; статус PR и CI виден рядом с задачей.
-
-### Ведущие задачи и подзадачи
-Ведущая задача делит работу на подзадачи (`brachio task create`, порядок — `--after`). Каждая подзадача возвращает коммит, изменённые файлы и сводку, и зависимые задачи начинаются только после вашей проверки. Задачи также обмениваются сообщениями.
-
-### Для ежедневной работы
 Расход лимитов агентов в строке состояния, дерево файлов с поиском, выбор проекта с клонированием или созданием репозитория, перетаскивание для сортировки, поиск задач и восемь цветовых тем.
 
-### CLI, MCP и skills
-CLI `brachio` управляет задачами из любого терминала. `brachio mcp` предоставляет инструменты задач через stdio. Skills `brachio-send` и `brachio-lead` учат Claude Code и Codex ими пользоваться.
+CLI `brachio` управляет задачами из любого терминала, `brachio mcp` предоставляет инструменты задач через stdio, а skills `brachio-send` и `brachio-lead` учат Claude Code и Codex ими пользоваться.
 
 ## Настройка проекта
 
@@ -70,20 +83,20 @@ CLI `brachio` управляет задачами из любого термин
 
 ```toml
 [setup]
-copy = [".env"]
+copy = [".env.example"]
 run = ["pnpm install"]
 
 [qa]
-program = "npm"
+program = "pnpm"
 args = ["test"]
 timeout_secs = 600
 ```
 
-Команды настройки и запуски QA всегда сначала запрашивают подтверждение.
+Команды настройки и запуски QA просят вашего подтверждения перед выполнением. Копируйте настоящий `.env` в worktree только для проектов и агентов, которым доверяете, потому что его может прочитать каждый агент в этом worktree.
 
-## Пока нет
+## Текущие рамки и ограничения
 
-Автоматического слияния, вложенности задач глубже одного уровня, подзадач в обычных папках, удалённых машин и приложения для Linux. Статус агентов, подтверждения и восстановление зависят от того, что сообщает каждый агент.
+Пока не реализовано: автоматическое слияние, вложенность задач глубже одного уровня, подзадачи в обычных папках, удалённые машины и приложение для Linux. Статус агентов, подтверждения и восстановление зависят от того, что сообщает каждый агент.
 
 ## Сборка из исходников
 
@@ -106,8 +119,12 @@ CI проверяет Rust в Windows, macOS и Ubuntu, а также интер
 
 ## Участие
 
-Прочитайте [руководство для участников](../../.github/CONTRIBUTING.md). Агентам для кода также нужно прочитать [руководство для агентов](../../.github/CONTRIBUTING-AGENTS.md). О проблемах безопасности сообщайте через [закрытое сообщение об уязвимости](../../.github/SECURITY.md).
+Вклад приветствуется. Прочитайте [руководство для участников](../../.github/CONTRIBUTING.md) и ищите issues с метками [`good first issue`](https://github.com/4n5rud/Brachio/labels/good%20first%20issue), [`help wanted`](https://github.com/4n5rud/Brachio/labels/help%20wanted) и [`documentation`](https://github.com/4n5rud/Brachio/labels/documentation). Агентам для кода также нужно прочитать [руководство для агентов](../../.github/CONTRIBUTING-AGENTS.md). О проблемах безопасности сообщайте через [закрытое сообщение об уязвимости](../../.github/SECURITY.md).
+
+## Ранняя разработка
+
+Brachio находится на ранней стадии разработки, так что ожидайте ошибок. Issues и pull request приветствуются, а звезда на репозитории — хороший способ следить за проектом.
 
 ## Лицензия
 
-[MIT License](../../LICENSE-MIT)
+Brachio распространяется по [лицензии MIT](../../LICENSE-MIT).

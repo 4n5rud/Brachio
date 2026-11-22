@@ -48,7 +48,7 @@ import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
-import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
+import { keysWithNewMail, MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { registerActions, registerGoToSource } from "./lib/actions";
 import { CuesDialog } from "./components/CuesDialog";
 import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
@@ -534,6 +534,16 @@ export function App() {
       tone: "primary",
     });
     return agreed && stillAvailable() && await insert();
+  };
+
+  // Codex has no hook that can announce mail, so the notice is typed into its input, never submitted.
+  const noticeCodexMail = async (key: string) => {
+    const id = taskIdOf(key);
+    const target = draftTargets.get(id)?.();
+    if (selected()?.id !== id || target?.key !== key || target.agent !== AGENT_NAME.codex) return;
+    if (!activeAgentKey(id, key) || questions().some((question) => question.key === key)) return;
+    const prepared = target.prepare(pasteText(MAILBOX_REMINDER));
+    if (prepared && !prepared.userTyped) await prepared.insert();
   };
 
   const report = (failure: unknown) => {
@@ -1058,7 +1068,10 @@ export function App() {
       onCleanup(() => stopWindowWatch?.());
       detectKeepAwake();
       onCleanup(watchMailbox((unread) => {
-        setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
+        const previous = mailbox();
+        setMailbox({ unread, revision: previous.revision + 1 });
+        if (previous.revision === 0) return;
+        for (const key of keysWithNewMail(previous.unread, unread)) void noticeCodexMail(key).catch(report);
       }));
       onCleanup(watchCreatedTasks((record) => void adoptCreated(record).catch(report)));
       onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreated(record, true).catch(report)));

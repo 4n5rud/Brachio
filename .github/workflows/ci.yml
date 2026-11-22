@@ -82,3 +82,7 @@ jobs:
           echo "Cargo.toml: $cargo_version"
           echo "ui/package.json: $ui_version"
           test "$cargo_version" = "$ui_version"
+      - name: Public documents
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-public-docs.mjs --links

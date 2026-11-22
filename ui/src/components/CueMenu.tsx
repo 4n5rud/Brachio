@@ -11,7 +11,7 @@ export function CueMenu(props: { taskId: string; repoId: string | undefined }) {
   const run = (cue: Parameters<typeof runCue>[1]) => {
     setAnchor(undefined);
     void runCue(props.taskId, cue).then((done) => {
-      if (!done) pushToast({ tone: "error", message: t("cue.notRun") });
+      pushToast(done ? { tone: "success", message: t("cue.ran").replace("{label}", () => cue.label) } : { tone: "error", message: t("cue.notRun") });
     });
   };
   return (

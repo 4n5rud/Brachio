@@ -1,6 +1,6 @@
 # Screens and states
 
-Every screen and every interaction state of Brachio, drawn from the features on `main` up to #261 and the strings in `ui/src/i18n/en.ts`. Each card uses only this system's tokens, so the theme switcher on this page shows any of them in all eight color sets. Sample tasks and numbers are example content.
+Every screen and every interaction state of Brachio, drawn from the app's features and the strings in `ui/src/i18n/en.ts`. Every entry is **Implemented** unless its row says **Status: Planned** (designed, not built) or **Deprecated**; the section "Where the design goes past the app" lists the differences. Each card uses only this system's tokens, so the theme switcher on this page shows any of them in all eight color sets. Sample tasks and numbers are example content.
 
 Cards are grouped under Components: **Screens** (full windows, 1440 × 900, plus Coverage), **Interactions** and **Errors** (full windows for every interaction and failure), **States** (sheets of every state of one area), **Later** (planned, not built), plus the new components ThemePicker, PrChip, Notice and ConfirmDialog.
 
@@ -8,11 +8,11 @@ Cards are grouped under Components: **Screens** (full windows, 1440 × 900, plus
 
 | Region | Size | Holds |
 |---|---|---|
-| Title bar | 40px | app mark, sidebar toggle, active project, Search tasks (`⌘P`), Tasks and Board, inspector toggle, Activity bell with the Needs you count, Settings; on Windows the minimize, maximize and close buttons |
-| Sidebar | 288px, can hide | projects (Git repositories and folder workspaces) with their tasks; children under their lead; Archived tasks at the foot |
+| Title bar | 40px | app mark, sidebar toggle, active project, Search tasks (`⌘P`), Tasks and Board, inspector toggle, Activity bell with the Needs you count; on Windows the minimize, maximize and close buttons |
+| Sidebar | 288px, can hide | projects (Git repositories and folder workspaces) with their tasks; children under their lead; at the foot, the Settings gear and Archived tasks |
 | Main | at least 352px | task header, tabs (agent, second agent, shell, split), pane head, notices, terminal, approval bar |
 | Inspector | 360px, 560px for a side-by-side diff, can hide | Changes, Files, QA, Activity |
-| Status bar | 24px | Core OK, Sessions, Memory (app, runtime and agents together), CPU |
+| Status bar | 24px | Core OK, Sessions, Memory (working set of the app and the terminal runtime with the agents in it, summed; the popover splits app and runtime), CPU |
 
 The smallest window is 1000 × 600.
 
@@ -68,7 +68,7 @@ Whole windows, 1440 × 900, one moment each: menus, tooltips, drags, dialogs, pa
 | ScreenKorean | Korean UI: the same main screen with 한국어 selected |
 | ScreenAddProjectMenu | Add project: pick a Git repository or a folder |
 | ScreenDropFolder | Drag a folder onto the window to add it as a project |
-| ScreenTaskMenu | Right-click a task row (design proposal) |
+| ScreenTaskMenu | Right-click a task row (Status: Implemented; the design may differ in detail) |
 | ScreenSidebarCollapsed | A project collapsed; hovering its heading shows the counts |
 | ScreenArchiveConfirm | Archive a task: confirm |
 | ScreenArchivedList | Archived tasks: restore or delete for good |
@@ -82,8 +82,8 @@ Whole windows, 1440 × 900, one moment each: menus, tooltips, drags, dialogs, pa
 | ScreenSetupDone | Setup commands ran in the shell tab |
 | ScreenAddTabMenu | The + on the tab row: open a shell or a second agent |
 | ScreenSplitMac | Agent and shell side by side on macOS |
-| ScreenCloseShell | Close a shell tab that still runs a program (design proposal) |
-| ScreenManyTabs | Seven tabs: a tab beyond the six kept on screen (design proposal) |
+| ScreenCloseShell | Close a shell tab that still runs a program (Status: Planned) |
+| ScreenManyTabs | Seven tabs: a tab beyond the six kept on screen (Status: Planned) |
 | ScreenOtherTabWaiting | Another tab waits for approval while you read this one |
 | ScreenApprovalEdit | Approval bar: a file edit shows the whole change |
 | ScreenApprovalSending | Approval bar: sending the answer |
@@ -122,7 +122,7 @@ Whole windows, 1440 × 900, one moment each: menus, tooltips, drags, dialogs, pa
 | ScreenSettingsAgents | Settings, Agents: versions, sign-in and usage |
 | ScreenSignOutCodex | Sign out of Codex: confirm |
 | ScreenSettingsAgentsSignIn | Settings, Agents: signing in to Codex in the browser |
-| ScreenSettingsNotifications | Settings, Notifications (design proposal: the app has one switch today) |
+| ScreenSettingsNotifications | Settings, Notifications (Status: Planned. The app has one switch today.) |
 | ScreenSettingsShortcuts | Settings, Shortcuts for macOS and Windows |
 | ScreenSettingsUpdates | Settings, Updates with a new version |
 | ScreenSettingsUpdatesChecking | Settings, Updates: checking |
@@ -184,8 +184,8 @@ Whole windows for every failure. Each one says what broke, what is kept, and off
 
 | Card | What |
 |---|---|
-| ScreenPlan | task dependencies as a graph and the handoff review with its QA result (#176 data is stored; #178 links QA to the handoff) |
-| LaterConvenience | from the Orca parity list: pinned tasks, unread finish, overlap warning across tasks, compare agents on one prompt, switch recent tasks, import worktrees, keep awake, shortcut list |
+| ScreenPlan | task dependencies as a graph and the handoff review with its QA result (Status: Planned. Dependencies and handoffs are stored, but there is no graph view yet) |
+| LaterConvenience | Status: Planned. Workflow improvements: pinned tasks, unread finish, overlap warning across tasks, compare agents on one prompt, switch recent tasks, import worktrees, keep awake, shortcut list |
 
 ## Moving between screens
 - Tasks and Board show the same tasks. Opening a tile opens that task in Tasks.
@@ -206,8 +206,6 @@ Whole windows for every failure. Each one says what broke, what is kept, and off
 ## Where the design goes past the app today
 - The PR chip and the unread count move to their own line in the task row; the app joins them with a middle dot.
 - A side-by-side diff widens the inspector to 560px.
-- Settings get a Notifications page and the color themes; the app has a theme select and one notifications switch.
-- Background tabs beyond the six kept on screen get a one-line placeholder.
-- Right-clicking a task row opens a menu (ScreenTaskMenu).
+- Settings get a Notifications page; the app has one notifications switch. (Color themes are implemented.)
+- Background tabs beyond the six kept on screen get a one-line placeholder (Status: Planned).
 - Closing a shell tab that still runs a program asks first (ScreenCloseShell).
-- Settings, Notifications splits the one switch into one per kind.

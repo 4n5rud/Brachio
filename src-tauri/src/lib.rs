@@ -17,6 +17,7 @@ mod orchestration;
 mod pr_status;
 mod project_add;
 mod project_cues;
+mod prompt_history;
 mod qa_run;
 mod quit;
 mod resource_usage;
@@ -40,6 +41,8 @@ mod terminal_shells;
 mod terminal_status;
 mod tray_menu;
 mod update_release;
+mod usage_analytics;
+mod worker_preamble;
 mod workspace;
 mod worktree_import;
 
@@ -271,6 +274,7 @@ pub fn run() {
         .manage(project_add::CloneJobs::default())
         .manage(pr_status::PrStatuses::default())
         .manage(session_tokens::TokenTrackers::default())
+        .manage(usage_analytics::UsageScanLock::default())
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(claude_usage::ClaudeUsageCache::default())
@@ -296,6 +300,7 @@ pub fn run() {
             update_release::open_update_release,
             terminal::terminal_open,
             terminal::terminal_forget_uncertain_launch,
+            terminal::terminal_saved_screen,
             terminal::terminal_codex_conversations,
             workspace::repo_codex_conversations,
             terminal::terminal_write,
@@ -307,9 +312,15 @@ pub fn run() {
             quit::terminals_stop,
             quit::app_quit,
             session_tokens::tasks_token_usage,
+            usage_analytics::usage_providers,
+            usage_analytics::usage_scan,
+            usage_analytics::usage_report,
+            usage_analytics::usage_limit_snapshot,
             project_cues::cue_list,
             project_cues::cue_add,
             project_cues::cue_delete,
+            prompt_history::prompt_history_list,
+            prompt_history::prompt_history_add,
             system_check::system_check,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
@@ -338,6 +349,8 @@ pub fn run() {
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,
+            orchestration::orchestration_reopen_child,
+            worker_preamble::task_worker_preamble,
             workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,
