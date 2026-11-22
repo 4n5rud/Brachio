@@ -8,8 +8,8 @@ use brachio_runtime::mailbox::{
     DEFAULT_BATCH, MAX_BATCH, MAX_WAIT_SECS,
 };
 use brachio_store::{
-    child_reports, dismiss_messages, mark_read, peek_inbox, peek_next_batch, recent_messages,
-    reply_recipient, send_message, unread_counts, Message, NewMessage, TaskRecord,
+    child_reports, dismiss_messages, mark_read, peek_inbox, peek_next_batch, pending_gate,
+    recent_messages, reply_recipient, send_message, unread_counts, Message, NewMessage, TaskRecord,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -67,6 +67,14 @@ pub(crate) fn agent_owner(connection: &Connection, key: &str) -> Result<TaskReco
 
 fn send(connection: &Connection, mail: &SendMail, now_ms: i64, new_id: &str) -> Outcome {
     let sender = agent_owner(connection, &mail.from)?;
+    if let Some(parent) = mail.reply_to.as_deref() {
+        if pending_gate(connection, parent)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err("Only the user can answer a decision gate.".to_owned());
+        }
+    }
     let to = match mail.reply_to.as_deref() {
         Some(parent) => {
             let recipient = reply_recipient(connection, parent, &mail.from)
@@ -83,6 +91,9 @@ fn send(connection: &Connection, mail: &SendMail, now_ms: i64, new_id: &str) -> 
     };
     if to == mail.from {
         return Err("A message cannot be sent to the terminal that sends it.".to_owned());
+    }
+    if mail.kind == "decision_gate" {
+        crate::decision_gate::check_new_gate(connection, &mail.from, &to, mail.payload.as_deref())?;
     }
     let priority = mail.priority.as_deref().unwrap_or("normal");
     if !PRIORITIES.contains(&priority) {

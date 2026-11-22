@@ -2,6 +2,7 @@
 
 mod child_report;
 mod database;
+mod decision_gate_record;
 mod message_record;
 mod orchestration_record;
 mod orchestration_schedule;
@@ -18,6 +19,9 @@ mod usage_record;
 
 pub use child_report::{child_reports, ChildReport};
 pub use database::{open, open_in_memory, StoreError};
+pub use decision_gate_record::{
+    gate_options, pending_gate, pending_gates, PendingGate, MAX_GATE_OPTIONS, MAX_GATE_OPTION_CHARS,
+};
 pub use message_record::{
     dismiss_messages, expire_read_messages, forget_task_messages, mark_read, peek_inbox,
     peek_next_batch, peek_unread, recent_messages, reply_recipient, send_message, take_unread,

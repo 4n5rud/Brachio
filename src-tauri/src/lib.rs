@@ -2,8 +2,10 @@
 
 mod agent_accounts;
 mod always_allow;
+mod child_escalation;
 mod child_task_request;
 mod claude_usage;
+mod decision_gate;
 mod external_link;
 mod file_in_use;
 mod folder_access;
@@ -348,6 +350,8 @@ pub fn run() {
             mailbox::mailbox_inbox,
             mailbox::mailbox_dismiss,
             orchestration::orchestration_view,
+            child_escalation::child_agent_stopped,
+            decision_gate::decision_gate_answer,
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,

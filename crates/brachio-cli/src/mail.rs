@@ -25,6 +25,9 @@ pub struct SendArgs {
     /// The message id this answers.
     #[arg(long)]
     reply_to: Option<String>,
+    /// For `--type decision_gate`: a choice the user may pick; give it 2 to 6 times.
+    #[arg(long = "option")]
+    options: Vec<String>,
     #[command(flatten)]
     message: MessageArgs,
 }
@@ -124,7 +127,17 @@ pub(crate) fn call_within(
 }
 
 pub fn send(args: SendArgs) -> Result<()> {
-    send_message(args.to, args.kind, args.reply_to, args.message)
+    let mut message = args.message;
+    if !args.options.is_empty() {
+        if args.kind != "decision_gate" {
+            bail!("--option only applies to --type decision_gate.");
+        }
+        if message.payload.is_some() {
+            bail!("Use either --option or --payload, not both.");
+        }
+        message.payload = Some(serde_json::json!({ "options": args.options }).to_string());
+    }
+    send_message(args.to, args.kind, args.reply_to, message)
 }
 
 pub fn ask(args: AskArgs) -> Result<()> {

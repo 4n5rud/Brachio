@@ -692,6 +692,8 @@ export const ko: Messages = {
   "orchestration.reopen": "다시 시도",
   "orchestration.empty": "나눠 맡긴 작업 없음",
   "orchestration.noHandoff": "아직 결과 보고 없음",
+  "orchestration.gate": "결정 필요",
+  "orchestration.gateNote": "이 작업에 의존하는 작업은 선택할 때까지 기다립니다. 선택은 에이전트에게 답장으로 전달됩니다.",
   "orchestration.dependsOn": "먼저 끝나야 하는 작업:",
   "orchestration.commit": "커밋",
   "orchestration.files": "개 파일 변경",

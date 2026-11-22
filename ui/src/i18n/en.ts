@@ -677,6 +677,8 @@ export const en = {
   "orchestration.reopen": "Try again",
   "orchestration.empty": "This task has no child tasks.",
   "orchestration.noHandoff": "No result report yet.",
+  "orchestration.gate": "Decision needed",
+  "orchestration.gateNote": "Tasks that depend on this one wait until you choose. Your choice is sent back to the agent.",
   "orchestration.dependsOn": "Waits for:",
   "orchestration.commit": "Commit",
   "orchestration.files": "changed files",

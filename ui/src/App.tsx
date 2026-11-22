@@ -43,6 +43,7 @@ import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
 import { AGENT_NAME, compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/tasks";
+import { reportChildStopped } from "./lib/orchestration";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
@@ -607,6 +608,10 @@ export function App() {
     if (inTauri && wasActive !== taskActive()) void recordTurnBoundary(taskId, taskActive());
     const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
     if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
+    if (task.parentTaskId && sessionKey === `${taskId}:agent` && inTauri && previous.state !== status.state
+        && (status.state === "exited" || status.state === "idle")) {
+      reportChildStopped(taskId, status.state, status.state === "exited" ? status.code : null, message).catch(report);
+    }
     const key = notificationKey(previous, status);
     if (!key || key === "notify.permission" && questions().some((question) => question.key === sessionKey)) return;
     recordActivity(task, sessionKey, key, message, at);
