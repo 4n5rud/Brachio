@@ -5,7 +5,8 @@ description: Split work into child tasks and collect their results, or finish as
 
 A lead is a task you started yourself. It can ask the user for child tasks, each with its own
 worktree, branch and agent. Children cannot create tasks, a task has at most 4 open children, and
-plain folders (no git) cannot have them.
+plain folders (no git) cannot have them. A task, yours or a child's, can have several agent tabs
+sharing its worktree, so address messages to the task, and expect more than one agent in it.
 
 As a lead:
 

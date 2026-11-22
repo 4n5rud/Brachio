@@ -9,4 +9,6 @@ conflicts, CI failed, changes requested, CI running, CI passed, open, then merge
 18px high, `radius-xs`, 1px `color-line`. Number in `meta` `color-text-3`; the word in the status color it stands for: failed and conflicts `color-status-error`, changes requested `color-status-blocked`, running `color-status-working`, passed `color-status-ready`, others `color-text-3`. When GitHub cannot be reached the chip keeps the last result, turns its edge dashed and adds "offline"; the tooltip says why.
 
 ## Placement
-In the TaskRow it sits on its own line under the meta line, with the unread mail count, so the branch and diff stat never get squeezed. (The app joins them with a middle dot today; the design replaces the dot with layout.)
+In the TaskRow it sits on its own line under the meta line, with the unread mail count, so the branch and diff stat never get squeezed. 
+## Status
+Planned for the placement: the app joins the chip and the unread count with a middle dot today. The chip itself is Implemented.
