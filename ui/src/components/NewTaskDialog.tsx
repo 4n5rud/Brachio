@@ -17,6 +17,7 @@ import { blockedFolder } from "../lib/folder-access";
 import { AgentIcon } from "./AgentIcon";
 import { Toggle } from "./ui/Toggle";
 import { SUBMIT_KEYS } from "../lib/shortcut";
+import { loadPromptHistory, recallStep, rememberPrompt, type PromptHistoryEntry } from "../lib/prompt-history";
 import { repoCodexConversations, titleFromPrompt } from "../lib/workspace";
 
 /** What the dialog hands back when the user creates a task. */
@@ -71,6 +72,9 @@ export function NewTaskDialog(props: {
   const [conversationId, setConversationId] = createSignal("");
   const [compare, setCompare] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
+  const [history, setHistory] = createSignal<readonly PromptHistoryEntry[]>([]);
+  let recallPosition = -1;
+  let ownText = "";
   const [confirmingClose, setConfirmingClose] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [installed] = createResource(async () => {
@@ -107,6 +111,28 @@ export function NewTaskDialog(props: {
   const createError = () => (baseError() ? null : error());
 
   createEffect(() => setProjectText(props.repoName));
+  createEffect(on(() => props.repoId, (repoId) => {
+    recallPosition = -1;
+    void loadPromptHistory(repoId).then((entries) => { if (repoId === props.repoId) setHistory(entries); }).catch(() => setHistory([]));
+  }));
+  const recall = (event: KeyboardEvent & { currentTarget: HTMLTextAreaElement }) => {
+    if (event.isComposing || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const box = event.currentTarget;
+    const atStart = box.selectionStart === 0 && box.selectionEnd === 0;
+    const atEnd = box.selectionStart === box.value.length && box.selectionEnd === box.value.length;
+    if (event.key === "ArrowUp" ? !atStart : !atEnd) return;
+    const next = recallStep(recallPosition, history().length, event.key);
+    if (next === undefined) return;
+    event.preventDefault();
+    if (recallPosition === -1) ownText = box.value;
+    recallPosition = next;
+    const text = next === -1 ? ownText : history()[next]?.body ?? "";
+    setPrompt(text);
+    box.value = text;
+    const caret = event.key === "ArrowUp" ? 0 : text.length;
+    box.setSelectionRange(caret, caret);
+  };
   createEffect(on(() => props.repoId, () => {
     setBase("");
     setParentTaskId("");
@@ -140,7 +166,10 @@ export function NewTaskDialog(props: {
         confirmLabel: t("confirm.discard"),
         tone: "danger",
       });
-      if (discard) props.onClose();
+      if (discard) {
+        rememberPrompt(props.repoId, null, "draft", prompt());
+        props.onClose();
+      }
     } catch (failure) {
       setError(String(failure));
     } finally {
@@ -153,6 +182,7 @@ export function NewTaskDialog(props: {
     setBusy(true);
     setError(null);
     try {
+      rememberPrompt(props.repoId, null, "prompt", prompt());
       await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(),
         base: base().trim(), parentTaskId: parentTaskId() || undefined,
         codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
@@ -192,7 +222,8 @@ export function NewTaskDialog(props: {
       }
     >
       <TextArea ref={promptBox} label={t("newTask.prompt")} value={prompt()}
-        onInput={(event) => setPrompt(event.currentTarget.value)} />
+        onInput={(event) => { recallPosition = -1; setPrompt(event.currentTarget.value); }}
+        onKeyDown={recall} />
       <div class="form-grid">
         <Combobox label={t("project.label")} listLabel={t("project.list")} value={projectText()}
           options={projectOptions()} emptyText={t("project.empty")}
