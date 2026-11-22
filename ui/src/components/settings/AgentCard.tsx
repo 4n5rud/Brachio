@@ -3,6 +3,7 @@ import { t } from "../../i18n";
 import type { AgentKind } from "../../lib/terminal";
 import { AgentIcon } from "../AgentIcon";
 import { Button } from "../ui/Button";
+import { PathLink } from "../ui/PathLink";
 import { StatusGlyph } from "../ui/StatusBadge";
 
 export const AGENT_NAMES = { claude_code: "Claude Code", codex: "Codex" } as const;
@@ -45,6 +46,9 @@ const STATUS_WORD = {
   checking: "settings.agentChecking",
 } as const;
 
+/** Some agent CLIs append their own name to the version line. */
+const plainVersion = (version: string) => version.replace(/\s*\((Claude Code|Codex)\)/i, "");
+
 /** One agent program found on this computer, with its version, account and usage. */
 export function AgentCard(props: AgentCardProps) {
   const checking = () => props.account.state === "checking";
@@ -53,19 +57,21 @@ export function AgentCard(props: AgentCardProps) {
   const tone = () => (checking() ? "working" : props.account.state === "signedIn" ? "ready" : "done");
   return (
     <div class="agent-card">
-      <strong class="agent-card-name">
+      <div class="agent-card-head">
         <AgentIcon agent={ICON_OF[props.kind]} />
-        {AGENT_NAMES[props.kind]}
-        <Show when={props.version}>{(version) => <span class="agent-card-version">{version()}</span>}</Show>
-      </strong>
-      <span class="agent-card-path">{props.path}</span>
-      <Show when={accountError()} fallback={
-        <span class="agent-card-status" aria-live="polite">
-          <StatusGlyph tone={tone()} />
-          {t(STATUS_WORD[props.account.state as keyof typeof STATUS_WORD])}
-          <Show when={accountName()}>{(name) => <span class="agent-card-account">{name()}</span>}</Show>
-        </span>
-      }>{(message) => <p class="form-error" role="alert">{message()}</p>}</Show>
+        <strong>{AGENT_NAMES[props.kind]}</strong>
+        <Show when={props.version}>{(version) => <span class="agent-card-version">{plainVersion(version())}</span>}</Show>
+        <span class="agent-card-spacer" />
+        <Show when={!accountError()}>
+          <span class="agent-card-status" aria-live="polite">
+            <StatusGlyph tone={tone()} />
+            {t(STATUS_WORD[props.account.state as keyof typeof STATUS_WORD])}
+            <Show when={accountName()}>{(name) => <span class="agent-card-account">{name()}</span>}</Show>
+          </span>
+        </Show>
+      </div>
+      <PathLink path={props.path} />
+      <Show when={accountError()}>{(message) => <p class="form-error" role="alert">{message()}</p>}</Show>
       <Show when={props.signingIn}><p class="form-hint" role="status">{t("settings.agentLoginPending")}</p></Show>
       <Show when={props.kind === "claude_code"}><p class="form-hint">{t("settings.claudeSwitchAccount")}</p></Show>
       <Show when={props.usage}>{(rows) => (

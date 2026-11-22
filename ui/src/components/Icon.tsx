@@ -26,6 +26,7 @@ const PATHS = {
   more: () => <><circle cx="3.5" cy="8" r=".9" fill="currentColor" /><circle cx="8" cy="8" r=".9" fill="currentColor" /><circle cx="12.5" cy="8" r=".9" fill="currentColor" /></>,
   split: () => <><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M8 3v10" /></>,
   external: () => <path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9.5v4h-9v-9h4" />,
+  copy: () => <><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" /></>,
   folder: () => <path d="M2 4.5h4l1.5 1.5H14v6.5H2z" />,
   folderOpen: () => <path d="M2 12.5V4.5h4l1.5 1.5H13v2M2 12.5l1.8-4.5H14.5l-1.8 4.5z" />,
   file: () => <><path d="M4 2h5l3 3v9H4z" /><path d="M9 2v3h3" /></>,
