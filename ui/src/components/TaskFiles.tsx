@@ -18,6 +18,7 @@ import type { TerminalDrop } from "../lib/terminal-drop";
 import { quoteShellPaths } from "../lib/shell-quote";
 import { shellKind } from "../lib/terminal";
 import { t } from "../i18n";
+import { useAsyncAction } from "../lib/async-action";
 import { copyIntoTask, createTaskEntry, listTaskFiles, moveTaskPath, previewTaskFile, previewTaskMedia, renameTaskPath, taskCopyConflicts, trashTaskPath } from "../lib/workspace";
 
 const RESULT_LIMIT = 100;
@@ -57,7 +58,7 @@ export function FilesPanel(props: {
   return (
     <>
       <InspectorSection title={t("files.title")}
-        end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} disabled={props.loading} onClick={props.onRefresh} />}>
+        end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={props.loading} onClick={props.onRefresh} />}>
         <Input aria-label={t("files.filter")} placeholder={t("files.filter")} mono value={props.filter}
           onInput={(event) => props.onFilter(event.currentTarget.value)} />
         <Show when={props.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
@@ -191,6 +192,7 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
       failed(t("files.copyFailed"), failure);
     }
   };
+  const reload = useAsyncAction(async () => { await refetch(); }, { failureToast: true });
   onCleanup(registerTreeDrop({ copyInto }));
 
   const absolute = (file: string) => {
@@ -220,7 +222,7 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
   const onAction = async (action: FileAction, target: string, kind: "file" | "dir") => {
     if (action === "open") {
       noteRecentFile(props.taskId, target);
-      await openInEditor(props.taskId, target);
+      await openInEditor(props.taskId, target).catch((failure) => failed(t("files.openFailed"), failure));
     } else if (action === "reveal") {
       await revealPath(absolute(target)).catch((failure) => failed(t("files.revealFailed"), failure));
     } else if (action === "copyPath") {
@@ -238,6 +240,7 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
         await trashTaskPath(props.taskId, target);
         if (path() === target || path().startsWith(`${target}/`)) setPath("");
         await refetch();
+        pushToast({ tone: "success", message: t("files.trashed") });
       } catch (failure) {
         failed(t("files.trashFailed"), failure);
       }
@@ -248,8 +251,8 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
 
   return (
     <>
-    <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading} error={files()?.error}
-      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()}
+    <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading || reload.pending()} error={files()?.error}
+      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void reload.run()} preview={previewState()}
       onMove={(from, toDir) => void move(from, toDir)} onTerminalDrop={(file, terminal) => void dropOnTerminal(file, terminal)}
       onAction={(action, target, kind) => void onAction(action, target, kind)} />
     <Show when={naming()}>

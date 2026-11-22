@@ -27,6 +27,18 @@
 .icon-button:disabled:active {
   background: transparent;
 }
+.icon-button.is-busy:disabled {
+  opacity: 1;
+  color: var(--color-status-working);
+}
+.icon-spin {
+  animation: spin 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-spin {
+    animation-duration: 3s;
+  }
+}
 .icon-button-sm {
   width: 24px;
   height: 24px;

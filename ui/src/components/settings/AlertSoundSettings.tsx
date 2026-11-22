@@ -1,5 +1,6 @@
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../../i18n";
+import { useAsyncAction } from "../../lib/async-action";
 import { alertSoundSettings, previewAlertSound, readCustomSound, updateAlertSound, type AlertSoundKind } from "../../lib/alert-sound";
 import { Button } from "../ui/Button";
 import { Toggle } from "../ui/Toggle";
@@ -24,6 +25,7 @@ function AlertSoundRows(props: { kind: AlertSoundKind }) {
     }
     picker.value = "";
   };
+  const test = useAsyncAction(() => previewAlertSound(props.kind), { minMs: 1000 });
   return (
     <>
       <Toggle checked={setting().on} label={t(props.kind === "ask" ? "sound.ask" : "sound.finished")}
@@ -33,7 +35,7 @@ function AlertSoundRows(props: { kind: AlertSoundKind }) {
         <input class="sound-volume" type="range" min="0" max="100" step="5" disabled={!setting().on}
           aria-label={t("sound.volume")} value={Math.round(setting().volume * 100)}
           onInput={(event) => updateAlertSound(props.kind, { volume: event.currentTarget.valueAsNumber / 100 })} />
-        <Button size="sm" disabled={!setting().on} onClick={() => void previewAlertSound(props.kind)}>{t("sound.test")}</Button>
+        <Button size="sm" busy={test.pending()} loadingLabel={t("sound.playing")} disabled={!setting().on} onClick={() => void test.run()}>{t("sound.test")}</Button>
       </SettingRow>
       <SettingRow label={setting().custom?.name ?? t("sound.builtIn")} hint={problem() || undefined} error={!!problem()}>
         <input ref={picker} class="sound-file" type="file" accept=".wav,.mp3,.ogg,audio/wav,audio/mpeg,audio/ogg" tabIndex={-1}

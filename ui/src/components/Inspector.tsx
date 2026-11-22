@@ -1,6 +1,7 @@
 import { IconTabs, type IconTab } from "./ui/IconTabs";
 import { For, Match, Show, Switch, createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
 import { t } from "../i18n";
+import { useAsyncAction } from "../lib/async-action";
 import { TaskPorts } from "./TaskPorts";
 import { TaskProcesses } from "./TaskProcesses";
 import type { TaskRow } from "../lib/tasks";
@@ -65,6 +66,7 @@ export function Inspector(props: {
       }
     },
   );
+  const reload = useAsyncAction(async () => { await refetch(); }, { failureToast: true });
   const [history, { refetch: refetchHistory }] = createResource(
     () => pane() === "activity" && props.task.id,
     async (id) => {
@@ -120,9 +122,9 @@ export function Inspector(props: {
                 return (
                   <>
                     <ChangedFiles additions={props.task.additions} deletions={props.task.deletions}
-                      loading={changes.loading} error={currentChanges()?.error} data={currentChanges()?.data}
+                      loading={changes.loading || reload.pending()} error={currentChanges()?.error} data={currentChanges()?.data}
                       files={files()} busy={runner.busy()} split={split()} onSplit={setSplit}
-                      onRefresh={() => void refetch()}
+                      onRefresh={() => void reload.run()}
                       onStage={(path) => void runner.run({ action: "stageFile", path }).then((result) => {
                         if (result && !result.ok) pushToast({ tone: "error", title: t("error.title"), message: result.failure.output });
                       })}

@@ -39,3 +39,14 @@ pnpm --dir ui build
 Include the commands and results in your pull request, along with platforms or behavior you could not verify. Fill in the [pull request template](pull_request_template.md). Maintainers handle merges and [releases](RELEASING.md).
 
 Coding agents should also follow the [agent contribution guide](CONTRIBUTING-AGENTS.md).
+
+## Public documents
+
+Everything in this repository is public. `node scripts/check-public-docs.mjs` runs in CI and fails on:
+
+- paths from a real machine in documents (write `/Users/you` or `C:\Users\you` instead),
+- notes, tool commands or IDs from private design or planning tools,
+- wording that compares Brachio feature by feature with another product,
+- README download links to a release that is a draft or does not exist (`--links`).
+
+Describe what Brachio does and how to use it. Keep plans, comparisons and work notes in issues or pull requests, and mark design documents as implemented or planned.
