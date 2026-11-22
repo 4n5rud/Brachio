@@ -34,6 +34,7 @@ import { createReorder, placeInOrder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
+import { CueMenu } from "./CueMenu";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
 
@@ -354,6 +355,7 @@ export function TaskView(props: {
               )}</For>
             </Select>
           </Show>
+          <CueMenu taskId={props.task.id} repoId={props.task.repoId} />
           <Show when={props.task.worktreePath}>
             <IconButton icon="archive" label={t("task.archive")} disabled={!props.onArchive}
               onClick={() => props.onArchive?.()} />

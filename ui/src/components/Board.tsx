@@ -1,20 +1,22 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { t } from "../i18n";
 import type { StatusTone } from "../lib/status";
-import { GROUP_ORDER, groupTasks, type TaskGroup, type TaskRow } from "../lib/tasks";
+import { LANE_ORDER, groupByLane, type BoardLane } from "../lib/board-lanes";
+import { prReport } from "../lib/pr-status-store";
+import type { TaskRow } from "../lib/tasks";
 import { BoardTile } from "./BoardTile";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { StatusGlyph } from "./ui/StatusBadge";
 import "./Board.css";
 
-const COLUMN: Record<TaskGroup, { tone: StatusTone; label: () => string }> = {
+const COLUMN: Record<BoardLane, { tone: StatusTone; label: () => string }> = {
   needs: { tone: "blocked", label: () => t("group.needs") },
   working: { tone: "working", label: () => t("group.working") },
-  review: { tone: "ready", label: () => t("group.review") },
-  done: { tone: "done", label: () => t("group.done") },
+  review: { tone: "ready", label: () => t("lane.review") },
+  ready: { tone: "done", label: () => t("lane.ready") },
 };
 
-/** Every task on one screen: a column per status in need-first order, filtered by project. */
+/** Every task on one screen: a lane per derived state (needs you, working, in review, ready to merge), filtered by project. */
 export function Board(props: {
   tasks: readonly TaskRow[];
   repos: readonly { id: string; name: string }[];
@@ -23,7 +25,7 @@ export function Board(props: {
 }) {
   const [project, setProject] = createSignal("");
   const shown = createMemo(() => project() ? props.tasks.filter((task) => task.repoId === project()) : props.tasks);
-  const groups = createMemo(() => groupTasks(shown()));
+  const groups = createMemo(() => groupByLane(shown(), prReport));
   return (
     <section class="board">
       <div class="board-head">
@@ -34,7 +36,7 @@ export function Board(props: {
         </Show>
       </div>
       <div class="board-cols">
-        <For each={GROUP_ORDER}>{(group) => (
+        <For each={LANE_ORDER}>{(group) => (
           <div class="board-col">
             <div class="board-col-head" classList={{ needs: group === "needs" }}>
               <StatusGlyph tone={COLUMN[group].tone} />

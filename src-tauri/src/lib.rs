@@ -24,6 +24,7 @@ mod runtime_terminals;
 mod task_activity;
 mod task_folder;
 mod task_overlaps;
+mod project_cues;
 mod task_pin;
 mod task_ports;
 mod task_tabs;
@@ -298,6 +299,9 @@ pub fn run() {
             terminal::terminal_park,
             quit::terminals_stop,
             quit::app_quit,
+            project_cues::cue_list,
+            project_cues::cue_add,
+            project_cues::cue_delete,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
             task_activity::task_activity_list,

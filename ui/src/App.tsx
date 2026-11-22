@@ -41,6 +41,8 @@ import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { registerActions, registerGoToSource } from "./lib/actions";
+import { CuesDialog } from "./components/CuesDialog";
+import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
 import { pushUndoToast } from "./lib/undo";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
@@ -238,6 +240,28 @@ export function App() {
     { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), keys: SHORTCUT_LIST_KEYS,
       run: () => { setShortcutsOpen(true); } },
   ));
+  onCleanup(registerPromptCueSender((id, text) => draftComment(id, text)));
+  createEffect(() => {
+    const repoId = selected()?.repoId;
+    if (repoId) void loadCues(repoId).catch(report);
+  });
+  createEffect(() => {
+    const task = selected();
+    const repoId = task?.repoId;
+    if (!task || !repoId) return;
+    const cueActions = cuesOf(repoId)
+      .filter((cue) => cue.kind === "prompt" || canRunShellCues())
+      .map((cue) => ({
+        id: `cue:${cue.id}`,
+        label: () => cue.label,
+        group: () => t("cue.title"),
+        run: async () => { if (!(await runCue(task.id, cue))) pushToast({ tone: "error", message: t("cue.notRun") }); },
+      }));
+    onCleanup(registerActions(
+      { id: `cue.manage:${repoId}`, label: () => t("cue.manage"), group: () => t("cue.title"), run: () => { openCueManager(repoId); } },
+      ...cueActions,
+    ));
+  });
   // Agents; terminal tabs are added by their owner through registerGoToSource.
   onCleanup(registerGoToSource(() => rows().map((task) => ({
     id: `agent:${task.id}`,
@@ -1267,6 +1291,10 @@ export function App() {
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
+      </Show>
+      <Show when={cueManagerRepo()}>
+        {(repoId) => <CuesDialog repoId={repoId()} repoName={repos().find((item) => item.id === repoId())?.name ?? ""}
+          onClose={closeCueManager} />}
       </Show>
       <Show when={issueReport() !== undefined}>
         <IssueReportDialog error={issueReport() ?? ""} onClose={() => setIssueReport(undefined)} />
