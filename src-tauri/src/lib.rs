@@ -17,6 +17,7 @@ mod orchestration;
 mod pr_status;
 mod project_add;
 mod qa_run;
+mod quit;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
@@ -295,6 +296,8 @@ pub fn run() {
             terminal::terminal_close,
             terminal::terminal_detach,
             terminal::terminal_park,
+            quit::terminals_stop,
+            quit::app_quit,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
             task_activity::task_activity_list,
@@ -467,7 +470,7 @@ fn install_tray(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
-            "quit" => app.exit(0),
+            "quit" => request_quit(app),
             "new-task" => {
                 show_main_window(app);
                 if let Err(error) = app.emit_to("main", "tray-new-task", ()) {
@@ -489,6 +492,14 @@ fn install_tray(app: &App) -> tauri::Result<()> {
     let tray = tray.build(app)?;
     app.manage(TrayHandle(tray));
     Ok(())
+}
+
+/// Asks the window to confirm the quit; quits at once when there is no window to ask.
+fn request_quit(app: &AppHandle) {
+    show_main_window(app);
+    if app.emit_to("main", "quit-requested", ()).is_err() {
+        app.exit(0);
+    }
 }
 
 fn show_main_window(app: &AppHandle) {

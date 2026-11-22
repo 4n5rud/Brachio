@@ -65,6 +65,8 @@ export function TaskView(props: {
   requestedTab?: { key: string };
   onSecondaryKeys?: (keys: ReadonlyMap<string, readonly string[]>) => void;
   onSecondaryClosed?: (taskId: string, key: string) => void;
+  /** Asked before the last tab of a task closes; resolves false to keep it. */
+  confirmCloseLastTab?: (taskId: string) => Promise<boolean>;
   onAnswer?: (id: number, allow: boolean) => void;
   /** Allows the request and remembers it for this task for the app session. */
   onAnswerAlways?: (id: number) => void;
@@ -178,6 +180,7 @@ export function TaskView(props: {
   const closeTab = async (tab: TaskTab) => {
     const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
+    if (tabsOf(id).length === 1 && props.confirmCloseLastTab && !(await props.confirmCloseLastTab(id))) return;
     setTabsSaving(true);
     setTabError("");
     try {
