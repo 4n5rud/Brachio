@@ -154,7 +154,7 @@ pub fn record_limit_snapshot(
     used_percent: f64,
 ) -> Result<bool, StoreError> {
     let latest: Option<i64> = connection.query_row(
-        "SELECT MAX(at_ms) FROM usage_limit_snapshots WHERE provider = ?1 AND window = ?2",
+        "SELECT MAX(at_ms) FROM usage_limit_snapshots WHERE provider = ?1 AND window_name = ?2",
         params![provider, window],
         |row| row.get(0),
     )?;
@@ -162,7 +162,7 @@ pub fn record_limit_snapshot(
         return Ok(false);
     }
     connection.execute(
-        "INSERT OR IGNORE INTO usage_limit_snapshots (provider, window, at_ms, used_percent) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR IGNORE INTO usage_limit_snapshots (provider, window_name, at_ms, used_percent) VALUES (?1, ?2, ?3, ?4)",
         params![provider, window, at_ms, used_percent.clamp(0.0, 100.0)],
     )?;
     Ok(true)
@@ -172,12 +172,20 @@ pub fn record_limit_snapshot(
 ///
 /// # Errors
 /// Fails when the query fails.
-pub fn limit_history(connection: &Connection, since_ms: i64) -> Result<Vec<LimitSnapshot>, StoreError> {
+pub fn limit_history(
+    connection: &Connection,
+    since_ms: i64,
+) -> Result<Vec<LimitSnapshot>, StoreError> {
     let mut statement = connection.prepare(
-        "SELECT provider, window, at_ms, used_percent FROM usage_limit_snapshots WHERE at_ms >= ?1 ORDER BY at_ms",
+        "SELECT provider, window_name, at_ms, used_percent FROM usage_limit_snapshots WHERE at_ms >= ?1 ORDER BY at_ms",
     )?;
     let rows = statement.query_map([since_ms], |row| {
-        Ok(LimitSnapshot { provider: row.get(0)?, window: row.get(1)?, at_ms: row.get(2)?, used_percent: row.get(3)? })
+        Ok(LimitSnapshot {
+            provider: row.get(0)?,
+            window: row.get(1)?,
+            at_ms: row.get(2)?,
+            used_percent: row.get(3)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -203,30 +211,77 @@ mod tests {
     #[test]
     fn applying_twice_adds_up_and_keeps_the_state() {
         let mut connection = open_in_memory().expect("open");
-        usage_apply(&mut connection, "claude_code", "/a.jsonl", "s1", &[row("2026-11-01", "a", 5)]).expect("apply");
-        usage_apply(&mut connection, "claude_code", "/a.jsonl", "s2", &[row("2026-11-01", "a", 3)]).expect("apply");
+        usage_apply(
+            &mut connection,
+            "claude_code",
+            "/a.jsonl",
+            "s1",
+            &[row("2026-11-01", "a", 5)],
+        )
+        .expect("apply");
+        usage_apply(
+            &mut connection,
+            "claude_code",
+            "/a.jsonl",
+            "s2",
+            &[row("2026-11-01", "a", 3)],
+        )
+        .expect("apply");
         let rows = usage_rows(&connection, None, "2026-11-01").expect("rows");
         assert_eq!((rows.len(), rows[0].output, rows[0].input), (1, 8, 2));
-        assert_eq!(usage_file_state(&connection, "/a.jsonl").expect("state").as_deref(), Some("s2"));
+        assert_eq!(
+            usage_file_state(&connection, "/a.jsonl")
+                .expect("state")
+                .as_deref(),
+            Some("s2")
+        );
         assert_eq!(usage_file_state(&connection, "/none").expect("state"), None);
     }
 
     #[test]
     fn rows_are_limited_by_day_and_provider_and_reset_clears_them() {
         let mut connection = open_in_memory().expect("open");
-        usage_apply(&mut connection, "claude_code", "/a", "s", &[row("2026-10-01", "a", 1), row("2026-11-01", "a", 2)]).expect("apply");
-        assert_eq!(usage_rows(&connection, None, "2026-11-01").expect("rows").len(), 1);
-        assert!(usage_rows(&connection, Some("codex"), "2026-01-01").expect("rows").is_empty());
+        usage_apply(
+            &mut connection,
+            "claude_code",
+            "/a",
+            "s",
+            &[row("2026-10-01", "a", 1), row("2026-11-01", "a", 2)],
+        )
+        .expect("apply");
+        assert_eq!(
+            usage_rows(&connection, None, "2026-11-01")
+                .expect("rows")
+                .len(),
+            1
+        );
+        assert!(usage_rows(&connection, Some("codex"), "2026-01-01")
+            .expect("rows")
+            .is_empty());
         usage_reset(&mut connection).expect("reset");
-        assert!(usage_rows(&connection, None, "2026-01-01").expect("rows").is_empty());
+        assert!(usage_rows(&connection, None, "2026-01-01")
+            .expect("rows")
+            .is_empty());
     }
 
     #[test]
     fn limit_snapshots_keep_a_gap_and_survive_a_reset() {
         let mut connection = open_in_memory().expect("open");
-        assert!(record_limit_snapshot(&connection, "codex", "session", 1_000, 10.0).expect("first"));
-        assert!(!record_limit_snapshot(&connection, "codex", "session", 1_000 + 60_000, 20.0).expect("too soon"));
-        assert!(record_limit_snapshot(&connection, "codex", "session", 1_000 + SNAPSHOT_GAP_MS, 30.0).expect("later"));
+        assert!(
+            record_limit_snapshot(&connection, "codex", "session", 1_000, 10.0).expect("first")
+        );
+        assert!(
+            !record_limit_snapshot(&connection, "codex", "session", 1_000 + 60_000, 20.0)
+                .expect("too soon")
+        );
+        assert!(record_limit_snapshot(
+            &connection,
+            "codex",
+            "session",
+            1_000 + SNAPSHOT_GAP_MS,
+            30.0
+        )
+        .expect("later"));
         usage_reset(&mut connection).expect("reset");
         assert_eq!(limit_history(&connection, 0).expect("history").len(), 2);
     }

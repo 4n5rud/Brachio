@@ -109,7 +109,13 @@ fn day_of(record: &Value) -> Option<String> {
     let stamp = record.get("timestamp")?.as_str()?;
     let day = stamp.get(..10)?;
     let shaped = day.len() == 10
-        && day.bytes().enumerate().all(|(at, byte)| if at == 4 || at == 7 { byte == b'-' } else { byte.is_ascii_digit() });
+        && day.bytes().enumerate().all(|(at, byte)| {
+            if at == 4 || at == 7 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
     shaped.then(|| day.to_owned())
 }
 
@@ -150,11 +156,21 @@ fn has(line: &[u8], needle: &[u8]) -> bool {
     line.windows(needle.len()).any(|window| window == needle)
 }
 
-fn finish(file: &LogFile, state: &FileState, days: BTreeMap<String, TokenUsage>, bytes: u64) -> Scanned {
+fn finish(
+    file: &LogFile,
+    state: &FileState,
+    days: BTreeMap<String, TokenUsage>,
+    bytes: u64,
+) -> Scanned {
     let buckets = days
         .into_iter()
         .filter(|(_, usage)| !is_empty(*usage))
-        .map(|(day, usage)| Bucket { day, project: state.project.clone(), session: file.session.clone(), usage })
+        .map(|(day, usage)| Bucket {
+            day,
+            project: state.project.clone(),
+            session: file.session.clone(),
+            usage,
+        })
         .collect();
     Scanned { buckets, bytes }
 }
@@ -187,7 +203,11 @@ fn scan_claude(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
             cache_write: count(usage, "cache_creation_input_tokens"),
         };
         let id = message.get("id").and_then(Value::as_str).map(str::to_owned);
-        let added = if id.is_some() && id == state.last_id { delta(now, state.last_usage) } else { now };
+        let added = if id.is_some() && id == state.last_id {
+            delta(now, state.last_usage)
+        } else {
+            now
+        };
         state.last_id = id;
         state.last_usage = now;
         let Some(day) = day_of(&record) else {
@@ -252,7 +272,7 @@ fn scan_codex(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
 }
 
 fn newest_first(mut files: Vec<(std::time::SystemTime, LogFile)>) -> Vec<LogFile> {
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     files.truncate(MAX_LOG_FILES);
     files.into_iter().map(|(_, file)| file).collect()
 }
@@ -276,14 +296,21 @@ pub fn claude_logs_in(projects: &Path) -> Vec<LogFile> {
             let Some(session) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
                 continue;
             };
-            let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
             found.push((modified, LogFile { path, session }));
         }
     }
     newest_first(found)
 }
 
-fn collect_rollouts(folder: &Path, depth: usize, found: &mut Vec<(std::time::SystemTime, LogFile)>) {
+fn collect_rollouts(
+    folder: &Path,
+    depth: usize,
+    found: &mut Vec<(std::time::SystemTime, LogFile)>,
+) {
     let Ok(entries) = fs::read_dir(folder) else {
         return;
     };
@@ -301,11 +328,19 @@ fn collect_rollouts(folder: &Path, depth: usize, found: &mut Vec<(std::time::Sys
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        if !stem.starts_with("rollout-") || path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        if !stem.starts_with("rollout-")
+            || path.extension().and_then(|e| e.to_str()) != Some("jsonl")
+        {
             continue;
         }
-        let session = stem.get(stem.len().saturating_sub(36)..).unwrap_or(stem).to_owned();
-        let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        let session = stem
+            .get(stem.len().saturating_sub(36)..)
+            .unwrap_or(stem)
+            .to_owned();
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
         found.push((modified, LogFile { path, session }));
     }
 }
@@ -329,7 +364,8 @@ impl UsageProvider for ClaudeProvider {
         "claude"
     }
     fn log_files(&self) -> Vec<LogFile> {
-        home_dir("CLAUDE_CONFIG_DIR", ".claude").map_or_else(Vec::new, |dir| claude_logs_in(&dir.join("projects")))
+        home_dir("CLAUDE_CONFIG_DIR", ".claude")
+            .map_or_else(Vec::new, |dir| claude_logs_in(&dir.join("projects")))
     }
     fn scan(&self, file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         scan_claude(file, state)
@@ -347,7 +383,8 @@ impl UsageProvider for CodexProvider {
         "codex"
     }
     fn log_files(&self) -> Vec<LogFile> {
-        home_dir("CODEX_HOME", ".codex").map_or_else(Vec::new, |dir| codex_logs_in(&dir.join("sessions")))
+        home_dir("CODEX_HOME", ".codex")
+            .map_or_else(Vec::new, |dir| codex_logs_in(&dir.join("sessions")))
     }
     fn scan(&self, file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         scan_codex(file, state)
@@ -360,7 +397,11 @@ mod tests {
     use std::io::Write;
 
     fn write(path: &Path, text: &str) {
-        let mut file = fs::OpenOptions::new().create(true).append(true).open(path).expect("open");
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("open");
         file.write_all(text.as_bytes()).expect("write");
     }
 
@@ -371,17 +412,35 @@ mod tests {
     }
 
     fn file_in(dir: &Path) -> LogFile {
-        LogFile { path: dir.join("s.jsonl"), session: "s".to_owned() }
+        LogFile {
+            path: dir.join("s.jsonl"),
+            session: "s".to_owned(),
+        }
     }
 
     #[test]
     fn claude_usage_is_bucketed_by_day_and_a_repeated_message_counts_once() {
         let dir = tempfile::tempdir().expect("dir");
         let file = file_in(dir.path());
-        write(&file.path, &format!("{}\n{}\n{}\n", claude_line("m1", "2026-11-01", 5), claude_line("m1", "2026-11-01", 5), claude_line("m2", "2026-11-02", 7)));
+        write(
+            &file.path,
+            &format!(
+                "{}\n{}\n{}\n",
+                claude_line("m1", "2026-11-01", 5),
+                claude_line("m1", "2026-11-01", 5),
+                claude_line("m2", "2026-11-02", 7)
+            ),
+        );
         let scanned = scan_claude(&file, &mut FileState::default()).expect("scan");
-        let days: Vec<_> = scanned.buckets.iter().map(|b| (b.day.as_str(), b.usage.output, b.project.as_str())).collect();
-        assert_eq!(days, [("2026-11-01", 5, "/work/a"), ("2026-11-02", 7, "/work/a")]);
+        let days: Vec<_> = scanned
+            .buckets
+            .iter()
+            .map(|b| (b.day.as_str(), b.usage.output, b.project.as_str()))
+            .collect();
+        assert_eq!(
+            days,
+            [("2026-11-01", 5, "/work/a"), ("2026-11-02", 7, "/work/a")]
+        );
     }
 
     #[test]
@@ -389,13 +448,22 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         let file = file_in(dir.path());
         let mut state = FileState::default();
-        write(&file.path, &format!("{}\n", claude_line("m1", "2026-11-01", 5)));
+        write(
+            &file.path,
+            &format!("{}\n", claude_line("m1", "2026-11-01", 5)),
+        );
         scan_claude(&file, &mut state).expect("scan");
-        write(&file.path, &format!("broken \"usage\"\n{}\n", claude_line("m2", "2026-11-01", 3)));
+        write(
+            &file.path,
+            &format!("broken \"usage\"\n{}\n", claude_line("m2", "2026-11-01", 3)),
+        );
         let again = scan_claude(&file, &mut state).expect("scan");
         assert_eq!(again.buckets.len(), 1);
         assert_eq!(again.buckets[0].usage.output, 3);
-        assert!(scan_claude(&file, &mut state).expect("scan").buckets.is_empty());
+        assert!(scan_claude(&file, &mut state)
+            .expect("scan")
+            .buckets
+            .is_empty());
     }
 
     #[test]
@@ -404,12 +472,38 @@ mod tests {
         let file = file_in(dir.path());
         let meta = r#"{"timestamp":"2026-11-01T01:00:00Z","type":"session_meta","payload":{"id":"x","cwd":"/work/b"}}"#;
         let event = |day: &str, input: u64, output: u64| {
-            format!(r#"{{"timestamp":"{day}T02:00:00Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{input},"cached_input_tokens":0,"output_tokens":{output}}}}}}}}}"#)
+            format!(
+                r#"{{"timestamp":"{day}T02:00:00Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{input},"cached_input_tokens":0,"output_tokens":{output}}}}}}}}}"#
+            )
         };
-        write(&file.path, &format!("{meta}\n{}\n{}\n", event("2026-11-01", 100, 10), event("2026-11-02", 250, 30)));
+        write(
+            &file.path,
+            &format!(
+                "{meta}\n{}\n{}\n",
+                event("2026-11-01", 100, 10),
+                event("2026-11-02", 250, 30)
+            ),
+        );
         let scanned = scan_codex(&file, &mut FileState::default()).expect("scan");
-        let found: Vec<_> = scanned.buckets.iter().map(|b| (b.day.as_str(), b.usage.input, b.usage.output, b.project.as_str())).collect();
-        assert_eq!(found, [("2026-11-01", 100, 10, "/work/b"), ("2026-11-02", 150, 20, "/work/b")]);
+        let found: Vec<_> = scanned
+            .buckets
+            .iter()
+            .map(|b| {
+                (
+                    b.day.as_str(),
+                    b.usage.input,
+                    b.usage.output,
+                    b.project.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("2026-11-01", 100, 10, "/work/b"),
+                ("2026-11-02", 150, 20, "/work/b")
+            ]
+        );
     }
 
     #[test]
@@ -429,7 +523,13 @@ mod tests {
     fn a_line_with_a_bad_day_is_not_counted() {
         let dir = tempfile::tempdir().expect("dir");
         let file = file_in(dir.path());
-        write(&file.path, &format!("{}\n", claude_line("m1", "not-a-date", 5)));
-        assert!(scan_claude(&file, &mut FileState::default()).expect("scan").buckets.is_empty());
+        write(
+            &file.path,
+            &format!("{}\n", claude_line("m1", "not-a-date", 5)),
+        );
+        assert!(scan_claude(&file, &mut FileState::default())
+            .expect("scan")
+            .buckets
+            .is_empty());
     }
 }

@@ -19,6 +19,7 @@ import { sidebarRowParts, updateSidebarRowParts } from "../../lib/sidebar-rows";
 import { ThemePicker } from "../ui/ThemePicker";
 import { Toggle } from "../ui/Toggle";
 import { AgentSettings } from "./AgentSettings";
+import { UsageAnalytics } from "./UsageAnalytics";
 import { SettingRow } from "./SettingRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { TerminalSettings } from "./TerminalSettings";
@@ -200,7 +201,10 @@ export function SettingsPanel(props: {
             <p class="form-hint">{t("settings.themeNote")}</p>
           </Match>
           <Match when={page() === "terminal"}><SettingsGroup><TerminalSettings drafts={props.terminalDrafts} /></SettingsGroup></Match>
-          <Match when={page() === "agents"}><SettingsGroup>{props.agents ?? <AgentSettings />}</SettingsGroup></Match>
+          <Match when={page() === "agents"}>
+            <SettingsGroup>{props.agents ?? <AgentSettings />}</SettingsGroup>
+            <Show when={"__TAURI_INTERNALS__" in window}><UsageAnalytics /></Show>
+          </Match>
           <Match when={page() === "notifications"}>
             <SettingsGroup>
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}

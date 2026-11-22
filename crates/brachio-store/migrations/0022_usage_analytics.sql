@@ -22,8 +22,8 @@ CREATE INDEX usage_daily_day ON usage_daily(day);
 -- Plan limit windows as the agents reported them, so a history line can be drawn.
 CREATE TABLE usage_limit_snapshots (
     provider TEXT NOT NULL,
-    window TEXT NOT NULL,
+    window_name TEXT NOT NULL,
     at_ms INTEGER NOT NULL,
     used_percent REAL NOT NULL,
-    PRIMARY KEY (provider, window, at_ms)
+    PRIMARY KEY (provider, window_name, at_ms)
 );
