@@ -17,6 +17,8 @@ use serde::Serialize;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::runtime_client;
+use crate::runtime_terminals::RuntimeTerminals;
+use crate::workspace::Database;
 
 const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_millis(500);
 const RUNTIME_PIDS_TTL: Duration = Duration::from_secs(30);
@@ -133,6 +135,117 @@ pub async fn resource_usage(
         runtime_memory_bytes,
         cpu_percent: (cpu_total / cores).clamp(0.0, 100.0),
     })
+}
+
+/// One process in a task's terminal trees.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProcess {
+    pid: u32,
+    parent_pid: Option<u32>,
+    name: String,
+    /// Terminal key of the tree the process belongs to.
+    key: String,
+    /// Percent of one core since the previous reading; the first reading is 0.
+    cpu_percent: f32,
+    memory_bytes: u64,
+}
+
+/// The task's live terminals and the pids of their shells.
+async fn task_roots(
+    database: &Database,
+    terminals: &RuntimeTerminals,
+    task_id: &str,
+) -> Result<Vec<(String, u32)>, String> {
+    let tabs: Vec<String> = {
+        let connection = database.lock()?;
+        brachio_store::task_tabs(&connection, task_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|tab| tab.tab_id)
+            .collect()
+    };
+    terminals
+        .live_sessions_for_task(task_id, &tabs)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// CPU and memory of every process below the task's terminals, shells included.
+#[tauri::command]
+pub async fn task_processes(
+    monitor: tauri::State<'_, ResourceMonitor>,
+    database: tauri::State<'_, Database>,
+    terminals: tauri::State<'_, RuntimeTerminals>,
+    id: String,
+) -> Result<Vec<TaskProcess>, String> {
+    let roots = task_roots(&database, &terminals, &id).await?;
+    let mut system = monitor
+        .system
+        .lock()
+        .map_err(|_| "resource monitor is poisoned".to_string())?;
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    let rows: Vec<ProcessRow> = system
+        .processes()
+        .iter()
+        .map(|(pid, process)| (*pid, process.parent()))
+        .collect();
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    for (key, root) in roots {
+        for pid in tree_pids(&rows, [Pid::from_u32(root)]) {
+            let Some(process) = system.process(pid) else {
+                continue;
+            };
+            if !seen.insert(pid) {
+                continue;
+            }
+            found.push(TaskProcess {
+                pid: pid.as_u32(),
+                parent_pid: process.parent().map(Pid::as_u32),
+                name: process.name().to_string_lossy().into_owned(),
+                key: key.clone(),
+                cpu_percent: process.cpu_usage(),
+                memory_bytes: process.memory(),
+            });
+        }
+    }
+    found.sort_by_key(|process| process.pid);
+    Ok(found)
+}
+
+/// Ends one process, only when it is in the task's terminal trees.
+#[tauri::command]
+pub async fn task_process_kill(
+    monitor: tauri::State<'_, ResourceMonitor>,
+    database: tauri::State<'_, Database>,
+    terminals: tauri::State<'_, RuntimeTerminals>,
+    id: String,
+    pid: u32,
+) -> Result<(), String> {
+    let roots = task_roots(&database, &terminals, &id).await?;
+    let mut system = monitor
+        .system
+        .lock()
+        .map_err(|_| "resource monitor is poisoned".to_string())?;
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    let rows: Vec<ProcessRow> = system
+        .processes()
+        .iter()
+        .map(|(pid, process)| (*pid, process.parent()))
+        .collect();
+    let target = Pid::from_u32(pid);
+    let inside = roots
+        .iter()
+        .any(|(_, root)| tree_pids(&rows, [Pid::from_u32(*root)]).contains(&target));
+    if !inside {
+        return Err("That process is not part of this task.".to_owned());
+    }
+    match system.process(target) {
+        Some(process) if process.kill() => Ok(()),
+        Some(_) => Err("The process could not be ended.".to_owned()),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
