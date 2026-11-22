@@ -899,6 +899,19 @@ export const en = {
   "project.addFailedNote": "Nothing was added. Fix the problem and try again.",
 
   "time.now": "now",
+  "checkpoints.title": "Restore points",
+  "checkpoints.empty": "Restore points appear here after the agent changes files.",
+  "checkpoints.turnStart": "Before turn",
+  "checkpoints.turnEnd": "After turn",
+  "checkpoints.beforeRestore": "Before restore",
+  "checkpoints.restore": "Restore",
+  "checkpoints.restoreTitle": "Restore files to point #{number}?",
+  "checkpoints.restoreBody": "Files in this task's folder go back to how they were at this point. Files added since are removed. A backup point is saved first, so you can undo this. Git branch, commits and staging are not changed.",
+  "checkpoints.conversationNote": "The agent's conversation is NOT rolled back. It still remembers its later work, so tell it the files were restored.",
+  "checkpoints.restored": "Files restored. Backup saved as point #{number}.",
+  "checkpoints.restoreFailed": "Could not restore files",
+  "checkpoints.working": "Restore is off while the agent is working.",
+  "checkpoints.oldest": "The oldest point has nothing before it to compare with.",
 } as const;
 
 export type MessageKey = keyof typeof en;
