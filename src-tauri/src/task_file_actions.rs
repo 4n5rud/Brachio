@@ -87,21 +87,22 @@ pub async fn task_open_in_editor(
     id: String,
     path: String,
     editor: Option<String>,
+    line: Option<u32>,
 ) -> Result<(), String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
     tauri::async_runtime::spawn_blocking(move || {
         let file = existing_inside(&task.worktree_path, &path)?;
-        let program = EDITORS
+        let chosen = EDITORS
             .iter()
-            .find(|(editor_id, _, _)| Some(*editor_id) == editor.as_deref())
-            .map(|(_, _, program)| program);
+            .find(|(editor_id, _, _)| Some(*editor_id) == editor.as_deref());
+        let program = chosen.map(|(_, _, program)| program);
         let mut command = match program {
             Some(program) => {
                 let path_var = std::env::var_os("PATH").unwrap_or_default();
                 let launcher = find_program(program, &path_var)
                     .ok_or_else(|| "That editor is not installed.".to_owned())?;
                 let mut command = Command::new(launcher);
-                command.arg(&file);
+                command.args(editor_arguments(chosen.map(|(id, _, _)| *id), &file, line));
                 command
             }
             None => crate::task_folder::open_command(&file),
@@ -111,6 +112,20 @@ pub async fn task_open_in_editor(
     })
     .await
     .map_err(to_text)?
+}
+
+/// How each editor is told to open a file at a line; the system default cannot take a line.
+fn editor_arguments(
+    editor: Option<&str>,
+    file: &Path,
+    line: Option<u32>,
+) -> Vec<std::ffi::OsString> {
+    let at_line = |line: u32| format!("{}:{line}", file.display()).into();
+    match (editor, line.filter(|line| *line > 0)) {
+        (Some("vscode" | "cursor"), Some(line)) => vec!["--goto".into(), at_line(line)],
+        (Some("zed"), Some(line)) => vec![at_line(line)],
+        _ => vec![file.as_os_str().to_owned()],
+    }
 }
 
 #[cfg(windows)]
@@ -296,7 +311,7 @@ pub async fn task_discard_hunk(
 
 #[cfg(test)]
 mod tests {
-    use super::{create_inside, find_program, rename_inside, valid_name};
+    use super::{create_inside, editor_arguments, find_program, rename_inside, valid_name};
     use std::fs;
 
     #[test]
@@ -345,6 +360,17 @@ mod tests {
         );
         assert!(create_inside(dir.path(), "..", "x", false).is_err());
         assert!(create_inside(dir.path(), "nope", "x", false).is_err());
+    }
+
+    #[test]
+    fn editors_get_the_line_in_their_own_form() {
+        let file = std::path::Path::new("src/a.rs");
+        let args = |editor, line| editor_arguments(editor, file, line);
+        assert_eq!(args(Some("vscode"), Some(7)), ["--goto", "src/a.rs:7"]);
+        assert_eq!(args(Some("zed"), Some(7)), ["src/a.rs:7"]);
+        assert_eq!(args(Some("cursor"), None), ["src/a.rs"]);
+        assert_eq!(args(None, Some(7)), ["src/a.rs"]);
+        assert_eq!(args(Some("vscode"), Some(0)), ["src/a.rs"]);
     }
 
     #[test]
