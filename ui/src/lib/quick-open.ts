@@ -1,11 +1,9 @@
+import type { AppAction } from "./actions";
 import type { TaskRow } from "./tasks";
-
-/** What the command entries of quick open can do. */
-export type CommandId = "newTask" | "settings" | "archived";
 
 export type QuickEntry =
   | { kind: "task"; task: TaskRow }
-  | { kind: "command"; id: CommandId }
+  | { kind: "action"; action: AppAction }
   | { kind: "file"; path: string };
 
 /** A file search starts after this many characters, so the whole list is not shown. */
