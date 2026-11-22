@@ -1,5 +1,5 @@
 import { Button } from "./ui/Button";
-import { For, Show, createResource } from "solid-js";
+import { For, Show, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { listFolderRepos } from "../lib/workspace";
 
@@ -21,10 +21,13 @@ export function FolderRepos(props: {
       }
     },
   );
+  const [adding, setAdding] = createSignal<string>();
   const add = async (path: string) => {
+    setAdding(path);
     try {
       await props.onAdd(path);
     } finally {
+      setAdding(undefined);
       void refetch();
     }
   };
@@ -36,7 +39,7 @@ export function FolderRepos(props: {
           {(repo) => (
             <div class="folder-repo">
               <span class="folder-repo-name" title={repo.path}>{repo.name}</span>
-              <Button size="sm" disabled={repo.added} onClick={() => void add(repo.path)}>
+              <Button size="sm" busy={adding() === repo.path} disabled={repo.added || adding() !== undefined} onClick={() => void add(repo.path)}>
                 {repo.added ? t("folderRepos.added") : t("folderRepos.add")}
               </Button>
             </div>

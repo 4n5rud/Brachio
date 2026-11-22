@@ -11,6 +11,7 @@ import type { TerminalDrop } from "../lib/terminal-drop";
 import { quoteShellPaths } from "../lib/shell-quote";
 import { shellKind } from "../lib/terminal";
 import { t } from "../i18n";
+import { useAsyncAction } from "../lib/async-action";
 import { copyIntoTask, listTaskFiles, moveTaskPath, previewTaskFile, previewTaskMedia, taskCopyConflicts } from "../lib/workspace";
 
 const RESULT_LIMIT = 100;
@@ -47,7 +48,7 @@ export function FilesPanel(props: {
   return (
     <>
       <InspectorSection title={t("files.title")}
-        end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} disabled={props.loading} onClick={props.onRefresh} />}>
+        end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={props.loading} onClick={props.onRefresh} />}>
         <Input aria-label={t("files.filter")} placeholder={t("files.filter")} mono value={props.filter}
           onInput={(event) => props.onFilter(event.currentTarget.value)} />
         <Show when={props.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
@@ -178,11 +179,12 @@ export function TaskFiles(props: { taskId: string; onInsert: (path: string) => v
       failed(t("files.copyFailed"), failure);
     }
   };
+  const reload = useAsyncAction(async () => { await refetch(); }, { failureToast: true });
   onCleanup(registerTreeDrop({ copyInto }));
 
   return (
-    <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading} error={files()?.error}
-      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void refetch()} preview={previewState()}
+    <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading || reload.pending()} error={files()?.error}
+      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void reload.run()} preview={previewState()}
       onMove={(from, toDir) => void move(from, toDir)} onTerminalDrop={(file, terminal) => void dropOnTerminal(file, terminal)} />
   );
 }

@@ -1,3 +1,4 @@
+import { holdMinimum } from "./async-action";
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import type { AgentKind } from "./tasks";
@@ -63,10 +64,11 @@ export const nearlyUsed = (window: UsageWindow) => window.usedPercent >= NEARLY_
 
 const [usages, setUsages] = createSignal<readonly AgentUsage[]>([]);
 const [refreshing, setRefreshing] = createSignal(false);
+const [updatedAt, setUpdatedAt] = createSignal<number>();
 let signedIn: AgentKind[] | undefined;
 let polling: number | undefined;
 
-export { refreshing as agentUsageRefreshing, usages as agentUsages };
+export { refreshing as agentUsageRefreshing, updatedAt as agentUsageUpdatedAt, usages as agentUsages };
 
 async function signedInAgents(): Promise<AgentKind[]> {
   const found: AgentKind[] = [];
@@ -99,9 +101,13 @@ async function readUsage(agent: AgentKind, force: boolean): Promise<AgentUsage> 
 export async function refreshAgentUsage(force = false): Promise<void> {
   if (refreshing()) return;
   setRefreshing(true);
-  try {
+  const read = async () => {
     if (force || signedIn === undefined) signedIn = await signedInAgents();
     setUsages(await Promise.all(CORE_ORDER.filter((agent) => signedIn?.includes(agent)).map((agent) => readUsage(agent, force))));
+    setUpdatedAt(Date.now() / 1000);
+  };
+  try {
+    await (force ? holdMinimum(read()) : read());
   } catch {
     setUsages([]);
   } finally {

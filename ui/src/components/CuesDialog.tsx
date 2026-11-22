@@ -14,14 +14,18 @@ export function CuesDialog(props: { repoId: string; repoName: string; onClose: (
   const [label, setLabel] = createSignal("");
   const [body, setBody] = createSignal("");
   const [error, setError] = createSignal("");
+  const [saving, setSaving] = createSignal(false);
   const add = async () => {
     setError("");
+    setSaving(true);
     try {
       await addCue(props.repoId, kind(), label(), body());
       setLabel("");
       setBody("");
     } catch (failure) {
       setError(String(failure));
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -45,7 +49,7 @@ export function CuesDialog(props: { repoId: string; repoName: string; onClose: (
         hint={kind() === "prompt" ? t("cue.promptHint") : t("cue.shellHint")}
         value={body()} onInput={(event) => setBody(event.currentTarget.value)} />
       <Show when={error()}><p class="form-error" role="alert">{error()}</p></Show>
-      <Button size="sm" variant="primary" disabled={!label().trim() || !body().trim()} onClick={() => void add()}>{t("cue.add")}</Button>
+      <Button size="sm" variant="primary" busy={saving()} disabled={!label().trim() || !body().trim()} onClick={() => void add()}>{t("cue.add")}</Button>
     </Dialog>
   );
 }

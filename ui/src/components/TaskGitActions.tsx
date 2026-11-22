@@ -4,6 +4,7 @@ import { For, Show, createSignal, type JSX } from "solid-js";
 import { t } from "../i18n";
 import { requestShell } from "../lib/shell-request";
 import { pushToast } from "../lib/toasts";
+import { holdMinimum } from "../lib/async-action";
 import { openExternalLink } from "../lib/pr-status";
 import { prReport, refreshPrStatus } from "../lib/pr-status-store";
 import type { DiffFile } from "../lib/diff";
@@ -45,6 +46,7 @@ export function TaskGitActions(props: {
   const [commitOutcome, setCommitOutcome] = createSignal<Outcome>(props.initial?.commit);
   const [pushOutcome, setPushOutcome] = createSignal<Outcome>(props.initial?.push);
   const [prOutcome, setPrOutcome] = createSignal<Outcome>(props.initial?.pr);
+  const [working, setWorking] = createSignal<"stage" | "push" | undefined>();
   const busy = () => props.runner.busy();
   const blocked = () => props.conflicts.length > 0;
   const fail = (error: unknown) => pushToast({ tone: "error", title: t("error.title"), message: String(error) });
@@ -74,8 +76,13 @@ export function TaskGitActions(props: {
   };
 
   const stageTracked = async () => {
-    const result = await props.runner.run({ action: "stageTracked" });
-    if (result && !result.ok) fail(result.failure.output);
+    setWorking("stage");
+    try {
+      const result = await holdMinimum(props.runner.run({ action: "stageTracked" }));
+      if (result && !result.ok) fail(result.failure.output);
+    } finally {
+      setWorking(undefined);
+    }
   };
 
   const commit = async () => {
@@ -92,7 +99,8 @@ export function TaskGitActions(props: {
 
   const push = async () => {
     setPushOutcome(undefined);
-    const result = await props.runner.run({ action: "push" });
+    setWorking("push");
+    const result = await holdMinimum(props.runner.run({ action: "push" })).finally(() => setWorking(undefined));
     if (!result) return;
     setPushOutcome(result.ok
       ? { ok: t("git.pushed").replace("{branch}", props.branch ?? "") }
@@ -137,7 +145,7 @@ export function TaskGitActions(props: {
           )}</For>
         </Show>
         <ActionRow>
-          <Button size="sm" disabled={busy()} onClick={() => void stageTracked()}>{t("git.stageTracked")}</Button>
+          <Button size="sm" busy={working() === "stage"} disabled={busy()} onClick={() => void stageTracked()}>{t("git.stageTracked")}</Button>
         </ActionRow>
       </InspectorSection>
       <Show when={props.untracked.length > 0}>
@@ -191,7 +199,7 @@ export function TaskGitActions(props: {
           </>
         ))}
         <ActionRow>
-          <Button size="sm" icon="download" disabled={busy()} onClick={() => void push()}>{t("git.push")}</Button>
+          <Button size="sm" icon="download" busy={working() === "push"} disabled={busy()} onClick={() => void push()}>{t("git.push")}</Button>
           <Show when={failureOf(pushOutcome())?.kind === "rejected"}>
             <Button size="sm" icon="terminal" onClick={() => requestShell(props.taskId)}>{t("git.openShell")}</Button>
           </Show>

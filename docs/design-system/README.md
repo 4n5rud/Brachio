@@ -12,6 +12,7 @@ The screens follow the combined design guideline (myWorkFlow and unslop-ui). Whe
 - No eyebrow labels, decorative numbering, slogans or explain-the-screen sentences. A confirm dialog asks a question, lists what is lost and has two buttons: Cancel and a verb.
 - Weights stay between 400 and 600. Spacing stays on the 4px scale. No gradients, glows or colored shadows.
 - Toasts confirm what just happened and leave after 3s; errors stay until dismissed. Loading shows nothing under 0.3s, then the working arc with words.
+- Every user-triggered async action shows pending, then success or failure; a control that was pressed never stays silent. See `async-feedback.md`.
 - Repeating motion only for loading: the working arc. Status glyphs and badges never pulse.
 - No middle dots or arrows to join phrases in UI text; split them with layout.
 

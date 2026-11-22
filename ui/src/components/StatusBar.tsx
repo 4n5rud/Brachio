@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { t } from "../i18n";
-import { agentUsageRefreshing, agentUsages, refreshAgentUsage, startAgentUsagePolling } from "../lib/agent-usage";
+import { agentUsageRefreshing, agentUsageUpdatedAt, agentUsages, refreshAgentUsage, startAgentUsagePolling } from "../lib/agent-usage";
 import { UsageStatus } from "./AgentUsage";
 import { Icon } from "./Icon";
 import { Button } from "./ui/Button";
@@ -131,7 +131,7 @@ export function StatusBar(props: { sessions: number; onAgentSettings: () => void
       memoryTitle={memoryTitle()}
       cpu={usage() ? `${Math.round(usage()!.cpuPercent)}%` : undefined}
       usage={
-        <UsageStatus usages={agentUsages()} now={now()} refreshing={agentUsageRefreshing()}
+        <UsageStatus usages={agentUsages()} now={now()} refreshing={agentUsageRefreshing()} updatedAt={agentUsageUpdatedAt()}
           onRefresh={() => void refreshAgentUsage(true)} onAccounts={props.onAgentSettings}
           onDetails={agentUsages().some((entry) => entry.agent === "claude") ? () => void invoke("open_claude_usage") : undefined} />
       }

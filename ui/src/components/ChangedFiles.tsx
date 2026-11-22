@@ -39,7 +39,7 @@ export function ChangedFiles(props: {
     <InspectorSection title={t("inspector.changedFiles")}
       end={<>
         <DiffStat additions={props.additions} deletions={props.deletions} />
-        <IconButton size="sm" icon="refresh" label={t("inspector.refresh")} disabled={props.loading} onClick={props.onRefresh} />
+        <IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={props.loading} onClick={props.onRefresh} />
       </>}>
       <Show when={props.loading && !props.data}>
         <InspectorNote tone="progress">{t("inspector.loadingChanges")}</InspectorNote>
@@ -50,7 +50,7 @@ export function ChangedFiles(props: {
             <InspectorNote tone="error">{t("inspector.changesFailed")}</InspectorNote>
             <OutputLog text={gitOutput(error())} />
             <ActionRow>
-              <Button size="sm" icon="refresh" disabled={props.loading} onClick={props.onRefresh}>{t("inspector.tryAgain")}</Button>
+              <Button size="sm" icon="refresh" busy={props.loading} onClick={props.onRefresh}>{t("inspector.tryAgain")}</Button>
             </ActionRow>
           </>
         )}
