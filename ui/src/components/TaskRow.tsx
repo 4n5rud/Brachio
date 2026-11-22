@@ -14,6 +14,7 @@ import { AgentChip } from "./ui/AgentChip";
 import { DiffStat } from "./ui/DiffStat";
 import { prChipIcon } from "./ui/PrChip";
 import { StatusGlyph } from "./ui/StatusBadge";
+import { sidebarRowParts } from "../lib/sidebar-rows";
 import "./TaskRow.css";
 
 /** One task in the sidebar: status, title and age, then agent, branch and diff stat, a line for the pull request and mail, and an optional note. */
@@ -88,9 +89,11 @@ export function TaskRowItem(props: {
         </span>
       </Show>
       <span class="task-meta">
-        <AgentChip agent={props.task.agent} />
-        <span class="task-branch">{shortBranch(props.task.branch)}</span>
-        <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+        <Show when={sidebarRowParts().agent}><AgentChip agent={props.task.agent} /></Show>
+        <Show when={sidebarRowParts().branch}><span class="task-branch">{shortBranch(props.task.branch)}</span></Show>
+        <Show when={sidebarRowParts().changes}>
+          <DiffStat additions={props.task.additions} deletions={props.task.deletions} />
+        </Show>
         <Show when={props.comparing}><span class="task-compare">{t("task.compare")}</span></Show>
       </span>
       <Show when={props.unread > 0}>
@@ -98,7 +101,7 @@ export function TaskRowItem(props: {
           <MailboxBadge count={props.unread} />
         </span>
       </Show>
-      <Show when={props.task.note}>
+      <Show when={sidebarRowParts().statusText && props.task.note}>
         <span class={`task-note task-note-${tone()}`}>{props.task.note}</span>
       </Show>
       <Show when={menu()}>

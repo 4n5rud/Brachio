@@ -239,7 +239,7 @@ export function TaskList(props: {
       <Show when={props.onSettings || props.onOpenArchived}>
         <div class="sidebar-foot">
           <Show when={props.onSettings}>
-            <IconButton icon="gear" label={t("titlebar.settings")} keys={SETTINGS_KEYS.split("+")}
+            <IconButton icon="gear" label={t("titlebar.settings")} keys={SETTINGS_KEYS().split("+")}
               onClick={() => props.onSettings?.()} />
           </Show>
           <Show when={props.onOpenArchived}>
