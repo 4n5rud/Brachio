@@ -23,20 +23,47 @@ export const matchesAll = (text: string, query: string): boolean => {
  * comes before one whose name only contains it, and both come before a match in a folder name.
  * Shorter paths come first within a group.
  */
-export function rankFiles(files: readonly string[], query: string, limit = MAX_FILE_RESULTS): string[] {
+export function rankFiles(
+  files: readonly string[],
+  query: string,
+  limit = MAX_FILE_RESULTS,
+  recents: readonly string[] = [],
+): string[] {
   const terms = termsOf(query);
   if (query.trim().length < MIN_FILE_QUERY || terms.length === 0) return [];
   const first = terms[0] ?? "";
-  const scored: { path: string; score: number }[] = [];
+  const letters = terms.join("");
+  const scored: { path: string; score: number; recent: number }[] = [];
   for (const path of files) {
     const lower = path.toLowerCase();
-    if (!terms.every((term) => lower.includes(term))) continue;
     const name = lower.slice(lower.lastIndexOf("/") + 1);
-    scored.push({ path, score: name.startsWith(first) ? 0 : name.includes(first) ? 1 : 2 });
+    const recent = recents.indexOf(path);
+    const rank = recent < 0 ? recents.length : recent;
+    if (terms.every((term) => lower.includes(term))) {
+      scored.push({ path, score: name.startsWith(first) ? 0 : name.includes(first) ? 1 : 2, recent: rank });
+    } else if (isSubsequence(letters, name)) {
+      scored.push({ path, score: 3, recent: rank });
+    }
   }
-  scored.sort((a, b) => a.score - b.score || a.path.length - b.path.length || a.path.localeCompare(b.path));
+  scored.sort((a, b) => a.score - b.score || a.recent - b.recent || a.path.length - b.path.length || a.path.localeCompare(b.path));
   return scored.slice(0, limit).map((entry) => entry.path);
 }
+
+/** True when the letters appear in order in the text, not necessarily next to each other. */
+function isSubsequence(letters: string, text: string): boolean {
+  let at = 0;
+  for (const letter of text) {
+    if (letter === letters[at]) at++;
+    if (at === letters.length) return true;
+  }
+  return letters.length === 0;
+}
+
+/** Recently opened files that still exist, in the order they were opened. */
+export const existingRecents = (files: readonly string[], recents: readonly string[], limit = 8): string[] => {
+  const present = new Set(files);
+  return recents.filter((path) => present.has(path)).slice(0, limit);
+};
 
 /** Loads a file list and applies it unless cancelled first, so a slower earlier request cannot overwrite a newer one. */
 export function loadFilesUnlessCancelled(

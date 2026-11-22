@@ -36,6 +36,7 @@ sha2 = "0.10"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 tokio.workspace = true
 tracing.workspace = true
+trash = "5"
 tracing-subscriber.workspace = true
 uuid.workspace = true
 

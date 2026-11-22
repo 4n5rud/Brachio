@@ -1,11 +1,12 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { startFileDrag } from "../lib/file-drag";
 import { osDropDir, treeDirAt } from "../lib/tree-drop";
 import { terminalAt, type TerminalDrop } from "../lib/terminal-drop";
 import { Icon } from "./Icon";
 import { FileMoveDialog, canMoveInto } from "./FileMoveDialog";
-import { Menu, MenuItem } from "./ui/Menu";
+import { Menu, MenuItem, MenuSeparator } from "./ui/Menu";
+import { revealRequest } from "../lib/file-reveal";
 import "./FileTree.css";
 
 interface Node { name: string; path: string; dirs: Map<string, Node>; files: string[] }
@@ -33,6 +34,8 @@ function build(paths: readonly string[]): Node {
 const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const parentOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+export type FileAction = "open" | "reveal" | "copyPath" | "copyRelative" | "rename" | "newFile" | "newFolder" | "trash";
+
 /** How long a dragged item must rest on a closed folder before it opens. */
 const HOVER_OPEN_MS = 600;
 
@@ -57,6 +60,8 @@ export function FileTree(props: {
   onMove?: (from: string, toDir: string) => void;
   /** An item was dropped on a terminal. */
   onTerminalDrop?: (path: string, terminal: TerminalDrop) => void;
+  /** A context menu choice for an item; "newFile" and "newFolder" name the folder to create in. */
+  onAction?: (action: FileAction, path: string, kind: "file" | "dir") => void;
 }) {
   const [open, setOpen] = createSignal(openByTask.get(props.treeKey) ?? new Set<string>());
   const [focus, setFocus] = createSignal("");
@@ -104,6 +109,25 @@ export function FileTree(props: {
     const timer = setTimeout(() => toggle(dir, true), HOVER_OPEN_MS);
     onCleanup(() => clearTimeout(timer));
   });
+
+  // Showing a file from quick open opens its folders and moves focus to it.
+  createEffect(on(revealRequest, (request) => {
+    if (!request || request.taskId !== props.treeKey) return;
+    const next = new Set(open());
+    const parts = request.path.split("/");
+    for (let i = 1; i < parts.length; i++) next.add(parts.slice(0, i).join("/"));
+    openByTask.set(props.treeKey, next);
+    setOpen(next);
+    setFocus(request.path);
+    queueMicrotask(() => treeEl?.querySelector<HTMLElement>(`[data-path="${CSS.escape(request.path)}"]`)?.focus());
+  }));
+  const act = (action: FileAction) => {
+    const row = menu()?.row;
+    setMenu(undefined);
+    if (!row) return;
+    const into = row.kind === "dir" ? row.path : parentOf(row.path);
+    props.onAction?.(action, action === "newFile" || action === "newFolder" ? into : row.path, row.kind);
+  };
 
   let overTerminal: Element | undefined;
   const markTerminal = (host?: Element) => {
@@ -208,9 +232,25 @@ export function FileTree(props: {
       <Show when={menu()}>
         {(current) => (
           <Menu anchor={current().anchor} label={t("files.menu")} onClose={() => setMenu(undefined)}>
+            <Show when={current().row.kind === "file" && props.onAction}>
+              <MenuItem onSelect={() => act("open")}>{t("files.openEditor")}</MenuItem>
+            </Show>
+            <Show when={props.onAction}>
+              <MenuItem onSelect={() => act("reveal")}>{t("files.reveal")}</MenuItem>
+              <MenuItem onSelect={() => act("copyPath")}>{t("path.copy")}</MenuItem>
+              <MenuItem onSelect={() => act("copyRelative")}>{t("files.copyRelative")}</MenuItem>
+              <MenuSeparator />
+              <MenuItem onSelect={() => act("newFile")}>{t("files.newFile")}</MenuItem>
+              <MenuItem onSelect={() => act("newFolder")}>{t("files.newFolder")}</MenuItem>
+              <MenuItem onSelect={() => act("rename")}>{t("files.rename")}</MenuItem>
+            </Show>
             <MenuItem disabled={!props.onMove} onSelect={() => { setMoving(current().row.path); setMenu(undefined); }}>
               {t("files.move")}
             </MenuItem>
+            <Show when={props.onAction}>
+              <MenuSeparator />
+              <MenuItem danger onSelect={() => act("trash")}>{t("files.trash")}</MenuItem>
+            </Show>
           </Menu>
         )}
       </Show>

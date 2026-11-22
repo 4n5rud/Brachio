@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlightParts, loadFilesUnlessCancelled, matchesAll, rankFiles } from "./quick-open";
+import { highlightParts, loadFilesUnlessCancelled, existingRecents, matchesAll, rankFiles } from "./quick-open";
 
 describe("quick open file loading", () => {
   it("drops a slower earlier response and a stale failure once cancelled", async () => {
@@ -62,4 +62,18 @@ it("highlightParts marks every query word, ignoring case", () => {
     { text: "iter", hit: false },
   ]);
   expect(highlightParts("login", " ")).toEqual([{ text: "login", hit: false }]);
+});
+
+describe("quick open fuzzy files and recents", () => {
+  const files = ["src/app/Router.tsx", "src/lib/render-table.ts", "docs/readme.md"];
+  it("finds a file by letters in order after exact matches", () => {
+    expect(rankFiles(files, "rtr")).toEqual(["src/app/Router.tsx"]);
+    expect(rankFiles(files, "zq")).toEqual([]);
+  });
+  it("puts recently opened files first among equal matches", () => {
+    expect(rankFiles(["a/x.ts", "b/x.ts"], "x.ts", 30, ["b/x.ts"])).toEqual(["b/x.ts", "a/x.ts"]);
+  });
+  it("lists only recents that still exist", () => {
+    expect(existingRecents(files, ["gone.ts", "docs/readme.md"])).toEqual(["docs/readme.md"]);
+  });
 });
