@@ -47,6 +47,7 @@ import { registerActions, registerGoToSource } from "./lib/actions";
 import { CuesDialog } from "./components/CuesDialog";
 import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
 import { pushUndoToast } from "./lib/undo";
+import { tokenLabel, tokenUsage, tokenTotal, watchTokenUsage } from "./lib/token-usage";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RenameDialog } from "./components/RenameDialog";
@@ -266,6 +267,10 @@ export function App() {
       ...cueActions,
     ));
   });
+  onCleanup(watchTokenUsage(() => rows().filter((task) => task.worktreePath).map((task) => task.id)));
+  const tokenRows = () => rows().filter((task) => tokenUsage(task.id))
+    .sort((a, b) => tokenTotal(tokenUsage(b.id)!) - tokenTotal(tokenUsage(a.id)!)).slice(0, 8)
+    .map((task) => ({ id: task.id, title: task.title }));
   // Agents; terminal tabs are added by their owner through registerGoToSource.
   onCleanup(registerGoToSource(() => rows().map((task) => ({
     id: `agent:${task.id}`,
@@ -274,6 +279,7 @@ export function App() {
     kind: "agent" as const,
     title: task.title,
     path: task.worktreePath ?? undefined,
+    detail: tokenUsage(task.id) ? tokenLabel(tokenUsage(task.id)!) : undefined,
     tone: statusTone(task.status),
     focus: () => open(task.id),
   }))));
@@ -1315,7 +1321,7 @@ export function App() {
         </Show>
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
-      <StatusBar sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
+      <StatusBar tokenRows={tokenRows()} sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
       <Show when={renamingTask()} keyed>
         {(id) => (
           <RenameDialog title={t("rename.task")} value={findTask(id)?.title ?? ""} maxLength={200}

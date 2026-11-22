@@ -22,6 +22,7 @@ mod quit;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
+mod session_tokens;
 mod task_activity;
 mod task_file_ops;
 mod task_folder;
@@ -267,6 +268,7 @@ pub fn run() {
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(project_add::CloneJobs::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(session_tokens::TokenTrackers::default())
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(claude_usage::ClaudeUsageCache::default())
@@ -300,6 +302,7 @@ pub fn run() {
             terminal::terminal_park,
             quit::terminals_stop,
             quit::app_quit,
+            session_tokens::tasks_token_usage,
             project_cues::cue_list,
             project_cues::cue_add,
             project_cues::cue_delete,

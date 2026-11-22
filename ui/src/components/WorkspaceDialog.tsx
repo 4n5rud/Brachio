@@ -188,7 +188,8 @@ export function WorkspaceDialog(props: {
                         lead={<StatusGlyph tone={target.tone} />}
                         name={<Marked text={target.title} query={text()} />}
                         detail={<><span>{target.kind === "agent" ? t("quickOpen.kindAgent") : t("quickOpen.kindTerminal")}</span>
-                          <Show when={target.path}>{(path) => <span>{path()}</span>}</Show></>}
+                          <Show when={target.path}>{(path) => <span>{path()}</span>}</Show>
+                          <Show when={target.detail}>{(detail) => <span>{detail()}</span>}</Show></>}
                         end={highlight() === index() ? <Kbd>↵</Kbd> : undefined} />
                     )}</For>
                   </div>

@@ -24,6 +24,8 @@ export interface GoToTarget {
   kind: "agent" | "terminal";
   title: string;
   path?: string;
+  /** Quiet extra words, such as the tokens the session used. */
+  detail?: string;
   tone: StatusTone;
   /** Focuses the task and the tab. */
   focus: () => void;

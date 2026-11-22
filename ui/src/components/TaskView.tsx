@@ -36,6 +36,7 @@ import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
+import { tokenUsage } from "../lib/token-usage";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
 
@@ -365,6 +366,7 @@ export function TaskView(props: {
     <section class="task-view" classList={{ "view-hidden": !props.visible }}>
       <TaskHeader title={props.task.title} status={props.task.status}
         branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
+        tokens={tokenUsage(props.task.id)}
         actions={<>
           <Show when={props.workspaceTasks.length > 1}>
             <Select class="workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
