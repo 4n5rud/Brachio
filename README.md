@@ -1,49 +1,72 @@
-﻿<p align="center"><img src="src-tauri/icons/128x128@2x.png" width="112" alt="Brachio"></p>
+﻿<p align="center"><img src="src-tauri/icons/128x128@2x.png" width="96" alt="Brachio"></p>
 <h1 align="center">Brachio</h1>
-<p align="center">A desktop workspace for coding agents.</p>
-<p align="center"><a href="https://x.com/4n5rud08"><img src="https://cdn.simpleicons.org/x/888888" width="20" height="20" alt="Follow 4n5rud on X"></a></p>
+<p align="center"><b>Run Claude Code and Codex side by side, each in its own worktree.<br>Brachio asks for you only when a decision is needed.</b></p>
+
+<p align="center">
+  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="Latest release"></a>
+  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/downloads/4n5rud/Brachio/total?color=2ea043" alt="Total downloads"></a>
+  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/Windows%20%7C%20macOS-555?style=flat" alt="Platforms: Windows and macOS">
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="License: MIT"></a>
+  <a href="https://x.com/4n5rud08"><img src="https://img.shields.io/badge/X-000000?logo=x&logoColor=white" alt="Follow on X"></a>
+</p>
+
+<h3 align="center"><a href="https://github.com/4n5rud/Brachio/releases">Download Brachio</a></h3>
+
 <p align="center">
 English · <a href="docs/readme/README.ko.md">한국어</a> · <a href="docs/readme/README.ja.md">日本語</a> · <a href="docs/readme/README.zh-CN.md">简体中文</a> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.pt.md">Português</a> · <a href="docs/readme/README.tr.md">Türkçe</a> · <a href="docs/readme/README.ru.md">Русский</a>
 </p>
 
-> **Pre-alpha** · Brachio is under development.
+> **Pre-alpha.** Brachio is young and changes quickly. Expect rough edges, and please [report what breaks](https://github.com/4n5rud/Brachio/issues/new/choose).
 
-Brachio brings Claude Code and Codex sessions into one workspace. Organize tasks by project, review changes, and keep terminals running in a separate local runtime.
+## Download
+
+| Platform | Installer |
+|---|---|
+| Windows 10/11 (x64) | [Brachio_0.2.0_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0/Brachio_0.2.0_x64-setup.exe) · [.msi](https://github.com/4n5rud/Brachio/releases/download/v0.2.0/Brachio_0.2.0_x64_en-US.msi) |
+| macOS (Apple silicon) | [Brachio_0.2.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0/Brachio_0.2.0_aarch64.dmg) |
+
+All versions and release notes are on the [releases page](https://github.com/4n5rud/Brachio/releases). Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
+
+The installers are not code signed yet. On Windows, choose **More info → Run anyway** if SmartScreen stops the installer. On macOS, Control-click Brachio in Applications and choose **Open**.
+
+**Requirements:** Git 2.38 or later, and your own [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) account. Brachio runs on your machine and never provides or proxies agent accounts.
+
+## Supported agents
+
+<p>
+  <kbd><img src="ui/src/assets/agent-icons/claudecode-color.svg" width="16" valign="middle" alt=""> Claude Code</kbd>&nbsp;
+  <kbd><img src="ui/src/assets/agent-icons/codex-color.svg" width="16" valign="middle" alt=""> Codex</kbd>
+</p>
+
+Any shell on your machine can also open as a tab: PowerShell, Command Prompt, Git Bash and WSL on Windows; your login shell, zsh, bash or fish on macOS.
 
 ## Features
 
-- **Projects and tasks** — Work with Git repositories or plain folders. Git tasks use separate branches and worktrees.
-- **Persistent terminals** — Reconnect to running sessions after the window closes. Saved screens and conversation resume help recover a stopped runtime.
-- **Review and Git** — Inspect changes and pull request status, comment on diff lines, stage, commit, push, and create pull requests.
-- **Agent coordination** — A lead task can create child tasks (`brachio task create`), list them, wait for them, and receive their handoffs (`brachio task handoff`). Creating a child task requires approval. Tasks also exchange messages.
-- **Dependencies and scheduling** — A child can wait for sibling tasks (`--after`). A task starts automatically only when its "Start automatically" option is on; it is off by default. Nothing is merged automatically.
-- **Handoff review** — A child records its commit, changed files, and summary. You approve or reject the handoff before dependent tasks can start.
-- **QA runner** — Run the QA command from `brachio.toml` after approval. Brachio records the result itself, so a handoff shows whether a QA run was verified.
-- **MCP server** — `brachio mcp` serves four tools over stdio. `list_child_tasks` and `get_task_result` are read-only. `spawn_task` waits for your approval, and `request_review` sends a `merge_ready` message to the lead. Brachio does not configure MCP for your agents automatically.
-- **Agent skills** — The `brachio-send` and `brachio-lead` skills describe the `brachio` commands to Claude Code. Codex reads them from one instructions file.
-- **Local tools** — Browse files and assign a preferred development port.
-- **Design system and themes** — Four color themes in light and dark (eight in total), documented in `docs/design-system/`.
-- **Notifications and approvals** — See task activity and respond to supported Claude Code permission requests.
+### Parallel agents, one place
+Every task gets its own Git branch and worktree, so agents never step on each other. Open as many agent and shell tabs in a task as you need, including several of the same agent. Plain folders work too.
 
-Not built yet: automatic merging, tasks more than one level deep, and creating child tasks in plain folders. Agent status, approvals, and recovery depend on the agent and runtime. Brachio runs locally using your own agent accounts.
+### Terminals that survive
+Terminals live in a separate local runtime. Close the window and your agents keep working; reopen it and reconnect. If the runtime stops, saved screens and conversation resume bring the session back.
 
-CI runs the Rust checks on Windows, macOS, and Ubuntu (without the app shell), plus UI checks. The app targets Windows and macOS. See `docs/agent-orchestration-design.md` for the orchestration design; the task graph, handoff review, and scheduler described there are implemented.
+### You decide, the agents do the rest
+Supported Claude Code permission requests, setup commands, QA runs and new child tasks wait in an approval bar inside the app. Nothing is merged on its own.
 
-## Development
+### Review and Git
+See changed files and diffs, comment on diff lines, stage, commit, push, and open pull requests, with pull request and CI status beside the task.
 
-Install Git 2.38+, Rust with rustfmt and Clippy, Node.js 22+, pnpm 10+, and the platform prerequisites for Tauri 2. Windows needs WebView2 and macOS needs Xcode command-line tools.
+### Lead and worker tasks
+A lead task splits work into child tasks (`brachio task create`), with dependencies (`--after`). Each child hands back its commit, changed files and summary, and you review the result before dependent tasks start. Tasks can also message each other.
 
-```sh
-pnpm --dir ui install --frozen-lockfile
-cargo install tauri-cli --version "^2" --locked
-cargo tauri dev
-```
+### Built for daily use
+Agent usage in the status bar, a file tree with search, a project picker that can clone or create a repository, task search, and eight color themes.
 
-The app targets Windows and macOS. Linux can run the platform-independent Rust checks without the Tauri app shell. See the [contribution guide](.github/CONTRIBUTING.md) for verification and pull requests.
+### CLI, MCP and skills
+The `brachio` CLI drives tasks from any terminal. `brachio mcp` serves task tools over stdio. The `brachio-send` and `brachio-lead` skills teach Claude Code and Codex how to use them.
 
 ## Project configuration
 
-A repository may provide `brachio.toml`:
+A repository may add `brachio.toml` to copy files and run setup in each new worktree, and to define a QA command:
 
 ```toml
 [setup]
@@ -51,19 +74,35 @@ copy = [".env"]
 run = ["pnpm install"]
 
 [qa]
-program = "C:/Program Files/nodejs/npm.cmd"
+program = "npm"
 args = ["test"]
 timeout_secs = 600
 ```
 
-Setup commands and QA runs require approval. Adjust paths and commands for your machine and project.
+Setup commands and QA runs always ask for approval first.
 
-## Project structure
+## Not built yet
 
-- `crates/` — Rust libraries, the terminal runtime, and the `brachio` CLI
-- `src-tauri/` — desktop shell and application commands
-- `ui/` — SolidJS interface and terminal
-- `docs/design-system/` — design reference
+Automatic merging, tasks nested more than one level, child tasks in plain folders, remote machines, and a Linux app. Agent status, approvals and recovery depend on what each agent reports.
+
+## Build from source
+
+Install Git 2.38+, Rust with rustfmt and Clippy, Node.js 22+, pnpm 10+, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (WebView2 on Windows, Xcode command-line tools on macOS).
+
+```sh
+pnpm --dir ui install --frozen-lockfile
+cargo install tauri-cli --version "^2" --locked
+cargo tauri dev
+```
+
+| Path | Contents |
+|---|---|
+| `crates/` | Rust libraries, the terminal runtime, and the `brachio` CLI |
+| `src-tauri/` | Desktop shell and app commands |
+| `ui/` | SolidJS interface and terminal |
+| `docs/design-system/` | Design tokens, components and rules |
+
+CI checks Rust on Windows, macOS and Ubuntu, plus the UI.
 
 ## Contributing
 

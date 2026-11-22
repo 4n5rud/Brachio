@@ -38,6 +38,8 @@ export function TaskRowItem(props: {
   /** Agents the same prompt can be started with in a new task. */
   duplicateAgents?: readonly AgentKind[];
   onDuplicate?: (agent: AgentKind) => void;
+  /** Drag and keyboard reorder handlers from the list. */
+  reorder?: Record<string, unknown>;
   pinned?: boolean;
   /** Pins or unpins the task; the menu item is left out when missing. */
   onTogglePin?: () => void;
@@ -64,6 +66,7 @@ export function TaskRowItem(props: {
       aria-haspopup="menu"
       onClick={() => props.onSelect()}
       onContextMenu={(event) => { event.preventDefault(); setMenu(event.currentTarget); }}
+      {...props.reorder}
     >
       <StatusGlyph tone={tone()} />
       <span class="task-title">{props.task.title}</span>

@@ -30,6 +30,8 @@ import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, type TabKind, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
 import { RenameDialog } from "./RenameDialog";
+import { createReorder, placeInOrder } from "../lib/drag-reorder";
+import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
@@ -207,6 +209,23 @@ export function TaskView(props: {
   const closeTabs = async (tabs: readonly TaskTab[]) => {
     for (const tab of tabs) await closeTab(tab);
   };
+  let tabRow: HTMLDivElement | undefined;
+  const tabReorder = createReorder({
+    axis: "x",
+    ids: () => tabsOf(props.task.id).map((tab) => tab.id),
+    container: () => tabRow,
+    scroller: () => tabRow,
+    label: (tabId) => labels().get(tabId) ?? "",
+    onReorder: (ids) => {
+      const id = props.task.id;
+      const before = tabsOf(id);
+      setTabsByTask((current) => new Map(current).set(id, placeInOrder(before, ids)));
+      invoke("task_reorder_tabs", { taskId: id, tabIds: ids }).catch((failure) => {
+        setTabsByTask((current) => new Map(current).set(id, before));
+        setTabError(String(failure));
+      });
+    },
+  });
   const quickSpec = (): TabSpec => recentSpec() ?? { kind: "shell", shell: null };
   onCleanup(onNewTabRequest((id) => {
     if (id === props.task.id && props.task.worktreePath) void openTab(quickSpec());
@@ -342,7 +361,7 @@ export function TaskView(props: {
               onClick={() => props.onArchive?.()} />
           </Show>
         </>} />
-      <div class="tabs" role="tablist">
+      <div class="tabs" role="tablist" ref={tabRow}>
         <button class="tab" role="tab" aria-selected={layout() !== "shell" && !isSecondarySelected(props.task.id)} type="button"
           onClick={() => selectAgent(props.task.id, false)}>
           <StatusGlyph tone={tabTone(terminalKey(props.task.id, "agent"))} />
@@ -353,7 +372,8 @@ export function TaskView(props: {
         <For each={tabsOf(props.task.id)}>
           {(tab) => (
             <div class="tab-item" role="presentation"
-              data-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}>
+              data-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
+              {...tabReorder.item(tab.id)}>
               <button class="tab" role="tab" type="button" aria-haspopup="menu"
                 aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
                 onClick={() => { selectTab(props.task.id, tab); }}

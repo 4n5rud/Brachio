@@ -19,6 +19,7 @@ export const SHORTCUTS = {
   newTask: { label: "newTask.title", mac: "⌘N", other: "Ctrl+Shift+N" },
   newTab: { label: "task.newTabShortcut", mac: "⌘T", other: "Ctrl+Shift+T" },
   jumpToTask: { label: "shortcuts.jumpToTask", mac: "⌘1-9", other: "Ctrl+1-9" },
+  nextAttention: { label: "shortcuts.nextAttention", mac: "⌘J", other: "Ctrl+Shift+J" },
   recentTasks: { label: "recent.title", mac: "⌃Tab", other: "Ctrl+Tab" },
   recentTasksTerminal: { label: "recent.title", mac: "⌘L", other: "Ctrl+Shift+L" },
   settings: { label: "titlebar.settings", mac: "⌘,", other: "Ctrl+," },
@@ -112,6 +113,12 @@ export function taskNumberShortcut(event: KeyPress, mac = isMac): number | undef
   if (event.altKey || event.shiftKey || !/^[1-9]$/.test(event.key)) return undefined;
   const held = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   return held ? Number(event.key) : undefined;
+}
+
+/** "Next task that needs me": ⌘J on macOS, Ctrl+Shift+J elsewhere, because plain Ctrl+J is a newline in the shell. */
+export function isNextAttentionShortcut(event: KeyPress, mac = isMac): boolean {
+  if (event.key.toLowerCase() !== "j" || event.altKey) return false;
+  return mac ? event.metaKey && !event.shiftKey && !event.ctrlKey : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
 /** "Settings": ⌘, on macOS and Ctrl+, elsewhere, as in most desktop apps. */

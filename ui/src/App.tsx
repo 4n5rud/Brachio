@@ -40,9 +40,10 @@ import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
 import { RenameDialog } from "./components/RenameDialog";
+import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -59,7 +60,8 @@ import { appVersion } from "./lib/issue-report";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
 import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
-import { addRepo, archiveTask, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
+import { placeInOrder } from "./lib/drag-reorder";
+import { addRepo, archiveTask, reorderRepos, reorderTasks, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
 
@@ -726,6 +728,16 @@ export function App() {
       .then((record) => open(record.id))
       .catch(report);
   };
+  const reorderProjects = (ids: string[]) => {
+    const before = repos();
+    setRepos((list) => placeInOrder(list, ids));
+    reorderRepos(ids).catch((failure) => { setRepos(before); report(failure); });
+  };
+  const reorderProjectTasks = (_repoId: string, ids: string[]) => {
+    const before = tasks();
+    setTasks((list) => placeInOrder(list, ids));
+    reorderTasks(ids).catch((failure) => { setTasks(before); report(failure); });
+  };
   const togglePin = (id: string, pin: boolean) => {
     const before = pinned();
     setPinned((current) => {
@@ -1030,6 +1042,13 @@ export function App() {
         open(jump);
         return;
       }
+      if (isNextAttentionShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = nextAttentionId(rows(), (task) => attentionOf(task.status, unreadFinish().has(task.id)), selectedId());
+        if (next) open(next);
+        return;
+      }
       const panel = panelToggleShortcut(event);
       if (panel) {
         event.preventDefault();
@@ -1126,6 +1145,8 @@ export function App() {
           onRenameTask={inTauri ? setRenamingTask : undefined}
           onDuplicateTask={inTauri ? duplicateTask : undefined}
           onVisibleChange={setVisibleTaskIds}
+          onReorderProjects={inTauri ? reorderProjects : undefined}
+          onReorderTasks={inTauri ? reorderProjectTasks : undefined}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}

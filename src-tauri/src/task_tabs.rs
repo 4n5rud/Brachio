@@ -111,3 +111,14 @@ pub fn task_rename_tab(
     brachio_store::rename_task_tab(&connection, &task_id, &tab_id, name.as_deref())
         .map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub fn task_reorder_tabs(
+    database: State<'_, Database>,
+    task_id: String,
+    tab_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut connection = database.lock()?;
+    brachio_store::reorder_task_tabs(&mut connection, &task_id, &tab_ids)
+        .map_err(|error| error.to_string())
+}
