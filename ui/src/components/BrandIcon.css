@@ -1,0 +1,12 @@
+.brand-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+.brand-icon-mono {
+  background: currentColor;
+  mask: var(--brand-src) center / contain no-repeat;
+}
