@@ -22,6 +22,7 @@ mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
 mod task_activity;
+mod task_file_ops;
 mod task_folder;
 mod task_overlaps;
 mod task_pin;
@@ -351,6 +352,9 @@ pub fn run() {
             workspace::task_files,
             workspace::task_file_preview,
             workspace::task_file_media,
+            task_file_ops::task_move_path,
+            task_file_ops::task_copy_conflicts,
+            task_file_ops::task_copy_in,
             workspace::task_changes,
             worktree_import::worktree_import_candidates,
             worktree_import::worktree_import,
