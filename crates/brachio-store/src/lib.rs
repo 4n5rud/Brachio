@@ -16,10 +16,10 @@ mod task_tabs;
 pub use child_report::{child_reports, ChildReport};
 pub use database::{open, open_in_memory, StoreError};
 pub use message_record::{
-    expire_read_messages, forget_task_messages, mark_read, peek_next_batch, peek_unread,
-    recent_messages, reply_recipient, send_message, take_unread, unread_counts, Message,
-    NewMessage, KINDS, MAX_BODY_BYTES, MAX_PAYLOAD_BYTES, MAX_SUBJECT_CHARS,
-    MAX_UNREAD_FROM_ONE_SENDER,
+    dismiss_messages, expire_read_messages, forget_task_messages, mark_read, peek_inbox,
+    peek_next_batch, peek_unread, recent_messages, reply_recipient, send_message, take_unread,
+    unread_counts, Message, NewMessage, KINDS, MAX_BODY_BYTES, MAX_PAYLOAD_BYTES,
+    MAX_SUBJECT_CHARS, MAX_UNREAD_FROM_ONE_SENDER,
 };
 pub use orchestration_record::{
     add_dependency, apply_transition, decide_handoff, decide_handoff_then, load_graph,

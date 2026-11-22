@@ -70,7 +70,7 @@ export function MailboxInbox(props: {
                 <Button size="sm" onClick={props.onReminder}>{t("mailbox.reminder")}</Button>
                 <Button size="sm" variant="ghost" onClick={() => void dismiss()}>{t("mailbox.markAllRead")}</Button>
               </div>
-              <p class="mailbox-note">{t("mailbox.hint")} {t("mailbox.dismissNote")}</p>
+              <p class="mailbox-note">{t("mailbox.hint")}</p>
             </Show>
           </>
         )}

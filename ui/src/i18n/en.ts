@@ -543,7 +543,6 @@ export const en = {
   "settings.systemCheckOpen": "Open",
   "mailbox.markAllRead": "Mark all read",
   "mailbox.dismiss": "Dismiss",
-  "mailbox.dismissNote": "Dismissed messages are marked read for the agent too.",
   "settings.fontSizeError": "Pick a size from 12 to 24. The last valid size, {value}, stays in use.",
   "settings.scrollbackError": "Pick a number from 1,000 to 50,000. The last valid value, {value}, stays in use.",
   "settings.agentsRefresh": "Refresh",

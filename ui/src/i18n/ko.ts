@@ -545,7 +545,6 @@ export const ko: Messages = {
   "settings.systemCheckOpen": "열기",
   "mailbox.markAllRead": "모두 읽음",
   "mailbox.dismiss": "해제",
-  "mailbox.dismissNote": "해제한 메시지는 에이전트에게도 읽음으로 처리됩니다.",
   "settings.fontSizeError": "12~24 사이로 입력하세요. 현재 마지막으로 적용된 크기({value})를 사용 중입니다.",
   "settings.scrollbackError": "1,000~50,000 사이로 입력하세요. 현재 마지막으로 적용된 값({value})을 사용 중입니다.",
   "settings.agentsRefresh": "새로고침",
