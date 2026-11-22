@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, recentTasksShortcut, SHORTCUT_LIST } from "./shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, panelToggleShortcut, recentTasksShortcut, SHORTCUT_LIST, taskNumberShortcut } from "./shortcut";
 
 const key = (pressed: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => ({
   altKey: false,
@@ -84,5 +84,15 @@ describe("new tab shortcut", () => {
     expect(isNewTabShortcut(key({ key: "t", metaKey: true }), true)).toBe(true);
     expect(isNewTabShortcut(key({ key: "t", ctrlKey: true, shiftKey: true }), false)).toBe(true);
     expect(isNewTabShortcut(key({ key: "t", ctrlKey: true }), false)).toBe(false);
+  });
+});
+
+describe("task number shortcut", () => {
+  it("is Cmd+1 to 9 on macOS and Ctrl+1 to 9 elsewhere", () => {
+    expect(taskNumberShortcut(key({ key: "3", metaKey: true }), true)).toBe(3);
+    expect(taskNumberShortcut(key({ key: "3", ctrlKey: true }), true)).toBeUndefined();
+    expect(taskNumberShortcut(key({ key: "9", ctrlKey: true }), false)).toBe(9);
+    expect(taskNumberShortcut(key({ key: "0", ctrlKey: true }), false)).toBeUndefined();
+    expect(taskNumberShortcut(key({ key: "1", ctrlKey: true, shiftKey: true }), false)).toBeUndefined();
   });
 });

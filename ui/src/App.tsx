@@ -33,7 +33,7 @@ import { activityKindOf, recordTaskActivity } from "./lib/task-activity";
 import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
-import { compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/tasks";
+import { AGENT_NAME, compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
@@ -46,10 +46,11 @@ import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, ope
 import { pushUndoToast } from "./lib/undo";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
+import { RenameDialog } from "./components/RenameDialog";
 import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import { statusTone, type AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -774,6 +775,27 @@ export function App() {
     requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
   }, record, startListed);
 
+  const [visibleTaskIds, setVisibleTaskIds] = createSignal<readonly string[]>([]);
+  const [renamingTask, setRenamingTask] = createSignal<string>();
+  const renameTask = (id: string, title: string) => {
+    setRenamingTask(undefined);
+    const before = findTask(id)?.title;
+    if (before === undefined || before === title) return;
+    setTasks((list) => list.map((task) => (task.id === id ? { ...task, title } : task)));
+    if (!inTauri) return;
+    invoke("task_rename", { id, title }).catch((failure) => {
+      setTasks((list) => list.map((task) => (task.id === id ? { ...task, title: before } : task)));
+      report(failure);
+    });
+  };
+  const duplicateTask = (id: string, agent: AgentKind) => {
+    const task = findTask(id);
+    if (!task?.repoId || !task.prompt) return;
+    const title = `${task.title} (${AGENT_NAME[agent]})`;
+    createOne(task.repoId, { prompt: task.prompt, title, agent, base: "" }, agent)
+      .then((record) => open(record.id))
+      .catch(report);
+  };
   const reorderProjects = (ids: string[]) => {
     const before = repos();
     setRepos((list) => placeInOrder(list, ids));
@@ -1089,6 +1111,14 @@ export function App() {
         openSettings();
         return;
       }
+      const number = taskNumberShortcut(event);
+      const jump = number === undefined ? undefined : visibleTaskIds()[number - 1];
+      if (jump) {
+        event.preventDefault();
+        event.stopPropagation();
+        open(jump);
+        return;
+      }
       if (isNextAttentionShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -1189,6 +1219,9 @@ export function App() {
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           pinned={pinned()}
           onTogglePin={togglePin}
+          onRenameTask={inTauri ? setRenamingTask : undefined}
+          onDuplicateTask={inTauri ? duplicateTask : undefined}
+          onVisibleChange={setVisibleTaskIds}
           onReorderProjects={inTauri ? reorderProjects : undefined}
           onReorderTasks={inTauri ? reorderProjectTasks : undefined}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
@@ -1268,6 +1301,12 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
+      <Show when={renamingTask()} keyed>
+        {(id) => (
+          <RenameDialog title={t("rename.task")} value={findTask(id)?.title ?? ""} maxLength={200}
+            onSave={(title) => renameTask(id, title)} onClose={() => setRenamingTask(undefined)} />
+        )}
+      </Show>
       <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
       <Show when={switcher()} keyed>
         {(current) => (
