@@ -48,9 +48,9 @@ export async function loadEditors(): Promise<void> {
 }
 
 /** Opens a task file in the chosen editor and reports a failure as a toast. */
-export async function openInEditor(taskId: string, path: string): Promise<void> {
+export async function openInEditor(taskId: string, path: string, line?: number): Promise<void> {
   try {
-    await invoke<void>("task_open_in_editor", { id: taskId, path, editor: chosen() || null });
+    await invoke<void>("task_open_in_editor", { id: taskId, path, editor: chosen() || null, line: line ?? null });
   } catch (failure) {
     pushToast({ tone: "error", title: t("files.openFailed"), message: String(failure) });
   }
