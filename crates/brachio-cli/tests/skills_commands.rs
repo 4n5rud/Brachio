@@ -47,7 +47,10 @@ fn each_shipped_stub_points_at_its_own_guide() {
     let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/skills");
     for name in ["brachio-send", "brachio-lead"] {
         let stub = std::fs::read_to_string(skills.join(name).join("SKILL.md")).expect("stub");
-        assert!(stub.contains(&format!("brachio skills get {name}")), "{name}");
+        assert!(
+            stub.contains(&format!("brachio skills get {name}")),
+            "{name}"
+        );
         assert!(stub.lines().count() <= 15, "{name} stays a stub");
     }
 }

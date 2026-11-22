@@ -278,7 +278,10 @@ mod tests {
             .expect("key");
         assert_eq!(named, file.to_string_lossy().replace('\\', "/"));
         let text = std::fs::read_to_string(&file).expect("file");
-        assert!(text.contains("brachio skills get brachio-send") && text.contains("brachio skills get brachio-lead"));
+        assert!(
+            text.contains("brachio skills get brachio-send")
+                && text.contains("brachio skills get brachio-lead")
+        );
         assert!(!text.contains("name: brachio-"), "front matter is left out");
         for program in ["C:/npm/codex.cmd", "C:/bin/codex.exe"] {
             brachio_agent::ResolvedCommand::new(Path::new(program), &arguments)
