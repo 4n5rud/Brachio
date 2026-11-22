@@ -122,7 +122,8 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
  * a handful at once.
  */
 export interface DraftInsert {
-  insert: () => Promise<boolean>;
+  /** Types the text into the agent input; with `submit` it also presses Enter. */
+  insert: (submit?: boolean) => Promise<boolean>;
   /** The user typed in this tab's input since they last submitted it, so the draft lands after it. */
   userTyped: boolean;
 }
@@ -424,11 +425,12 @@ export function TerminalPane(props: {
       const destination = handle;
       if (!destination || !canPasteDraft()) return undefined;
       const revision = inputRevision;
-      const insert = async () => {
+      const insert = async (submit = false) => {
         if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
         inputRevision += 1;
         editedBeforePrompt = true;
-        await destination.write(bracketedPaste(text, true));
+        await destination.write(bracketedPaste(text, true) + (submit ? "\r" : ""));
+        if (submit) userTyped = false;
         if (destination === handle && props.active) term.focus();
         return true;
       };
