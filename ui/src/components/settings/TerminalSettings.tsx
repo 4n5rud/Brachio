@@ -10,6 +10,7 @@ import {
   updateTerminalSettings,
   type TerminalSettings as TerminalValues,
 } from "../../lib/terminal-settings";
+import { ShellIcon } from "../BrandIcon";
 import { SettingRow } from "./SettingRow";
 
 type Range = { min: number; max: number };
@@ -57,6 +58,7 @@ export function TerminalSettings(props: { drafts?: Partial<Record<keyof Terminal
   return (
     <>
       <SettingRow label={t("settings.defaultShell")} hint={t("settings.defaultShellHint")}>
+        <ShellIcon shell={installedShells().find((shell) => chosenShell() === null ? shell.isDefault : shell.id === chosenShell()) ?? { id: "" }} />
         <Select aria-label={t("settings.defaultShell")} value={chosenShell() ?? ""}
           onChange={(event) => chooseShell(event.currentTarget.value || null)}>
           <option value="">{t("settings.systemShell")}</option>
