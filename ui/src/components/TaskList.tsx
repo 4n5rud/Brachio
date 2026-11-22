@@ -5,7 +5,7 @@ import type { AddProjectKind } from "../lib/project-choices";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { SETTINGS_KEYS } from "../lib/shortcut";
-import { compareSiblings, orderWithChildren, orderWithCompare, pinnedFirst, taskGroup, type TaskRow } from "../lib/tasks";
+import { compareSiblings, orderWithChildren, orderWithCompare, pinnedFirst, taskGroup, type AgentKind, type TaskRow } from "../lib/tasks";
 import type { PrChip } from "../lib/pr-status";
 import { FolderRepos } from "./FolderRepos";
 import { watchPrStatuses } from "../lib/pr-status-store";
@@ -38,6 +38,12 @@ export function TaskList(props: {
   onOpenArchived?: () => void;
   /** Opens Settings; its button sits at the foot of the sidebar. */
   onSettings?: () => void;
+  /** Opens the rename dialog for a task. */
+  onRenameTask?: (id: string) => void;
+  /** Starts a new task with this task's prompt and another agent. */
+  onDuplicateTask?: (id: string, agent: AgentKind) => void;
+  /** Tells which tasks are on screen, in order, for the number shortcuts. */
+  onVisibleChange?: (ids: string[]) => void;
   onArchiveTask?: (id: string) => void;
   /** Archives the other tasks of a comparison and keeps this one. */
   onKeepOnly?: (id: string) => void;
@@ -75,6 +81,13 @@ export function TaskList(props: {
     onCleanup(watchPrStatuses(() => props.tasks.filter((task) => task.worktreePath).map((task) => task.id)));
   }
   const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(props.initialCollapsed ?? loadCollapsedProjects());
+  createEffect(() => {
+    const ids = groupIds().flatMap((id) => collapsed().has(id)
+      ? []
+      : orderWithCompare(orderWithChildren(pinnedFirst(tasksByGroup().get(id) ?? [], props.pinned ?? new Set()))).map((task) => task.id));
+    props.onVisibleChange?.(ids);
+  });
+  const otherAgents = (task: TaskRow): AgentKind[] => (["claude", "codex"] as const).filter((agent) => agent !== task.agent);
   const countsTitle = (tasks: readonly TaskRow[]) => {
     const needs = tasks.filter((task) => taskGroup(task.status) === "needs").length;
     const parts = [t("sidebar.countTasks").replace("{count}", String(tasks.length))];
@@ -169,6 +182,9 @@ export function TaskList(props: {
                         onSelect={() => props.onSelect(task.id)}
                         pinned={props.pinned?.has(task.id)}
                         onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(task.id, !props.pinned?.has(task.id)) : undefined}
+                        onRename={props.onRenameTask ? () => props.onRenameTask?.(task.id) : undefined}
+                        duplicateAgents={otherAgents(task)}
+                        onDuplicate={props.onDuplicateTask ? (agent) => props.onDuplicateTask?.(task.id, agent) : undefined}
                         onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}
                         comparing={compareSiblings(props.tasks, task).length > 0}
                         onKeepOnly={props.onKeepOnly && compareSiblings(props.tasks, task).length > 0

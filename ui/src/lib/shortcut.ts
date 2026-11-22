@@ -18,6 +18,7 @@ export const SHORTCUTS = {
   quickOpen: { label: "quickOpen.title", mac: "⌘P", other: "Ctrl+Shift+P" },
   newTask: { label: "newTask.title", mac: "⌘N", other: "Ctrl+Shift+N" },
   newTab: { label: "task.newTabShortcut", mac: "⌘T", other: "Ctrl+Shift+T" },
+  jumpToTask: { label: "shortcuts.jumpToTask", mac: "⌘1-9", other: "Ctrl+1-9" },
   recentTasks: { label: "recent.title", mac: "⌃Tab", other: "Ctrl+Tab" },
   recentTasksTerminal: { label: "recent.title", mac: "⌘L", other: "Ctrl+Shift+L" },
   settings: { label: "titlebar.settings", mac: "⌘,", other: "Ctrl+," },
@@ -104,6 +105,13 @@ export function recentTasksShortcut(
   if (event.key.toLowerCase() !== "l") return undefined;
   if (mac) return event.metaKey && !event.ctrlKey && !event.shiftKey ? { back: false, hold: "Meta" } : undefined;
   return event.ctrlKey && event.shiftKey && !event.metaKey ? { back: false, hold: "Control" } : undefined;
+}
+
+/** "Go to task N": ⌘1 to ⌘9 on macOS, Ctrl+1 to Ctrl+9 elsewhere. Returns the 1-based number. */
+export function taskNumberShortcut(event: KeyPress, mac = isMac): number | undefined {
+  if (event.altKey || event.shiftKey || !/^[1-9]$/.test(event.key)) return undefined;
+  const held = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  return held ? Number(event.key) : undefined;
 }
 
 /** "Settings": ⌘, on macOS and Ctrl+, elsewhere, as in most desktop apps. */

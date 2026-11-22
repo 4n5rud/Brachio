@@ -302,6 +302,8 @@ pub fn run() {
             task_tabs::task_open_tabs,
             task_tabs::task_add_tab,
             task_tabs::task_close_tab,
+            task_tabs::task_rename_tab,
+            workspace::task_rename,
             terminal_shells::shell_list,
             terminal_shells::shell_set_default,
             workspace::task_drop_paths,

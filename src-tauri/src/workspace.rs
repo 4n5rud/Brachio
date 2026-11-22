@@ -88,6 +88,12 @@ pub struct CreateTaskRequest {
     pub after: Vec<String>,
 }
 
+/// Renames a task.
+#[tauri::command]
+pub fn task_rename(database: State<'_, Database>, id: String, title: String) -> Result<(), String> {
+    TaskRecord::rename(&*database.lock()?, &id, &title).map_err(to_text)
+}
+
 /// Lists registered repositories.
 #[tauri::command]
 pub fn repo_list(database: State<'_, Database>) -> Result<Vec<RepoRecord>, String> {

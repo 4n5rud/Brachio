@@ -30,7 +30,7 @@ import { activityKindOf, recordTaskActivity } from "./lib/task-activity";
 import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
-import { compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/tasks";
+import { AGENT_NAME, compareSiblings, taskGroup, type AgentKind, type TaskRow } from "./lib/tasks";
 import { listenForTaskNotifications, notificationKey, notifyIfAway } from "./lib/notify";
 import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
@@ -39,9 +39,10 @@ import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { loadFilesUnlessCancelled, type CommandId } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
+import { RenameDialog } from "./components/RenameDialog";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
-import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
+import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import type { AgentState } from "./lib/status";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
@@ -704,6 +705,27 @@ export function App() {
     requestSetup: (task) => void requestSetup(task.id, task.repoId, task.setupCommands),
   }, record, startListed);
 
+  const [visibleTaskIds, setVisibleTaskIds] = createSignal<readonly string[]>([]);
+  const [renamingTask, setRenamingTask] = createSignal<string>();
+  const renameTask = (id: string, title: string) => {
+    setRenamingTask(undefined);
+    const before = findTask(id)?.title;
+    if (before === undefined || before === title) return;
+    setTasks((list) => list.map((task) => (task.id === id ? { ...task, title } : task)));
+    if (!inTauri) return;
+    invoke("task_rename", { id, title }).catch((failure) => {
+      setTasks((list) => list.map((task) => (task.id === id ? { ...task, title: before } : task)));
+      report(failure);
+    });
+  };
+  const duplicateTask = (id: string, agent: AgentKind) => {
+    const task = findTask(id);
+    if (!task?.repoId || !task.prompt) return;
+    const title = `${task.title} (${AGENT_NAME[agent]})`;
+    createOne(task.repoId, { prompt: task.prompt, title, agent, base: "" }, agent)
+      .then((record) => open(record.id))
+      .catch(report);
+  };
   const togglePin = (id: string, pin: boolean) => {
     const before = pinned();
     setPinned((current) => {
@@ -1000,6 +1022,14 @@ export function App() {
         openSettings();
         return;
       }
+      const number = taskNumberShortcut(event);
+      const jump = number === undefined ? undefined : visibleTaskIds()[number - 1];
+      if (jump) {
+        event.preventDefault();
+        event.stopPropagation();
+        open(jump);
+        return;
+      }
       const panel = panelToggleShortcut(event);
       if (panel) {
         event.preventDefault();
@@ -1093,6 +1123,9 @@ export function App() {
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           pinned={pinned()}
           onTogglePin={togglePin}
+          onRenameTask={inTauri ? setRenamingTask : undefined}
+          onDuplicateTask={inTauri ? duplicateTask : undefined}
+          onVisibleChange={setVisibleTaskIds}
           onArchiveTask={(id) => { const task = tasks().find((item) => item.id === id); if (task && !archiving()) void archive(task); }}
           onError={report}
           onAddFolderRepo={inTauri ? addFolderRepo : undefined}
@@ -1169,6 +1202,12 @@ export function App() {
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
       <StatusBar sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
+      <Show when={renamingTask()} keyed>
+        {(id) => (
+          <RenameDialog title={t("rename.task")} value={findTask(id)?.title ?? ""} maxLength={200}
+            onSave={(title) => renameTask(id, title)} onClose={() => setRenamingTask(undefined)} />
+        )}
+      </Show>
       <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>
       <Show when={switcher()} keyed>
         {(current) => (
