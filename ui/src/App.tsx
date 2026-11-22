@@ -16,6 +16,9 @@ import { ToastHost } from "./components/ui/Toast";
 import { pushToast } from "./lib/toasts";
 import { clearOsDrop, dropOnTree, hoverOsDrop, overTree as overFilesTree } from "./lib/tree-drop";
 import { terminalAt } from "./lib/terminal-drop";
+import { openInEditor } from "./lib/editor";
+import { noteRecentFile, recentFiles } from "./lib/recent-files";
+import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
@@ -277,6 +280,18 @@ export function App() {
     tone: statusTone(task.status),
     focus: () => open(task.id),
   }))));
+  const openFile = (path: string) => {
+    const task = selected();
+    if (!task) return;
+    noteRecentFile(task.id, path);
+    void openInEditor(task.id, path);
+  };
+  const revealFile = (path: string) => {
+    const task = selected();
+    if (!task) return;
+    noteRecentFile(task.id, path);
+    revealInTree(task.id, path);
+  };
   const insertFile = (path: string) => {
     const task = selected();
     if (task) void draftComment(task.id, `@${path} `).catch(report);
@@ -1343,6 +1358,8 @@ export function App() {
             onDownload: () => void openRelease().catch(report),
           } : undefined}
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
+          onOpenFile={inTauri ? openFile : undefined} onRevealFile={inTauri ? revealFile : undefined}
+          recentFiles={selected() ? recentFiles(selected()!.id) : []}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
       </Show>

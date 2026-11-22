@@ -191,3 +191,12 @@ export const taskCopyConflicts = (id: string, sources: string[], toDir: string) 
   invoke<string[]>("task_copy_conflicts", { id, sources, toDir });
 export const copyIntoTask = (id: string, sources: string[], toDir: string, overwrite: boolean) =>
   invoke<string[]>("task_copy_in", { id, sources, toDir, overwrite });
+
+export const renameTaskPath = (id: string, from: string, newName: string) =>
+  invoke<string>("task_file_rename", { id, from, newName });
+export const createTaskEntry = (id: string, dir: string, name: string, folder: boolean) =>
+  invoke<string>("task_file_create", { id, dir, name, folder });
+/** Moves to the system trash; nothing is deleted for good. */
+export const trashTaskPath = (id: string, path: string) => invoke<void>("task_file_trash", { id, path });
+export const discardTaskFile = (id: string, path: string) => invoke<void>("task_discard_file", { id, path });
+export const discardTaskHunk = (id: string, patch: string) => invoke<void>("task_discard_hunk", { id, patch });

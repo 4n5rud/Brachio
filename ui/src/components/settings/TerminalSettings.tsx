@@ -1,5 +1,6 @@
 import { For, createSignal, onMount, type Accessor } from "solid-js";
 import { Input, Select } from "../ui/Input";
+import { chooseEditor, chosenEditor, installedEditors, loadEditors } from "../../lib/editor";
 import { chooseShell, chosenShell, installedShells, loadShells } from "../../lib/shells";
 import { Toggle } from "../ui/Toggle";
 import { t } from "../../i18n";
@@ -10,7 +11,7 @@ import {
   updateTerminalSettings,
   type TerminalSettings as TerminalValues,
 } from "../../lib/terminal-settings";
-import { ShellIcon } from "../BrandIcon";
+import { BrandIcon, ShellIcon, type BrandName } from "../BrandIcon";
 import { SettingRow } from "./SettingRow";
 
 type Range = { min: number; max: number };
@@ -54,7 +55,7 @@ function NumberRow(props: {
 
 /** Font size and scrollback of every terminal. Open terminals follow the change at once. */
 export function TerminalSettings(props: { drafts?: Partial<Record<keyof TerminalValues, string>> }) {
-  onMount(() => void loadShells());
+  onMount(() => { void loadShells(); void loadEditors(); });
   return (
     <>
       <SettingRow label={t("settings.defaultShell")} hint={t("settings.defaultShellHint")}>
@@ -63,6 +64,14 @@ export function TerminalSettings(props: { drafts?: Partial<Record<keyof Terminal
           onChange={(event) => chooseShell(event.currentTarget.value || null)}>
           <option value="">{t("settings.systemShell")}</option>
           <For each={installedShells()}>{(shell) => <option value={shell.id}>{shell.name}</option>}</For>
+        </Select>
+      </SettingRow>
+      <SettingRow label={t("settings.defaultEditor")} hint={t("settings.defaultEditorHint")}>
+        <BrandIcon brand={chosenEditor() as BrandName} fallback="file" />
+        <Select aria-label={t("settings.defaultEditor")} value={chosenEditor()}
+          onChange={(event) => chooseEditor(event.currentTarget.value)}>
+          <option value="">{t("settings.systemEditor")}</option>
+          <For each={installedEditors()}>{(editor) => <option value={editor.id}>{editor.name}</option>}</For>
         </Select>
       </SettingRow>
       <NumberRow field="fontSize" label={t("settings.fontSize")} range={FONT_SIZE_RANGE} step={1} draft={props.drafts?.fontSize}
