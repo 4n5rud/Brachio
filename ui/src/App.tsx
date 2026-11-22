@@ -16,6 +16,9 @@ import { EmptyRepo } from "./components/EmptyRepo";
 import { EmptyState } from "./components/ui/EmptyState";
 import { ToastHost } from "./components/ui/Toast";
 import { pushToast } from "./lib/toasts";
+import { clearOsDrop, dropOnTree, hoverOsDrop, overTree as overFilesTree } from "./lib/tree-drop";
+import { terminalAt } from "./lib/terminal-drop";
+import { quoteShellPaths } from "./lib/shell-quote";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
@@ -43,6 +46,8 @@ import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
 import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { registerActions, registerGoToSource } from "./lib/actions";
+import { CuesDialog } from "./components/CuesDialog";
+import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
 import { pushUndoToast } from "./lib/undo";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { ShortcutsDialog } from "./components/ShortcutList";
@@ -241,6 +246,28 @@ export function App() {
     { id: "app.shortcuts", label: () => t("action.shortcuts"), group: () => t("action.groupApp"), keys: SHORTCUT_LIST_KEYS,
       run: () => { setShortcutsOpen(true); } },
   ));
+  onCleanup(registerPromptCueSender((id, text) => draftComment(id, text)));
+  createEffect(() => {
+    const repoId = selected()?.repoId;
+    if (repoId) void loadCues(repoId).catch(report);
+  });
+  createEffect(() => {
+    const task = selected();
+    const repoId = task?.repoId;
+    if (!task || !repoId) return;
+    const cueActions = cuesOf(repoId)
+      .filter((cue) => cue.kind === "prompt" || canRunShellCues())
+      .map((cue) => ({
+        id: `cue:${cue.id}`,
+        label: () => cue.label,
+        group: () => t("cue.title"),
+        run: async () => { if (!(await runCue(task.id, cue))) pushToast({ tone: "error", message: t("cue.notRun") }); },
+      }));
+    onCleanup(registerActions(
+      { id: `cue.manage:${repoId}`, label: () => t("cue.manage"), group: () => t("cue.title"), run: () => { openCueManager(repoId); } },
+      ...cueActions,
+    ));
+  });
   // Agents; terminal tabs are added by their owner through registerGoToSource.
   onCleanup(registerGoToSource(() => rows().map((task) => ({
     id: `agent:${task.id}`,
@@ -950,7 +977,7 @@ export function App() {
     if (!selected()?.worktreePath || view() !== "tasks") return false;
     const ratio = window.devicePixelRatio;
     const target = document.elementFromPoint(position.x / ratio, position.y / ratio);
-    return !!target?.closest(".task-view [data-agent-terminal]");
+    return !!target?.closest(".task-view [data-agent-terminal], .task-view [data-shell-terminal]");
   };
 
   const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
@@ -958,6 +985,11 @@ export function App() {
     if (!task?.worktreePath || dialogOpen() || workspacePanel() || !dropTargetsTerminal(position)) return;
     const files = await resolveDroppedTaskPaths(task.id, paths);
     if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+    const shell = terminalAt(position.x / window.devicePixelRatio, position.y / window.devicePixelRatio);
+    if (shell?.kind === "shell") {
+      if (!(await shell.target.insert(quoteShellPaths(await shellKind(), files)))) report(t("diff.notReady"));
+      return;
+    }
     const draft = files.map((path) => `@${/[\s"]/u.test(path) ? `"${path.replaceAll('"', '\\"')}"` : path}`).join(" ");
     if (!(await draftComment(task.id, draft + " "))) report(t("diff.notReady"));
   };
@@ -1007,16 +1039,23 @@ export function App() {
       listener.catch(report);
       onCleanup(() => { void listener.then((handle) => handle.unregister(), () => {}).catch(report); });
       const dropListener = getCurrentWebview().onDragDropEvent(({ payload }) => {
+        const ratio = window.devicePixelRatio;
+        const free = !dialogOpen() && !workspacePanel();
+        const overTree = payload.type !== "leave" && free && overFilesTree(payload.position.x / ratio, payload.position.y / ratio);
         if (payload.type === "enter" || payload.type === "over") {
-          const overTerminal = !dialogOpen() && !workspacePanel() && dropTargetsTerminal(payload.position);
-          setFolderOverWindow(!dialogOpen() && !workspacePanel() && !overTerminal);
+          const overTerminal = free && dropTargetsTerminal(payload.position);
+          setFolderOverWindow(free && !overTerminal && !overTree);
           setFilesOverTerminal(overTerminal);
+          if (overTree) hoverOsDrop(payload.position.x / ratio, payload.position.y / ratio); else clearOsDrop();
         } else {
           setFolderOverWindow(false);
           setFilesOverTerminal(false);
+          clearOsDrop();
         }
         if (payload.type !== "drop") return;
-        if (dropTargetsTerminal(payload.position)) {
+        if (overTree) {
+          dropOnTree(payload.position.x / ratio, payload.position.y / ratio, payload.paths);
+        } else if (dropTargetsTerminal(payload.position)) {
           void dropFiles(payload.paths, payload.position).catch(report);
         } else if (!dialogOpen() && !workspacePanel()) {
           void (async () => {
@@ -1315,6 +1354,10 @@ export function App() {
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
+      </Show>
+      <Show when={cueManagerRepo()}>
+        {(repoId) => <CuesDialog repoId={repoId()} repoName={repos().find((item) => item.id === repoId())?.name ?? ""}
+          onClose={closeCueManager} />}
       </Show>
       <Show when={issueReport() !== undefined}>
         <IssueReportDialog error={issueReport() ?? ""} onClose={() => setIssueReport(undefined)} />

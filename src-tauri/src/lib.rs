@@ -16,6 +16,7 @@ mod mailbox;
 mod orchestration;
 mod pr_status;
 mod project_add;
+mod project_cues;
 mod qa_run;
 mod quit;
 mod resource_usage;
@@ -23,6 +24,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod system_check;
 mod task_activity;
+mod task_file_ops;
 mod task_folder;
 mod task_overlaps;
 mod task_pin;
@@ -299,6 +301,9 @@ pub fn run() {
             terminal::terminal_park,
             quit::terminals_stop,
             quit::app_quit,
+            project_cues::cue_list,
+            project_cues::cue_add,
+            project_cues::cue_delete,
             system_check::system_check,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
@@ -354,6 +359,9 @@ pub fn run() {
             workspace::task_files,
             workspace::task_file_preview,
             workspace::task_file_media,
+            task_file_ops::task_move_path,
+            task_file_ops::task_copy_conflicts,
+            task_file_ops::task_copy_in,
             workspace::task_changes,
             worktree_import::worktree_import_candidates,
             worktree_import::worktree_import,
