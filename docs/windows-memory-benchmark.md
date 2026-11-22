@@ -1,4 +1,6 @@
-# Windows memory benchmark
+# Memory benchmark methodology
+
+This page describes how to measure Brachio's memory use on Windows. No results are published yet: the numbers will be added here, with their methodology and environment, after the runs are done. Until then, make no performance claims from this page.
 
 Use a release build on a single Windows machine and start the sampler from a separate PowerShell window. Use one disposable repository and the same app build, terminal runtime mode, agent versions and configuration, task fixture, window size, scrollback settings, and warm-up for every run. Record the Windows build, CPU and logical processor count, RAM, app commit and build type, WebView2 version, runtime mode, and enabled agent tool versions.
 

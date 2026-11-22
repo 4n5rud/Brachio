@@ -19,7 +19,7 @@ A grid of a 16px glyph column, the title and the age. Padding 6px 8px, radius 8p
 | Korean title | breaks between words (`word-break: keep-all`); the branch falls back to `task-<id>` |
 | No changes yet | DiffStat hidden |
 | No tasks | the sidebar says "No tasks yet" and shows the new task shortcut |
-| 200+ tasks | the list virtualizes; group counts stay exact |
+| 200+ tasks | Status: Planned. The list is not virtualized yet; the design keeps group counts exact when it is |
 
 ## Don't
 - Don't use the note to restate the status. It carries the reason or the next step.
