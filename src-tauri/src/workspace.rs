@@ -94,6 +94,19 @@ pub fn task_rename(database: State<'_, Database>, id: String, title: String) -> 
     TaskRecord::rename(&*database.lock()?, &id, &title).map_err(to_text)
 }
 
+/// Whether any terminal of the task is still running, so opening it only reconnects.
+#[tauri::command]
+pub async fn task_has_live_terminals(
+    database: State<'_, Database>,
+    terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
+    id: String,
+) -> Result<bool, String> {
+    Ok(!live_task_terminals(&database, &terminals, &in_app, &id)
+        .await?
+        .is_empty())
+}
+
 /// Lists registered repositories.
 #[tauri::command]
 pub fn repo_list(database: State<'_, Database>) -> Result<Vec<RepoRecord>, String> {
