@@ -23,3 +23,6 @@ Rows are agent or terminal tabs grouped by project; Left/Right switch the projec
 
 ## Undo
 `pushUndoToast(message, undo)` in `lib/undo.ts` shows "실행 취소" for 6 seconds. Use it only with a real inverse (unarchive, move back). Actions with no safe inverse (delete task) get no undo button. Wired: archive. Hooks for other owners: task delete has none by design; file move and project removal call `pushUndoToast` with their inverse once one exists.
+
+## Project cues
+A project keeps reusable prompts and shell commands (`project_cues` table, `lib/cues.ts`). They appear in the palette under "프로젝트 Cue" and in the task header menu. A prompt goes through the draft flow (typed into the agent input, never sent). Shell cues need a runner: the owner of the shell terminal calls `registerShellCueRunner((taskId, command) => Promise<boolean>)` and types the command only once the shell is ready; until one is registered, shell cues are listed but disabled.

@@ -6,6 +6,7 @@ mod message_record;
 mod orchestration_record;
 mod orchestration_schedule;
 mod pr_status_record;
+mod project_cue_record;
 mod qa_result_record;
 mod repo_record;
 mod task_activity_record;
@@ -31,6 +32,10 @@ pub use orchestration_schedule::{
     set_scheduler_enabled, state_reason, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
+pub use project_cue_record::{
+    add_project_cue, delete_project_cue, project_cues, ProjectCue, MAX_CUE_BODY_CHARS,
+    MAX_CUE_LABEL_CHARS,
+};
 pub use qa_result_record::{
     delete_qa_results, latest_qa_result, qa_result_by_id, save_qa_result, NewQaResult,
     QaResultRecord, MAX_QA_RESULTS_PER_TASK,

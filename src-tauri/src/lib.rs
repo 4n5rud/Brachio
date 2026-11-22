@@ -16,6 +16,7 @@ mod mailbox;
 mod orchestration;
 mod pr_status;
 mod project_add;
+mod project_cues;
 mod qa_run;
 mod quit;
 mod resource_usage;
@@ -299,6 +300,9 @@ pub fn run() {
             terminal::terminal_park,
             quit::terminals_stop,
             quit::app_quit,
+            project_cues::cue_list,
+            project_cues::cue_add,
+            project_cues::cue_delete,
             task_pin::task_pins_list,
             task_pin::task_pin_set,
             task_activity::task_activity_list,
