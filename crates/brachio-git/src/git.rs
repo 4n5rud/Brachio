@@ -88,6 +88,35 @@ impl Git {
         )?)
     }
 
+    /// Runs git with `input` on its standard input and returns its trimmed standard output.
+    ///
+    /// # Errors
+    /// Fails when git cannot be started or exits with a failure status.
+    pub fn run_with_input(&self, args: &[&str], input: &[u8]) -> Result<String, GitError> {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let mut child = self
+            .command(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            // A git that exits early closes the pipe; its own exit status says why.
+            let _ = stdin.write_all(input);
+        }
+        let output = child.wait_with_output()?;
+        if !output.status.success() {
+            return Err(GitError::Failed {
+                args: args.join(" "),
+                status: output.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            });
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+
     fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new("git");
         command.arg("-C").arg(&self.repo);

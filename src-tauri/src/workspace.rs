@@ -94,6 +94,19 @@ pub fn task_rename(database: State<'_, Database>, id: String, title: String) -> 
     TaskRecord::rename(&*database.lock()?, &id, &title).map_err(to_text)
 }
 
+/// Whether any terminal of the task is still running, so opening it only reconnects.
+#[tauri::command]
+pub async fn task_has_live_terminals(
+    database: State<'_, Database>,
+    terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
+    id: String,
+) -> Result<bool, String> {
+    Ok(!live_task_terminals(&database, &terminals, &in_app, &id)
+        .await?
+        .is_empty())
+}
+
 /// Lists registered repositories.
 #[tauri::command]
 pub fn repo_list(database: State<'_, Database>) -> Result<Vec<RepoRecord>, String> {
@@ -265,7 +278,7 @@ fn is_folder_task(database: &Database, task: &TaskRecord) -> Result<bool, String
 
 /// Takes the repository's worktree lock, then loads a task that is still open in a git project.
 /// The task is read again after the wait because a deletion may have run in between.
-async fn lock_open_git_task(
+pub(crate) async fn lock_open_git_task(
     database: &Database,
     worktrees: &TaskWorktreeLocks,
     id: &str,

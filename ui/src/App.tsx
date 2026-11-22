@@ -13,11 +13,15 @@ import { firstRunPending } from "./lib/system-check";
 import { alertSoundKind, playAlertSound } from "./lib/alert-sound";
 import { quitConfirmEnabled, runningAgentKeys, setQuitConfirmEnabled } from "./lib/quit-confirm";
 import { EmptyRepo } from "./components/EmptyRepo";
+import { Button } from "./components/ui/Button";
 import { EmptyState } from "./components/ui/EmptyState";
 import { ToastHost } from "./components/ui/Toast";
 import { pushToast } from "./lib/toasts";
 import { clearOsDrop, dropOnTree, hoverOsDrop, overTree as overFilesTree } from "./lib/tree-drop";
 import { terminalAt } from "./lib/terminal-drop";
+import { openInEditor } from "./lib/editor";
+import { noteRecentFile, recentFiles } from "./lib/recent-files";
+import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
@@ -70,6 +74,9 @@ import { pasteText } from "./lib/terminal-paste";
 import { loadApprovedSetups, saveApprovedSetups } from "./lib/setup-approval";
 import { checkForRelease, openRelease } from "./lib/updates";
 import { appVersion } from "./lib/issue-report";
+import { launchMounts, resumeLastTaskEnabled } from "./lib/lazy-resume";
+import { restoreWindowState, watchWindowState } from "./lib/window-state";
+import { MAX_MOUNTED_TERMINALS } from "./lib/terminal-parking";
 import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-workspace-tasks";
 import { deleteBlock } from "./lib/delete-preview";
 import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
@@ -280,6 +287,18 @@ export function App() {
     tone: statusTone(task.status),
     focus: () => open(task.id),
   }))));
+  const openFile = (path: string) => {
+    const task = selected();
+    if (!task) return;
+    noteRecentFile(task.id, path);
+    void openInEditor(task.id, path);
+  };
+  const revealFile = (path: string) => {
+    const task = selected();
+    if (!task) return;
+    noteRecentFile(task.id, path);
+    revealInTree(task.id, path);
+  };
   const insertFile = (path: string) => {
     const task = selected();
     if (task) void draftComment(task.id, `@${path} `).catch(report);
@@ -381,6 +400,14 @@ export function App() {
   });
   // Tasks whose terminal has been opened in this run, in the order they were opened.
   const [openIds, setOpenIds] = createSignal<readonly string[]>([]);
+  // Until the launch check says which terminals are still alive nothing is opened, so a stopped
+  // task is never resumed by accident. A task held here waits for the person to resume it.
+  const [launchPending, setLaunchPending] = createSignal(inTauri);
+  const [heldTask, setHeldTask] = createSignal<string>();
+  const heldHere = () => heldTask() !== undefined && heldTask() === selectedId();
+  createEffect(() => {
+    if (heldTask() !== undefined && selectedId() !== heldTask()) setHeldTask(undefined);
+  });
   const [workspaceTaskIds, setWorkspaceTaskIds] = createSignal<readonly string[]>([]);
   const workspaceTasks = createMemo(() => {
     const byId = new Map(tasks().map((task) => [task.id, task]));
@@ -392,7 +419,7 @@ export function App() {
   const displayedTask = createMemo(() => selected() ?? rows().find((task) => openIds().includes(task.id)));
   createEffect(() => {
     const id = selectedId();
-    if (id !== undefined && !openIds().includes(id)) setOpenIds((ids) => [...ids, id]);
+    if (id !== undefined && !launchPending() && id !== heldTask() && !openIds().includes(id)) setOpenIds((ids) => [...ids, id]);
     if (id !== undefined && !workspaceTaskIds().includes(id)) {
       setWorkspaceTaskIds((ids) => [...ids, id]);
     }
@@ -607,6 +634,28 @@ export function App() {
       setWorkspaceTaskIds(restoredTasks);
       setUnreadFinishMarks(loadUnreadFinish(new Set(storedTasks.map((task) => task.id))));
       restoreSelection();
+    });
+    void settleLaunch();
+  };
+
+  // Reconnects to terminals that are still alive, which costs nothing new. A stopped task resumes
+  // only if it is the focused one and the setting allows it; the rest wait until they are opened.
+  const settleLaunch = async () => {
+    const focused = selectedId();
+    const candidates = workspaceTaskIds().slice(0, MAX_MOUNTED_TERMINALS);
+    const alive = new Set<string>();
+    await Promise.all([...new Set([...(focused ? [focused] : []), ...candidates])].map(async (id) => {
+      try {
+        if (await invoke<boolean>("task_has_live_terminals", { id })) alive.add(id);
+      } catch {
+        // A task that could not be checked counts as stopped.
+      }
+    }));
+    const plan = launchMounts(focused, candidates, alive, resumeLastTaskEnabled());
+    batch(() => {
+      setOpenIds((ids) => [...ids, ...plan.open.filter((id) => !ids.includes(id))]);
+      setHeldTask(plan.held);
+      setLaunchPending(false);
     });
   };
 
@@ -997,6 +1046,10 @@ export function App() {
 
   onMount(() => {
     if (inTauri) {
+      void restoreWindowState().catch(() => {});
+      let stopWindowWatch: (() => void) | undefined;
+      void watchWindowState().then((stop) => { stopWindowWatch = stop; }, () => {});
+      onCleanup(() => stopWindowWatch?.());
       detectKeepAwake();
       onCleanup(watchMailbox((unread) => {
         setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
@@ -1267,7 +1320,16 @@ export function App() {
           now={now()}
         />
         </Show>
-        <Show when={displayedTask()}>
+        <Show when={heldHere() ? selected() : undefined}>
+          {(task) => (
+            <main class="task-view task-held">
+              <EmptyState title={task().title} body={t("task.resumeHeld")}>
+                <Button variant="primary" onClick={() => setHeldTask(undefined)}>{t("task.resumeAction")}</Button>
+              </EmptyState>
+            </main>
+          )}
+        </Show>
+        <Show when={heldHere() ? undefined : displayedTask()}>
           {(task) => (
             <TaskView
               task={task()}
@@ -1359,6 +1421,8 @@ export function App() {
             onDownload: () => void openRelease().catch(report),
           } : undefined}
           files={quickFiles()} onInsertFile={inTauri ? insertFile : undefined}
+          onOpenFile={inTauri ? openFile : undefined} onRevealFile={inTauri ? revealFile : undefined}
+          recentFiles={selected() ? recentFiles(selected()!.id) : []}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
       </Show>

@@ -73,7 +73,7 @@ pub async fn task_copy_in(
 }
 
 /// A path relative to the root, with `/`, that holds no `..`, drive, `.git` or control character.
-fn clean_relative(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn clean_relative(path: &str) -> Result<PathBuf, String> {
     if path.chars().any(char::is_control) || (cfg!(windows) && path.contains(':')) {
         return Err("The path contains an unsupported character.".to_owned());
     }
@@ -92,12 +92,12 @@ fn clean_relative(path: &str) -> Result<PathBuf, String> {
     Ok(clean)
 }
 
-fn canonical_root(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn canonical_root(root: &Path) -> Result<PathBuf, String> {
     root.canonicalize().map_err(to_text)
 }
 
 /// An existing folder of the task, resolved through links; empty means the task's root.
-fn resolve_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let root = canonical_root(root)?;
     let dir = root
         .join(clean_relative(relative)?)

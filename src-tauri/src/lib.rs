@@ -24,6 +24,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod system_check;
 mod task_activity;
+mod task_file_actions;
 mod task_file_ops;
 mod task_folder;
 mod task_overlaps;
@@ -332,6 +333,7 @@ pub fn run() {
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,
+            workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,
             project_add::project_clone,
@@ -362,6 +364,13 @@ pub fn run() {
             task_file_ops::task_move_path,
             task_file_ops::task_copy_conflicts,
             task_file_ops::task_copy_in,
+            task_file_actions::task_editors,
+            task_file_actions::task_open_in_editor,
+            task_file_actions::task_file_rename,
+            task_file_actions::task_file_create,
+            task_file_actions::task_file_trash,
+            task_file_actions::task_discard_file,
+            task_file_actions::task_discard_hunk,
             workspace::task_changes,
             worktree_import::worktree_import_candidates,
             worktree_import::worktree_import,
