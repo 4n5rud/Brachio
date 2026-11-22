@@ -56,6 +56,7 @@ pub async fn agent_auth_status(kind: AgentKind) -> Result<AgentAuthStatus, Strin
     let args: &[&str] = match kind {
         AgentKind::Codex => &["login", "status"],
         AgentKind::ClaudeCode => &["auth", "status", "--json"],
+        AgentKind::Grok => return Err("Grok signs in from its own terminal.".to_owned()),
     };
     let output = timeout(
         STATUS_TIMEOUT,
@@ -75,6 +76,7 @@ pub async fn agent_auth_status(kind: AgentKind) -> Result<AgentAuthStatus, Strin
             })
         }
         AgentKind::Codex => Err("Codex did not report its sign-in status.".to_owned()),
+        AgentKind::Grok => Err("Grok signs in from its own terminal.".to_owned()),
         AgentKind::ClaudeCode => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

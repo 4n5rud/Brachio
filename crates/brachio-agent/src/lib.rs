@@ -3,12 +3,14 @@
 //! version before use.
 
 mod agent_kind;
+mod catalog;
 mod codex_sessions;
 mod installed;
 mod session_tokens;
 mod usage_scan;
 
 pub use agent_kind::{AgentKind, Launch};
+pub use catalog::{AgentSpec, ResumeSupport, StatusChannel};
 pub use codex_sessions::{
     codex_conversations, codex_rollout_path, latest_codex_session, latest_session_in, rollout_in,
     CodexConversation,

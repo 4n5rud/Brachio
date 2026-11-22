@@ -6,13 +6,14 @@ import { Button } from "../ui/Button";
 import { PathLink } from "../ui/PathLink";
 import { StatusGlyph } from "../ui/StatusBadge";
 
-export const AGENT_NAMES = { claude_code: "Claude Code", codex: "Codex" } as const;
-const ICON_OF = { claude_code: "claude", codex: "codex" } as const;
+export const AGENT_NAMES = { claude_code: "Claude Code", codex: "Codex", grok: "Grok" } as const;
+const ICON_OF = { claude_code: "claude", codex: "codex", grok: "grok" } as const;
 
 export type AccountState =
   | { state: "checking" }
   | { state: "signedIn"; account: string | null }
   | { state: "signedOut" }
+  | { state: "ownTerminal" }
   | { state: "error"; message: string };
 
 export interface UsageRow {
@@ -62,7 +63,7 @@ export function AgentCard(props: AgentCardProps) {
         <strong>{AGENT_NAMES[props.kind]}</strong>
         <Show when={props.version}>{(version) => <span class="agent-card-version">{plainVersion(version())}</span>}</Show>
         <span class="agent-card-spacer" />
-        <Show when={!accountError()}>
+        <Show when={!accountError() && props.account.state !== "ownTerminal"}>
           <span class="agent-card-status" aria-live="polite">
             <StatusGlyph tone={tone()} />
             {t(STATUS_WORD[props.account.state as keyof typeof STATUS_WORD])}
@@ -72,6 +73,7 @@ export function AgentCard(props: AgentCardProps) {
       </div>
       <PathLink path={props.path} />
       <Show when={accountError()}>{(message) => <p class="form-error" role="alert">{message()}</p>}</Show>
+      <Show when={props.account.state === "ownTerminal"}><p class="form-hint">{t("settings.agentOwnTerminal")}</p></Show>
       <Show when={props.signingIn}><p class="form-hint" role="status">{t("settings.agentLoginPending")}</p></Show>
       <Show when={props.kind === "claude_code"}><p class="form-hint">{t("settings.claudeSwitchAccount")}</p></Show>
       <Show when={props.usage}>{(rows) => (
