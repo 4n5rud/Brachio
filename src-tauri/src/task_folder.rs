@@ -90,7 +90,7 @@ fn reveal_command(folder: &Path) -> Command {
     }
 }
 
-fn open_command(folder: &Path) -> Command {
+pub(crate) fn open_command(folder: &Path) -> Command {
     #[cfg(windows)]
     {
         let mut command = explorer();

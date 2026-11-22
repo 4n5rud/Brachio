@@ -4,13 +4,16 @@ import { TextArea } from "./ui/Input";
 import { DiffStat } from "./ui/DiffStat";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import { t } from "../i18n";
+import { hunkPatch } from "../lib/diff-hunks";
+import { IconButton } from "./ui/IconButton";
 import { diffFiles, diffRows, splitDiffRows, type DiffFile, type DiffLocation, type DiffRow } from "../lib/diff";
 import { InspectorNote } from "./InspectorNote";
 import "./DiffReview.css";
 
 type Line =
   | { kind: "file"; file: DiffFile }
-  | { kind: "hunk" | "code" | "note"; row: DiffRow };
+  | { kind: "code" | "note"; row: DiffRow }
+  | { kind: "hunk"; row: DiffRow; file: number; hunk: number };
 
 type Item = Line | { kind: "pair"; old?: DiffRow; next?: DiffRow };
 
@@ -22,6 +25,8 @@ export function DiffReview(props: {
   split: boolean;
   onSplit: (split: boolean) => void;
   onDraft: (text: string) => Promise<boolean>;
+  /** Throws away one hunk; given its patch with the file header. */
+  onDiscardHunk?: (patch: string) => void;
   /** A line already chosen, for the component catalog. */
   initial?: { line?: number; side?: "old" | "new"; comment?: string; error?: string };
 }) {
@@ -29,13 +34,15 @@ export function DiffReview(props: {
   const lines = createMemo<Line[]>(() => {
     const files = diffFiles(props.patch);
     let next = 0;
+    let hunks = 0;
     const result: Line[] = [];
     for (const row of rows()) {
       if (row.location) result.push({ kind: "code", row });
       else if (row.text.startsWith("diff --git ")) {
         const file = files[next++];
+        hunks = 0;
         if (file) result.push({ kind: "file", file });
-      } else if (row.text.startsWith("@@")) result.push({ kind: "hunk", row });
+      } else if (row.text.startsWith("@@")) result.push({ kind: "hunk", row, file: next - 1, hunk: hunks++ });
       else if (row.text && !HEADER.test(row.text)) result.push({ kind: "note", row });
     }
     return result;
@@ -156,7 +163,17 @@ export function DiffReview(props: {
     if (line.kind === "code") return code(line.row);
     return (
       <div class={line.kind === "hunk" ? "drow hunk" : "drow note"}>
-        <span /><span /><span>{line.row.text}</span>
+        <span /><span />
+        <span>
+          {line.row.text}
+          <Show when={line.kind === "hunk" && props.onDiscardHunk}>
+            <IconButton size="sm" icon="x" label={t("changes.discardHunk")}
+              onClick={() => {
+                const patch = line.kind === "hunk" ? hunkPatch(props.patch, line.file, line.hunk) : undefined;
+                if (patch) props.onDiscardHunk?.(patch);
+              }} />
+          </Show>
+        </span>
       </div>
     );
   };

@@ -247,7 +247,7 @@ fn is_folder_task(database: &Database, task: &TaskRecord) -> Result<bool, String
 
 /// Takes the repository's worktree lock, then loads a task that is still open in a git project.
 /// The task is read again after the wait because a deletion may have run in between.
-async fn lock_open_git_task(
+pub(crate) async fn lock_open_git_task(
     database: &Database,
     worktrees: &TaskWorktreeLocks,
     id: &str,

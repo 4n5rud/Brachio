@@ -22,6 +22,10 @@ import { TaskActivityList } from "./TaskActivityList";
 import { TaskAlwaysAllow } from "./TaskAlwaysAllow";
 import { TaskOverlaps } from "./TaskOverlaps";
 import { listTaskActivity } from "../lib/task-activity";
+import { revealRequest } from "../lib/file-reveal";
+import { openInEditor } from "../lib/editor";
+import { confirmDialog } from "./ui/ConfirmDialog";
+import { discardTaskFile, discardTaskHunk } from "../lib/workspace";
 
 /** How often the open Activity tab reloads, since the core records events the interface never sees. */
 const ACTIVITY_REFRESH_MS = 5_000;
@@ -47,6 +51,7 @@ export function Inspector(props: {
     if (!isLead() && pane() === "tasks") setPane("files");
   });
   const [pane, setPane] = createSignal<Pane>(isGit() ? "changes" : "files");
+  createEffect(on(revealRequest, (request) => { if (request?.taskId === props.task.id) setPane("files"); }));
   createEffect(() => {
     if (!isGit() && pane() === "changes") setPane("files");
   });
@@ -98,7 +103,7 @@ export function Inspector(props: {
         <Match when={pane() === "files"}>
           <Show when={props.task.worktreePath && props.task.id} keyed
             fallback={<InspectorSection title={t("files.title")}><InspectorNote>{t("files.empty")}</InspectorNote></InspectorSection>}>
-            {(id) => <TaskFiles taskId={id} onInsert={(path) => void props.onDraft(id, `@${path} `)} />}
+            {(id) => <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />}
           </Show>
         </Match>
         <Match when={pane() === "changes"}>
@@ -116,6 +121,28 @@ export function Inspector(props: {
                       onStage={(path) => void runner.run({ action: "stageFile", path }).then((result) => {
                         if (result && !result.ok) pushToast({ tone: "error", title: t("error.title"), message: result.failure.output });
                       })}
+                      onUnstage={(path) => void runner.run({ action: "unstageFile", path })}
+                      onOpenInEditor={(path) => void openInEditor(id, path)}
+                      onDiscardFile={async (path) => {
+                        const ok = await confirmDialog({
+                          title: t("changes.discardTitle").replace("{name}", () => path.slice(path.lastIndexOf("/") + 1)),
+                          body: t("changes.discardBody"),
+                          confirmLabel: t("changes.discard"),
+                        });
+                        if (!ok) return;
+                        try { await discardTaskFile(id, path); } catch (failure) {
+                          pushToast({ tone: "error", title: t("changes.discardFailed"), message: String(failure) });
+                        }
+                        await refetch();
+                      }}
+                      onDiscardHunk={async (patch) => {
+                        const ok = await confirmDialog({ title: t("changes.discardHunkTitle"), body: t("changes.discardHunkBody"), confirmLabel: t("changes.discard") });
+                        if (!ok) return;
+                        try { await discardTaskHunk(id, patch); } catch (failure) {
+                          pushToast({ tone: "error", title: t("changes.discardFailed"), message: String(failure) });
+                        }
+                        await refetch();
+                      }}
                       onDraft={(text) => props.onDraft(id, text)} />
                     <TaskOverlaps taskId={id} changesRevision={currentChanges()?.data} />
                     <Show when={currentChanges()?.data}>

@@ -1,7 +1,7 @@
 import { Button } from "./ui/Button";
 import { For, Match, Show, Switch, createMemo, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
-import { matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
+import { existingRecents, matchesAll, rankFiles, type CommandId, type QuickEntry } from "../lib/quick-open";
 import { NEW_TASK_KEYS, SETTINGS_KEYS } from "../lib/shortcut";
 import { shortBranch, type TaskRow } from "../lib/tasks";
 import { formatAge } from "../lib/time";
@@ -69,6 +69,12 @@ export function WorkspaceDialog(props: {
   /** Files of the selected task, offered when the query is two characters or more. */
   files?: readonly string[];
   onInsertFile?: (path: string) => void;
+  /** Enter on a file: opens it in the external editor. */
+  onOpenFile?: (path: string) => void;
+  /** Alt+Enter on a file: shows it in the Files tree. */
+  onRevealFile?: (path: string) => void;
+  /** Files opened before, newest first, offered before anything is typed. */
+  recentFiles?: readonly string[];
   onCommand?: (id: CommandId) => void;
   onClose: () => void;
   repos: readonly { id: string; name: string }[];
@@ -86,8 +92,10 @@ export function WorkspaceDialog(props: {
       ? COMMANDS.filter((id) => matchesAll(COMMAND_LABEL[id](), text))
           .map((id): QuickEntry => ({ kind: "command", id }))
       : [];
+    const recents = props.recentFiles ?? [];
     const files = props.onInsertFile
-      ? rankFiles(props.files ?? [], text).map((path): QuickEntry => ({ kind: "file", path }))
+      ? (text.trim() === "" ? existingRecents(props.files ?? [], recents) : rankFiles(props.files ?? [], text, undefined, recents))
+          .map((path): QuickEntry => ({ kind: "file", path }))
       : [];
     return [...tasks, ...files, ...commands];
   });
@@ -97,8 +105,14 @@ export function WorkspaceDialog(props: {
     props.onOpen(id, sessionKey);
     props.onClose();
   };
-  const activate = (entry: QuickEntry) => {
-    if (entry.kind === "task") {
+  const activate = (entry: QuickEntry, how: "open" | "reveal" | "insert" = "open") => {
+    if (entry.kind === "file" && how === "reveal" && props.onRevealFile) {
+      props.onRevealFile(entry.path);
+      props.onClose();
+    } else if (entry.kind === "file" && how === "open" && props.onOpenFile) {
+      props.onOpenFile(entry.path);
+      props.onClose();
+    } else if (entry.kind === "task") {
       choose(entry.task.id);
     } else if (entry.kind === "command") {
       // Commands that open another panel reuse this dialog, so it stays open.
@@ -127,6 +141,7 @@ export function WorkspaceDialog(props: {
         <div class="palette-hints">
           <span><Kbd>↑</Kbd><Kbd>↓</Kbd>{t("quickOpen.hintMove")}</span>
           <span><Kbd>↵</Kbd>{t("quickOpen.hintOpen")}</span>
+          <Show when={props.onRevealFile}><span><Kbd>Alt</Kbd><Kbd>↵</Kbd>{t("quickOpen.hintReveal")}</span></Show>
           <span><Kbd>Esc</Kbd>{t("quickOpen.hintClose")}</span>
         </div>
       ) : undefined}>
@@ -157,7 +172,7 @@ export function WorkspaceDialog(props: {
                 if (event.key === "Enter") {
                   event.preventDefault();
                   const entry = entries()[highlight()] ?? entries()[0];
-                  if (entry) activate(entry);
+                  if (entry) activate(entry, event.altKey ? "reveal" : event.ctrlKey || event.metaKey ? "insert" : "open");
                 } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
                   event.preventDefault();
                   const step = event.key === "ArrowDown" ? 1 : -1;
