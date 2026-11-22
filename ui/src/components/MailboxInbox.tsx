@@ -3,6 +3,7 @@ import { Button } from "./ui/Button";
 import { IconButton } from "./ui/IconButton";
 import { For, Show, createResource } from "solid-js";
 import { t } from "../i18n";
+import { pushToast } from "../lib/toasts";
 import { readMailbox } from "../lib/mailbox";
 import { formatAge } from "../lib/time";
 import { StatusGlyph } from "./ui/StatusBadge";
@@ -32,7 +33,7 @@ export function MailboxInbox(props: {
     try {
       await invoke("mailbox_dismiss", { tabKey: props.tabKey, ids });
     } catch (error) {
-      console.warn("Could not dismiss messages", error);
+      pushToast({ tone: "error", title: t("error.title"), message: String(error) });
     }
     void refetch();
   };

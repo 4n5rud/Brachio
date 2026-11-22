@@ -50,3 +50,4 @@ button.file-row {
 .fstat-r { color: var(--color-text-2); }
 .fstat-u { color: var(--color-text-3); }
 .fstat-c { color: var(--color-status-error); }
+.reason-wrap { display: inline-flex; }

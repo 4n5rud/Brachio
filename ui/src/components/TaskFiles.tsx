@@ -217,7 +217,7 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
   const onAction = async (action: FileAction, target: string, kind: "file" | "dir") => {
     if (action === "open") {
       noteRecentFile(props.taskId, target);
-      await openInEditor(props.taskId, target);
+      await openInEditor(props.taskId, target).catch((failure) => failed(t("files.openFailed"), failure));
     } else if (action === "reveal") {
       await revealPath(absolute(target)).catch((failure) => failed(t("files.revealFailed"), failure));
     } else if (action === "copyPath") {
@@ -235,6 +235,7 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
         await trashTaskPath(props.taskId, target);
         if (path() === target || path().startsWith(`${target}/`)) setPath("");
         await refetch();
+        pushToast({ tone: "success", message: t("files.trashed") });
       } catch (failure) {
         failed(t("files.trashFailed"), failure);
       }
