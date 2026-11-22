@@ -1,7 +1,7 @@
 import { IconButton } from "./ui/IconButton";
 import { Select } from "./ui/Input";
 import { Button } from "./ui/Button";
-import { For, Show, createComputed, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createComputed, createResource, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
@@ -103,6 +103,10 @@ export function TaskView(props: {
   onReportProblem?: (message: string) => void;
 }) {
   const [inboxTab, setInboxTab] = createSignal<string>();
+  const [workerPreamble] = createResource(
+    () => (props.task.parentTaskId ? props.task.id : undefined),
+    (taskId) => invoke<string | null>("task_worker_preamble", { taskId }).catch(() => null),
+  );
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredTabs = new Set<string>();
@@ -504,6 +508,14 @@ export function TaskView(props: {
         </Show>
       </div>
       <div class="pane">
+        <Show when={workerPreamble()}>
+          {(preamble) => (
+            <details class="terminal-recovery">
+              <summary>{t("task.workerPreamble")}</summary>
+              <pre class="terminal-recovery-prompt">{preamble()}</pre>
+            </details>
+          )}
+        </Show>
         <Show when={props.task.prompt}>
           {(prompt) => (
             <details class="terminal-recovery">

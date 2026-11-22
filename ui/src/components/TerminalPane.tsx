@@ -356,7 +356,7 @@ export function TerminalPane(props: {
           else if (resume) setContinuity(opened.resumed ? "terminal.conversationResuming" : "terminal.newConversation");
           // The size may have changed while the session was starting.
           void opened.resize(term.rows, term.cols).catch(() => {});
-          if (opened.promptDelivery === "type_in") typeInPrompt = initialPrompt;
+          if (opened.promptDelivery === "type_in") typeInPrompt = opened.firstPrompt ?? initialPrompt;
           // A shell that was already running has had its setup typed in before.
           else if (initialInputPending !== null && !opened.resumed) typeInPrompt = initialInputPending;
           initialInputPending = null;

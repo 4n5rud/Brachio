@@ -50,6 +50,8 @@ export interface ChildView {
   state: ChildState;
   /** Why Brachio failed it, such as "lost after restart". */
   reason: string | null;
+  /** It failed to start too many times; only the user can reopen it. */
+  startBlocked: boolean;
   dependencies: DependencyView[];
   handoff: HandoffView | null;
 }
@@ -64,6 +66,9 @@ export interface OrchestrationView {
 
 export const setScheduler = (leadTaskId: string, enabled: boolean) =>
   invoke<void>("orchestration_set_scheduler", { leadTaskId, enabled });
+
+export const reopenChild = (taskId: string) =>
+  invoke<void>("orchestration_reopen_child", { taskId });
 
 export const readOrchestration = (leadTaskId: string) =>
   invoke<OrchestrationView>("orchestration_view", { leadTaskId });
