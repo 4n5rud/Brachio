@@ -18,6 +18,7 @@ import { ArchiveGrid } from "../ArchiveGrid";
 import { sidebarRowParts, updateSidebarRowParts } from "../../lib/sidebar-rows";
 import { ThemePicker } from "../ui/ThemePicker";
 import { Toggle } from "../ui/Toggle";
+import { resumeLastTaskEnabled, updateResumeLastTask } from "../../lib/lazy-resume";
 import { AgentSettings } from "./AgentSettings";
 import { SettingRow } from "./SettingRow";
 import { SettingsGroup } from "./SettingsGroup";
@@ -177,6 +178,8 @@ export function SettingsPanel(props: {
             <Toggle checked={quitConfirmEnabled()} label={t("settings.confirmQuit")} hint={t("settings.confirmQuitHint")}
               onChange={setQuitConfirmEnabled} />
             <Show when={"__TAURI_INTERNALS__" in window}>
+              <Toggle checked={resumeLastTaskEnabled()} label={t("settings.resumeLast")} hint={t("settings.resumeLastHint")}
+                onChange={updateResumeLastTask} />
               <SettingRow label={t("settings.systemCheck")} hint={t("settings.systemCheckHint")}>
                 <Button size="sm" onClick={openSystemCheck}>{t("settings.systemCheckOpen")}</Button>
               </SettingRow>
