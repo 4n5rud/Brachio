@@ -305,6 +305,8 @@ pub fn run() {
             task_tabs::task_open_tabs,
             task_tabs::task_add_tab,
             task_tabs::task_close_tab,
+            task_tabs::task_rename_tab,
+            workspace::task_rename,
             task_tabs::task_reorder_tabs,
             workspace::repo_reorder,
             workspace::task_reorder,

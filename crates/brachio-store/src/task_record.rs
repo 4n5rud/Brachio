@@ -82,6 +82,9 @@ pub enum ChildInsertError {
     Store(#[from] StoreError),
 }
 
+/// Longest title a task can be renamed to.
+pub const MAX_TITLE_CHARS: usize = 200;
+
 const COLUMNS: &str =
     "id, repo_id, title, branch, worktree_path, agent_kind, created_at_ms, archived_at_ms, \
      agent_session_id, prompt, parent_task_id, compare_group";
@@ -199,6 +202,30 @@ impl TaskRecord {
         let rows = statement.query_map([], Self::from_row)?;
         let tasks: Vec<Self> = rows.collect::<Result<_, _>>()?;
         Ok(tasks)
+    }
+
+    /// Gives a task a new title.
+    ///
+    /// # Errors
+    /// Fails with `Invalid` for a blank or over-long title, and `NotFound` for an unknown task.
+    pub fn rename(connection: &Connection, id: &str, title: &str) -> Result<(), StoreError> {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+            return Err(StoreError::Invalid(format!(
+                "A task title needs 1 to {MAX_TITLE_CHARS} characters."
+            )));
+        }
+        let changed = connection.execute(
+            "UPDATE tasks SET title = ?2 WHERE id = ?1",
+            params![id, title],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound {
+                table: "tasks",
+                id: id.to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// Places the open tasks of one project in the given order.
@@ -410,6 +437,19 @@ mod tests {
             .collect();
 
         assert_eq!(ids, vec!["t2", "t1"]);
+    }
+
+    #[test]
+    fn renaming_trims_and_refuses_blank_titles() {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert");
+        TaskRecord::rename(&connection, "t1", "  new name ").expect("rename");
+        assert_eq!(
+            TaskRecord::get(&connection, "t1").expect("get").title,
+            "new name"
+        );
+        assert!(TaskRecord::rename(&connection, "t1", "  ").is_err());
+        assert!(TaskRecord::rename(&connection, "missing", "x").is_err());
     }
 
     #[test]
