@@ -2,7 +2,7 @@
 //!
 //! The 5-hour and weekly percentages come from Anthropic's own usage endpoint, called with the
 //! access token Claude Code already stored for this user. The token is read from the credentials
-//! file, handed to `curl` on stdin (never on the command line), and sent to that one HTTPS host.
+//! file (or, on macOS, the login Keychain entry Claude Code writes), handed to `curl` on stdin (never on the command line), and sent to that one HTTPS host.
 //! It is not refreshed, logged or returned to the UI. Results are cached for a minute.
 
 use std::path::PathBuf;
@@ -23,6 +23,10 @@ const FORCE_FLOOR: Duration = Duration::from_secs(5);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const RESPONSE_LIMIT: u64 = 64 * 1024;
 const CREDENTIALS_LIMIT: u64 = 256 * 1024;
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+#[cfg(target_os = "macos")]
+const KEYCHAIN_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -211,17 +215,57 @@ fn credentials_path() -> Option<PathBuf> {
     Some(dir.join(".credentials.json"))
 }
 
-async fn read_credentials() -> Result<Credentials, String> {
-    let signed_out = || "Claude Code credentials were not found on this computer.".to_owned();
-    let path = credentials_path().ok_or_else(signed_out)?;
-    let file = tokio::fs::File::open(path)
-        .await
-        .map_err(|_| signed_out())?;
+async fn read_credentials_file() -> Option<String> {
+    let path = credentials_path()?;
+    if !path.exists() {
+        return None;
+    }
+    let file = tokio::fs::File::open(path).await.ok()?;
     let mut text = String::new();
     file.take(CREDENTIALS_LIMIT)
         .read_to_string(&mut text)
         .await
-        .map_err(|_| signed_out())?;
+        .ok()?;
+    Some(text)
+}
+
+/// Claude Code on macOS keeps its credentials JSON in the login Keychain; may show a permission prompt.
+#[cfg(target_os = "macos")]
+async fn read_keychain_credentials() -> Option<String> {
+    let mut child = Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let output = child.stdout.take()?;
+    let mut bytes = Vec::new();
+    let read = timeout(KEYCHAIN_TIMEOUT, async {
+        output
+            .take(CREDENTIALS_LIMIT)
+            .read_to_end(&mut bytes)
+            .await?;
+        child.wait().await
+    })
+    .await;
+    if !read.ok()?.ok()?.success() {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+async fn read_credentials() -> Result<Credentials, String> {
+    let signed_out = || "Claude Code credentials were not found on this computer.".to_owned();
+    let text = match read_credentials_file().await {
+        Some(text) => Some(text),
+        #[cfg(target_os = "macos")]
+        None => read_keychain_credentials().await,
+        #[cfg(not(target_os = "macos"))]
+        None => None,
+    }
+    .ok_or_else(signed_out)?;
     let credentials = parse_credentials(&text).ok_or_else(signed_out)?;
     let now_ms = i64::try_from(
         SystemTime::now()
