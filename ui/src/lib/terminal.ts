@@ -39,6 +39,19 @@ export interface OpenOptions {
 export const forgetUncertainLaunch = (key: string, operationId: string) =>
   invoke<void>("terminal_forget_uncertain_launch", { key, operationId });
 
+/** What a terminal whose program is gone last displayed. */
+export interface SavedScreen {
+  /** Escape sequences that redraw the screen. */
+  ansi: string;
+  rows: number;
+  cols: number;
+  exited: boolean;
+  exitCode: number | null;
+}
+
+export const savedScreen = (key: string) =>
+  invoke<SavedScreen | null>("terminal_saved_screen", { key });
+
 export interface CodexConversation {
   id: string;
   timestamp: string | null;

@@ -1,36 +1,66 @@
 <p align="center"><img src="../../src-tauri/icons/128x128@2x.png" width="96" alt="Brachio"></p>
 <h1 align="center">Brachio</h1>
-<p align="center"><b>让 Claude Code 和 Codex 并排运行，每个任务一个独立工作树。<br>只有需要你做决定时才会叫你。</b></p>
+<p align="center"><b>运行多个编码代理，一切尽在掌控。</b></p>
+<p align="center">面向 Claude Code 和 Codex 的轻量级开源桌面工作区。<br>并行运行代理，用 Git 工作树隔离各个任务，并在一处审查它们的成果。</p>
+
+<p align="center">Windows · macOS（实验性） · MIT · Pre-alpha</p>
+<p align="center"><a href="https://github.com/4n5rud/Brachio/releases"><b>下载</b></a> · <a href="https://github.com/4n5rud/Brachio/issues/new/choose">报告问题</a></p>
 
 <p align="center">
-  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="release"></a>
-  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/downloads/4n5rud/Brachio/total?color=2ea043" alt="downloads"></a>
-  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Windows%20%7C%20macOS-555?style=flat" alt="Windows | macOS">
-  <a href="../../LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="MIT"></a>
-  <a href="https://x.com/4n5rud08"><img src="https://img.shields.io/badge/X-000000?logo=x&logoColor=white" alt="X"></a>
+  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="最新版本"></a>
+  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="CI 状态"></a>
+  <a href="../../LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="许可证：MIT"></a>
 </p>
 
-<h3 align="center"><a href="https://github.com/4n5rud/Brachio/releases">下载 Brachio</a></h3>
+<!-- screenshot: main window -->
 
 <p align="center">
 <a href="../../README.md">English</a> · <a href="README.ko.md">한국어</a> · <a href="README.ja.md">日本語</a> · 简体中文 · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a> · <a href="README.pt.md">Português</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.ru.md">Русский</a>
 </p>
 
-> **预览前版本（Pre-alpha）。** 早期版本，变化很快。遇到问题请 [提交 Issue](https://github.com/4n5rud/Brachio/issues/new/choose)。
+> **预览前版本（Pre-alpha）。** Brachio 还很年轻，变化很快。可能会有不完善之处，遇到问题请[提交 Issue](https://github.com/4n5rud/Brachio/issues/new/choose)。
+
+## 为什么选择 Brachio？
+
+### 并行工作，变更相互隔离
+在 Git 项目中，每个任务都有自己的分支和工作树，因此各代理编辑的是不同的工作目录。工作树不能避免之后的合并冲突，也不隔离运行环境：端口、数据库和外部服务仍可能冲突，它也不是安全沙箱。一个任务里可以有多个代理和 shell 标签页，同一种代理也能开多个。普通文件夹同样支持，只是没有分支。
+
+### 重启窗口后继续工作
+终端运行在独立的本地运行时进程中，而不是窗口里。关闭窗口后，其中的代理继续运行；重新打开即可重新连接。如果运行时本身停止，正在运行的进程会消失，但保存的画面和代理的会话恢复可以让你接着之前的对话继续。
+
+### 委派工作，审查成果
+主任务把工作拆成子任务（`brachio task create`），并可设定依赖关系（`--after`）。
+
+1. 主任务把工作拆成子任务，由你在应用内批准。
+2. 每个工作者在自己的工作树和分支中运行。
+3. 完成的工作者交回它的提交、变更文件和摘要。
+4. 你审查交接内容并批准；只有这样，依赖它的任务才会开始。
+
+任务之间也可以互发消息。不会自动合并任何东西。
+
+### 内置 Git 工作流
+查看变更文件和 diff、在 diff 行上评论、暂存、提交、推送并创建拉取请求，任务旁边会显示拉取请求和 CI 状态。受支持的 Claude Code 权限请求、初始化命令和 QA 运行，都会在审批栏中等待你决定。
+
+### 本地运行，开源
+Brachio 在你的机器上运行，采用 MIT 许可证。它使用你已有的 Claude Code 或 Codex 账号，从不提供或代理代理账号。它是一个 Rust 和 Tauri 应用。
 
 ## 下载
 
 | 平台 | 安装包 |
 |---|---|
 | Windows 10/11 (x64) | [Brachio_0.1.0_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64-setup.exe) · [.msi](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64_en-US.msi) |
-| macOS (Apple silicon) | [Brachio_0.1.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_aarch64.dmg) |
+| macOS（Apple silicon，实验性） | [Brachio_0.1.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_aarch64.dmg) |
 
 所有版本和发布说明都在 [Releases 页面](https://github.com/4n5rud/Brachio/releases)。每个版本的 `SHA256SUMS.txt` 列出 SHA-256 校验值。
 
-安装包暂未签名。Windows 上如果 SmartScreen 拦截，请选择 **更多信息 → 仍要运行**。macOS 上请在“应用程序”中按住 Control 点击 Brachio，选择 **打开**。
+安装包暂未签名。请只从上面的官方 Releases 页面下载，并把文件的 SHA-256 与 `SHA256SUMS.txt` 比对。校验值一致只说明文件完整送达，并不代表软件是安全的。
 
-**需要：** Git 2.38 或更高版本，以及你自己的 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 或 [Codex](https://github.com/openai/codex) 账号。Brachio 只在本机运行，不提供也不代理任何代理账号。
+- **Windows：** 如果 SmartScreen 拦截了安装包，请选择 **更多信息**，然后选择 **仍要运行**。
+- **macOS：** 打开 **系统设置 > 隐私与安全性**，为 Brachio 选择 **仍要打开**。
+
+macOS 支持是实验性的：CI 会在 macOS 上构建并测试 Rust 代码，但终端运行时尚未在真实的 Mac 上测试过。
+
+**需要：** Git 2.38 或更高版本，以及你自己的 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 或 [Codex](https://github.com/openai/codex) 账号。
 
 ## 支持的代理
 
@@ -39,51 +69,34 @@
   <kbd><img src="../../ui/src/assets/agent-icons/codex-color.svg" width="16" valign="middle" alt=""> Codex</kbd>
 </p>
 
-本机的 shell 也能作为标签页打开：Windows 上有 PowerShell、命令提示符、Git Bash 和 WSL；macOS 上有登录 shell、zsh、bash 和 fish。
+本机的任何 shell 也能作为标签页打开：Windows 上有 PowerShell、命令提示符、Git Bash 和 WSL；macOS 上有登录 shell、zsh、bash 或 fish。
 
-## 功能
+## 其他功能
 
-### 多个代理，一处管理
-每个任务都有独立的 Git 分支和工作树，代理之间互不干扰。一个任务里可以按需打开多个代理和 shell 标签页，同一种代理也能开多个。普通文件夹同样支持。
-
-### 不会断开的终端
-终端运行在独立的本地运行时中。关闭窗口后代理继续工作，重新打开即可重新连接。运行时停止时，可以用保存的画面和会话恢复把会话找回来。
-
-### 由你决定
-受支持的 Claude Code 权限请求、初始化命令、QA 运行和子任务创建，都会在应用内的审批栏里等待。不会自动合并任何东西。
-
-### 审查与 Git
-查看变更文件和 diff、在 diff 行上评论、暂存、提交、推送、创建拉取请求，并在任务旁显示 PR 和 CI 状态。
-
-### 主任务与子任务
-主任务把工作拆成子任务（`brachio task create`，用 `--after` 设定顺序）。子任务交回提交、变更文件和摘要，你确认结果后，依赖它的任务才会开始。任务之间也可以互发消息。
-
-### 方便日常使用
 状态栏中的代理用量、可搜索的文件树、可克隆或新建仓库的项目选择、拖拽排序、任务搜索，以及 8 种配色主题。
 
-### CLI、MCP 与技能
-`brachio` CLI 可在任意终端中操作任务。`brachio mcp` 通过 stdio 提供任务工具。`brachio-send` 和 `brachio-lead` 技能教 Claude Code 和 Codex 如何使用它们。
+`brachio` CLI 可在任意终端中操作任务，`brachio mcp` 通过 stdio 提供任务工具，`brachio-send` 和 `brachio-lead` 技能教 Claude Code 和 Codex 如何使用它们。
 
 ## 项目配置
 
-在仓库中添加 `brachio.toml`，即可在每个新工作树中复制文件、运行初始化命令，并定义 QA 命令：
+仓库可以添加 `brachio.toml`，在每个新工作树中复制文件并运行初始化命令，还可以定义 QA 命令：
 
 ```toml
 [setup]
-copy = [".env"]
+copy = [".env.example"]
 run = ["pnpm install"]
 
 [qa]
-program = "npm"
+program = "pnpm"
 args = ["test"]
 timeout_secs = 600
 ```
 
-初始化命令和 QA 运行总是先征求你的同意。
+初始化命令和 QA 运行在执行前会请求你的批准。只对你信任的项目和代理，才把真实的 `.env` 复制进工作树，因为该工作树里的每个代理都能读取它。
 
-## 尚未支持
+## 当前范围与限制
 
-自动合并、超过一层的任务嵌套、普通文件夹中的子任务、远程机器和 Linux 应用。代理状态、审批和恢复取决于各代理上报的信息。
+尚未实现：自动合并、超过一层的任务嵌套、普通文件夹中的子任务、远程机器和 Linux 应用。代理状态、审批和恢复取决于各代理上报的信息。
 
 ## 从源码构建
 
@@ -106,8 +119,12 @@ CI 在 Windows、macOS 和 Ubuntu 上检查 Rust，并检查 UI。
 
 ## 参与贡献
 
-请阅读 [贡献指南](../../.github/CONTRIBUTING.md)。编码代理还应阅读 [代理贡献指南](../../.github/CONTRIBUTING-AGENTS.md)。安全问题请通过 [私密漏洞报告](../../.github/SECURITY.md) 提交。
+欢迎参与贡献。请阅读[贡献指南](../../.github/CONTRIBUTING.md)，并留意标有 [`good first issue`](https://github.com/4n5rud/Brachio/labels/good%20first%20issue)、[`help wanted`](https://github.com/4n5rud/Brachio/labels/help%20wanted) 和 [`documentation`](https://github.com/4n5rud/Brachio/labels/documentation) 的 issue。编码代理还应阅读[代理贡献指南](../../.github/CONTRIBUTING-AGENTS.md)。安全问题请通过[私密漏洞报告](../../.github/SECURITY.md)提交。
+
+## 早期开发
+
+Brachio 处于早期开发阶段，可能存在 bug。欢迎提交 issue 和拉取请求，给仓库点个星也是关注进展的好办法。
 
 ## 许可证
 
-[MIT License](../../LICENSE-MIT)
+Brachio 采用 [MIT License](../../LICENSE-MIT) 授权。

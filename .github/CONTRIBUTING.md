@@ -4,6 +4,10 @@ Thank you for helping improve Brachio. The project is pre-alpha and targets Wind
 
 For a security issue, use [private vulnerability reporting](SECURITY.md).
 
+## Where to start
+
+Look for issues labeled [`good first issue`](https://github.com/4n5rud/Brachio/labels/good%20first%20issue), [`help wanted`](https://github.com/4n5rud/Brachio/labels/help%20wanted) or [`documentation`](https://github.com/4n5rud/Brachio/labels/documentation). The labels `platform: windows` and `platform: macos` mark platform-specific work.
+
 ## Setup
 
 Install Git 2.38+, Rust with rustfmt and Clippy, Node.js 22+, pnpm 10+, and the Tauri 2 platform prerequisites. Windows needs WebView2 and macOS needs Xcode command-line tools.
