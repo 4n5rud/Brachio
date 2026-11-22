@@ -17,4 +17,4 @@ Each theme has a light and a dark set; Mode picks which one. The eight sets are 
 - Status colors (working, needs you, ready, error) keep their hue in every theme, so status reads the same everywhere. Only Contrast shifts them for more contrast.
 - The brand mint and the mascot never change with the theme.
 - A theme applies at once, including open terminals when "Terminal colors" is on.
-- Every text and status token holds 4.5:1 on canvas, panel, raised and hover in all eight sets; control borders and focus hold 3:1.
+- The tokens are designed for 4.5:1 text and 3:1 control borders and focus on the main surfaces. No automated test checks these ratios yet, so measure before relying on them.

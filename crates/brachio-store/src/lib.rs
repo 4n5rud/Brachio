@@ -34,8 +34,9 @@ pub use orchestration_record::{
     HandoffSource, NewHandoff, OrchestrationError,
 };
 pub use orchestration_schedule::{
-    fail_lost, fail_running, running_children, schedule_next, scheduled_leads, scheduler_enabled,
-    set_scheduler_enabled, state_reason, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
+    fail_lost, fail_running, record_start_failure, reopen_failed, running_children, schedule_next,
+    scheduled_leads, scheduler_enabled, set_scheduler_enabled, start_circuit_broken, state_reason,
+    StartOutcome, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN, MAX_START_FAILURES,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
 pub use project_cue_record::{

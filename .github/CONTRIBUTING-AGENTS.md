@@ -20,4 +20,4 @@ Follow the [contributor guide](CONTRIBUTING.md) and the user's instructions. Thi
 
 Run applicable checks from the contributor guide, inspect the diff, and report results and unverified cases. Use disposable repositories for destructive Git tests. For platform-specific behavior, state which platforms were actually tested.
 
-When collaborating across sessions, record ownership, dependencies, PR links, and verification results in shared project notes. Follow the maintainer's merge and review instructions.
+When collaborating across sessions, coordinate through issues and pull requests: record ownership, dependencies, and verification results there. Follow the maintainer's merge and review instructions.

@@ -44,6 +44,7 @@ mod terminal_status;
 mod tray_menu;
 mod update_release;
 mod usage_analytics;
+mod worker_preamble;
 mod workspace;
 mod worktree_import;
 
@@ -352,6 +353,8 @@ pub fn run() {
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,
+            orchestration::orchestration_reopen_child,
+            worker_preamble::task_worker_preamble,
             workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,

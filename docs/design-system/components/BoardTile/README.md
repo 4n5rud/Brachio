@@ -11,7 +11,10 @@ A task as a tile in the board view, with the last lines of its terminal, so the 
 - Tiles follow the same group order as the task list.
 
 ## Lead and worker
-A lead task that splits work shows its workers as tiles in a row under it, joined by a hairline. The lead tile holds the decision gate ("Merge 3 workers") once every worker is ready.
+A lead task that splits work shows its workers as tiles in a row under it, joined by a hairline. The lead tile is designed to hold a decision gate ("Merge 3 workers") once every worker is ready.
+
+## Status
+Planned for the decision gate: Brachio does not merge automatically, so the app has no such button; the board shows lanes by state. Tiles with the last terminal lines are the design target and may differ from the app.
 
 ## Don't
 - Don't stream the preview at full frame rate; refresh it at most twice a second.

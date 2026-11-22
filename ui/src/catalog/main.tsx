@@ -122,7 +122,7 @@ function Row(props: { cap: string; children: import("solid-js").JSX.Element }) {
 }
 
 const planChild = (id: string, title: string, state: ChildView["state"], waits: Array<[string, string, string]> = []): ChildView => ({
-  id, title, branch: id, state, reason: null, handoff: null, gates: [],
+  id, title, branch: id, state, reason: null, startBlocked: false, handoff: null, gates: [],
   dependencies: waits.map(([dependency, name, status]) => ({ id: dependency, title: name, state: status })),
 });
 const PLAN_CHILDREN: ChildView[] = [

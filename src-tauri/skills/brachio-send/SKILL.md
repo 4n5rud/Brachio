@@ -3,7 +3,7 @@ name: brachio-send
 description: Message another Brachio task's agent, or read messages sent to you, with the brachio command.
 ---
 
-Brachio runs several agents side by side, one per task. Use `brachio` to talk to the others.
+Brachio runs several agents side by side. A task can have several agent tabs, so more than one agent may share a task and a worktree. Use `brachio` to talk to the others.
 Messages wait until the receiver asks; nothing interrupts anyone.
 
 Send when you finish something others depend on, are blocked, or need a decision:
