@@ -1,7 +1,8 @@
-import type { JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import type { AgentState } from "../lib/status";
 import { Icon } from "./Icon";
 import { DiffStat } from "./ui/DiffStat";
+import { tokenDetail, tokenLabel, type TokenUsage } from "../lib/token-usage";
 import { StatusBadge } from "./ui/StatusBadge";
 import "./TaskHeader.css";
 
@@ -13,6 +14,8 @@ export function TaskHeader(props: {
   additions?: number;
   deletions?: number;
   actions?: JSX.Element;
+  /** Tokens the agent session has used; omitted when its log is not available. */
+  tokens?: TokenUsage;
 }) {
   return (
     <div class="task-header">
@@ -25,6 +28,7 @@ export function TaskHeader(props: {
             {props.branch}
           </span>
           <DiffStat additions={props.additions} deletions={props.deletions} />
+          <Show when={props.tokens}>{(usage) => <span title={tokenDetail(usage())}>{tokenLabel(usage())}</span>}</Show>
         </div>
       </div>
       <div class="task-header-actions">{props.actions}</div>

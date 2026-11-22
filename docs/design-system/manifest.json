@@ -16,6 +16,7 @@
     "components/DiffStat/README.md",
     "components/EmptyState/README.md",
     "components/IconButton/README.md",
+    "components/Chart/README.md",
     "components/PathLink/README.md",
     "components/Input/README.md",
     "components/Kbd/README.md",
@@ -91,6 +92,11 @@
       "name": "IconButton",
       "group": "Actions",
       "summary": "A square button holding one icon, for chrome actions people repeat often."
+    },
+    {
+      "name": "Chart",
+      "group": "Data",
+      "summary": "Dependency-free SVG bar, line and share charts with a table fallback."
     },
     {
       "name": "PathLink",

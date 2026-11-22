@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import type { AgentKind } from "./tasks";
 import { CORE_AGENT, detectAgents } from "./terminal";
+import { recordLimit } from "./usage-analytics";
 
 export interface UsageWindow {
   usedPercent: number;
@@ -101,17 +102,29 @@ async function readUsage(agent: AgentKind, force: boolean): Promise<AgentUsage> 
 export async function refreshAgentUsage(force = false): Promise<void> {
   if (refreshing()) return;
   setRefreshing(true);
-  const read = async () => {
+  const load = async () => {
     if (force || signedIn === undefined) signedIn = await signedInAgents();
-    setUsages(await Promise.all(CORE_ORDER.filter((agent) => signedIn?.includes(agent)).map((agent) => readUsage(agent, force))));
+    const read = await Promise.all(CORE_ORDER.filter((agent) => signedIn?.includes(agent)).map((agent) => readUsage(agent, force)));
+    setUsages(read);
+    recordLimitReadings(read);
     setUpdatedAt(Date.now() / 1000);
   };
   try {
-    await (force ? holdMinimum(read()) : read());
+    await (force ? holdMinimum(load()) : load());
   } catch {
     setUsages([]);
   } finally {
     setRefreshing(false);
+  }
+}
+
+/** Saves each window's reading for the history chart; Rust keeps them 30 minutes apart. */
+function recordLimitReadings(read: readonly AgentUsage[]): void {
+  for (const usage of read) {
+    if (usage.state !== "ok") continue;
+    const provider = usage.agent === "claude" ? "claude_code" : "codex";
+    if (usage.session) void recordLimit(provider, "session", usage.session.usedPercent).catch(() => {});
+    if (usage.weekly) void recordLimit(provider, "weekly", usage.weekly.usedPercent).catch(() => {});
   }
 }
 

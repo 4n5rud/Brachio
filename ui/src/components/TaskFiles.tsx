@@ -7,7 +7,8 @@ import { revealPath } from "../lib/workspace";
 import type { FileAction } from "./FileTree";
 import { IconButton } from "./ui/IconButton";
 import { FileTree } from "./FileTree";
-import { InspectorNote, OutputLog } from "./InspectorNote";
+import { InspectorNote } from "./InspectorNote";
+import { FileContent } from "./FileContent";
 import { InspectorSection } from "./InspectorSection";
 import { Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { confirmDialog } from "./ui/ConfirmDialog";
@@ -32,6 +33,8 @@ export interface FilePreview {
   /** Null for a file that is not UTF-8 text. */
   text?: string | null;
   truncated?: boolean;
+  /** Over 1 MiB: nothing was read. */
+  tooLarge?: boolean;
   media?: { url: string; type: string };
 }
 
@@ -78,8 +81,10 @@ export function FilesPanel(props: {
             </Show>
             <Show when={preview().error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
             <Show when={preview().text !== undefined && !preview().loading}>
-              <Show when={preview().text !== null} fallback={<InspectorNote>{t("files.binary")}</InspectorNote>}>
-                <OutputLog text={preview().text ?? ""} />
+              <Show when={preview().tooLarge}><InspectorNote>{t("files.tooLarge")}</InspectorNote></Show>
+              <Show when={!preview().tooLarge && preview().text === null}><InspectorNote>{t("files.binary")}</InspectorNote></Show>
+              <Show when={typeof preview().text === "string"}>
+                <FileContent path={props.selected} text={preview().text ?? ""} />
               </Show>
               <Show when={preview().truncated}><InspectorNote>{t("files.truncated")}</InspectorNote></Show>
             </Show>
@@ -137,7 +142,7 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
     if (preview.loading) return { loading: true };
     const result = preview();
     if (result?.path !== path()) return undefined;
-    return { error: result.error, text: result.file?.text, truncated: result.file?.truncated, media: media() };
+    return { error: result.error, text: result.file?.text, truncated: result.file?.truncated, tooLarge: result.file?.tooLarge, media: media() };
   };
   const choose = (file: string) => {
     setPath(file);

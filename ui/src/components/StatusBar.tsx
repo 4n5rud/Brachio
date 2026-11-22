@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { t } from "../i18n";
 import { agentUsageRefreshing, agentUsageUpdatedAt, agentUsages, refreshAgentUsage, startAgentUsagePolling } from "../lib/agent-usage";
 import { UsageStatus } from "./AgentUsage";
+import { tokenDetail, tokenLabel, tokenUsage } from "../lib/token-usage";
 import { Icon } from "./Icon";
 import { Button } from "./ui/Button";
 import { Popover } from "./ui/Popover";
@@ -31,6 +32,8 @@ function ResourceSummary(props: {
   memory?: string;
   memoryTitle?: string;
   cpu?: string;
+  /** Per-task token totals, largest first; empty when no agent log is available. */
+  tokenRows?: readonly { id: string; title: string }[];
 }) {
   const [anchor, setAnchor] = createSignal<HTMLElement>();
   return (
@@ -52,6 +55,16 @@ function ResourceSummary(props: {
               <Show when={props.memoryTitle}>{(parts) => <dd class="statusbar-details-note">{parts()}</dd>}</Show>
               <dt><Icon name="cpu" class="icon-xs" />{t("statusbar.cpu")}</dt><dd>{props.cpu ?? "–"}</dd>
             </dl>
+            <Show when={props.tokenRows?.length}>
+              <dl class="statusbar-details">
+                <For each={props.tokenRows}>{(row) => {
+                  const usage = () => tokenUsage(row.id);
+                  return <Show when={usage()}>{(current) => (
+                    <><dt title={row.title}>{row.title}</dt><dd title={tokenDetail(current())}>{tokenLabel(current())}</dd></>
+                  )}</Show>;
+                }}</For>
+              </dl>
+            </Show>
             <Show when={props.usageUnavailable}>
               <p class="statusbar-details-error">{t("statusbar.usageUnavailableNote")}</p>
               <Button size="sm" variant="ghost" onClick={() => window.location.reload()}>{t("statusbar.reload")}</Button>
@@ -72,6 +85,7 @@ export function StatusBarView(props: {
   /** Tooltip that splits the memory figure into its parts. */
   memoryTitle?: string;
   cpu?: string;
+  tokenRows?: readonly { id: string; title: string }[];
   /** Current branch of the repository and its distance from the remote. */
   branch?: string;
   ahead?: number;
@@ -83,7 +97,7 @@ export function StatusBarView(props: {
     <footer class="statusbar">
       {props.usage}
       <ResourceSummary sessions={props.sessions} usageUnavailable={props.usageUnavailable} memory={props.memory}
-        memoryTitle={props.memoryTitle} cpu={props.cpu} />
+        memoryTitle={props.memoryTitle} cpu={props.cpu} tokenRows={props.tokenRows} />
       <Show when={props.branch}>
         {(branch) => (
           <span class="statusbar-end">
@@ -97,7 +111,7 @@ export function StatusBarView(props: {
 }
 
 /** Bottom bar. Memory and CPU cover the app and every process it started, plus the terminal runtime. */
-export function StatusBar(props: { sessions: number; onAgentSettings: () => void }) {
+export function StatusBar(props: { sessions: number; onAgentSettings: () => void; tokenRows?: readonly { id: string; title: string }[] }) {
   const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
   const [usageUnavailable, setUsageUnavailable] = createSignal(false);
   const [now, setNow] = createSignal(Date.now() / 1000);
@@ -130,6 +144,7 @@ export function StatusBar(props: { sessions: number; onAgentSettings: () => void
       memory={usage() ? formatMemory(usage()!.memoryBytes) : undefined}
       memoryTitle={memoryTitle()}
       cpu={usage() ? `${Math.round(usage()!.cpuPercent)}%` : undefined}
+      tokenRows={props.tokenRows}
       usage={
         <UsageStatus usages={agentUsages()} now={now()} refreshing={agentUsageRefreshing()} updatedAt={agentUsageUpdatedAt()}
           onRefresh={() => void refreshAgentUsage(true)} onAccounts={props.onAgentSettings}

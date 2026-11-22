@@ -3,6 +3,7 @@ import { For, Match, Show, Switch, createEffect, createResource, createSignal, o
 import { t } from "../i18n";
 import { useAsyncAction } from "../lib/async-action";
 import { TaskPorts } from "./TaskPorts";
+import { TaskProcesses } from "./TaskProcesses";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { diffFiles, diffTotals, type DiffTotals } from "../lib/diff";
@@ -107,6 +108,7 @@ export function Inspector(props: {
               <>
                 <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
                 <TaskPorts taskId={id} />
+                <TaskProcesses taskId={id} />
               </>
             )}
           </Show>

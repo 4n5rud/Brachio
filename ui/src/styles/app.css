@@ -264,6 +264,7 @@ p {
   min-height: 0;
 }
 .terminal-content {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;

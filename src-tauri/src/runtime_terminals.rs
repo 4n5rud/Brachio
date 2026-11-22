@@ -95,6 +95,23 @@ impl RuntimeTerminals {
         task_id: &str,
         extra_tabs: &[String],
     ) -> Result<Vec<String>> {
+        Ok(self
+            .live_sessions_for_task(task_id, extra_tabs)
+            .await?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect())
+    }
+
+    /// Like `live_keys_for_task`, with the process ID of each running terminal's shell.
+    ///
+    /// # Errors
+    /// Fails when a runtime cannot be asked.
+    pub async fn live_sessions_for_task(
+        &self,
+        task_id: &str,
+        extra_tabs: &[String],
+    ) -> Result<Vec<(String, u32)>> {
         let Some(current) = self.client().await? else {
             return Ok(Vec::new());
         };
@@ -109,7 +126,7 @@ impl RuntimeTerminals {
                         result: ResponseResult::Success { session, .. },
                         ..
                     }) if !session.exited => {
-                        live.push(key.clone());
+                        live.push((key.clone(), session.pid));
                         break;
                     }
                     Ok(_) | Err(ClientError::Refused(_) | ClientError::NotRunning) => {}

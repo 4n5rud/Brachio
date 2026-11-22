@@ -22,6 +22,7 @@ mod quit;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
+mod session_tokens;
 mod system_check;
 mod task_activity;
 mod task_file_actions;
@@ -39,6 +40,7 @@ mod terminal_shells;
 mod terminal_status;
 mod tray_menu;
 mod update_release;
+mod usage_analytics;
 mod workspace;
 mod worktree_import;
 
@@ -269,6 +271,8 @@ pub fn run() {
         .manage(runtime_terminals::RuntimeTerminals::default())
         .manage(project_add::CloneJobs::default())
         .manage(pr_status::PrStatuses::default())
+        .manage(session_tokens::TokenTrackers::default())
+        .manage(usage_analytics::UsageScanLock::default())
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(claude_usage::ClaudeUsageCache::default())
@@ -285,6 +289,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             resource_usage::resource_usage,
+            resource_usage::task_processes,
+            resource_usage::task_process_kill,
             tray_update,
             keep_awake::keep_awake_supported,
             keep_awake::keep_awake_set,
@@ -302,6 +308,11 @@ pub fn run() {
             terminal::terminal_park,
             quit::terminals_stop,
             quit::app_quit,
+            session_tokens::tasks_token_usage,
+            usage_analytics::usage_providers,
+            usage_analytics::usage_scan,
+            usage_analytics::usage_report,
+            usage_analytics::usage_limit_snapshot,
             project_cues::cue_list,
             project_cues::cue_add,
             project_cues::cue_delete,
