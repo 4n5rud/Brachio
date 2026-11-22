@@ -6,6 +6,7 @@ import { isMac } from "../../lib/shortcut";
 import { prioritySortEnabled, updatePrioritySort } from "../../lib/sidebar-sort";
 import { keepAwakeEnabled, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
 import { AlertSoundSettings } from "./AlertSoundSettings";
+import { openSystemCheck } from "../SystemCheckDialog";
 import { quitConfirmEnabled, setQuitConfirmEnabled } from "../../lib/quit-confirm";
 import { notificationSettings, updateNotificationSettings } from "../../lib/notification-settings";
 import { openLogFolder } from "../../lib/workspace";
@@ -175,7 +176,12 @@ export function SettingsPanel(props: {
             </Show>
             <Toggle checked={quitConfirmEnabled()} label={t("settings.confirmQuit")} hint={t("settings.confirmQuitHint")}
               onChange={setQuitConfirmEnabled} />
-            <Show when={"__TAURI_INTERNALS__" in window}><LogFilesRow /></Show>
+            <Show when={"__TAURI_INTERNALS__" in window}>
+              <SettingRow label={t("settings.systemCheck")} hint={t("settings.systemCheckHint")}>
+                <Button size="sm" onClick={openSystemCheck}>{t("settings.systemCheckOpen")}</Button>
+              </SettingRow>
+              <LogFilesRow />
+            </Show>
             </SettingsGroup>
           </Match>
           <Match when={page() === "appearance"}>

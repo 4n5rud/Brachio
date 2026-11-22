@@ -50,3 +50,7 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+.mailbox-dismiss {
+  float: right;
+  margin-left: var(--space-1);
+}
