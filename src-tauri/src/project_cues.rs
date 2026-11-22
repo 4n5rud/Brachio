@@ -10,7 +10,9 @@ use crate::workspace::Database;
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 #[tauri::command]
@@ -27,9 +29,16 @@ pub fn cue_add(
     label: String,
     body: String,
 ) -> Result<ProjectCue, String> {
-    let cue = ProjectCue { id: Uuid::new_v4().to_string(), repo_id, kind, label, body };
+    let cue = ProjectCue {
+        id: Uuid::new_v4().to_string(),
+        repo_id,
+        kind,
+        label,
+        body,
+    };
     let connection = database.lock()?;
-    brachio_store::add_project_cue(&connection, &cue, now_ms()).map_err(|error| error.to_string())?;
+    brachio_store::add_project_cue(&connection, &cue, now_ms())
+        .map_err(|error| error.to_string())?;
     Ok(cue)
 }
 

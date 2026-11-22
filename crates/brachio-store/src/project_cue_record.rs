@@ -51,7 +51,14 @@ pub fn add_project_cue(
     connection.execute(
         "INSERT INTO project_cues (id, repo_id, kind, label, body, created_at_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![cue.id, cue.repo_id, cue.kind, cue.label.trim(), cue.body, at_ms],
+        params![
+            cue.id,
+            cue.repo_id,
+            cue.kind,
+            cue.label.trim(),
+            cue.body,
+            at_ms
+        ],
     )?;
     Ok(())
 }
