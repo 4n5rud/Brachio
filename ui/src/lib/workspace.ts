@@ -48,6 +48,10 @@ export interface CreateTaskRequest {
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
+/** Saves the order the projects were dragged into. */
+export const reorderRepos = (ids: readonly string[]) => invoke<void>("repo_reorder", { ids });
+/** Saves the order one project's tasks were dragged into. */
+export const reorderTasks = (ids: readonly string[]) => invoke<void>("task_reorder", { ids });
 /** With `gitOnly`, a folder that is not a Git repository is refused instead of added as a folder workspace. */
 export const addRepo = (path: string, gitOnly = false) => invoke<RepoRecord>("repo_add", { path, gitOnly });
 /** Clones `url` into a new folder inside `parent` and adds it. Rejects with "cancelled" when stopped. */
@@ -111,6 +115,7 @@ export const previewTaskFile = (id: string, path: string) =>
   invoke<{ text: string | null; truncated: boolean }>("task_file_preview", { id, path });
 export const previewTaskMedia = (id: string, path: string) =>
   invoke<ArrayBuffer | number[]>("task_file_media", { id, path });
+export const revealPath = (path: string) => invoke<void>("path_reveal", { path });
 export const revealTask = (id: string) => invoke<void>("task_reveal", { id });
 export const openTaskFolder = (id: string) => invoke<void>("task_open_folder", { id });
 export const openLogFolder = () => invoke<void>("open_log_folder");

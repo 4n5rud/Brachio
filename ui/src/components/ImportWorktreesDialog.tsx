@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { importWorktrees, listImportableWorktrees, type TaskRecord } from "../lib/workspace";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
+import { PathLink } from "./ui/PathLink";
 import "./ImportWorktreesDialog.css";
 
 /** Lists the project's Git worktrees that no task uses and turns the chosen ones into tasks. */
@@ -66,7 +67,7 @@ export function ImportWorktreesDialog(props: {
               {(item) => (
                 <label class="row-gap import-row" title={item.path}>
                   <input type="checkbox" checked={chosen().has(item.path)} onChange={() => toggle(item.path)} />
-                  <span class="import-path">{item.path}</span>
+                  <PathLink path={item.path} copyable={false} />
                   <span class="import-branch">{item.branch}</span>
                 </label>
               )}

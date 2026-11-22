@@ -11,7 +11,7 @@ import { prFailure, prRefreshing, prReport, refreshPrStatus } from "../lib/pr-st
 import { formatAge } from "../lib/time";
 import { PrChip } from "./ui/PrChip";
 import { IconButton } from "./ui/IconButton";
-import { StatusGlyph } from "./ui/StatusBadge";
+import { Icon, type IconName } from "./Icon";
 import { FileRow } from "./FileRow";
 import { InspectorNote } from "./InspectorNote";
 import { InspectorSection } from "./InspectorSection";
@@ -38,6 +38,8 @@ const CHECKS_LABEL = {
 } as const;
 
 const CHECKS_TONE = { failure: "error", pending: "working", success: "ready", none: undefined } as const;
+
+const CHECKS_ICON: Record<string, IconName> = { failure: "ghX", pending: "ghDot", success: "ghCheck" };
 
 const STATE_KEY = { open: "prChip.open", merged: "prChip.merged", closed: "prChip.closed" } as const;
 
@@ -131,7 +133,7 @@ function Snapshot(props: { snapshot: PullRequestSnapshot; report: PrStatusReport
           <Show when={CHECKS_TONE[checks().overall]} fallback={t(CHECKS_LABEL[checks().overall])}>
             {(tone) => (
               <span class={`status status-${tone()}`}>
-                <StatusGlyph tone={tone()} />
+                <Icon name={CHECKS_ICON[checks().overall] ?? "ghDot"} class="icon-xs" />
                 {t(CHECKS_LABEL[checks().overall])}
               </span>
             )}
@@ -147,14 +149,14 @@ function Snapshot(props: { snapshot: PullRequestSnapshot; report: PrStatusReport
         <dt>{t("prStatus.review")}</dt>
         <dd>{t(REVIEW_LABEL[props.snapshot.review])}</dd>
         <dt>{t("prStatus.merge")}</dt>
-        <dd>{t(CONFLICT_LABEL[props.snapshot.conflict])} <code>{props.snapshot.baseBranch}</code></dd>
+        <dd>{t(CONFLICT_LABEL[props.snapshot.conflict])} <Icon name="ghBranch" class="icon-xs" /><code>{props.snapshot.baseBranch}</code></dd>
       </dl>
       <For each={props.snapshot.failedChecks}>{(check) => (
         <FileRow mark="failed" path={check.name} label={check.name}
           actionLabel={check.url ? t("prStatus.openLog") : undefined}
           onAction={() => check.url && open(check.url)} />
       )}</For>
-      <InspectorNote>{t("prStatus.commit").replace("{sha}", shortSha(props.snapshot.headSha))}</InspectorNote>
+      <InspectorNote><Icon name="ghCommit" class="icon-xs" /> {t("prStatus.commit").replace("{sha}", shortSha(props.snapshot.headSha))}</InspectorNote>
       <Show when={props.report.headMatchesLocal === false && props.report.localHead}>
         {(local) => (
           <InspectorNote tone="warn">

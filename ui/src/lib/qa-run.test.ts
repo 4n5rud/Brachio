@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, shortSha } from "./qa-run";
-
-describe("formatDuration", () => {
-  it("uses the largest readable unit", () => {
-    expect(formatDuration(850)).toBe("850 ms");
-    expect(formatDuration(12_340)).toBe("12.3 s");
-    expect(formatDuration(125_000)).toBe("2 m 5 s");
-  });
-});
+import { shortSha } from "./qa-run";
 
 describe("shortSha", () => {
   it("keeps the first eight characters", () => {

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { openExternalLink } from "../lib/pr-status";
+import { Icon } from "./Icon";
 import { FileRow } from "./FileRow";
 import { ActionRow, InspectorSection } from "./InspectorSection";
 import { InspectorNote } from "./InspectorNote";
@@ -131,7 +132,7 @@ export function PullRequestFeedbackView(props: {
               actionLabel={t("prStatus.openLog")} onAction={() => open(item.url)} />
           ) : (
             <div class="thread-note">
-              <b>{item.label}</b> {(item.body ?? "").slice(0, 240)}
+              <Icon name="ghComment" class="icon-xs" /> <b>{item.label}</b> {(item.body ?? "").slice(0, 240)}
             </div>
           )}</For>
         </Show>

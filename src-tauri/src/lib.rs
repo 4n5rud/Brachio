@@ -302,6 +302,9 @@ pub fn run() {
             task_tabs::task_open_tabs,
             task_tabs::task_add_tab,
             task_tabs::task_close_tab,
+            task_tabs::task_reorder_tabs,
+            workspace::repo_reorder,
+            workspace::task_reorder,
             terminal_shells::shell_list,
             terminal_shells::shell_set_default,
             workspace::task_drop_paths,
@@ -359,6 +362,7 @@ pub fn run() {
             workspace::task_git_action,
             open_local_port,
             task_folder::task_reveal,
+            task_folder::path_reveal,
             task_folder::task_open_folder,
             task_folder::open_log_folder,
         ])

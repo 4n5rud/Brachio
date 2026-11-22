@@ -59,6 +59,9 @@ The screens follow the combined design guideline (myWorkFlow and unslop-ui). Whe
 - Radii: `radius-xs` 4px (kbd, chips), `radius-sm` 6px (buttons), 7px for rows, fields and segmented tracks, `radius-md` 9px (tiles, toasts), `radius-lg` 12px (dialogs).
 - Panels are separated by 1px `color-line` hairlines, never by shadow. Only layers above the app (dialogs, toasts, menus) take `shadow-overlay`.
 
+## Reordering
+- Projects, tasks and tabs reorder by pointer drag or Alt+arrow. See `drag-reorder.md`.
+
 ## Motion
 - The working arc is the only repeating animation (1.1s per turn). Status glyphs, badges and dots never pulse or bounce.
 - Other motion is short and functional: 120ms for hover and toggles. Under `prefers-reduced-motion`, everything stops, the arc included.
@@ -83,6 +86,6 @@ Every interactive component defines default, hover, pressed, focus, disabled and
 - Mode follows the OS by default; the person can force Dark or Light and pick a color theme in Settings, Appearance.
 
 ## In the app
-- The shared primitives live in `ui/src/components/ui/`, one `.tsx` and one `.css` each: Button, IconButton, Input, Combobox, Menu, Tooltip, Toggle, SegmentedControl, Kbd, Dialog, ConfirmDialog, Toast, Notice, EmptyState.
+- The shared primitives live in `ui/src/components/ui/`, one `.tsx` and one `.css` each: Button, IconButton, Input, Combobox, Menu, Tooltip, Toggle, SegmentedControl, Kbd, PathLink, Dialog, ConfirmDialog, Toast, Notice, EmptyState.
 - Open the component catalog with `pnpm --dir ui dev`, then `http://localhost:5173/catalog.html`. It shows every primitive in every state, with a switcher for the 8 themes and for English and Korean, to compare against `components/<Name>/preview.html`. The catalog is a dev-server page only and is not part of `vite build`.
 - Confirmations use `confirmDialog()`, errors and results use `pushToast()`; the native `confirm` and `alert` are not used.

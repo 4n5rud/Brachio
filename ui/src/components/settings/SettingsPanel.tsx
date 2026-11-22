@@ -3,6 +3,7 @@ import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
 import { isMac } from "../../lib/shortcut";
+import { prioritySortEnabled, updatePrioritySort } from "../../lib/sidebar-sort";
 import { keepAwakeEnabled, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
 import { notificationSettings, updateNotificationSettings } from "../../lib/notification-settings";
 import { openLogFolder } from "../../lib/workspace";
@@ -185,6 +186,8 @@ export function SettingsPanel(props: {
             <LanguageRow />
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
+            <Toggle checked={prioritySortEnabled()} label={t("settings.prioritySort")} hint={t("settings.prioritySortHint")}
+              onChange={updatePrioritySort} />
             <Show when={keepAwakeSupported()}>
               <Toggle checked={keepAwakeEnabled()} label={t("settings.keepAwake")} hint={t("settings.keepAwakeHint")}
                 onChange={updateKeepAwake} />

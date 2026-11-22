@@ -84,3 +84,14 @@ pub fn task_close_tab(
     let connection = database.lock()?;
     brachio_store::close_task_tab(&connection, &task_id, &tab_id).map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub fn task_reorder_tabs(
+    database: State<'_, Database>,
+    task_id: String,
+    tab_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut connection = database.lock()?;
+    brachio_store::reorder_task_tabs(&mut connection, &task_id, &tab_ids)
+        .map_err(|error| error.to_string())
+}

@@ -33,6 +33,25 @@ pub async fn task_reveal(database: State<'_, Database>, id: String) -> Result<()
     run(reveal_command(&folder)).await
 }
 
+/// Shows any file or folder in the system file manager, selected. The path must exist and is
+/// passed as one argument, never through a shell.
+#[tauri::command]
+pub async fn path_reveal(path: String) -> Result<(), String> {
+    let target = existing_path(Path::new(&path))?;
+    run(reveal_command(&target)).await
+}
+
+fn existing_path(path: &Path) -> Result<PathBuf, String> {
+    if path.as_os_str().is_empty() {
+        return Err("The path is empty.".to_owned());
+    }
+    let target = path.canonicalize().map_err(|error| {
+        crate::folder_access::describe(path, &error.to_string())
+            .unwrap_or_else(|| format!("{} no longer exists.", path.display()))
+    })?;
+    Ok(brachio_pty::without_verbatim_prefix(&target))
+}
+
 /// Opens the task's worktree with the system's default handler for folders. Brachio has no
 /// editor setting, so this is the file manager rather than a code editor.
 #[tauri::command]
@@ -66,7 +85,8 @@ fn reveal_command(folder: &Path) -> Command {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        open_command(folder)
+        // xdg-open has no select; the parent folder is the closest.
+        open_command(folder.parent().unwrap_or(folder))
     }
 }
 
@@ -115,7 +135,15 @@ async fn run(mut command: Command) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::existing_folder;
+    use super::{existing_folder, existing_path};
+
+    #[test]
+    fn a_missing_path_is_not_revealed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        assert!(existing_path(&dir.path().join("none.txt")).is_err());
+        assert!(existing_path(std::path::Path::new("")).is_err());
+        assert!(existing_path(dir.path()).is_ok());
+    }
 
     #[test]
     fn only_a_folder_that_exists_is_opened() {

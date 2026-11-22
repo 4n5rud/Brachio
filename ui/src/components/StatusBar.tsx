@@ -87,7 +87,7 @@ export function StatusBarView(props: {
       <Show when={props.branch}>
         {(branch) => (
           <span class="statusbar-end">
-            <Icon name="branch" class="icon-xs" />
+            <Icon name="ghBranch" class="icon-xs" />
             {branch()} <b>↑{props.ahead ?? 0} ↓{props.behind ?? 0}</b>
           </span>
         )}

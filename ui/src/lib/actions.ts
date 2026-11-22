@@ -56,6 +56,7 @@ export function groupByProject(targets: readonly GoToTarget[]): { projectId: str
   const groups = new Map<string, { projectId: string; projectName: string; targets: GoToTarget[] }>();
   for (const target of targets) {
     const group = groups.get(target.projectId) ?? { projectId: target.projectId, projectName: target.projectName, targets: [] };
+    group.projectName ||= target.projectName;
     group.targets.push(target);
     groups.set(target.projectId, group);
   }

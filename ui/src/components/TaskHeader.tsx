@@ -21,7 +21,7 @@ export function TaskHeader(props: {
         <div class="task-header-meta">
           <StatusBadge status={props.status} />
           <span>
-            <Icon name="branch" class="icon-sm" />
+            <Icon name="ghBranch" class="icon-sm" />
             {props.branch}
           </span>
           <DiffStat additions={props.additions} deletions={props.deletions} />
