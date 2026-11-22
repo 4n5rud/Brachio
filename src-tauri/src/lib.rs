@@ -359,6 +359,7 @@ pub fn run() {
             workspace::task_git_action,
             open_local_port,
             task_folder::task_reveal,
+            task_folder::path_reveal,
             task_folder::task_open_folder,
             task_folder::open_log_folder,
         ])

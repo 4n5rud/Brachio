@@ -16,6 +16,7 @@
     "components/DiffStat/README.md",
     "components/EmptyState/README.md",
     "components/IconButton/README.md",
+    "components/PathLink/README.md",
     "components/Input/README.md",
     "components/Kbd/README.md",
     "components/Menu/README.md",
@@ -90,6 +91,11 @@
       "name": "IconButton",
       "group": "Actions",
       "summary": "A square button holding one icon, for chrome actions people repeat often."
+    },
+    {
+      "name": "PathLink",
+      "group": "Actions",
+      "summary": "A file or folder path with a middle ellipsis that opens its place in the file manager."
     },
     {
       "name": "Input",

@@ -111,6 +111,7 @@ export const previewTaskFile = (id: string, path: string) =>
   invoke<{ text: string | null; truncated: boolean }>("task_file_preview", { id, path });
 export const previewTaskMedia = (id: string, path: string) =>
   invoke<ArrayBuffer | number[]>("task_file_media", { id, path });
+export const revealPath = (path: string) => invoke<void>("path_reveal", { path });
 export const revealTask = (id: string) => invoke<void>("task_reveal", { id });
 export const openTaskFolder = (id: string) => invoke<void>("task_open_folder", { id });
 export const openLogFolder = () => invoke<void>("open_log_folder");

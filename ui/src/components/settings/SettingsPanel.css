@@ -34,6 +34,8 @@
   background: var(--color-line);
 }
 .settings-page {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   padding: var(--space-1) var(--space-6) var(--space-6);
   overflow: auto;
   display: grid;
@@ -43,6 +45,7 @@
 .settings-column {
   width: 100%;
   max-width: 720px;
+  min-width: 0;
   display: grid;
   gap: var(--space-1);
 }
@@ -75,35 +78,37 @@
 
 .agent-card {
   display: grid;
-  gap: 4px;
-  justify-items: start;
+  gap: 6px;
+  justify-items: stretch;
+  min-width: 0;
   padding: 10px 0;
 }
-.agent-card-name {
+.agent-card-head {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font: var(--text-label);
+}
+.agent-card-spacer {
+  flex: 1;
 }
 .agent-card-version,
 .agent-card-account {
   font: var(--text-meta);
   color: var(--color-text-3);
 }
-.agent-card-path {
-  font: var(--text-meta);
-  color: var(--color-text-2);
-  overflow-wrap: anywhere;
-}
 .agent-card-status {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  white-space: nowrap;
   font: var(--text-caption);
 }
 .agent-card-actions {
   display: flex;
+  justify-content: flex-start;
   gap: 6px;
   flex-wrap: wrap;
   margin-top: var(--space-2);
