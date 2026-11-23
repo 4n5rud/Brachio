@@ -19,10 +19,12 @@ import { ToastHost } from "./components/ui/Toast";
 import { pushToast } from "./lib/toasts";
 import { clearOsDrop, dropOnTree, hoverOsDrop, overTree as overFilesTree } from "./lib/tree-drop";
 import { terminalAt } from "./lib/terminal-drop";
+import { dropIntoDialog } from "./lib/dialog-drop";
 import { openInEditor } from "./lib/editor";
 import { noteRecentFile, recentFiles } from "./lib/recent-files";
 import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
+import { attachImages, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
@@ -1082,15 +1084,29 @@ export function App() {
   const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
     const task = selected();
     if (!task?.worktreePath || dialogOpen() || workspacePanel() || !dropTargetsTerminal(position)) return;
-    const files = await resolveDroppedTaskPaths(task.id, paths);
-    if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
     const shell = terminalAt(position.x / window.devicePixelRatio, position.y / window.devicePixelRatio);
     if (shell?.kind === "shell") {
+      const files = await resolveDroppedTaskPaths(task.id, paths);
+      if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
       if (!(await shell.target.insert(quoteShellPaths(await shellKind(), files)))) report(t("diff.notReady"));
       return;
     }
-    const draft = files.map((path) => `@${/[\s"]/u.test(path) ? `"${path.replaceAll('"', '\\"')}"` : path}`).join(" ");
-    if (!(await draftComment(task.id, draft + " "))) report(t("diff.notReady"));
+    const draft = await attachmentPaths(task.id, paths);
+    if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+    if (!(await draftComment(task.id, fileReferences(draft) + " "))) report(t("diff.notReady"));
+  };
+
+  /** Files as worktree paths; images are first saved into the task's ignored attachments folder. */
+  const attachmentPaths = async (id: string, paths: string[]) => {
+    const images = paths.filter(isImagePath);
+    const others = paths.filter((path) => !isImagePath(path));
+    if (others.length > MAX_ATTACHED_FILES || images.length > MAX_ATTACHED_IMAGES) {
+      throw new Error(t("attach.tooMany").replace("{files}", String(MAX_ATTACHED_FILES)).replace("{images}", String(MAX_ATTACHED_IMAGES)));
+    }
+    return [
+      ...(others.length ? await resolveDroppedTaskPaths(id, others) : []),
+      ...(images.length ? await attachImages(id, images) : []),
+    ];
   };
 
   onMount(() => {
@@ -1163,7 +1179,9 @@ export function App() {
           dropOnTree(payload.position.x / ratio, payload.position.y / ratio, payload.paths);
         } else if (dropTargetsTerminal(payload.position)) {
           void dropFiles(payload.paths, payload.position).catch(report);
-        } else if (!dialogOpen() && !workspacePanel()) {
+        } else if (dialogOpen()) {
+          dropIntoDialog(payload.paths);
+        } else if (!workspacePanel()) {
           void (async () => {
             for (const path of payload.paths) await addProject(path).catch(report);
           })();
@@ -1410,6 +1428,7 @@ export function App() {
               statusForKey={(id, key) => live().get(id)?.get(key)?.status}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
               onDraftOriginal={(text) => draftComment(task().id, text)}
+              onAttachPaths={async (paths) => draftComment(task().id, fileReferences(await attachmentPaths(task().id, paths)) + " ")}
               setupRequest={setupRequests().get(task().id)}
               setupFailure={setupFailures().get(task().id)}
               setupOutcome={setupOutcomes().get(task().id)}
@@ -1507,6 +1526,7 @@ export function App() {
             defaultBranch={current().defaultBranch}
             isGit={current().isGit}
             parents={inTauri ? rows().filter((task) => task.repoId === current().id) : rows()}
+            terminalLabel={(key) => `${findTask(taskIdOf(key))?.title ?? key} · ${key.split(":")[1]?.startsWith("shell") ? t("task.shell") : t("attach.agentTab")}`}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
           />

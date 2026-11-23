@@ -1,4 +1,7 @@
 import { IconButton } from "./ui/IconButton";
+import { AttachButton } from "./AttachButton";
+import { terminalExcerpt } from "../lib/attachments";
+import { readTerminalTail, terminalTailKeys } from "../lib/terminal-tail";
 import { Select } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createComputed, createResource, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
@@ -87,6 +90,8 @@ export function TaskView(props: {
   takeSetupInput?: (taskId: string) => string | undefined;
   onArchive?: () => void;
   onDraftOriginal?: (text: string) => Promise<boolean>;
+  /** Files and images chosen in the picker; they go into the agent input as a draft. */
+  onAttachPaths?: (paths: string[]) => Promise<boolean>;
   /** Commands from brachio.toml waiting for the user's yes or no. */
   setupRequest?: { commands: readonly string[]; answer: (run: boolean) => void };
   setupFailure?: string;
@@ -335,6 +340,19 @@ export function TaskView(props: {
     for (const key of [terminalKey(id, "agent"), ...agentTabs(id).map((tab) => tabKey(id, tab))]) drainQueue(key);
   });
   const [queueOpen, setQueueOpen] = createSignal(false);
+  const tailLabel = (key: string) => {
+    const title = props.findTask(taskIdOf(key))?.title ?? key;
+    return `${title} · ${key.split(":")[1]?.startsWith("shell") ? t("task.shell") : t("attach.agentTab")}`;
+  };
+  const tailChoices = (own: string) =>
+    terminalTailKeys().filter((key) => key !== own).map((key) => ({ key, label: tailLabel(key) }));
+  const attach = async (draft: () => Promise<boolean> | undefined) => {
+    try {
+      if (!(await draft())) props.onReportProblem?.(t("diff.notReady"));
+    } catch (failure) {
+      props.onReportProblem?.(String(failure));
+    }
+  };
   const activeAgentTab = () => {
     if (layout() === "shell") return undefined;
     const id = props.task.id;
@@ -488,6 +506,15 @@ export function TaskView(props: {
           <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} aria-haspopup="menu"
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
+        </Show>
+        <Show when={activeAgentTab()}>
+          {(key) => <AttachButton class="tab-queue" defaultPath={props.task.worktreePath ?? undefined}
+            tails={() => tailChoices(key())}
+            onPaths={(paths) => void attach(() => props.onAttachPaths?.(paths))}
+            onTail={(tail) => void attach(() => {
+              const lines = readTerminalTail(tail);
+              return lines ? props.onDraftOriginal?.(terminalExcerpt(tailLabel(tail), lines)) : undefined;
+            })} />}
         </Show>
         <Show when={activeAgentTab()}>
           {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")}

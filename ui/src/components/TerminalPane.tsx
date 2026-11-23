@@ -23,6 +23,8 @@ import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from ".
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
+import { MAX_TERMINAL_LINES } from "../lib/attachments";
+import { registerTerminalTail } from "../lib/terminal-tail";
 import { SetupMarkerFilter, type SetupResult } from "../lib/setup-signal";
 import { onShellInput } from "../lib/shell-input";
 import { typedSinceSubmit } from "../lib/typed-input";
@@ -485,6 +487,18 @@ export function TerminalPane(props: {
       },
     }) : undefined;
 
+    const stopTail = session?.key ? registerTerminalTail(session.key, () => {
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let row = Math.max(0, buffer.length - MAX_TERMINAL_LINES - 1); row < buffer.length; row += 1) {
+        const line = buffer.getLine(row);
+        if (!line) continue;
+        if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += line.translateToString(true);
+        else lines.push(line.translateToString(true));
+      }
+      return lines;
+    }) : undefined;
+
     const setupMarkers = session && !session.agent ? new SetupMarkerFilter() : undefined;
     function writeOutput(bytes: Uint8Array) {
       lastOutputAt = Date.now();
@@ -711,6 +725,7 @@ export function TerminalPane(props: {
       host.removeEventListener("compositionstart", noteUserInput, true);
       stopShellDrop?.();
       stopShellPane?.();
+      stopTail?.();
       linkProvider.dispose();
       window.removeEventListener("keydown", trackModifier, true);
       window.removeEventListener("keyup", trackModifier, true);
