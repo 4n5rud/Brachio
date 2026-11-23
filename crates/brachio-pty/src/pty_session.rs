@@ -27,6 +27,32 @@ pub struct SpawnSpec {
     pub cols: u16,
 }
 
+/// Variables an agent session sets for the programs it starts. When the app was itself started
+/// from such a session, they would reach every terminal: Claude Code there would take itself for a
+/// child of that other session, stop saving its transcript, and see the other session's messaging
+/// socket. A variable the spawn spec sets on purpose is still applied.
+const AGENT_SESSION_VARIABLES: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDE_EFFORT",
+    "CLAUDE_PID",
+];
+
+/// Drops the inherited markers of an agent session, leaving settings such as
+/// `CLAUDE_CODE_USE_BEDROCK` alone.
+fn without_agent_session(command: &mut CommandBuilder) {
+    for name in AGENT_SESSION_VARIABLES {
+        command.env_remove(name);
+    }
+}
+
 /// How many writes may wait for a child that is not reading its input. Typing and pastes are far
 /// fewer; a child that stays deaf past this is not going to read what is queued anyway.
 const QUEUED_WRITES: usize = 512;
@@ -112,6 +138,7 @@ impl PtySession {
         let mut command = CommandBuilder::new(&spec.program);
         command.args(&spec.args);
         command.cwd(without_verbatim_prefix(&spec.cwd));
+        without_agent_session(&mut command);
         for (name, value) in &spec.env {
             command.env(name, value);
         }
@@ -248,6 +275,50 @@ mod path_tests {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_session_markers_from_the_app_do_not_reach_terminals() {
+        let mut command = CommandBuilder::new("/bin/sh");
+        for name in AGENT_SESSION_VARIABLES {
+            command.env(name, "from-the-app");
+        }
+        command.env("CLAUDE_CODE_USE_BEDROCK", "1");
+        without_agent_session(&mut command);
+        for name in AGENT_SESSION_VARIABLES {
+            assert_eq!(command.get_env(name), None, "{name}");
+        }
+        assert_eq!(command.get_env("CLAUDE_CODE_USE_BEDROCK"), Some(std::ffi::OsStr::new("1")));
+    }
+
+    #[test]
+    fn a_spawned_program_does_not_see_an_inherited_session_marker() {
+        let spec = SpawnSpec {
+            program: "/bin/sh".to_owned(),
+            args: vec![
+                "-c".to_owned(),
+                "echo \"marker=[${CLAUDE_CODE_CHILD_SESSION}] kept=[${BRACHIO_KEPT}]\"".to_owned(),
+            ],
+            cwd: std::env::temp_dir(),
+            env: vec![("BRACHIO_KEPT".to_owned(), "yes".to_owned())],
+            rows: 24,
+            cols: 80,
+        };
+        let session = PtySession::spawn(&spec).expect("spawn sh");
+        let mut reader = session.take_reader().expect("take reader");
+        let mut output = Vec::new();
+        let mut chunk = [0u8; 256];
+        while let Ok(read) = reader.read(&mut chunk) {
+            if read == 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..read]);
+            if String::from_utf8_lossy(&output).contains("kept=[yes]") {
+                break;
+            }
+        }
+        let text = String::from_utf8_lossy(&output);
+        assert!(text.contains("marker=[] kept=[yes]"), "{text}");
+    }
 
     #[test]
     fn runs_a_program_and_reads_its_output() {
