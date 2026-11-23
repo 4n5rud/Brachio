@@ -304,8 +304,15 @@ async fn a_restarted_runtime_shows_the_last_screen_before_the_terminal_starts_ag
     let journal = world.folder.path().join("runtime-state");
     eventually("the screen to be saved", || async {
         std::fs::read_dir(&journal).is_ok_and(|entries| {
+            // Only a finished record counts: the runtime's scratch file holds the new screen
+            // before the rename, and a kill in between would leave the older record behind.
             entries.flatten().any(|entry| {
-                std::fs::read_to_string(entry.path()).is_ok_and(|saved| saved.contains(MARKER))
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+                    && std::fs::read_to_string(entry.path())
+                        .is_ok_and(|saved| saved.contains(MARKER))
             })
         })
     })
