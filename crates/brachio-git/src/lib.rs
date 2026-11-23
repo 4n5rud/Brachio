@@ -4,6 +4,7 @@
 mod branch_list;
 mod change_ops;
 mod changed_paths;
+mod checkpoint;
 mod conflict_report;
 mod file_list;
 mod git;
@@ -22,6 +23,10 @@ mod worktree_setup;
 pub use branch_list::{list_branches, BranchEntry, MAX_BRANCHES};
 pub use change_ops::{discard_hunk, discard_tracked, in_head};
 pub use changed_paths::{changed_paths, shared_paths};
+pub use checkpoint::{
+    capture_checkpoint, checkpoint_diff, delete_checkpoints, list_checkpoints, restore_checkpoint,
+    CaptureKind, Checkpoint, CheckpointDiff, Restored, MAX_CHECKPOINTS,
+};
 pub use conflict_report::{merge_target, predict_conflict, ConflictReport, MergeTarget};
 pub use file_list::{list_files, MAX_FILES};
 pub use git::{Git, GitError};

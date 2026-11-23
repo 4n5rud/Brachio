@@ -1,0 +1,16 @@
+{
+  "description": "Claude Code asks for the protocol, works a turn, then goes idle. A short flicker is debounced away.",
+  "steps": [
+    { "at_ms": 0, "output": "\u001b]7501;?\u001b\\" },
+    { "at_ms": 0, "expect_replies": 1 },
+    { "at_ms": 100, "output": "\u001b]7501;state=working\u001b\\streaming..." },
+    { "at_ms": 150, "expect": { "state": "unknown" } },
+    { "at_ms": 400, "expect": { "state": "working" } },
+    { "at_ms": 1000, "output": "\u001b]7501;state=idle\u001b\\" },
+    { "at_ms": 1100, "expect": { "state": "working" } },
+    { "at_ms": 1300, "expect": { "state": "idle" } },
+    { "at_ms": 1400, "output": "\u001b]7501;state=working\u001b\\" },
+    { "at_ms": 1500, "output": "\u001b]7501;state=idle\u001b\\" },
+    { "at_ms": 1900, "expect": { "state": "idle" } }
+  ]
+}

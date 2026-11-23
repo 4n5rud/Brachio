@@ -1,0 +1,27 @@
+{
+  "description": "Truncated, non-JSON, and unrelated payloads never open an approval.",
+  "agent": "claude",
+  "events": [
+    {
+      "stdin": "{\"session_id\": \"s1\", \"hook_event_name\": ",
+      "key": "k",
+      "expect_request": null
+    },
+    {
+      "stdin": "\u0000\u0001 not json",
+      "key": "k",
+      "expect_request": null
+    },
+    {
+      "stdin": "{\"session_id\": \"s1\", \"hook_event_name\": \"PostToolUse\", \"tool_response\": {}}",
+      "key": "k",
+      "expect_request": null
+    },
+    {
+      "stdin": "{\"session_id\": \"s1\", \"hook_event_name\": \"PermissionRequest\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"echo \u202eevil\"}, \"tool_use_id\": \"t1\"}",
+      "key": "k",
+      "expect_request": null,
+      "note": "raw bidi override character in the tool input"
+    }
+  ]
+}

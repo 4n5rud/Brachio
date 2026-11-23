@@ -1,0 +1,20 @@
+{
+  "description": "The person answers in the terminal, so the app gives no decision and the hook prints nothing.",
+  "agent": "claude",
+  "events": [
+    {
+      "stdin": "{\"session_id\": \"s1\", \"hook_event_name\": \"PermissionRequest\", \"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"src/main.rs\"}, \"tool_use_id\": \"t3\"}",
+      "key": "task1:agent",
+      "expect_request": {
+        "key": "task1:agent",
+        "session_id": "s1",
+        "tool_name": "Edit",
+        "tool_use_id": "t3"
+      },
+      "decision": {
+        "behavior": "ask"
+      },
+      "expect_output": null
+    }
+  ]
+}

@@ -64,6 +64,26 @@ pub trait Backend {
     /// # Errors
     /// A message for the agent when the app cannot be reached or refuses.
     fn request_review(&mut self, request: ReviewRequest) -> Result<Value, String>;
+
+    /// Send a `decision_gate` to the lead task; the user answers it, and the answer comes back
+    /// as a reply in this task's mailbox.
+    ///
+    /// # Errors
+    /// A message for the agent when the app cannot be reached or refuses.
+    fn raise_decision_gate(&mut self, request: DecisionGate) -> Result<Value, String>;
+}
+
+/// Validated input of `raise_decision_gate`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionGate {
+    /// The question, on one line.
+    pub subject: String,
+    /// Details.
+    #[serde(default)]
+    pub body: String,
+    /// The choices the user may pick, 2 to 6.
+    pub options: Vec<String>,
 }
 
 /// Validated input of `spawn_task`.
@@ -168,6 +188,21 @@ fn tools() -> Value {
                 "additionalProperties":false
             },
             "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}
+        },
+        {
+            "name":"raise_decision_gate",
+            "description":"Ask the user to choose before work that depends on this task goes on. Sends a decision_gate to the lead; the user's choice comes back as a reply in your mailbox. Nothing is decided for you.",
+            "inputSchema":{
+                "type":"object",
+                "properties":{
+                    "subject":{"type":"string","minLength":1,"maxLength":MAX_SUBJECT_CHARS},
+                    "body":{"type":"string","description":"Details, at most 8 KiB."},
+                    "options":{"type":"array","minItems":2,"maxItems":6,"items":{"type":"string","minLength":1,"maxLength":80}}
+                },
+                "required":["subject","options"],
+                "additionalProperties":false
+            },
+            "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}
         }
     ])
 }
@@ -229,6 +264,18 @@ fn call_tool(
                 return Err(BAD_ARGUMENTS);
             }
             backend.request_review(request)
+        }
+        "raise_decision_gate" => {
+            let request: DecisionGate =
+                serde_json::from_value(arguments).map_err(|_| BAD_ARGUMENTS)?;
+            if request.subject.trim().is_empty()
+                || request.subject.chars().count() > MAX_SUBJECT_CHARS
+                || request.body.len() > MAX_TEXT_BYTES
+                || !(2..=6).contains(&request.options.len())
+            {
+                return Err(BAD_ARGUMENTS);
+            }
+            backend.raise_decision_gate(request)
         }
         _ => return Err("Unknown tool"),
     })
@@ -367,6 +414,10 @@ mod tests {
             self.calls.push(format!("review {}", request.subject));
             Ok(json!({}))
         }
+        fn raise_decision_gate(&mut self, request: DecisionGate) -> Result<Value, String> {
+            self.calls.push(format!("gate {}", request.options.len()));
+            Ok(json!({}))
+        }
     }
 
     const HANDSHAKE: &str = concat!(
@@ -401,6 +452,9 @@ mod tests {
         fn request_review(&mut self, request: ReviewRequest) -> Result<Value, String> {
             (**self).request_review(request)
         }
+        fn raise_decision_gate(&mut self, request: DecisionGate) -> Result<Value, String> {
+            (**self).raise_decision_gate(request)
+        }
     }
 
     fn call(id: u32, name: &str, arguments: &Value) -> String {
@@ -425,7 +479,8 @@ mod tests {
                 "list_child_tasks",
                 "spawn_task",
                 "get_task_result",
-                "request_review"
+                "request_review",
+                "raise_decision_gate"
             ]
         );
     }
