@@ -4,6 +4,7 @@ import { TextArea } from "./ui/Input";
 import { DiffStat } from "./ui/DiffStat";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import { t } from "../i18n";
+import { takeDraftProblem } from "../lib/draft-problem";
 import { hunkPatch } from "../lib/diff-hunks";
 import { IconButton } from "./ui/IconButton";
 import { diffFiles, diffRows, splitDiffRows, type DiffFile, type DiffLocation, type DiffRow } from "../lib/diff";
@@ -92,7 +93,7 @@ export function DiffReview(props: {
         setComment("");
         setLocation(undefined);
       } else {
-        setError(t("diff.notReady"));
+        setError(takeDraftProblem() ?? "");
       }
     } catch (failure) {
       setError(String(failure));

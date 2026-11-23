@@ -3,6 +3,7 @@ import { IconButton } from "./ui/IconButton";
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { takeDraftProblem } from "../lib/draft-problem";
 import { openExternalLink } from "../lib/pr-status";
 import { Icon } from "./Icon";
 import { FileRow } from "./FileRow";
@@ -97,7 +98,7 @@ export function PullRequestFeedback(props: { taskId: string; onDraft: (text: str
     setError("");
     try {
       const text = items().map((item) => item.text).join("\n");
-      if (!(await props.onDraft(text.slice(0, DRAFT_LIMIT)))) setError(t("diff.notReady"));
+      if (!(await props.onDraft(text.slice(0, DRAFT_LIMIT)))) setError(takeDraftProblem() ?? "");
     } catch (failure) {
       setError(String(failure));
     }
