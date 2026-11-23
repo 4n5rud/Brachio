@@ -1,8 +1,8 @@
 import type { AgentKind } from "./tasks";
 import { AGENT_NAME } from "./tasks";
+import { agentOfTab, isTabKind, type TabKind } from "./tab-kinds";
 
-/** What an extra tab runs. Agent names are the core's. */
-export type TabKind = "claude_code" | "codex" | "shell";
+export type { TabKind };
 
 /** One open extra tab of a task. */
 export interface TaskTab {
@@ -20,11 +20,9 @@ export interface TabSpec {
   shell: string | null;
 }
 
-export const UI_AGENT: Record<Exclude<TabKind, "shell">, AgentKind> = { claude_code: "claude", codex: "codex" };
-
 /** Stable name of the terminal behind an extra tab, which the backend registered. */
 export const tabKey = (taskId: string, tab: Pick<TaskTab, "id" | "kind">): string =>
-  `${taskId}:${tab.kind === "shell" ? "shell" : "agent"}-${tab.id}`;
+  `${taskId}:${agentOfTab(tab) === null ? "shell" : "agent"}-${tab.id}`;
 
 export const sameSpec = (a: TabSpec, b: TabSpec): boolean => a.kind === b.kind && a.shell === b.shell;
 
@@ -40,7 +38,8 @@ export function tabLabels(
   const seen = new Map<string, number>([[AGENT_NAME[primary], 1]]);
   const labels = new Map<string, string>();
   for (const tab of tabs) {
-    const base = tab.kind === "shell" ? shellName(tab.shell) : AGENT_NAME[UI_AGENT[tab.kind]];
+    const agent = agentOfTab(tab);
+    const base = agent === null ? shellName(tab.shell) : AGENT_NAME[agent];
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
     labels.set(tab.id, tab.name || (count > 1 ? `${base} ${count}` : base));
@@ -56,7 +55,7 @@ export function loadRecentSpec(): TabSpec | undefined {
     const stored: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "null");
     if (stored === null || typeof stored !== "object") return undefined;
     const { kind, shell } = stored as Record<string, unknown>;
-    if (kind !== "claude_code" && kind !== "codex" && kind !== "shell") return undefined;
+    if (!isTabKind(kind)) return undefined;
     return { kind, shell: typeof shell === "string" ? shell : null };
   } catch {
     return undefined;
