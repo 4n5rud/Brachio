@@ -11,6 +11,8 @@ export interface ApprovalQuestion {
   kind: "tool" | "qa_run" | "create_task";
   /** "Always allow in this task" can remember this exact request. */
   canAlwaysAllow: boolean;
+  /** Why the project's permission rules were not used for this question, when they were not. */
+  policyNote?: string | null;
 }
 
 /** A remembered "always allow" of one task: one tool and its exact command or file path. */
@@ -19,6 +21,15 @@ export interface AlwaysAllowRule {
   tool: string;
   target: string;
 }
+
+/** The `[permissions]` rules of one project, or why they are not in force. */
+export interface ProjectPermissions {
+  allow: string[];
+  deny: string[];
+  error: string | null;
+}
+
+export const repoPermissions = (repoId: string) => invoke<ProjectPermissions>("repo_permissions", { repoId });
 
 export const taskIdOf = (key: string): string => key.split(":")[0] ?? key;
 

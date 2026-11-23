@@ -50,6 +50,8 @@ const SIMPLE: Record<string, { key: MessageKey; tone: StatusTone }> = {
   permission_asked: { key: "notify.permission", tone: "blocked" },
   approval_answered: { key: "activity.approvalAnswered", tone: "ready" },
   approval_auto_allowed: { key: "activity.approvalAutoAllowed", tone: "ready" },
+  approval_policy_allowed: { key: "activity.approvalPolicyAllowed", tone: "ready" },
+  approval_policy_denied: { key: "activity.approvalPolicyDenied", tone: "error" },
   approval_closed_elsewhere: { key: "activity.approvalClosedElsewhere", tone: "unknown" },
   question_asked: { key: "notify.question", tone: "blocked" },
   auth_needed: { key: "notify.auth", tone: "blocked" },

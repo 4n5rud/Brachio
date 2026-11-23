@@ -836,7 +836,7 @@ export function TaskView(props: {
             <Show when={approval()?.kind === "qa_run"}
               fallback={
                 <ApprovalBar review={approval()?.review ?? ""} agent={AGENT_NAME[props.task.agent]}
-                  sending={sending() === id}
+                  body={approval()?.policyNote ?? undefined} sending={sending() === id}
                   onAllow={() => answer(id, true)}
                   onAllowAlways={approval()?.canAlwaysAllow && props.onAnswerAlways ? () => answerAlways(id) : undefined}
                   onDeny={() => answer(id, false)} />

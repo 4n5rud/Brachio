@@ -22,13 +22,14 @@ import { Toggle } from "../ui/Toggle";
 import { resumeLastTaskEnabled, updateResumeLastTask } from "../../lib/lazy-resume";
 import { AgentSettings } from "./AgentSettings";
 import { ScratchFolders } from "./ScratchFolders";
+import { ProjectPermissions } from "./ProjectPermissions";
 import { UsageAnalytics } from "./UsageAnalytics";
 import { SettingRow } from "./SettingRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { TerminalSettings } from "./TerminalSettings";
 import "./SettingsPanel.css";
 
-export type SettingsPage = "general" | "appearance" | "terminal" | "agents" | "notifications" | "shortcuts" | "updates" | "archived" | "scratch";
+export type SettingsPage = "general" | "appearance" | "terminal" | "agents" | "notifications" | "shortcuts" | "updates" | "archived" | "scratch" | "permissions";
 
 export interface UpdateSettingsProps {
   enabled: boolean;
@@ -47,6 +48,7 @@ const PAGES: { page: SettingsPage; icon: IconName; label: () => string; desktopO
   { page: "appearance", icon: "sliders", label: () => t("settings.navAppearance") },
   { page: "terminal", icon: "terminal", label: () => t("settings.terminal") },
   { page: "agents", icon: "bot", label: () => t("settings.navAgents"), desktopOnly: true },
+  { page: "permissions", icon: "checkCircle", label: () => t("settings.navPermissions"), desktopOnly: true },
   { page: "notifications", icon: "bell", label: () => t("settings.navNotifications") },
   { page: "shortcuts", icon: "keyboard", label: () => t("settings.navShortcuts") },
   { page: "updates", icon: "download", label: () => t("updates.title"), desktopOnly: true },
@@ -212,6 +214,9 @@ export function SettingsPanel(props: {
           <Match when={page() === "agents"}>
             <SettingsGroup>{props.agents ?? <AgentSettings />}</SettingsGroup>
             <Show when={"__TAURI_INTERNALS__" in window}><UsageAnalytics /></Show>
+          </Match>
+          <Match when={page() === "permissions"}>
+            <ProjectPermissions repos={props.repos} />
           </Match>
           <Match when={page() === "notifications"}>
             <SettingsGroup>
