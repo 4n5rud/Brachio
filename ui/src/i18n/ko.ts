@@ -105,6 +105,8 @@ export const ko: Messages = {
   "import.note": "가져오기는 작업만 추가합니다. 파일은 바꾸거나 지우지 않습니다.",
   "sidebar.importWorktrees": "작업 폴더 가져오기",
   "sidebar.importWorktreesIn": "{project}로 작업 폴더 가져오기",
+  "subagent.kind": "서브에이전트 작업 폴더",
+  "subagent.tag": "서브에이전트",
   "task.new": "새 결과",
   "task.finishedUnread": "자리를 비운 사이 끝났습니다. 작업을 열면 표시가 사라집니다.",
 

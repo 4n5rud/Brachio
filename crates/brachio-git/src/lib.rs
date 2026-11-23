@@ -49,8 +49,8 @@ pub use worktree::{
     UnsavedWork,
 };
 pub use worktree_list::{
-    importable, list_worktrees, parse_worktree_list, path_key, select_importable, ImportError,
-    WorktreeEntry,
+    importable, list_worktrees, parse_worktree_list, path_key, select_importable,
+    subagent_worktrees, ImportError, WorktreeEntry, SUBAGENT_WORKTREES_DIR,
 };
 pub use worktree_setup::{
     copy_setup_files, read_setup, retry_setup_files, SetupConfig, SetupError, CONFIG_FILE,

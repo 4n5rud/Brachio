@@ -103,6 +103,8 @@ export const en = {
   "import.note": "Importing only adds tasks. Brachio does not change or delete any files.",
   "sidebar.importWorktrees": "Import worktrees",
   "sidebar.importWorktreesIn": "Import worktrees into {project}",
+  "subagent.kind": "Subagent worktree",
+  "subagent.tag": "subagent",
   "task.new": "new",
   "task.finishedUnread": "Finished while you were away. Opening the task clears it.",
 
