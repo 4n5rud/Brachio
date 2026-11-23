@@ -59,6 +59,7 @@ export function TaskList(props: {
   onArchiveTask?: (id: string) => void;
   /** Archives the other tasks of a comparison and keeps this one. */
   onKeepOnly?: (id: string) => void;
+  onCompareResults?: (id: string) => void;
   /** Ids of the pinned tasks; they come first in their project. */
   pinned?: ReadonlySet<string>;
   onTogglePin?: (id: string, pinned: boolean) => void;
@@ -231,6 +232,8 @@ export function TaskList(props: {
                         comparing={compareSiblings(props.tasks, task).length > 0}
                         onKeepOnly={props.onKeepOnly && compareSiblings(props.tasks, task).length > 0
                           ? () => props.onKeepOnly?.(task.id) : undefined}
+                        onCompareResults={props.onCompareResults && compareSiblings(props.tasks, task).length > 0
+                          ? () => props.onCompareResults?.(task.id) : undefined}
                         onError={props.onError}
                       />
                     )}
