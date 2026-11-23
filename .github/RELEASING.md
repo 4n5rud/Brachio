@@ -14,7 +14,7 @@ Do this once per repository, not per release.
 One version, in two files that must match: `[workspace.package] version` in `Cargo.toml` and `version` in `ui/package.json`. CI fails when they differ.
 
 - Pre-alpha (current): versions are `0.x`. The app is unsigned, has no automatic update, and may change anything between releases. Only the latest release is supported.
-- Release candidate: `0.2.0-rc.1`, `0.2.0-rc.2`, and so on. Published as a pre-release, for testing a build on real machines before a stable release.
+- Release candidate: `0.2.0-rc.1`, `0.2.0-rc.2`, and so on. Published as a pre-release, for testing a build on real machines before a stable release. Windows release candidates ship only the setup `.exe`, because MSI does not accept a version like `0.2.0-rc.1`.
 - Stable: `0.2.0`. Before 1.0, a new feature raises the minor number and a fix raises the patch number. The version must be higher than the last stable release. A release is called stable only after its release candidate was installed and checked on each platform.
 
 ## Per-release steps

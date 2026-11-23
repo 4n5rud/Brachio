@@ -106,7 +106,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          args: --config src-tauri/tauri.release.conf.json ${{ matrix.extra_args }}
+          # MSI only accepts a numeric pre-release suffix, so a release candidate ships the NSIS installer alone.
+          args: --config src-tauri/tauri.release.conf.json ${{ matrix.extra_args }} ${{ matrix.os == 'windows-latest' && needs.prepare.outputs.prerelease == 'true' && '--bundles nsis' || '' }}
           tagName: ${{ github.ref_name }}
           releaseName: Brachio ${{ needs.prepare.outputs.version }}
           releaseDraft: true
