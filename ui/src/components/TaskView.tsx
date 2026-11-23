@@ -31,8 +31,9 @@ import type { ApprovalQuestion } from "../lib/approvals";
 import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayouts,
   saveSelectedSecondaryAgents, terminalKey, type TerminalLayout } from "../lib/terminal-layout";
 import { installedShells, loadShells } from "../lib/shells";
-import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, type TabKind, type TabSpec,
+import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
+import { agentOfKind, agentOfTab, isAgentTab, type AgentTabKind } from "../lib/tab-kinds";
 import { RenameDialog } from "./RenameDialog";
 import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
@@ -170,16 +171,16 @@ export function TaskView(props: {
     id: `tab:${props.task.id}:${tab.id}`,
     projectId: props.task.repoId ?? "",
     projectName: "",
-    kind: tab.kind === "shell" ? "terminal" as const : "agent" as const,
+    kind: isAgentTab(tab) ? "agent" as const : "terminal" as const,
     title: labels().get(tab.id) ?? "",
     path: props.task.worktreePath ?? undefined,
-    tone: tab.kind === "shell" ? "unknown" as const : statusTone(props.task.status),
+    tone: isAgentTab(tab) ? statusTone(props.task.status) : "unknown" as const,
     focus: () => selectTab(props.task.id, tab),
   }))));
-  const agentTabs = (id: string) => tabsOf(id).filter((tab) => tab.kind !== "shell");
+  const agentTabs = (id: string) => tabsOf(id).filter(isAgentTab);
   createEffect(() => {
     props.onSecondaryKeys?.(new Map([...tabsByTask()].map(([id, list]) =>
-      [id, list.filter((tab) => tab.kind !== "shell").map((tab) => tabKey(id, tab))])));
+      [id, list.filter(isAgentTab).map((tab) => tabKey(id, tab))])));
   });
   const selectTab = (id: string, tab: TaskTab | undefined) => {
     setSelectedSecondary((current) => {
@@ -354,7 +355,7 @@ export function TaskView(props: {
   const [queueOpen, setQueueOpen] = createSignal(false);
   const agentOfKey = (key: string): AgentKind => {
     const tab = agentTabs(props.task.id).find((candidate) => tabKey(props.task.id, candidate) === key);
-    return tab ? UI_AGENT[tab.kind as Exclude<TabKind, "shell">] : props.task.agent;
+    return tab ? agentOfKind(tab.kind) : props.task.agent;
   };
   // Typed into the working agent and sent with Enter, which is how the agent itself folds in a follow-up.
   const steerTab = async (key: string, text: string) => {
@@ -392,11 +393,11 @@ export function TaskView(props: {
     const id = props.task.id;
     const tab = selectedTab(id);
     if (!tab) return terminalKey(id, "agent");
-    return tab.kind === "shell" ? undefined : tabKey(id, tab);
+    return isAgentTab(tab) ? tabKey(id, tab) : undefined;
   };
   const pendingAgentName = (key: string) => {
     const tab = agentTabs(props.task.id).find((candidate) => tabKey(props.task.id, candidate) === key);
-    return AGENT_NAME[tab ? UI_AGENT[tab.kind as Exclude<TabKind, "shell">] : props.task.agent];
+    return AGENT_NAME[tab ? agentOfKind(tab.kind) : props.task.agent];
   };
   const approval = () => props.questions?.find((question) => question.key === activeAgentTab());
   const [sending, setSending] = createSignal<number>();
@@ -509,12 +510,16 @@ export function TaskView(props: {
                 aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
                 onClick={() => { selectTab(props.task.id, tab); }}
                 onContextMenu={(event) => { event.preventDefault(); setTabActions({ anchor: event.currentTarget, tab }); }}>
-                <Show when={tab.kind !== "shell"} fallback={<ShellIcon shell={shellOf(tab.shell)} class="icon-sm" />}>
-                  <StatusGlyph tone={tabTone(tabKey(props.task.id, tab))} />
-                  <AgentIcon agent={UI_AGENT[tab.kind as Exclude<TabKind, "shell">]} />
+                <Show when={agentOfTab(tab)} fallback={<ShellIcon shell={shellOf(tab.shell)} class="icon-sm" />}>
+                  {(agent) => (
+                    <>
+                      <StatusGlyph tone={tabTone(tabKey(props.task.id, tab))} />
+                      <AgentIcon agent={agent()} />
+                    </>
+                  )}
                 </Show>
                 {labels().get(tab.id)}
-                <Show when={tab.kind !== "shell"}>
+                <Show when={isAgentTab(tab)}>
                   <MailboxBadge count={props.unreadForTab?.(tabKey(props.task.id, tab)) ?? 0} />
                 </Show>
               </button>
@@ -612,10 +617,10 @@ export function TaskView(props: {
             <Menu anchor={anchor()} label={t("task.tabs")} onClose={() => setTabMenu(undefined)}>
               <For each={AGENT_SPECS}>
                 {(spec) => (
-                  <MenuItem icon={<AgentIcon agent={UI_AGENT[spec.kind as Exclude<TabKind, "shell">]} />}
+                  <MenuItem icon={<AgentIcon agent={agentOfKind(spec.kind)} />}
                     disabled={!tabsReady() || tabsSaving()}
                     onSelect={() => { setTabMenu(undefined); void openTab(spec); }}>
-                    {AGENT_NAME[UI_AGENT[spec.kind as Exclude<TabKind, "shell">]]}
+                    {AGENT_NAME[agentOfKind(spec.kind)]}
                     <RecentChip show={sameSpec(spec, quickSpec())} />
                   </MenuItem>
                 )}
@@ -755,11 +760,11 @@ export function TaskView(props: {
                             return { key: terminalKey(id, "agent"), agent: AGENT_NAME[task.agent], prepare };
                           }
                           const tab = selectedTab(id);
-                          if (!tab || tab.kind === "shell") return undefined;
+                          if (!tab || !isAgentTab(tab)) return undefined;
                           const key = tabKey(id, tab);
                           const extra = secondaryWriters.get(key);
                           return extra
-                            ? { key, agent: AGENT_NAME[UI_AGENT[tab.kind]], prepare: extra }
+                            ? { key, agent: AGENT_NAME[agentOfKind(tab.kind)], prepare: extra }
                             : undefined;
                           });
                           return () => {
@@ -773,13 +778,14 @@ export function TaskView(props: {
                       {(tab) => {
                         const task = props.findTask(id);
                         if (!task?.worktreePath) return null;
+                        const cwd = task.worktreePath;
                         const key = tabKey(id, tab);
                         const tabSelected = () => isTabSelected(id, tab);
                         return (
                           <div class="terminal-cell" hidden={!tabSelected()}>
-                            <Show when={tab.kind !== "shell"} fallback={
+                            <Show when={agentOfTab(tab)} fallback={
                               <TerminalPane
-                                session={{ agent: null, cwd: task.worktreePath, key }}
+                                session={{ agent: null, cwd, key }}
                                 active={selected() && mode() !== "shell" && tabSelected()}
                                 focus={tabSelected()}
                                 leave="park"
@@ -788,8 +794,9 @@ export function TaskView(props: {
                                 theme={props.theme}
                               />
                             }>
+                              {(agent) => (
                               <TerminalPane
-                                session={{ agent: CORE_AGENT[UI_AGENT[tab.kind as Exclude<TabKind, "shell">]], cwd: task.worktreePath,
+                                session={{ agent: CORE_AGENT[agent()], cwd,
                                   key, sessionId: tab.id, resume: restoredTabs.has(tab.id) }}
                                 active={selected() && mode() !== "shell" && tabSelected()}
                                 leave="park"
@@ -805,6 +812,7 @@ export function TaskView(props: {
                                   };
                                 }}
                               />
+                              )}
                             </Show>
                           </div>
                         );
@@ -888,7 +896,7 @@ export function TaskView(props: {
   );
 }
 
-const AGENT_SPECS: readonly TabSpec[] = [{ kind: "claude_code", shell: null }, { kind: "codex", shell: null }];
+const AGENT_SPECS: readonly (TabSpec & { kind: AgentTabKind })[] = [{ kind: "claude_code", shell: null }, { kind: "codex", shell: null }];
 
 /** The shortcut that opens the kind used last, shown on that kind's row. */
 // TODO: replace with the shared Menu shortcut chip once the primitive lands.
