@@ -82,6 +82,9 @@ pub struct Question {
     pub kind: QuestionKind,
     /// "Always allow in this task" is offered for this question.
     pub can_always_allow: bool,
+    /// The leading words "always allow" could cover instead of the exact command, such as
+    /// `gh pr merge`; `None` when only the exact request can be remembered.
+    pub always_prefix: Option<String>,
     /// Identifies the question in [`Approvals::answer`].
     pub id: u64,
     /// The terminal the agent runs in, such as `<task id>:agent`.
@@ -226,13 +229,25 @@ impl Approvals {
     /// Allows an open tool request and remembers it for its task. `false` when the question is
     /// already over or cannot be remembered, in which case nothing is answered.
     pub fn answer_always(&self, id: u64) -> bool {
+        self.answer_always_as(id, false)
+    }
+
+    /// Like [`Self::answer_always`], but remembers the command's leading words instead of the
+    /// exact command. `false`, with nothing answered, when the request has no prefix to offer.
+    pub fn answer_always_prefix(&self, id: u64) -> bool {
+        self.answer_always_as(id, true)
+    }
+
+    fn answer_always_as(&self, id: u64, prefix: bool) -> bool {
         let Ok(mut map) = self.pending.lock() else {
             return false;
         };
-        if map
-            .get(&id)
-            .is_none_or(|pending| pending.remember.is_none())
-        {
+        if map.get(&id).is_none_or(|pending| {
+            pending
+                .remember
+                .as_ref()
+                .is_none_or(|candidate| prefix && candidate.prefix_label().is_none())
+        }) {
             return false;
         }
         let Some(pending) = map.remove(&id) else {
@@ -240,8 +255,12 @@ impl Approvals {
         };
         drop(map);
         if let Some(candidate) = &pending.remember {
-            self.always
-                .add(always_allow::task_of(&pending.question.key), candidate);
+            let task = always_allow::task_of(&pending.question.key);
+            if prefix {
+                self.always.add_prefix(task, candidate);
+            } else {
+                self.always.add(task, candidate);
+            }
         }
         pending.sender.send(Decision::Allow).is_ok()
     }
@@ -297,6 +316,7 @@ impl Approvals {
         let question = Question {
             kind,
             can_always_allow: remember.is_some(),
+            always_prefix: remember.as_ref().and_then(Candidate::prefix_label),
             id,
             key,
             review,
@@ -573,8 +593,16 @@ pub fn pending_approvals(approvals: tauri::State<'_, Arc<Approvals>>) -> Vec<Que
 
 /// Allows an open tool request and remembers it for the task until the app closes.
 #[tauri::command]
-pub fn approval_answer_always(approvals: tauri::State<'_, Arc<Approvals>>, id: u64) -> bool {
-    approvals.answer_always(id)
+pub fn approval_answer_always(
+    approvals: tauri::State<'_, Arc<Approvals>>,
+    id: u64,
+    prefix: Option<bool>,
+) -> bool {
+    if prefix == Some(true) {
+        approvals.answer_always_prefix(id)
+    } else {
+        approvals.answer_always(id)
+    }
 }
 
 /// The remembered answers of a task, for its Inspector.

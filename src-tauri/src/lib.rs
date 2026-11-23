@@ -7,6 +7,7 @@ mod auto_archive;
 mod child_escalation;
 mod child_task_request;
 mod claude_usage;
+mod command_words;
 mod decision_gate;
 mod external_link;
 mod file_in_use;
