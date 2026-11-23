@@ -103,8 +103,8 @@ mod tests {
         let shot = elsewhere.path().join("My shot.PNG");
         fs::write(&shot, b"png").expect("image");
 
-        let first = save_images(task.path(), &[shot.clone()]).expect("first");
-        let second = save_images(task.path(), &[shot]).expect("second");
+        let first = save_images(task.path(), std::slice::from_ref(&shot)).expect("first");
+        let second = save_images(task.path(), std::slice::from_ref(&shot)).expect("second");
 
         assert_eq!(first, [".brachio/attachments/My-shot.png"]);
         assert_eq!(second, [".brachio/attachments/My-shot-2.png"]);
