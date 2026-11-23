@@ -8,7 +8,7 @@ import "./TaskAlwaysAllow.css";
 
 const REFRESH_MS = 5_000;
 
-/** Requests remembered with "Always allow in this task": exact command or file path, each with a revoke button. */
+/** Requests remembered with "Always allow in this task": the exact request or the start of a command, each with a revoke button. */
 export function AlwaysAllowList(props: { rules: readonly AlwaysAllowRule[]; onRevoke: (rule: AlwaysAllowRule) => void }) {
   return (
     <Show when={props.rules.length > 0}>
@@ -17,7 +17,10 @@ export function AlwaysAllowList(props: { rules: readonly AlwaysAllowRule[]; onRe
           <For each={props.rules}>{(rule) => (
             <li class="always-allow-row">
               <span class="always-allow-tool">{rule.tool}</span>
-              <code class="always-allow-target" title={rule.target}>{rule.target}</code>
+              <span class="always-allow-what">
+                <code class="always-allow-target" title={rule.target}>{rule.kind === "prefix" ? `${rule.target} …` : rule.target}</code>
+                <small class="always-allow-kind">{rule.kind === "prefix" ? t("alwaysAllow.kindPrefix") : t("alwaysAllow.kindExact")}</small>
+              </span>
               <Button size="sm" variant="ghost" aria-label={t("alwaysAllow.revokeLabel").replace("{target}", rule.target)}
                 onClick={() => props.onRevoke(rule)}>
                 {t("alwaysAllow.revoke")}

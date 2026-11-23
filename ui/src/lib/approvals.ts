@@ -11,14 +11,20 @@ export interface ApprovalQuestion {
   kind: "tool" | "qa_run" | "create_task";
   /** "Always allow in this task" can remember this exact request. */
   canAlwaysAllow: boolean;
+  /** The leading words "always allow" could cover instead of the exact command, such as "gh pr merge". */
+  alwaysPrefix?: string | null;
   /** Why the project's permission rules were not used for this question, when they were not. */
   policyNote?: string | null;
 }
 
-/** A remembered "always allow" of one task: one tool and its exact command or file path. */
+/**
+ * A remembered "always allow" of one task: one tool and either its exact command or file path, or
+ * (`prefix`) the leading words of any single simple command that starts that way.
+ */
 export interface AlwaysAllowRule {
   id: number;
   tool: string;
+  kind: "exact" | "prefix";
   target: string;
 }
 
@@ -36,8 +42,9 @@ export const taskIdOf = (key: string): string => key.split(":")[0] ?? key;
 /** Resolves to false when the question was already over, for example answered in the terminal. */
 export const answerApproval = (id: number, allow: boolean) => invoke<boolean>("approval_answer", { id, allow });
 
-/** Allows the request and remembers it for the task until the app closes. */
-export const answerApprovalAlways = (id: number) => invoke<boolean>("approval_answer_always", { id });
+/** Allows the request and remembers it for the task until the app closes: the exact request, or with `prefix` its leading words. */
+export const answerApprovalAlways = (id: number, prefix = false) =>
+  invoke<boolean>("approval_answer_always", { id, prefix });
 
 export const listAlwaysAllow = (taskId: string) => invoke<AlwaysAllowRule[]>("always_allow_list", { taskId });
 

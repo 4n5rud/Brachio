@@ -87,7 +87,7 @@ export function TaskView(props: {
   confirmCloseLastTab?: (taskId: string) => Promise<boolean>;
   onAnswer?: (id: number, allow: boolean) => void;
   /** Allows the request and remembers it for this task for the app session. */
-  onAnswerAlways?: (id: number) => void;
+  onAnswerAlways?: (id: number, prefix?: boolean) => void;
   /** Tabs whose question closed without an answer from here. */
   closedElsewhere?: readonly string[];
   onDismissClosedElsewhere?: (key: string) => void;
@@ -408,9 +408,9 @@ export function TaskView(props: {
     setSending(id);
     props.onAnswer?.(id, allow);
   };
-  const answerAlways = (id: number) => {
+  const answerAlways = (id: number, prefix: boolean) => {
     setSending(id);
-    props.onAnswerAlways?.(id);
+    props.onAnswerAlways?.(id, prefix);
   };
   const closedHere = () => {
     const key = activeAgentTab();
@@ -894,7 +894,8 @@ export function TaskView(props: {
                 <ApprovalBar review={approval()?.review ?? ""} agent={AGENT_NAME[props.task.agent]}
                   body={approval()?.policyNote ?? undefined} sending={sending() === id}
                   onAllow={() => answer(id, true)}
-                  onAllowAlways={approval()?.canAlwaysAllow && props.onAnswerAlways ? () => answerAlways(id) : undefined}
+                  alwaysPrefix={approval()?.alwaysPrefix ?? undefined}
+                  onAllowAlways={approval()?.canAlwaysAllow && props.onAnswerAlways ? (prefix) => answerAlways(id, prefix) : undefined}
                   onDeny={() => answer(id, false)} />
               }>
               <ApprovalBar title={t("approval.qa.title")} agent="brachio.toml" body={t("approval.qa.body")}

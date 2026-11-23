@@ -497,12 +497,12 @@ export function App() {
   const createdThisRun = new Set<string>();
   const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
   // Questions that agents' hooks have asked and the user has not answered.
-  const answer = async (id: number, allow: boolean, always = false) => {
+  const answer = async (id: number, allow: boolean, always = false, prefix = false) => {
     const pending = questions().find((question) => question.id === id);
     if (!pending || !activeAgentKey(taskIdOf(pending.key), pending.key)) return;
     setQuestions((open) => open.filter((question) => question.id !== id));
     try {
-      if (always && pending.canAlwaysAllow) await answerApprovalAlways(id);
+      if (always && pending.canAlwaysAllow) await answerApprovalAlways(id, prefix);
       else await answerApproval(id, allow);
     } catch (failure) {
       report(failure);
@@ -1593,7 +1593,7 @@ export function App() {
               onSecondaryClosed={closeSecondarySession}
               confirmCloseLastTab={confirmCloseLastTab}
               onAnswer={(id, allow) => void answer(id, allow)}
-              onAnswerAlways={(id) => void answer(id, true, true)}
+              onAnswerAlways={(id, prefix) => void answer(id, true, true, prefix)}
               closedElsewhere={closedElsewhere().filter((key) => taskIdOf(key) === task().id)}
               onDismissClosedElsewhere={(key) => setClosedElsewhere((keys) => keys.filter((open) => open !== key))}
               hasSetupInput={hasSetupInput}
