@@ -405,6 +405,7 @@ pub fn run() {
             task_file_actions::task_file_rename,
             task_file_actions::task_file_create,
             task_file_actions::task_file_trash,
+            task_file_actions::task_file_restore,
             task_file_actions::task_discard_file,
             task_file_actions::task_discard_hunk,
             workspace::task_changes,
