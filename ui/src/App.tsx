@@ -31,6 +31,8 @@ import { LocalPreview } from "./components/LocalPreview";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { AddProjectDialog } from "./components/AddProjectDialog";
+import { ScratchDialog } from "./components/ScratchDialog";
+import { PROJECTS_CHANGED } from "./lib/scratch";
 import type { AddProjectKind, ProjectChoice } from "./lib/project-choices";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
@@ -254,6 +256,7 @@ export function App() {
   const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [addProjectMode, setAddProjectMode] = createSignal<"clone" | "create">();
+  const [scratchOpen, setScratchOpen] = createSignal(false);
   // Remotes are read when the new task dialog opens, to label each project with its owner/repo.
   const [remoteUrls] = createResource(
     () => (inTauri && dialogOpen() ? true : undefined),
@@ -761,6 +764,7 @@ export function App() {
 
   const startAddProject = (kind: AddProjectKind) => {
     if (kind === "folder") void chooseRepo("folder").catch(report);
+    else if (kind === "scratch") setScratchOpen(true);
     else setAddProjectMode(kind);
   };
 
@@ -1243,6 +1247,9 @@ export function App() {
       dropListener.catch(report);
       onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
+      const reloadProjects = () => { load().catch(report); };
+      window.addEventListener(PROJECTS_CHANGED, reloadProjects);
+      onCleanup(() => window.removeEventListener(PROJECTS_CHANGED, reloadProjects));
       const stopApprovals = watchApprovals(
         (question) => {
           const id = taskIdOf(question.key);
@@ -1597,6 +1604,19 @@ export function App() {
             onClose={() => setDialogOpen(false)}
           />
         )}
+      </Show>
+      <Show when={scratchOpen()}>
+        <ScratchDialog
+          onStarted={async (record) => {
+            createdThisRun.add(record.id);
+            if (record.prompt) firstPrompts.set(record.id, record.prompt);
+            setRepos(await listRepos());
+            setTasks((list) => [toTaskRow(record), ...list]);
+            switchRepo(record.repoId);
+            open(record.id);
+            setScratchOpen(false);
+          }}
+          onClose={() => setScratchOpen(false)} />
       </Show>
       <Show when={addProjectMode()}>
         {(mode) => (

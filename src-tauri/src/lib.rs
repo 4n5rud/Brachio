@@ -27,6 +27,7 @@ mod quit;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
+mod scratch_workspace;
 mod session_tokens;
 mod system_check;
 mod task_activity;
@@ -428,6 +429,10 @@ pub fn run() {
             task_commits::task_commit_diff,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
+            scratch_workspace::scratch_create,
+            scratch_workspace::scratch_list,
+            scratch_workspace::scratch_convert,
+            scratch_workspace::scratch_discard,
             workspace::task_git_action,
             open_local_port,
             task_folder::task_reveal,
