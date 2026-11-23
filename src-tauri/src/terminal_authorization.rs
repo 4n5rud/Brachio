@@ -46,7 +46,7 @@ pub(crate) fn resolve(connection: &Connection, key: &str) -> Result<TerminalOwne
                     None,
                 ),
                 (true, TabKind::Codex) => (Some(AgentKind::Codex), None, None),
-                (false, TabKind::Shell) => (None, None, tab.shell_id),
+                (false, TabKind::Shell) => (None, None, tab.target),
                 _ => return Err("The tab does not match its terminal.".to_owned()),
             }
         }
@@ -79,7 +79,7 @@ mod tests {
         let added = |kind, id: &str| brachio_store::TaskTab {
             tab_id: id.to_owned(),
             kind,
-            shell_id: None,
+            target: None,
         };
         brachio_store::add_task_tab(&db, "task", &added(TabKind::ClaudeCode, tab))
             .expect("register tab");
@@ -109,7 +109,7 @@ mod tests {
             let tab = brachio_store::TaskTab {
                 tab_id: id.to_owned(),
                 kind,
-                shell_id: None,
+                target: None,
             };
             brachio_store::add_task_tab(&db, "task", &tab).expect("register tab");
         }

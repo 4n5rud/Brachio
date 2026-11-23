@@ -214,10 +214,7 @@ fn peers(connection: &Connection, key: &str) -> Outcome {
     for task in tasks {
         let tabs =
             brachio_store::task_tabs(connection, &task.id).map_err(|error| error.to_string())?;
-        for tab in tabs
-            .into_iter()
-            .filter(|tab| tab.kind != brachio_store::TabKind::Shell)
-        {
+        for tab in tabs.into_iter().filter(|tab| tab.kind.is_agent()) {
             peers.push(Peer {
                 key: format!("{}:agent-{}", task.id, tab.tab_id),
                 title: format!("{} (extra agent)", task.title),
