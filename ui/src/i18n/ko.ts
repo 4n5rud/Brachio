@@ -43,6 +43,8 @@ export const ko: Messages = {
   "sidebar.noProjectTasks": "열린 작업 없음",
   "sidebar.newTaskIn": "{project}에 새 작업",
   "sidebar.newTask": "새 작업",
+  "layout.resizeSidebar": "작업 목록 너비 조절",
+  "layout.resizeInspector": "인스펙터 너비 조절",
   "sidebar.dropTitle": "놓아서 프로젝트 추가",
   "sidebar.dropBody": "Git 저장소는 worktree 프로젝트로, 다른 폴더는 폴더 작업 공간으로 추가됩니다.",
   "recent.title": "최근 작업",

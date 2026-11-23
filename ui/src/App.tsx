@@ -65,6 +65,8 @@ import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
 import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
+import { PanelResizer } from "./components/PanelResizer";
+import { clampPanelWidth, loadInspectorWidth, loadSidebarWidth, saveInspectorWidth, saveSidebarWidth } from "./lib/panel-widths";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import { statusTone, type AgentState } from "./lib/status";
 import { recordTurnBoundary, turnActive } from "./lib/checkpoints";
@@ -116,6 +118,34 @@ export function App() {
   onCleanup(() => narrowQuery.removeEventListener("change", closeWhenNarrow));
   const toggleSidebar = () => setSidebarOpen((open) => { saveSidebarOpen(!open); return !open; });
   const [inspectorWide, setInspectorWide] = createSignal(false);
+  const [windowWidth, setWindowWidth] = createSignal(window.innerWidth);
+  const trackWindowWidth = () => setWindowWidth(window.innerWidth);
+  window.addEventListener("resize", trackWindowWidth);
+  onCleanup(() => window.removeEventListener("resize", trackWindowWidth));
+  const [sidebarWidth, setSidebarWidth] = createSignal(loadSidebarWidth());
+  const [inspectorWidth, setInspectorWidth] = createSignal(loadInspectorWidth());
+  const panelWidthStyle = () => {
+    const sidebar = sidebarWidth();
+    const inspector = inspectorWidth();
+    const sidebarPx = sidebar === undefined ? undefined : clampPanelWidth("sidebar", sidebar, windowWidth(), inspector === undefined ? 360 : inspector);
+    const inspectorPx = inspector === undefined ? undefined : clampPanelWidth("inspector", inspector, windowWidth(), sidebarPx ?? 288);
+    return {
+      ...(sidebarPx === undefined ? {} : { "--size-sidebar": `${sidebarPx}px` }),
+      ...(inspectorPx === undefined ? {} : { "--size-inspector": `${inspectorPx}px` }),
+    };
+  };
+  const resizePanel = (panel: "sidebar" | "inspector", width: number) => {
+    const sidebarPx = sidebarWidth() ?? 288;
+    const inspectorPx = inspectorWidth() ?? 360;
+    if (panel === "sidebar") setSidebarWidth(clampPanelWidth("sidebar", width, windowWidth(), inspectorOpen() && selected() ? inspectorPx : 0));
+    else setInspectorWidth(clampPanelWidth("inspector", width, windowWidth(), sidebarOpen() ? sidebarPx : 0));
+  };
+  const commitPanelWidths = () => {
+    const sidebar = sidebarWidth();
+    const inspector = inspectorWidth();
+    if (sidebar !== undefined) saveSidebarWidth(sidebar);
+    if (inspector !== undefined) saveInspectorWidth(inspector);
+  };
   const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
@@ -1337,12 +1367,18 @@ export function App() {
           <Board tasks={rows()} repos={repos()} now={now()} onOpen={open} />
         </main>
       </Show>
-      <main class="layout" classList={{
+      <main class="layout" style={panelWidthStyle()} classList={{
         "layout-no-inspector": !selected() || !inspectorOpen(),
-        "layout-inspector-wide": inspectorWide() && !!selected() && inspectorOpen(),
+        "layout-inspector-wide": inspectorWide() && inspectorWidth() === undefined && !!selected() && inspectorOpen(),
         "layout-no-sidebar": !sidebarOpen(),
         "view-hidden": view() !== "tasks",
       }}>
+        <Show when={sidebarOpen() && view() === "tasks"}>
+          <PanelResizer panel="sidebar" onResize={(width) => resizePanel("sidebar", width)} onCommit={commitPanelWidths} />
+        </Show>
+        <Show when={!!selected() && inspectorOpen() && view() === "tasks"}>
+          <PanelResizer panel="inspector" onResize={(width) => resizePanel("inspector", width)} onCommit={commitPanelWidths} />
+        </Show>
         <Show when={sidebarOpen()}>
         <TaskList
           tasks={rows()}
