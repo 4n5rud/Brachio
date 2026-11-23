@@ -76,6 +76,9 @@ pub struct CreateTaskRequest {
     /// Marks the task as one of several run on the same prompt to compare agents.
     #[serde(default)]
     pub compare_group: Option<String>,
+    /// A profile from the repository's `brachio.toml`, applied whenever the agent starts.
+    #[serde(default)]
+    pub profile: Option<String>,
     /// Set for tasks an agent asked for: the parent's open children are counted again when the
     /// task is saved, since other requests may have been approved meanwhile.
     #[serde(skip)]
@@ -354,8 +357,30 @@ pub async fn task_create(
     create_task(&database, &worktrees, request).await
 }
 
-/// The work of [`task_create`], shared with tasks that agents ask for.
+/// The work of [`task_create`], shared with tasks that agents ask for. A profile is checked
+/// before anything is created and remembered with the task.
 pub(crate) async fn create_task(
+    database: &Database,
+    worktrees: &TaskWorktreeLocks,
+    request: CreateTaskRequest,
+) -> Result<CreatedTask, String> {
+    let profile = request.profile.clone();
+    if let Some(name) = profile.as_deref() {
+        let repo = RepoRecord::get(&*database.lock()?, &request.repo_id).map_err(to_text)?;
+        let found = brachio_agent::find_profile(&repo.path, name).map_err(|e| e.to_string())?;
+        if found.agent != request.agent {
+            return Err(format!("The profile {name:?} is for another agent."));
+        }
+    }
+    let created = create_task_unprofiled(database, worktrees, request).await?;
+    if let Some(name) = profile {
+        brachio_store::set_task_profile(&*database.lock()?, &created.task.id, &name)
+            .map_err(to_text)?;
+    }
+    Ok(created)
+}
+
+async fn create_task_unprofiled(
     database: &Database,
     worktrees: &TaskWorktreeLocks,
     request: CreateTaskRequest,
@@ -1297,6 +1322,7 @@ mod folder_project_tests {
             base: Some("main".to_owned()),
             codex_conversation_id: None,
             compare_group: None,
+            profile: None,
             max_open_children: None,
             scheduled: false,
             after: Vec::new(),
@@ -1728,6 +1754,7 @@ mod agent_child_limit_tests {
             base: None,
             codex_conversation_id: None,
             compare_group: None,
+            profile: None,
             max_open_children: Some(4),
             scheduled: false,
             after: Vec::new(),
@@ -2206,6 +2233,7 @@ mod git_task_deletion_tests {
                 base: None,
                 codex_conversation_id: None,
                 compare_group: None,
+                profile: None,
                 max_open_children: None,
                 scheduled: false,
                 after: Vec::new(),

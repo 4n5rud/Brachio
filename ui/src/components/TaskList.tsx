@@ -45,6 +45,7 @@ export function TaskList(props: {
   onSettings?: () => void;
   /** Opens the rename dialog for a task. */
   onRenameTask?: (id: string) => void;
+  onCompareTask?: (id: string) => void;
   /** Starts a new task with this task's prompt and another agent. */
   onDuplicateTask?: (id: string, agent: AgentKind) => void;
   /** Tells which tasks are on screen, in order, for the number shortcuts. */
@@ -218,6 +219,7 @@ export function TaskList(props: {
                         pinned={props.pinned?.has(task.id)}
                         onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(task.id, !props.pinned?.has(task.id)) : undefined}
                         onRename={props.onRenameTask ? () => props.onRenameTask?.(task.id) : undefined}
+                        onCompare={props.onCompareTask && task.repoId ? () => props.onCompareTask?.(task.id) : undefined}
                         duplicateAgents={otherAgents(task)}
                         onDuplicate={props.onDuplicateTask ? (agent) => props.onDuplicateTask?.(task.id, agent) : undefined}
                         onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}

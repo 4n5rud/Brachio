@@ -11,6 +11,7 @@ import { filterProjects, projectSubline, type AddProjectKind, type ProjectChoice
 import { t } from "../i18n";
 import { AGENT_CATALOG, AGENT_KINDS } from "../lib/agent-catalog";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
+import { profileLabel, profilesFor, repoProfiles } from "../lib/agent-profiles";
 import { CORE_AGENT, detectAgents } from "../lib/terminal";
 import { BranchField } from "./BranchField";
 import { FolderAccessNotice } from "./FolderAccessNotice";
@@ -33,6 +34,8 @@ export interface NewTaskInput {
   codexConversationId?: string;
   /** Run the prompt once with Claude Code and once with Codex, to compare them. */
   compare?: boolean;
+  /** A profile from the project's `brachio.toml`. */
+  profile?: string;
 }
 
 const conversationLabel = (item: { id: string; timestamp: string | null }) => {
@@ -72,6 +75,7 @@ export function NewTaskDialog(props: {
   const [parentTaskId, setParentTaskId] = createSignal("");
   const [conversationId, setConversationId] = createSignal("");
   const [compare, setCompare] = createSignal(false);
+  const [profile, setProfile] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [history, setHistory] = createSignal<readonly PromptHistoryEntry[]>([]);
   let recallPosition = -1;
@@ -95,6 +99,8 @@ export function NewTaskDialog(props: {
       }
     },
   );
+  const [profiles] = createResource(() => props.repoId, (id) => repoProfiles(id).catch(() => []));
+  const profileChoices = () => (compare() ? [] : profilesFor(profiles() ?? [], agent()));
   const conversationChoices = () => (agent() === "codex" && !compare() ? conversations() ?? [] : []);
   const agentInfo = (kind: AgentKind) => {
     const found = installed();
@@ -187,7 +193,8 @@ export function NewTaskDialog(props: {
       await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(),
         base: base().trim(), parentTaskId: parentTaskId() || undefined,
         codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
-        compare: comparing() || undefined });
+        compare: comparing() || undefined,
+        profile: profileChoices().some((item) => item.name === profile()) ? profile() : undefined });
     } catch (failure) {
       setError(String(failure));
       setBusy(false);
@@ -263,7 +270,7 @@ export function NewTaskDialog(props: {
                   name="agent"
                   checked={agent() === kind}
                   disabled={agentInfo(kind).missing || comparing()}
-                  onChange={() => { setAgent(kind); setConversationId(""); }}
+                  onChange={() => { setAgent(kind); setConversationId(""); setProfile(""); }}
                 />
                 <AgentIcon agent={kind} />
                 <span class="agent-card-text">
@@ -283,6 +290,13 @@ export function NewTaskDialog(props: {
           <p class="form-hint">{t("newTask.agentOwnTerminal").replace("{name}", () => AGENT_NAME[agent()])}</p>
         </Show>
       </fieldset>
+      <Show when={profileChoices().length > 0}>
+        <Select label={t("newTask.profile")} hint={t("newTask.profileHint")} value={profile()}
+          onChange={(event) => setProfile(event.currentTarget.value)}>
+          <option value="">{t("newTask.profileNone")}</option>
+          <For each={profileChoices()}>{(item) => <option value={item.name}>{profileLabel(item)}</option>}</For>
+        </Select>
+      </Show>
       <Show when={canCompare()}>
         <Toggle checked={compare()} onChange={setCompare} label={t("newTask.compare")} hint={t("newTask.compareHint")} />
       </Show>

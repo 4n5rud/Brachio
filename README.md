@@ -94,6 +94,18 @@ timeout_secs = 600
 
 Setup commands and QA runs ask for your approval before they run. Copy a real `.env` into worktrees only for projects and agents you trust, because every agent in that worktree can read it.
 
+Agent profiles are presets you can pick when creating a task. A profile chooses the agent, a model name, a few allowed options and environment variables. Anything that changes approvals or permissions is refused:
+
+```toml
+[profiles.careful]
+agent = "claude_code"            # or "codex"
+model = "sonnet"
+args = ["--max-turns", "20"]     # claude_code: --verbose, --max-turns N; codex: --search
+env = { TEAM = "docs" }
+```
+
+To run one prompt with several agents or profiles, use "Duplicate as comparison task..." in a task's menu. Each run gets its own worktree and the tasks are grouped for comparison.
+
 ## Current scope and limitations
 
 Not built yet: automatic merging, tasks nested more than one level, child tasks in plain folders, remote machines, and a Linux app. Agent status, approvals and recovery depend on what each agent reports.

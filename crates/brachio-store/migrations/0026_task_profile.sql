@@ -1,0 +1,4 @@
+CREATE TABLE task_profile (
+    task_id TEXT PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    profile TEXT NOT NULL
+);

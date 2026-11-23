@@ -1,6 +1,7 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
 mod agent_accounts;
+mod agent_profiles;
 mod always_allow;
 mod child_escalation;
 mod child_task_request;
@@ -360,6 +361,8 @@ pub fn run() {
             worker_preamble::task_worker_preamble,
             handoff_summary::task_handoff_summary,
             handoff_summary::task_handoff_send,
+            agent_profiles::repo_profiles,
+            agent_profiles::task_join_compare_group,
             workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,

@@ -262,6 +262,20 @@ pub async fn terminal_open(
     if let (Some(_), Some(key)) = (request.agent, request.key.as_deref()) {
         environment.extend(hook.mail_environment(key));
     }
+    if let Some(kind) = request.agent {
+        let repo = brachio_store::RepoRecord::get(&*database.lock()?, &owner.task.repo_id)
+            .map_err(|error| error.to_string())?;
+        let added = crate::agent_profiles::launch_additions(
+            &*database.lock()?,
+            &owner.task.id,
+            &repo,
+            kind,
+        )?;
+        if let Some(added) = added {
+            options.extend(added.arguments);
+            environment.extend(added.environment);
+        }
+    }
     let first_prompt = request.prompt.clone();
     let (command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => {
