@@ -319,11 +319,16 @@ async fn a_restarted_runtime_shows_the_last_screen_before_the_terminal_starts_ag
 
     let (_, attached) = open_new(&terminals, &world, key, &second_window).await;
     assert!(!attached, "a new program starts after the restored screen");
-    eventually("the saved screen and the restored notice to arrive", || async {
-        let entries = second_window.entries();
-        entries.iter().any(|entry| entry.contains(MARKER))
-            && entries.iter().any(|entry| entry == r#"<{"restored":true}>"#)
-    })
+    eventually(
+        "the saved screen and the restored notice to arrive",
+        || async {
+            let entries = second_window.entries();
+            entries.iter().any(|entry| entry.contains(MARKER))
+                && entries
+                    .iter()
+                    .any(|entry| entry == r#"<{"restored":true}>"#)
+        },
+    )
     .await;
     let entries = second_window.entries();
     let screen = entries
