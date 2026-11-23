@@ -73,7 +73,7 @@ pub struct CheckpointRestored {
 }
 
 /// The worktree of an open task in a git project, or none for an archived or folder task.
-fn git_worktree(database: &Database, id: &str) -> Result<Option<PathBuf>, String> {
+pub(crate) fn git_worktree(database: &Database, id: &str) -> Result<Option<PathBuf>, String> {
     let connection = database.lock()?;
     let task = TaskRecord::get(&connection, id).map_err(to_text)?;
     let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
@@ -81,7 +81,7 @@ fn git_worktree(database: &Database, id: &str) -> Result<Option<PathBuf>, String
     Ok(usable.then_some(task.worktree_path))
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, brachio_git::GitError> + Send + 'static,
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work)

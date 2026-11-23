@@ -5,6 +5,7 @@ mod branch_list;
 mod change_ops;
 mod changed_paths;
 mod checkpoint;
+mod commit_log;
 mod conflict_report;
 mod file_list;
 mod git;
@@ -27,6 +28,7 @@ pub use checkpoint::{
     capture_checkpoint, checkpoint_diff, delete_checkpoints, list_checkpoints, restore_checkpoint,
     CaptureKind, Checkpoint, CheckpointDiff, Restored, MAX_CHECKPOINTS,
 };
+pub use commit_log::{commit_patch, list_commits, CommitEntry, CommitPatch, MAX_COMMITS};
 pub use conflict_report::{merge_target, predict_conflict, ConflictReport, MergeTarget};
 pub use file_list::{list_files, MAX_FILES};
 pub use git::{Git, GitError};
