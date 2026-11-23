@@ -821,9 +821,21 @@ export function App() {
   const create = async (input: NewTaskInput) => {
     const current = dialogRepo();
     if (!current) return;
+    // A background task starts its terminal and gets the "new" mark, but selection and focus stay put.
+    const settle = (record: CreatedTask) => {
+      if (!input.background) return open(record.id);
+      batch(() => {
+        setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
+        setUnreadFinish((marks) => new Set(marks).add(record.id));
+      });
+      pushToast({
+        tone: "success",
+        message: t("newTask.createdBackground").replace("{title}", () => record.title),
+        action: { label: t("task.open"), onClick: () => open(record.id) },
+      });
+    };
     if (!input.compare) {
-      const record = await createOne(current.id, input, input.agent);
-      open(record.id);
+      settle(await createOne(current.id, input, input.agent));
       setDialogOpen(false);
       return;
     }
@@ -834,7 +846,7 @@ export function App() {
     } catch (failure) {
       pushToast({ tone: "error", title: t("newTask.compareSecondFailed"), message: String(failure) });
     }
-    open(first.id);
+    settle(first);
     setDialogOpen(false);
   };
 

@@ -36,6 +36,8 @@ export interface NewTaskInput {
   compare?: boolean;
   /** A profile from the project's `brachio.toml`. */
   profile?: string;
+  /** Create the task and start its agent without switching to it. */
+  background?: boolean;
 }
 
 const conversationLabel = (item: { id: string; timestamp: string | null }) => {
@@ -184,7 +186,7 @@ export function NewTaskDialog(props: {
     }
   };
 
-  const submit = async () => {
+  const submit = async (background = false) => {
     if (!canCreate()) return;
     setBusy(true);
     setError(null);
@@ -194,6 +196,7 @@ export function NewTaskDialog(props: {
         base: base().trim(), parentTaskId: parentTaskId() || undefined,
         codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
         compare: comparing() || undefined,
+        background: background || undefined,
         profile: profileChoices().some((item) => item.name === profile()) ? profile() : undefined });
     } catch (failure) {
       setError(String(failure));
@@ -221,6 +224,10 @@ export function NewTaskDialog(props: {
         <>
           <Button variant="ghost" disabled={busy() || confirmingClose()} onClick={() => void requestClose()}>
             {t("newTask.cancel")}
+          </Button>
+          <Button variant="secondary" disabled={!canCreate()} title={t("newTask.createBackgroundHint")}
+            onClick={() => void submit(true)}>
+            {t("newTask.createBackground")}
           </Button>
           <Button variant="primary" icon="plus" kbd={SUBMIT_KEYS()} disabled={!canCreate()}
             loading={busy()} loadingLabel={t("newTask.creating")} onClick={() => void submit()}>
