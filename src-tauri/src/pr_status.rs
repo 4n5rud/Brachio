@@ -168,6 +168,17 @@ impl PrStatuses {
             .lock()
             .map_err(|_| "pull request status lock poisoned".to_owned())
     }
+
+    /// The number of the task's pull request when it is known to be merged.
+    pub(crate) fn merged_number(&self, task: &str) -> Result<Option<u64>, String> {
+        Ok(self
+            .tracker()?
+            .entries
+            .get(task)
+            .and_then(|entry| entry.snapshot.as_ref())
+            .filter(|snapshot| snapshot.state == PullRequestState::Merged)
+            .map(|snapshot| snapshot.number))
+    }
 }
 
 pub(crate) fn now_ms() -> i64 {

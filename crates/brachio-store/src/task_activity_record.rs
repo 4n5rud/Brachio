@@ -11,7 +11,7 @@ pub const MAX_TASK_ACTIVITY: usize = 200;
 pub const MAX_ACTIVITY_DETAIL_CHARS: usize = 200;
 
 /// What can be recorded. The interface chooses the wording for each.
-pub const ACTIVITY_KINDS: [&str; 17] = [
+pub const ACTIVITY_KINDS: [&str; 18] = [
     "permission_asked",
     "approval_answered",
     "approval_auto_allowed",
@@ -29,6 +29,7 @@ pub const ACTIVITY_KINDS: [&str; 17] = [
     "qa_run",
     "mail_received",
     "git_action",
+    "auto_archived",
 ];
 
 /// One recorded event.

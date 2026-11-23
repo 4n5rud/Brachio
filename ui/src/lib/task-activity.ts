@@ -62,6 +62,7 @@ const SIMPLE: Record<string, { key: MessageKey; tone: StatusTone }> = {
   handoff_rejected: { key: "activity.handoffRejected", tone: "error" },
   mail_received: { key: "activity.mailReceived", tone: "unknown" },
   git_action: { key: "activity.gitAction", tone: "done" },
+  auto_archived: { key: "activity.autoArchived", tone: "done" },
 };
 
 const GIT_LABEL: Record<string, MessageKey> = {

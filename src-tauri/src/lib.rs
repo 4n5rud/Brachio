@@ -3,6 +3,7 @@
 mod agent_accounts;
 mod agent_profiles;
 mod always_allow;
+mod auto_archive;
 mod child_escalation;
 mod child_task_request;
 mod claude_usage;
@@ -406,6 +407,7 @@ pub fn run() {
             worktree_import::worktree_import,
             task_overlaps::task_overlaps,
             pr_status::task_pr_status,
+            auto_archive::task_archive_if_merged,
             qa_run::qa_run,
             qa_run::qa_last_result,
             qa_run::qa_delete_output,

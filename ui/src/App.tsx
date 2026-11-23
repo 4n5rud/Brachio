@@ -11,6 +11,8 @@ import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
 import { SystemCheckHost, openSystemCheck } from "./components/SystemCheckDialog";
 import { firstRunPending } from "./lib/system-check";
 import { alertSoundKind, playAlertSound } from "./lib/alert-sound";
+import { archiveIfMerged, autoArchiveMergedEnabled, mergedTasksToArchive } from "./lib/auto-archive";
+import { prReport } from "./lib/pr-status-store";
 import { quitConfirmEnabled, runningAgentKeys, setQuitConfirmEnabled } from "./lib/quit-confirm";
 import { EmptyRepo } from "./components/EmptyRepo";
 import { Button } from "./components/ui/Button";
@@ -921,7 +923,10 @@ export function App() {
   };
 
   const archiveNow = async (task: TaskRow) => {
-      await archiveTask(task.id);
+    await archiveTask(task.id);
+    hideArchived(task);
+  };
+  const hideArchived = (task: TaskRow) => {
       batch(() => {
         setTasks((items) => items.filter((item) => item.id !== task.id));
         setArchived((items) => [task, ...items]);
@@ -968,6 +973,36 @@ export function App() {
       setArchiving(false);
     }
   };
+  // Archives merged tasks nobody is working on; one undo toast brings them all back.
+  const autoArchiveAsked = new Map<string, number>();
+  let autoArchiving = false;
+  createEffect(() => {
+    if (!inTauri || !autoArchiveMergedEnabled() || autoArchiving) return;
+    const due = mergedTasksToArchive(tasks(), prReport, live(), autoArchiveAsked, Date.now());
+    if (due.length === 0) return;
+    autoArchiving = true;
+    void (async () => {
+      const done: TaskRow[] = [];
+      for (const id of due) {
+        autoArchiveAsked.set(id, Date.now());
+        const task = findTask(id);
+        try {
+          if (task && await archiveIfMerged(id) === "archived") {
+            hideArchived(task);
+            done.push(task);
+          }
+        } catch (failure) {
+          console.warn("automatic archive failed", failure);
+        }
+      }
+      autoArchiving = false;
+      if (done.length === 0) return;
+      const message = done.length === 1
+        ? t("undo.autoArchived").replace("{title}", () => done[0]?.title ?? "")
+        : t("undo.autoArchivedMany").replace("{count}", String(done.length));
+      pushUndoToast(message, async () => { for (const task of done) await restore(task.id); });
+    })();
+  });
   // Ends a comparison: the other tasks run on the same prompt are archived and this one stays.
   const keepOnly = async (task: TaskRow) => {
     const siblings = compareSiblings(tasks(), task);

@@ -7,6 +7,7 @@ import { prioritySortEnabled, updatePrioritySort } from "../../lib/sidebar-sort"
 import { keepAwakeEnabled, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
 import { AlertSoundSettings } from "./AlertSoundSettings";
 import { openSystemCheck } from "../SystemCheckDialog";
+import { autoArchiveMergedEnabled, setAutoArchiveMergedEnabled } from "../../lib/auto-archive";
 import { quitConfirmEnabled, setQuitConfirmEnabled } from "../../lib/quit-confirm";
 import { notificationSettings, updateNotificationSettings } from "../../lib/notification-settings";
 import { openLogFolder } from "../../lib/workspace";
@@ -179,6 +180,8 @@ export function SettingsPanel(props: {
             <Toggle checked={quitConfirmEnabled()} label={t("settings.confirmQuit")} hint={t("settings.confirmQuitHint")}
               onChange={setQuitConfirmEnabled} />
             <Show when={"__TAURI_INTERNALS__" in window}>
+              <Toggle checked={autoArchiveMergedEnabled()} label={t("settings.autoArchiveMerged")} hint={t("settings.autoArchiveMergedHint")}
+                onChange={setAutoArchiveMergedEnabled} />
               <Toggle checked={resumeLastTaskEnabled()} label={t("settings.resumeLast")} hint={t("settings.resumeLastHint")}
                 onChange={updateResumeLastTask} />
               <SettingRow label={t("settings.systemCheck")} hint={t("settings.systemCheckHint")}>
