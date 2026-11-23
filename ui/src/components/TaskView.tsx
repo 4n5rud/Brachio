@@ -2,7 +2,6 @@ import { IconButton } from "./ui/IconButton";
 import { AttachButton } from "./AttachButton";
 import { terminalExcerpt } from "../lib/attachments";
 import { readTerminalTail, terminalTailKeys } from "../lib/terminal-tail";
-import { Select } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createComputed, createResource, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
@@ -69,7 +68,6 @@ export function TaskView(props: {
   /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
   openIds: readonly string[];
   workspaceTasks: readonly TaskRow[];
-  onOpenTask: (id: string) => void;
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, key: string, status: AgentState, message: string | null) => void;
   statusForKey?: (taskId: string, key: string) => AgentState | undefined;
@@ -475,14 +473,6 @@ export function TaskView(props: {
         branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
         tokens={tokenUsage(props.task.id)}
         actions={<>
-          <Show when={props.workspaceTasks.length > 1}>
-            <Select class="workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
-              onChange={(event) => props.onOpenTask(event.currentTarget.value)}>
-              <For each={props.workspaceTasks}>{(task) => (
-                <option value={task.id}>{task.title} · {task.branch}</option>
-              )}</For>
-            </Select>
-          </Show>
           <CueMenu taskId={props.task.id} repoId={props.task.repoId} />
           <Show when={props.task.worktreePath}>
             <IconButton icon="archive" label={t("task.archive")} disabled={!props.onArchive}

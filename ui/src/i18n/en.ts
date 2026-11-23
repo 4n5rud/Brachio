@@ -118,7 +118,6 @@ export const en = {
   "settings.defaultShellHint": "The shell new shell tabs start",
   "settings.systemShell": "System default",
   "task.shell": "Shell",
-  "task.openedTasks": "Previously opened tasks",
   "task.originalPrompt": "Original task prompt",
   "task.draftOriginalPrompt": "Insert original prompt",
   "task.workerPreamble": "Brief added above the first prompt for this child task",

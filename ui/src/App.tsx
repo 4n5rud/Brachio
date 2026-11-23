@@ -1530,7 +1530,6 @@ export function App() {
               theme={dataTheme()}
               openIds={openIds()}
               workspaceTasks={workspaceTasks()}
-              onOpenTask={open}
               findTask={findTask}
               takePrompt={takePrompt}
               questions={questions().filter((question) =>
