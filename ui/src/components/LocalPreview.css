@@ -1,0 +1,11 @@
+.preview-frame {
+  display: block;
+  width: 100%;
+  height: min(70vh, 640px);
+  border: 0;
+  background: #fff;
+}
+.preview-hint {
+  flex: 1;
+  margin: 0;
+}
