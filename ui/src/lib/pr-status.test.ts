@@ -25,6 +25,7 @@ const report = (overrides: Partial<PrStatusReport> = {}): PrStatusReport => ({
   retryInSeconds: null,
   localHead: null,
   headMatchesLocal: null,
+  linked: [],
   ...overrides,
 });
 
@@ -52,6 +53,23 @@ describe("pull request status refresh schedule", () => {
 
   it("shows seven characters of a commit", () => {
     expect(shortSha("68395383847f768023545324589198088c4971e4")).toBe("6839538");
+  });
+});
+
+describe("linked pull requests keep the schedule going", () => {
+  const link = (state: PullRequestSnapshot["state"] | null) => ({
+    repository: "o/r",
+    number: 9,
+    snapshot: state === null ? null : snapshot({ number: 9, state }),
+    checkedAtMs: 1,
+    error: null,
+  });
+
+  it("keeps asking while a linked pull request is open, even when the branch's own is merged", () => {
+    const merged = snapshot({ state: "merged" });
+    expect(nextRefreshDelay(report({ snapshot: merged, linked: [link("open")] }))).toBe(60_000);
+    expect(nextRefreshDelay(report({ snapshot: merged, linked: [link("merged")] }))).toBeNull();
+    expect(nextRefreshDelay(report({ snapshot: null, noPullRequest: false, linked: [link(null)] }))).toBe(60_000);
   });
 });
 

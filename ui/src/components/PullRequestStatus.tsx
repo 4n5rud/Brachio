@@ -2,8 +2,12 @@ import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import { useAsyncAction } from "../lib/async-action";
 import {
+  chipOfSnapshot,
+  linkPr,
   openExternalLink,
   shortSha,
+  unlinkPr,
+  type LinkedPrReport,
   type PrChip as PrChipState,
   type PrStatusReport,
   type PullRequestSnapshot,
@@ -11,6 +15,8 @@ import {
 import { prFailure, prRefreshing, prReport, refreshPrStatus } from "../lib/pr-status-store";
 import { formatAge } from "../lib/time";
 import { PrChip } from "./ui/PrChip";
+import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
 import { IconButton } from "./ui/IconButton";
 import { Icon, type IconName } from "./Icon";
 import { FileRow } from "./FileRow";
@@ -59,7 +65,15 @@ export function PullRequestStatus(props: { taskId: string }) {
 
   return (
     <PullRequestPanel report={prReport(props.taskId)} failure={prFailure(props.taskId)} busy={prRefreshing(props.taskId) || manual.pending()} done={manual.done()}
-      now={now()} onRefresh={() => void manual.run()} />
+      now={now()} onRefresh={() => void manual.run()}
+      onLink={async (reference) => {
+        await linkPr(props.taskId, reference);
+        await refresh(true);
+      }}
+      onUnlink={async (link) => {
+        await unlinkPr(props.taskId, link.repository, link.number);
+        await refresh(true);
+      }} />
   );
 }
 
@@ -71,6 +85,9 @@ export function PullRequestPanel(props: {
   done?: boolean;
   now: number;
   onRefresh: () => void;
+  /** Links another pull request; rejects with the reason it was refused. Without it the form is hidden. */
+  onLink?: (reference: string) => Promise<void>;
+  onUnlink?: (link: LinkedPrReport) => Promise<void>;
 }) {
   const age = (at: number) => formatAge(at, props.now);
 
@@ -107,10 +124,63 @@ export function PullRequestPanel(props: {
             <Show when={current().checkedAtMs !== null && !current().error}>
               <InspectorNote>{t("prStatus.checkedAt").replace("{age}", age(current().checkedAtMs ?? 0))}</InspectorNote>
             </Show>
+            <For each={current().linked}>
+              {(link) => <LinkedRow link={link} onUnlink={props.onUnlink} />}
+            </For>
           </>
         )}
       </Show>
+      <Show when={props.onLink}>{(onLink) => <LinkForm onLink={onLink()} />}</Show>
     </InspectorSection>
+  );
+}
+
+function LinkedRow(props: { link: LinkedPrReport; onUnlink?: (link: LinkedPrReport) => Promise<void> }) {
+  const unlink = useAsyncAction(async () => props.onUnlink?.(props.link), { failureToast: true });
+  const chip = (): PrChipState | null =>
+    props.link.snapshot ? chipOfSnapshot(props.link.snapshot, props.link.error !== null) : null;
+  const open = (url: string) => void openExternalLink(url).catch(() => {});
+  return (
+    <div class="row-gap">
+      <Show when={chip()}>{(value) => <PrChip chip={value()} url={props.link.snapshot?.url} />}</Show>
+      <button type="button" class="link-button"
+        onClick={() => open(props.link.snapshot?.url ?? `https://github.com/${props.link.repository}/pull/${props.link.number}`)}>
+        {props.link.repository}#{props.link.number}
+      </button>
+      <Show when={props.link.error}>
+        <span class="note note-warn">{props.link.snapshot ? t("prStatus.linkedOffline") : props.link.error}</span>
+      </Show>
+      <Show when={!props.link.snapshot && !props.link.error}>
+        <span class="note">{t("prStatus.linkedUnknown")}</span>
+      </Show>
+      <Show when={props.onUnlink}>
+        <IconButton size="sm" icon="x" label={t("prStatus.unlink").replace("{number}", `#${props.link.number}`)}
+          busy={unlink.pending()} onClick={() => void unlink.run()} />
+      </Show>
+    </div>
+  );
+}
+
+function LinkForm(props: { onLink: (reference: string) => Promise<void> }) {
+  const [reference, setReference] = createSignal("");
+  const [error, setError] = createSignal<string>();
+  const link = useAsyncAction(async () => {
+    setError(undefined);
+    try {
+      await props.onLink(reference().trim());
+      setReference("");
+    } catch (failure) {
+      setError(String(failure));
+    }
+  });
+  return (
+    <form class="row-gap" onSubmit={(event) => { event.preventDefault(); void link.run(); }}>
+      <Input compact mono aria-label={t("prStatus.linkLabel")} placeholder={t("prStatus.linkPlaceholder")}
+        value={reference()} error={error()} onInput={(event) => setReference(event.currentTarget.value)} />
+      <Button type="submit" size="sm" busy={link.pending()} disabled={reference().trim() === ""}>
+        {t("prStatus.link")}
+      </Button>
+    </form>
   );
 }
 

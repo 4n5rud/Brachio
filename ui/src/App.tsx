@@ -42,6 +42,8 @@ import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
 import { activityKindOf, recordTaskActivity } from "./lib/task-activity";
+import { CompareResults } from "./components/CompareResults";
+import { compareMembers } from "./lib/compare-results";
 import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
@@ -1014,9 +1016,9 @@ export function App() {
     }
   };
   // Ends a comparison: the other tasks run on the same prompt are archived and this one stays.
-  const keepOnly = async (task: TaskRow) => {
+  const keepOnly = async (task: TaskRow): Promise<boolean> => {
     const siblings = compareSiblings(tasks(), task);
-    if (archiving() || siblings.length === 0) return;
+    if (archiving() || siblings.length === 0) return false;
     setArchiving(true);
     try {
       if (!await confirmDialog({
@@ -1025,13 +1027,21 @@ export function App() {
         confirmLabel: t("task.keepOnlyConfirm"),
         cancelLabel: t("workspace.close"),
         tone: "primary",
-      })) return;
+      })) return false;
       for (const sibling of siblings) await archiveNow(sibling);
+      return true;
     } catch (failure) {
       pushToast({ tone: "error", title: t("task.archiveFailed"), message: String(failure) });
+      return false;
     } finally {
       setArchiving(false);
     }
+  };
+
+  const [compareOf, setCompareOf] = createSignal<TaskRow>();
+  const compared = () => {
+    const task = compareOf();
+    return task?.compareGroup ? compareMembers(tasks(), task.compareGroup, task.repoId) : [];
   };
 
   const restore = async (id: string) => {
@@ -1419,6 +1429,7 @@ export function App() {
           onNewTask={inTauri ? openNewTask : undefined}
           onImportWorktrees={inTauri ? setImportRepoId : undefined}
           onAddRepo={inTauri ? startAddProject : undefined}
+          onCompareResults={(id) => setCompareOf(tasks().find((item) => item.id === id))}
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           pinned={pinned()}
           onTogglePin={togglePin}
@@ -1556,6 +1567,11 @@ export function App() {
           recentFiles={selected() ? recentFiles(selected()!.id) : []}
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
+      </Show>
+      <Show when={compareOf() && compared().length > 1}>
+        <CompareResults tasks={compared()} now={now()} onClose={() => setCompareOf(undefined)}
+          onOpen={(id) => { setCompareOf(undefined); open(id); }}
+          onKeep={(task) => void keepOnly(task).then((kept) => { if (kept) setCompareOf(undefined); })} />
       </Show>
       <Show when={cueManagerRepo()}>
         {(repoId) => <CuesDialog repoId={repoId()} repoName={repos().find((item) => item.id === repoId())?.name ?? ""}

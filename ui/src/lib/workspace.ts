@@ -170,6 +170,7 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     branch: record.branch,
     status: { state: "unknown" },
     updatedAt: record.createdAtMs,
+    createdAt: record.createdAtMs,
     archivedAt: record.archivedAtMs ?? undefined,
     worktreePath: record.worktreePath,
     agentSessionId: record.agentSessionId ?? undefined,
