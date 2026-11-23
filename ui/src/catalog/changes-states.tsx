@@ -72,7 +72,7 @@ const snapshot = (over: Partial<PullRequestSnapshot> = {}): PullRequestSnapshot 
 });
 const report = (over: Partial<PrStatusReport> = {}): PrStatusReport => ({
   snapshot: snapshot(), checkedAtMs: NOW - 60_000, noPullRequest: false, error: null, retryInSeconds: null,
-  localHead: "c04d91e7a1b2c3d4", headMatchesLocal: true, ...over,
+  localHead: "c04d91e7a1b2c3d4", headMatchesLocal: true, linked: [], ...over,
 });
 const panel = (value?: PrStatusReport, failure?: string) => (
   <PullRequestPanel report={value} failure={failure} busy={false} now={NOW} onRefresh={() => {}} />
