@@ -1,6 +1,6 @@
 # Usage providers: how more agents plug in
 
-This is a plan. Only Claude Code and Codex are implemented.
+Claude Code, Codex and Grok are implemented. Gemini CLI and Antigravity are plans.
 
 ## How a provider plugs in today
 - **Rust:** implement `UsageProvider` in `crates/brachio-agent/src/usage_scan.rs` (id, display name, icon key, `log_files()`, `scan()`) and add it to `providers()`. `scan()` reads from the saved byte offset in a `FileState` and returns daily `Bucket`s. Everything else (storage, incremental rescans, charts, filters) is shared.
@@ -19,9 +19,9 @@ This is a plan. Only Claude Code and Codex are implemented.
 - **Steps:** (1) inspect a real install to see whether `transcript_full.jsonl` or the database carries usage; (2) only if it does, write a reader per format with version checks; (3) otherwise do not ship a provider, because estimating tokens is out of scope.
 
 ## Grok (xAI Grok Build CLI)
-- **What it exposes:** third-party tools report per-turn token totals, cache reads and reasoning tokens in `~/.grok/sessions/**/updates.jsonl` (`turn_completed` usage), and xAI's headless docs define the token fields (`input_tokens` is uncached input; `total_tokens` includes cache). Plan usage is reachable through `grok agent stdio` (an `x.ai/billing` method).
-- **Uncertain:** the exact session folder layout and event names come from third-party docs. A different project, `@webdevtoday/grok-cli`, uses `~/.grok-cli/history/` with another format.
-- **Steps:** (1) confirm the layout on a real install; (2) write `GrokProvider` with the same offset-based reader, mapping `turn_completed` usage to the four token counts; (3) add limit history through the billing method only if it needs no network beyond xAI's own endpoint.
+- **Implemented:** `GrokProvider` in `usage_scan.rs` reads `~/.grok/sessions/**/<session>/updates.jsonl` (or `$GROK_HOME`) incrementally, like the other providers. Each `turn_completed` record adds its usage to that day: `input_tokens` is uncached input, `output_tokens` and `reasoning_tokens` count as output, and cache reads and writes fill the cache buckets. A missing folder shows nothing.
+- **Unverified:** the session layout and the event and field names come from third-party descriptions. They have not been checked against an installed Grok, and only fixture tests cover the reader. If a real log differs, the reader counts nothing rather than guessing.
+- **Not done:** plan limit history. Plan usage is reachable through `grok agent stdio` (an `x.ai/billing` method); using it needs no network beyond xAI's own endpoint.
 
 ## Sources
 - Gemini CLI telemetry docs: https://google-gemini.github.io/gemini-cli/docs/cli/telemetry.html

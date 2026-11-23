@@ -19,6 +19,7 @@ const LINE_COLORS = ["var(--color-accent)", "var(--color-status-working)", "var(
 export function ProviderIcon(props: { icon: string }) {
   if (props.icon === "claude") return <AgentIcon agent="claude" />;
   if (props.icon === "codex") return <AgentIcon agent="codex" />;
+  if (props.icon === "grok") return <AgentIcon agent="grok" />;
   return <BrandIcon brand={BRAND_OF[props.icon]} fallback="bot" class="icon-sm" />;
 }
 
