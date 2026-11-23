@@ -37,6 +37,8 @@ import { AddProjectDialog } from "../components/AddProjectDialog";
 import { AddProjectItems } from "../components/AddProjectItems";
 import { EmptyState } from "../components/ui/EmptyState";
 import { IconButton } from "../components/ui/IconButton";
+import { AttachButton } from "../components/AttachButton";
+import { TabClose } from "../components/TabClose";
 import { Input, Select, TextArea } from "../components/ui/Input";
 import { Kbd } from "../components/ui/Kbd";
 import { Notice } from "../components/ui/Notice";
@@ -401,15 +403,20 @@ function Catalog() {
         <div class="tabs" role="tablist" style={{ width: "100%" }}>
           <button class="tab" role="tab" aria-selected="true" type="button">
             <StatusGlyph tone="ready" />Claude Code</button>
+          <TabClose label={t("task.archive")} onClose={() => {}} />
           <div class="tab-item" role="presentation">
             <button class="tab" role="tab" aria-selected="false" type="button">
               <StatusGlyph tone="blocked" /><AgentIcon agent="codex" />Codex</button>
-            <button class="tab-close" type="button" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></button></div>
+            <TabClose onClose={() => {}} /></div>
           <div class="tab-item" role="presentation">
             <button class="tab" role="tab" aria-selected="false" type="button">
               <Icon name="terminal" class="icon-sm" />{t("task.shell")}</button>
-            <button class="tab-close" type="button" aria-label={t("task.closeTab")}><Icon name="x" class="icon-xs" /></button></div>
-          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.newTab")} />
+            <TabClose onClose={() => {}} /></div>
+          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} hint={t("task.addTabHint")} />
+          <AttachButton class="tab-queue" tails={() => []} onPaths={() => {}} onTail={() => {}} />
+          <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")} hint={t("queue.hint")} badge={2} />
+          <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")} hint={t("mailbox.inboxHint")} badge={1} />
+          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} hint={t("handoff.openHint")} />
         </div>
         <div class="menu catalog-menu" role="menu">
           <div class="menu-item" role="menuitem"><Icon name="terminal" class="icon-sm" />{t("task.shell")}<small>{t("task.tabHintShell")}</small></div>
