@@ -222,6 +222,8 @@ export const en = {
   "terminal.launchResetAnyway": "Forget and reopen anyway",
   "terminal.launchResetCancel": "Keep waiting",
   "terminal.reopen": "Reopen session",
+  "terminal.savedScreen": "Last screen of the ended session",
+  "terminal.startAgain": "Start again",
   "terminal.reopening": "Reopening session",
   "terminal.restored": "Last screen recovered.",
   "terminal.liveAttached": "Reattached to the running terminal",
