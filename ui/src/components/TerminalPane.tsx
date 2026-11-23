@@ -23,7 +23,7 @@ import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { takeDraftProblem, type DraftProblem } from "../lib/draft-problem";
-import { bracketedPaste, isCopyKey, isNativePasteKey, pasteText, terminalClipboardText } from "../lib/terminal-paste";
+import { bracketedPaste, isCopyKey, isNativePasteKey, pastedImage, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
 import { MAX_TERMINAL_LINES } from "../lib/attachments";
 import { registerTerminalTail } from "../lib/terminal-tail";
@@ -155,6 +155,8 @@ export function TerminalPane(props: {
   /** Called with the agent's reported state, and with `exited` when the process ends. */
   onStatus?: (status: AgentState, message: string | null) => void;
   registerDraftWriter?: (prepare: PrepareDraft) => () => void;
+  /** Saves a picture pasted into the agent terminal and puts its path in the input; resolves to whether it went in. */
+  onPasteImage?: (image: Blob) => Promise<boolean>;
   /** Puts the task's original prompt into the agent input; resolves to whether it went in. */
   onInsertPrompt?: () => Promise<boolean>;
   /** Opens the problem report with the error text. */
@@ -581,6 +583,15 @@ export function TerminalPane(props: {
       event.stopPropagation();
       const text = terminalClipboardText(event.clipboardData.getData("text/plain"));
       if (text) term.paste(text);
+      else if (session?.agent) {
+        const image = pastedImage(event.clipboardData);
+        if (image && props.onPasteImage) {
+          void props.onPasteImage(image).then(
+            (done) => { if (!done) pushToast({ tone: "error", message: t("diff.notReady") }); },
+            (failure: unknown) => pushToast({ tone: "error", message: String(failure) }),
+          );
+        }
+      }
     };
     host.addEventListener("paste", pasteClipboard, true);
     const changeFontSize = (step: number) => {

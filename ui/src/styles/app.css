@@ -228,10 +228,6 @@ p {
   min-height: 0;
 }
 
-.workspace-task-switch {
-  width: clamp(7rem, 16vw, 13rem);
-}
-
 .pane {
   flex: 1;
   display: flex;

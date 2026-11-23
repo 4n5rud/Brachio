@@ -400,6 +400,7 @@ pub fn run() {
             workspace::task_file_preview,
             workspace::task_file_media,
             task_attachments::task_attach_images,
+            task_attachments::task_attach_pasted_image,
             task_file_ops::task_move_path,
             task_file_ops::task_copy_conflicts,
             task_file_ops::task_copy_in,

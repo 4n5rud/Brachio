@@ -3,7 +3,6 @@ import { AttachButton } from "./AttachButton";
 import { terminalExcerpt } from "../lib/attachments";
 import { takeDraftProblem } from "../lib/draft-problem";
 import { readTerminalTail, terminalTailKeys } from "../lib/terminal-tail";
-import { Select } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { For, Show, createComputed, createResource, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
@@ -70,7 +69,6 @@ export function TaskView(props: {
   /** Ids of tasks whose terminal stays mounted. Keyed by id so a row update never restarts a session. */
   openIds: readonly string[];
   workspaceTasks: readonly TaskRow[];
-  onOpenTask: (id: string) => void;
   findTask: (id: string) => TaskRow | undefined;
   onStatus?: (taskId: string, key: string, status: AgentState, message: string | null) => void;
   statusForKey?: (taskId: string, key: string) => AgentState | undefined;
@@ -95,6 +93,7 @@ export function TaskView(props: {
   onDraftOriginal?: (text: string) => Promise<boolean>;
   /** Files and images chosen in the picker; they go into the agent input as a draft. */
   onAttachPaths?: (paths: string[]) => Promise<boolean>;
+  onAttachPastedImage?: (image: Blob) => Promise<boolean>;
   /** Commands from brachio.toml waiting for the user's yes or no. */
   setupRequest?: { commands: readonly string[]; answer: (run: boolean) => void };
   setupFailure?: string;
@@ -478,14 +477,6 @@ export function TaskView(props: {
         branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
         tokens={tokenUsage(props.task.id)}
         actions={<>
-          <Show when={props.workspaceTasks.length > 1}>
-            <Select class="workspace-task-switch" aria-label={t("task.openedTasks")} value={props.task.id}
-              onChange={(event) => props.onOpenTask(event.currentTarget.value)}>
-              <For each={props.workspaceTasks}>{(task) => (
-                <option value={task.id}>{task.title} · {task.branch}</option>
-              )}</For>
-            </Select>
-          </Show>
           <CueMenu taskId={props.task.id} repoId={props.task.repoId} />
           <Show when={props.task.worktreePath}>
             <IconButton icon="archive" label={t("task.archive")} disabled={!props.onArchive}
@@ -500,6 +491,10 @@ export function TaskView(props: {
           {AGENT_NAME[props.task.agent]}
           <MailboxBadge count={props.unreadForTab?.(terminalKey(props.task.id, "agent")) ?? 0} />
         </button>
+        {/* The main session is the task itself, so its x archives the task (App asks first). */}
+        <Show when={props.task.worktreePath && props.onArchive}>
+          <TabClose label={t("task.archive")} onClose={() => props.onArchive?.()} />
+        </Show>
         <For each={tabsOf(props.task.id)}>
           {(tab) => (
             <div class="tab-item" role="presentation"
@@ -533,7 +528,7 @@ export function TaskView(props: {
           </div>
         </Show>
         <Show when={props.task.worktreePath}>
-          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} aria-haspopup="menu"
+          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} hint={t("task.addTabHint")} aria-haspopup="menu"
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
@@ -547,18 +542,18 @@ export function TaskView(props: {
             })} />}
         </Show>
         <Show when={activeAgentTab()}>
-          {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")}
+          {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")} hint={t("queue.hint")}
             badge={queuedPrompts(key()).length} aria-expanded={queueOpen()}
             onClick={() => setQueueOpen(!queueOpen())} />}
         </Show>
         <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
-          {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")}
+          {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")} hint={t("mailbox.inboxHint")}
             badge={props.unreadForTab?.(key()) ?? 0}
             aria-expanded={inboxTab() === key()}
             onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
         </Show>
         <Show when={activeAgentTab() && props.workspaceTasks.length > 1}>
-          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} onClick={() => setHandingOver(true)} />
+          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} hint={t("handoff.openHint")} onClick={() => setHandingOver(true)} />
         </Show>
         <Show when={handingOver() ? activeAgentTab() : undefined}>
           {(key) => (
@@ -729,6 +724,7 @@ export function TaskView(props: {
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
+                        onPasteImage={props.onAttachPastedImage}
                         registerDraftWriter={(prepare) => {
                           primaryWriters.set(id, prepare);
                           const unregister = props.registerDraftTarget(id, () => {
@@ -780,7 +776,8 @@ export function TaskView(props: {
                                 onReport={props.onReportProblem}
                                 theme={props.theme}
                                 onStatus={(status, message) => props.onStatus?.(id, key, status, message)}
-                                registerDraftWriter={(prepare) => {
+                                onPasteImage={props.onAttachPastedImage}
+                        registerDraftWriter={(prepare) => {
                                   secondaryWriters.set(key, prepare);
                                   return () => {
                                     if (secondaryWriters.get(key) === prepare) secondaryWriters.delete(key);
@@ -873,13 +870,13 @@ function RecentChip(props: { show: boolean }) {
 }
 
 /** Sits beside its tab, not inside it, so a button never nests in a button. */
-function TabClose(props: { onClose: () => void; disabled?: boolean }) {
+function TabClose(props: { onClose: () => void; disabled?: boolean; label?: string }) {
   const close = (event: Event) => {
     event.stopPropagation();
     if (!props.disabled) props.onClose();
   };
   return (
-    <button class="tab-close" type="button" aria-label={t("task.closeTab")} aria-disabled={props.disabled} onClick={close}>
+    <button class="tab-close" type="button" aria-label={props.label ?? t("task.closeTab")} title={props.label} aria-disabled={props.disabled} onClick={close}>
       <Icon name="x" class="icon-xs" />
     </button>
   );

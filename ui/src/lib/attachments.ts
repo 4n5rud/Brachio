@@ -27,6 +27,17 @@ export function terminalExcerpt(label: string, lines: readonly string[], count =
 export const attachImages = (id: string, sources: string[]) =>
   invoke<string[]>("task_attach_images", { id, sources });
 
+const IMAGE_EXTENSION: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+
+/** Saves a pasted picture into the task's attachments folder; returns its worktree-relative path. */
+export async function attachPastedImage(id: string, image: Blob): Promise<string> {
+  const extension = IMAGE_EXTENSION[image.type];
+  if (!extension) throw new Error("Only PNG, JPEG, GIF and WebP images can be attached.");
+  return invoke<string>("task_attach_pasted_image", new Uint8Array(await image.arrayBuffer()), {
+    headers: { "x-task-id": id, "x-image-extension": extension },
+  });
+}
+
 /** The path relative to the project folder with `/`, or the path itself when it is elsewhere. */
 export function relativeToProject(root: string, path: string): string {
   const slash = (text: string) => text.replaceAll("\\", "/").replace(/\/+$/u, "");

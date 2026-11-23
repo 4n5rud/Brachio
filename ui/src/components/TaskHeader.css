@@ -79,6 +79,8 @@
 }
 .tab-close {
   display: inline-grid;
+  flex: none;
+  align-self: center;
   border: 0;
   background: transparent;
   padding: 0;
@@ -101,9 +103,16 @@
 .tab-close[aria-disabled="true"] {
   opacity: 0.45;
 }
+/* The icons after the tabs share one centre line; the right-hand group starts at the first inbox icon. */
+.tab-queue {
+  align-self: center;
+}
 .tab-inbox {
   align-self: center;
   margin: 0 6px 0 auto;
+}
+.tab-inbox ~ .tab-inbox {
+  margin-left: 0;
 }
 .tab-add {
   align-self: center;

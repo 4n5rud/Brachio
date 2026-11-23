@@ -76,7 +76,8 @@
 }
 
 
-.agent-card {
+/* Not .agent-card: the new-task dialog's picker uses that name with a different layout. */
+.agent-account-card {
   display: grid;
   gap: 6px;
   justify-items: stretch;
