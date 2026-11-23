@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { bracketedPaste, isCopyKey, isImageOnlyPaste, isNativePasteKey, terminalClipboardText, terminalInputFrames, terminalInputWriter } from "./terminal-paste";
+import { bracketedPaste, isCopyKey, pastedImage, isNativePasteKey, terminalClipboardText, terminalInputFrames, terminalInputWriter } from "./terminal-paste";
 
 const press = (key: string, mods: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) =>
   ({ key, ctrlKey: false, metaKey: false, shiftKey: false, ...mods });
@@ -69,11 +69,12 @@ test("serializes terminal writes and recovers framing after a failed paste", asy
   expect(sent.slice(2)).toEqual(["\x1b[201~", "z"]);
 });
 
-test("treats a paste with a picture and no text as an image paste", () => {
-  const data = (types: string[], text = "") => ({ types, getData: () => text });
-  expect(isImageOnlyPaste(data(["Files"]))).toBe(true);
-  expect(isImageOnlyPaste(data(["image/png"]))).toBe(true);
-  expect(isImageOnlyPaste(data(["Files", "text/plain"], "a.png"))).toBe(false);
-  expect(isImageOnlyPaste(data(["text/plain"], "hello"))).toBe(false);
-  expect(isImageOnlyPaste(data([]))).toBe(false);
+test("finds the picture in a paste that has no text", () => {
+  const png = { type: "image/png" };
+  const data = (files: { type: string }[], text = "") => ({ files, getData: () => text });
+  expect(pastedImage(data([png]))).toBe(png);
+  expect(pastedImage(data([{ type: "application/pdf" }, png]))).toBe(png);
+  expect(pastedImage(data([png], "a.png"))).toBeUndefined();
+  expect(pastedImage(data([{ type: "application/pdf" }]))).toBeUndefined();
+  expect(pastedImage(data([]))).toBeUndefined();
 });
