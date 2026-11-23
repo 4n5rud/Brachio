@@ -33,7 +33,8 @@ import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayo
 import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
-import { agentOfKind, agentOfTab, isAgentTab, isTabKind, type AgentTabKind } from "../lib/tab-kinds";
+import { agentOfKind, agentOfTab, hasTerminal, isAgentTab, isTabKind, type AgentTabKind } from "../lib/tab-kinds";
+import { TabSurfacePlaceholder } from "./TabSurface";
 import { RenameDialog } from "./RenameDialog";
 import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
@@ -512,7 +513,10 @@ export function TaskView(props: {
                 aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
                 onClick={() => { selectTab(props.task.id, tab); }}
                 onContextMenu={(event) => { event.preventDefault(); setTabActions({ anchor: event.currentTarget, tab }); }}>
-                <Show when={agentOfTab(tab)} fallback={<ShellIcon shell={shellOf(tab.shell)} class="icon-sm" />}>
+                <Show when={agentOfTab(tab)} fallback={
+                  <Show when={tab.kind === "shell"} fallback={<Icon name={tab.kind === "browser" ? "globe" : "file"} class="icon-sm" />}>
+                    <ShellIcon shell={shellOf(tab.shell)} class="icon-sm" />
+                  </Show>}>
                   {(agent) => (
                     <>
                       <StatusGlyph tone={tabTone(tabKey(props.task.id, tab))} />
@@ -783,6 +787,13 @@ export function TaskView(props: {
                         const cwd = task.worktreePath;
                         const key = tabKey(id, tab);
                         const tabSelected = () => isTabSelected(id, tab);
+                        if (!hasTerminal(tab.kind)) {
+                          return (
+                            <div class="terminal-cell" hidden={!tabSelected()}>
+                              <TabSurfacePlaceholder kind={tab.kind} name={labels().get(tab.id)} />
+                            </div>
+                          );
+                        }
                         return (
                           <div class="terminal-cell" hidden={!tabSelected()}>
                             <Show when={agentOfTab(tab)} fallback={

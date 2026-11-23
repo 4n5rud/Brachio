@@ -10,6 +10,12 @@ describe("tab labels", () => {
     expect([...labels]).toEqual([["a", "Codex 2"], ["b", "Claude Code"], ["c", "Codex 3"]]);
   });
 
+  it("names a browser tab, and a file tab after its file", () => {
+    const file = (id: string, target: string): TaskTab => ({ id, kind: "file", shell: null, target });
+    const labels = tabLabels("claude", [tab("a", "browser"), file("b", "docs/guide/README.md"), file("c", "docs\\guide\\README.md"), tab("d", "file")], shellName);
+    expect([...labels.values()]).toEqual(["Browser", "README.md", "README.md 2", "File"]);
+  });
+
   it("numbers each shell on its own", () => {
     const labels = tabLabels("claude", [tab("a", "shell", "cmd"), tab("b", "shell", "cmd"), tab("c", "shell", null)], shellName);
     expect([...labels.values()]).toEqual(["Command Prompt", "Command Prompt 2", "PowerShell 7"]);
@@ -20,5 +26,10 @@ describe("tab keys", () => {
   it("names agent and shell terminals apart", () => {
     expect(tabKey("t1", tab("x", "codex"))).toBe("t1:agent-x");
     expect(tabKey("t1", tab("y", "shell"))).toBe("t1:shell-y");
+  });
+
+  it("gives a tab without a terminal a name no terminal can have", () => {
+    expect(tabKey("t1", tab("z", "browser"))).toBe("t1:browser-z");
+    expect(tabKey("t1", tab("f", "file"))).toBe("t1:file-f");
   });
 });
