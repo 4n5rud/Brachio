@@ -1,4 +1,5 @@
-//! Durable extra terminal tabs of a task. Any number of agent or shell tabs can be open at once.
+//! Durable extra tabs of a task: agent and shell terminals, and the browser and file tabs that
+//! point at an address or a file. Any number of each can be open at once.
 
 use std::collections::HashMap;
 
@@ -15,6 +16,10 @@ pub enum TabKind {
     Codex,
     /// A plain shell.
     Shell,
+    /// A web page; the tab's target is its address.
+    Browser,
+    /// A file of the task; the tab's target is its path inside the task's folder.
+    File,
 }
 
 impl TabKind {
@@ -25,7 +30,21 @@ impl TabKind {
             Self::ClaudeCode => "claude_code",
             Self::Codex => "codex",
             Self::Shell => "shell",
+            Self::Browser => "browser",
+            Self::File => "file",
         }
+    }
+
+    /// Whether the tab runs an agent.
+    #[must_use]
+    pub const fn is_agent(self) -> bool {
+        matches!(self, Self::ClaudeCode | Self::Codex)
+    }
+
+    /// Whether a terminal runs behind the tab.
+    #[must_use]
+    pub const fn has_terminal(self) -> bool {
+        matches!(self, Self::ClaudeCode | Self::Codex | Self::Shell)
     }
 
     /// Parses a stored or requested kind name.
@@ -35,6 +54,8 @@ impl TabKind {
             "claude_code" => Some(Self::ClaudeCode),
             "codex" => Some(Self::Codex),
             "shell" => Some(Self::Shell),
+            "browser" => Some(Self::Browser),
+            "file" => Some(Self::File),
             _ => None,
         }
     }
@@ -47,8 +68,9 @@ pub struct TaskTab {
     pub tab_id: String,
     /// What the tab runs.
     pub kind: TabKind,
-    /// Which detected shell a shell tab runs. `None` means the default shell.
-    pub shell_id: Option<String>,
+    /// What the tab points at: the detected shell a shell tab runs (`None` is the default shell),
+    /// a browser tab's address, or a file tab's path inside the task's folder.
+    pub target: Option<String>,
 }
 
 fn read_tab(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<TaskTab>> {
@@ -56,7 +78,7 @@ fn read_tab(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<TaskTab>> {
     Ok(TabKind::parse(&kind).map(|kind| TaskTab {
         tab_id: row.get(0).unwrap_or_default(),
         kind,
-        shell_id: row.get(2).unwrap_or_default(),
+        target: row.get(2).unwrap_or_default(),
     }))
 }
 
@@ -89,7 +111,7 @@ pub fn load_task_tabs(
     let mut tabs: HashMap<String, Vec<TaskTab>> = HashMap::new();
     {
         let mut statement = transaction
-            .prepare("SELECT tab_id, kind, shell_id, task_id FROM task_tabs ORDER BY sort_order IS NULL, sort_order, rowid")?;
+            .prepare("SELECT tab_id, kind, target, task_id FROM task_tabs ORDER BY sort_order IS NULL, sort_order, rowid")?;
         let rows = statement.query_map([], |row| Ok((read_tab(row)?, row.get::<_, String>(3)?)))?;
         for row in rows {
             let (tab, task_id) = row?;
@@ -108,7 +130,7 @@ pub fn load_task_tabs(
 /// Fails when the database cannot be read.
 pub fn task_tabs(connection: &Connection, task_id: &str) -> Result<Vec<TaskTab>, StoreError> {
     let mut statement = connection.prepare(
-        "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1
+        "SELECT tab_id, kind, target FROM task_tabs WHERE task_id = ?1
          ORDER BY sort_order IS NULL, sort_order, rowid",
     )?;
     let rows = statement.query_map([task_id], read_tab)?;
@@ -199,7 +221,7 @@ pub fn task_tab(
 ) -> Result<Option<TaskTab>, StoreError> {
     let tab = connection
         .query_row(
-            "SELECT tab_id, kind, shell_id FROM task_tabs WHERE task_id = ?1 AND tab_id = ?2",
+            "SELECT tab_id, kind, target FROM task_tabs WHERE task_id = ?1 AND tab_id = ?2",
             params![task_id, tab_id],
             read_tab,
         )
@@ -217,9 +239,9 @@ pub fn add_task_tab(
     tab: &TaskTab,
 ) -> Result<(), StoreError> {
     let affected = connection.execute(
-        "INSERT INTO task_tabs (task_id, tab_id, kind, shell_id)
+        "INSERT INTO task_tabs (task_id, tab_id, kind, target)
          SELECT id, ?2, ?3, ?4 FROM tasks WHERE id = ?1 AND archived_at_ms IS NULL",
-        params![task_id, tab.tab_id, tab.kind.as_str(), tab.shell_id],
+        params![task_id, tab.tab_id, tab.kind.as_str(), tab.target],
     )?;
     if affected == 0 {
         return Err(StoreError::NotFound {
@@ -327,7 +349,7 @@ mod tests {
         TaskTab {
             tab_id: id.to_owned(),
             kind,
-            shell_id: None,
+            target: None,
         }
     }
 
@@ -379,5 +401,56 @@ mod tests {
         assert!(load_task_tabs(&mut connection, &legacy)
             .expect("reload")
             .is_empty());
+    }
+
+    #[test]
+    fn browser_and_file_tabs_keep_their_target_and_unknown_kinds_are_skipped() {
+        let connection = connection_with_task();
+        let with_target = |id: &str, kind, target: &str| TaskTab {
+            tab_id: id.to_owned(),
+            kind,
+            target: Some(target.to_owned()),
+        };
+        add_task_tab(
+            &connection,
+            "t1",
+            &with_target("w", TabKind::Browser, "https://example.com/"),
+        )
+        .expect("browser");
+        add_task_tab(
+            &connection,
+            "t1",
+            &with_target("f", TabKind::File, "docs/README.md"),
+        )
+        .expect("file");
+        connection
+            .execute(
+                "INSERT INTO task_tabs (task_id, tab_id, kind) VALUES ('t1', 'future', 'hologram')",
+                [],
+            )
+            .expect("a kind from a newer build");
+
+        let tabs = task_tabs(&connection, "t1").expect("list");
+        assert_eq!(
+            tabs,
+            [
+                with_target("w", TabKind::Browser, "https://example.com/"),
+                with_target("f", TabKind::File, "docs/README.md"),
+            ]
+        );
+        assert!(task_tab(&connection, "t1", "future")
+            .expect("read")
+            .is_none());
+    }
+
+    #[test]
+    fn only_agents_and_shells_have_a_terminal() {
+        assert!(TabKind::Codex.is_agent() && TabKind::ClaudeCode.is_agent());
+        assert!(!TabKind::Shell.is_agent() && !TabKind::Browser.is_agent());
+        assert!(TabKind::Shell.has_terminal());
+        assert!(!TabKind::Browser.has_terminal() && !TabKind::File.has_terminal());
+        assert_eq!(TabKind::parse("browser"), Some(TabKind::Browser));
+        assert_eq!(TabKind::parse("file"), Some(TabKind::File));
+        assert_eq!(TabKind::parse("hologram"), None);
     }
 }

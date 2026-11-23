@@ -33,7 +33,7 @@ import { loadLayouts, loadSecondaryAgents, loadSelectedSecondaryAgents, saveLayo
 import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
-import { agentOfKind, agentOfTab, isAgentTab, type AgentTabKind } from "../lib/tab-kinds";
+import { agentOfKind, agentOfTab, isAgentTab, isTabKind, type AgentTabKind } from "../lib/tab-kinds";
 import { RenameDialog } from "./RenameDialog";
 import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
@@ -144,8 +144,10 @@ export function TaskView(props: {
     void loadShells();
     if (!("__TAURI_INTERNALS__" in window)) return;
     const legacy = Object.fromEntries(loadSecondaryAgents());
-    void invoke<Record<string, TaskTab[]>>("task_open_tabs", { legacy }).then((tabs) => {
+    void invoke<Record<string, TaskTab[]>>("task_open_tabs", { legacy }).then((stored) => {
       if (disposed) return;
+      // A kind this window does not draw yet (a browser or file tab) is left out rather than breaking the bar.
+      const tabs = Object.fromEntries(Object.entries(stored).map(([id, list]) => [id, list.filter((tab) => isTabKind(tab.kind))]));
       for (const list of Object.values(tabs)) for (const tab of list) restoredTabs.add(tab.id);
       setTabsByTask(new Map(Object.entries(tabs)));
       setTabsReady(true);

@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0025_task_agent_kind_explicit.sql"),
     include_str!("../migrations/0026_task_profile.sql"),
     include_str!("../migrations/0027_task_linked_prs.sql"),
+    include_str!("../migrations/0028_task_tab_target.sql"),
 ];
 
 /// Why a storage call failed.
@@ -253,6 +254,42 @@ mod tests {
             .map(|tab| tab.tab_id)
             .collect();
         assert_eq!(tabs, ["b", "a"]);
+    }
+
+    #[test]
+    fn a_shell_tab_keeps_its_shell_as_the_tab_target_after_the_upgrade() {
+        let mut connection = Connection::open_in_memory().expect("open");
+        for sql in &MIGRATIONS[..27] {
+            connection.execute_batch(sql).expect("old migration");
+        }
+        connection
+            .pragma_update(None, "user_version", 27)
+            .expect("version");
+        connection
+            .execute_batch(
+                "INSERT INTO repos (id, name, path, default_branch, added_at_ms) VALUES ('r1', 'one', '/1', 'main', 1);
+                 INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+                 VALUES ('t1', 'r1', 't', 'p', 'b1', '/w1', 'active', 1);
+                 INSERT INTO task_tabs (task_id, tab_id, kind, shell_id) VALUES
+                    ('t1', 'a', 'shell', 'zsh'), ('t1', 'b', 'shell', NULL), ('t1', 'c', 'codex', NULL);",
+            )
+            .expect("old rows");
+
+        migrate(&mut connection).expect("upgrade");
+
+        let targets: Vec<(String, Option<String>)> = crate::task_tabs(&connection, "t1")
+            .expect("tabs")
+            .into_iter()
+            .map(|tab| (tab.tab_id, tab.target))
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                ("a".to_owned(), Some("zsh".to_owned())),
+                ("b".to_owned(), None),
+                ("c".to_owned(), None),
+            ]
+        );
     }
 
     #[test]
