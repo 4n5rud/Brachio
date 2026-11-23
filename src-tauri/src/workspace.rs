@@ -431,13 +431,19 @@ async fn create_task_unprofiled(
             .unwrap_or_else(|| repo.default_branch.clone()),
     };
     let repo_path = repo.path.clone();
+    crate::pending_worktrees::record(&crate::pending_worktrees::PendingWorktree {
+        task_id: id.clone(),
+        repo_path: repo.path.clone(),
+        worktree_path: path.clone(),
+        branch: branch.clone(),
+    });
     let added = tauri::async_runtime::spawn_blocking(move || {
         brachio_git::add_worktree(&Git::new(&repo_path), &add)
     });
-    added
-        .await
-        .map_err(to_text)?
-        .map_err(|error| crate::folder_access::tag(&repo.path, error.to_string()))?;
+    added.await.map_err(to_text)?.map_err(|error| {
+        crate::pending_worktrees::clear(&id);
+        crate::folder_access::tag(&repo.path, error.to_string())
+    })?;
 
     // Pinning the conversation id lets the task resume exactly its own
     // conversation after a restart.
@@ -477,7 +483,10 @@ async fn create_task_unprofiled(
         Ok(record)
     });
     let task = match saved {
-        Ok(task) => task,
+        Ok(task) => {
+            crate::pending_worktrees::clear(&id);
+            task
+        }
         Err(error) => {
             let location = path.display().to_string();
             let cleanup = tauri::async_runtime::spawn_blocking(move || {
@@ -486,6 +495,9 @@ async fn create_task_unprofiled(
             .await
             .map_err(to_text)
             .and_then(|result| result.map_err(to_text));
+            if cleanup.is_ok() {
+                crate::pending_worktrees::clear(&id);
+            }
             return Err(match cleanup {
                 Ok(()) if refused => error,
                 Ok(()) => format!("Could not register task. The new worktree was removed. {error}"),

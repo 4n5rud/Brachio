@@ -18,6 +18,7 @@ mod keep_awake;
 mod log_file;
 mod mailbox;
 mod orchestration;
+mod pending_worktrees;
 mod pr_status;
 mod project_add;
 mod project_cues;
@@ -621,6 +622,19 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = brachio_store::expire_read_messages(&connection, cutoff) {
         tracing::warn!(%error, "could not remove old read messages");
     }
+    let pending = folder.join("pending-worktrees");
+    pending_worktrees::recover(&pending, |worktree| {
+        brachio_store::TaskRecord::list_open(&connection)
+            .into_iter()
+            .flatten()
+            .chain(
+                brachio_store::TaskRecord::list_archived(&connection)
+                    .into_iter()
+                    .flatten(),
+            )
+            .any(|task| task.id == worktree.task_id)
+    });
+    pending_worktrees::init(pending);
     app.manage(workspace::Database(Mutex::new(connection)));
     app.manage(workspace::TaskWorktreeLocks::default());
     app.manage(workspace::TaskCreateReceipts::default());
