@@ -39,7 +39,7 @@ pub fn run() {
         .and_then(|text| text.trim().parse::<u32>().ok())
         .unwrap_or(0);
     if unread != reported {
-        let _ = fs::write(&state, unread.to_string());
+        let _ = brachio_fs::write_atomic(&state, unread.to_string().as_bytes());
     }
     if let Some(output) = announcement(&event, unread, reported) {
         println!("{output}");

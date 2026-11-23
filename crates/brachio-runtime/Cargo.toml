@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 brachio-core.workspace = true
+brachio-fs.workspace = true
 brachio-pty.workspace = true
 clap.workspace = true
 interprocess = { version = "2.4.8", features = ["tokio"] }

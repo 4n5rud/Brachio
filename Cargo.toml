@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/brachio-core",
     "crates/brachio-process",
+    "crates/brachio-fs",
     "crates/brachio-pty",
     "crates/brachio-runtime",
     "crates/brachio-git",
@@ -18,6 +19,7 @@ members = [
 default-members = [
     "crates/brachio-core",
     "crates/brachio-process",
+    "crates/brachio-fs",
     "crates/brachio-pty",
     "crates/brachio-runtime",
     "crates/brachio-git",
@@ -38,6 +40,7 @@ repository = "https://github.com/4n5rud/Brachio"
 [workspace.dependencies]
 brachio-core = { path = "crates/brachio-core" }
 brachio-process = { path = "crates/brachio-process" }
+brachio-fs = { path = "crates/brachio-fs" }
 brachio-pty = { path = "crates/brachio-pty" }
 brachio-git = { path = "crates/brachio-git" }
 brachio-agent = { path = "crates/brachio-agent" }
