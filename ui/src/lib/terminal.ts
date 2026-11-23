@@ -90,6 +90,8 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
 
 interface OpenedTerminal {
   id: number;
+  /** The first prompt as the agent gets it, with a child task's preamble above it. */
+  firstPrompt: string | null;
   promptDelivery: PromptDelivery;
   resumed: boolean;
   attached: boolean;
@@ -98,6 +100,8 @@ interface OpenedTerminal {
 
 export interface TerminalHandle {
   id: number;
+  /** Type this, not the caller's own prompt, when `promptDelivery` is `type_in`. */
+  firstPrompt: string | null;
   /** `type_in` means the caller still has to type the prompt. */
   promptDelivery: PromptDelivery;
   /** Whether setup input and first prompts should be suppressed. */
@@ -131,6 +135,7 @@ export async function openTerminal(
   const id = opened.id;
   return {
     id,
+    firstPrompt: opened.firstPrompt ?? null,
     promptDelivery: opened.promptDelivery,
     resumed: opened.resumed,
     attached: opened.attached,

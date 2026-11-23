@@ -48,7 +48,7 @@ import { notificationSettings } from "./lib/notification-settings";
 import { blockedFolder, openFolderAccessSettings } from "./lib/folder-access";
 import { adoptCreatedTask } from "./lib/created-task-adoption";
 import { watchCreatedTasks, watchStartedTasksThenSchedule } from "./lib/created-task-events";
-import { MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
+import { keysWithNewMail, MAILBOX_REMINDER, watchMailbox } from "./lib/mailbox";
 import { registerActions, registerGoToSource } from "./lib/actions";
 import { CuesDialog } from "./components/CuesDialog";
 import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
@@ -64,6 +64,7 @@ import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./l
 import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import { statusTone, type AgentState } from "./lib/status";
+import { recordTurnBoundary, turnActive } from "./lib/checkpoints";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
 import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
 import { sendShellInput } from "./lib/shell-input";
@@ -536,6 +537,16 @@ export function App() {
     return agreed && stillAvailable() && await insert();
   };
 
+  // Codex has no hook that can announce mail, so the notice is typed into its input, never submitted.
+  const noticeCodexMail = async (key: string) => {
+    const id = taskIdOf(key);
+    const target = draftTargets.get(id)?.();
+    if (selected()?.id !== id || target?.key !== key || target.agent !== AGENT_NAME.codex) return;
+    if (!activeAgentKey(id, key) || questions().some((question) => question.key === key)) return;
+    const prepared = target.prepare(pasteText(MAILBOX_REMINDER));
+    if (prepared && !prepared.userTyped) await prepared.insert();
+  };
+
   const report = (failure: unknown) => {
     const message = String(failure);
     const blocked = blockedFolder(message);
@@ -590,7 +601,10 @@ export function App() {
     if (!task || !activeAgentKey(taskId, sessionKey)) return;
     const previous = live().get(taskId)?.get(sessionKey)?.status ?? { state: "unknown" };
     const at = Date.now();
+    const taskActive = () => [...(live().get(taskId)?.values() ?? [])].some((report) => turnActive(report.status));
+    const wasActive = taskActive();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    if (inTauri && wasActive !== taskActive()) void recordTurnBoundary(taskId, taskActive());
     const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
     if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     const key = notificationKey(previous, status);
@@ -1058,7 +1072,10 @@ export function App() {
       onCleanup(() => stopWindowWatch?.());
       detectKeepAwake();
       onCleanup(watchMailbox((unread) => {
-        setMailbox((previous) => ({ unread, revision: previous.revision + 1 }));
+        const previous = mailbox();
+        setMailbox({ unread, revision: previous.revision + 1 });
+        if (previous.revision === 0) return;
+        for (const key of keysWithNewMail(previous.unread, unread)) void noticeCodexMail(key).catch(report);
       }));
       onCleanup(watchCreatedTasks((record) => void adoptCreated(record).catch(report)));
       onCleanup(watchStartedTasksThenSchedule((record) => void adoptCreated(record, true).catch(report)));

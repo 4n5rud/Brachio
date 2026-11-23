@@ -599,7 +599,9 @@ pub async fn task_retry_setup_copy(
 /// Hides a task from the list. The worktree and branch stay on disk.
 #[tauri::command]
 pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), String> {
-    archive_unless_children_open(&*database.lock()?, &id, now_ms())
+    archive_unless_children_open(&*database.lock()?, &id, now_ms())?;
+    crate::task_checkpoints::forget_for_task(&database, &id);
+    Ok(())
 }
 
 /// Stable start of the refusal, so the UI can recognise it.
@@ -1092,6 +1094,7 @@ async fn delete_task(
             let current = brachio_git::unsaved_work(&git, &task.worktree_path, &task.branch)
                 .map_err(to_text)?;
             ensure_loss_unchanged(&expected_fingerprint, &current.fingerprint)?;
+            crate::task_checkpoints::forget(&git, &task.id);
             brachio_git::discard_worktree(&git, &task.worktree_path, &task.branch).map_err(
                 |error| {
                     let text = to_text(error);

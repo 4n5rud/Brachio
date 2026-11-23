@@ -26,6 +26,7 @@ mod runtime_terminals;
 mod session_tokens;
 mod system_check;
 mod task_activity;
+mod task_checkpoints;
 mod task_file_actions;
 mod task_file_ops;
 mod task_folder;
@@ -42,6 +43,7 @@ mod terminal_status;
 mod tray_menu;
 mod update_release;
 mod usage_analytics;
+mod worker_preamble;
 mod workspace;
 mod worktree_import;
 
@@ -275,6 +277,7 @@ pub fn run() {
         .manage(session_tokens::TokenTrackers::default())
         .manage(usage_analytics::UsageScanLock::default())
         .manage(task_overlaps::ChangedPathCache::default())
+        .manage(task_checkpoints::TurnTracker::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(claude_usage::ClaudeUsageCache::default())
         .manage(Arc::new(qa_run::QaResults::default()))
@@ -348,6 +351,8 @@ pub fn run() {
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,
+            orchestration::orchestration_reopen_child,
+            worker_preamble::task_worker_preamble,
             workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,
@@ -397,6 +402,10 @@ pub fn run() {
             external_link::open_external_link,
             issue_report::open_issue_draft,
             workspace::task_merge_preview,
+            task_checkpoints::task_checkpoint_turn,
+            task_checkpoints::task_checkpoint_list,
+            task_checkpoints::task_checkpoint_diff,
+            task_checkpoints::task_checkpoint_restore,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,

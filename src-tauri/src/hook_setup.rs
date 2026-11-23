@@ -311,4 +311,50 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn no_launch_command_carries_a_permission_bypass_flag() {
+        use brachio_agent::AgentKind;
+        let folder = tempfile::tempdir().expect("tempdir");
+        let setup = HookSetup {
+            endpoint: "endpoint".to_owned(),
+            settings: Some(folder.path().join("settings.json")),
+            helper_folder: Some(Path::new("helper").to_path_buf()),
+            plugin: Some(folder.path().join("plugin")),
+            codex_instructions: Some(
+                super::write_codex_instructions(folder.path()).expect("write"),
+            ),
+        };
+        let mut all: Vec<String> = setup.claude_arguments();
+        all.extend(setup.codex_arguments());
+        for kind in AgentKind::ALL {
+            let launches = [
+                kind.interactive(),
+                kind.interactive_with_prompt("do it"),
+                kind.resume("abc"),
+                kind.structured("do it"),
+            ];
+            for launch in launches {
+                all.push(launch.program.to_owned());
+                all.extend(launch.args);
+            }
+            all.extend(kind.session_id_args("abc"));
+        }
+        for argument in &all {
+            let lower = argument.to_lowercase();
+            for banned in [
+                "dangerously",
+                "bypass",
+                "yolo",
+                "skip-permissions",
+                "allow-all",
+                "full-auto",
+                "approval-mode",
+                "permission-mode",
+                "sandbox",
+            ] {
+                assert!(!lower.contains(banned), "{banned} in {argument:?}");
+            }
+        }
+    }
 }

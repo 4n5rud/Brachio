@@ -93,6 +93,7 @@ export const en = {
   "task.openedTasks": "Previously opened tasks",
   "task.originalPrompt": "Original task prompt",
   "task.draftOriginalPrompt": "Insert original prompt",
+  "task.workerPreamble": "Brief added above the first prompt for this child task",
   "task.promptDrafted": "Prompt inserted in the agent input.",
   "task.archive": "Archive task",
   "task.archived": "Archived tasks",
@@ -674,6 +675,7 @@ export const en = {
   "orchestration.note": "A child task is complete only when you confirm its result. An agent finishing does not count.",
   "orchestration.scheduler": "Start automatically",
   "orchestration.schedulerNote": "Child tasks start once everything they wait for is approved. Nothing is merged. Tasks running at once at most",
+  "orchestration.reopen": "Try again",
   "orchestration.empty": "This task has no child tasks.",
   "orchestration.noHandoff": "No result report yet.",
   "orchestration.dependsOn": "Waits for:",
@@ -907,6 +909,19 @@ export const en = {
   "project.addFailedNote": "Nothing was added. Fix the problem and try again.",
 
   "time.now": "now",
+  "checkpoints.title": "Restore points",
+  "checkpoints.empty": "Restore points appear here after the agent changes files.",
+  "checkpoints.turnStart": "Before turn",
+  "checkpoints.turnEnd": "After turn",
+  "checkpoints.beforeRestore": "Before restore",
+  "checkpoints.restore": "Restore",
+  "checkpoints.restoreTitle": "Restore files to point #{number}?",
+  "checkpoints.restoreBody": "Files in this task's folder go back to how they were at this point. Files added since are removed. A backup point is saved first, so you can undo this. Git branch, commits and staging are not changed.",
+  "checkpoints.conversationNote": "The agent's conversation is NOT rolled back. It still remembers its later work, so tell it the files were restored.",
+  "checkpoints.restored": "Files restored. Backup saved as point #{number}.",
+  "checkpoints.restoreFailed": "Could not restore files",
+  "checkpoints.working": "Restore is off while the agent is working.",
+  "checkpoints.oldest": "The oldest point has nothing before it to compare with.",
 } as const;
 
 export type MessageKey = keyof typeof en;

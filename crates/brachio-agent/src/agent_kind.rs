@@ -208,32 +208,4 @@ mod tests {
         assert_eq!(AgentKind::Grok.resume("abc"), AgentKind::Grok.interactive());
         assert!(!AgentKind::Grok.accepts_session_id());
     }
-
-    #[test]
-    fn no_agent_is_launched_with_a_flag_that_skips_approvals() {
-        const BYPASS: [&str; 6] = [
-            "--dangerously",
-            "--yolo",
-            "--bypass",
-            "--auto-approve",
-            "--always-approve",
-            "--no-confirm",
-        ];
-        for kind in AgentKind::ALL {
-            let launches = [
-                kind.interactive(),
-                kind.interactive_with_prompt("do it"),
-                kind.resume("abc"),
-                kind.structured("do it"),
-            ];
-            for launch in launches {
-                for argument in &launch.args {
-                    assert!(
-                        !BYPASS.iter().any(|flag| argument.starts_with(flag)),
-                        "{kind:?}: {argument}"
-                    );
-                }
-            }
-        }
-    }
 }
