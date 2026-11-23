@@ -8,8 +8,10 @@ const child = (id: string, waitsFor: Array<[string, string]> = []): ChildView =>
   branch: id,
   state: "queued",
   reason: null,
+  startBlocked: false,
   dependencies: waitsFor.map(([dependency, state]) => ({ id: dependency, title: dependency, state })),
   handoff: null,
+  gates: [],
 });
 
 describe("planLayout", () => {

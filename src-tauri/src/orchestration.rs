@@ -9,10 +9,11 @@ use brachio_core::task_graph::TaskState;
 use brachio_git::Git;
 use brachio_runtime::mailbox::MailResponse;
 use brachio_store::{
-    decide_handoff, decide_handoff_then, fail_lost, fail_running, load_graph, qa_result_by_id,
-    running_children, schedule_next, scheduled_leads, scheduler_enabled, send_message,
-    set_scheduler_enabled, state_reason, submit_handoff, Handoff, HandoffReview, HandoffSource,
-    NewHandoff, NewMessage, RepoRecord, TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
+    decide_handoff, decide_handoff_then, fail_lost, load_graph, pending_gates, qa_result_by_id,
+    record_start_failure, reopen_failed, running_children, schedule_next, scheduled_leads,
+    scheduler_enabled, send_message, set_scheduler_enabled, start_circuit_broken, state_reason,
+    submit_handoff, Handoff, HandoffReview, HandoffSource, NewHandoff, NewMessage, RepoRecord,
+    TaskRecord, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -55,8 +56,23 @@ pub struct ChildView {
     pub state: String,
     /// Why Brachio failed it, such as "lost after restart".
     pub reason: Option<String>,
+    /// It failed to start too many times; only the user can reopen it.
+    pub start_blocked: bool,
     pub dependencies: Vec<DependencyView>,
     pub handoff: Option<HandoffView>,
+    /// Decisions the child asked the user to make; they hold back what depends on it.
+    pub gates: Vec<GateView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GateView {
+    pub id: String,
+    /// The child's words; untrusted.
+    pub subject: String,
+    pub body: String,
+    pub options: Vec<String>,
+    pub created_at_ms: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,8 +163,20 @@ pub fn build_view(connection: &Connection, lead_id: &str) -> Result<Orchestratio
             branch: branch.clone(),
             state: state.as_str().to_owned(),
             reason: state_reason(connection, id).map_err(|e| e.to_string())?,
+            start_blocked: start_circuit_broken(connection, id).map_err(|e| e.to_string())?,
             dependencies,
             handoff,
+            gates: pending_gates(connection, id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|gate| GateView {
+                    id: gate.message_id,
+                    subject: gate.subject,
+                    body: gate.body,
+                    options: gate.options,
+                    created_at_ms: gate.created_at_ms,
+                })
+                .collect(),
         });
     }
     Ok(OrchestrationView {
@@ -327,6 +355,14 @@ pub fn review_decision(
     let handoff = Handoff::get(connection, handoff_id).map_err(|e| e.to_string())?;
     let task = TaskRecord::get(connection, &handoff.task_id).map_err(|e| e.to_string())?;
     if approved {
+        if !pending_gates(connection, &task.id)
+            .map_err(|e| e.to_string())?
+            .is_empty()
+        {
+            return Err(
+                "This task has an unanswered decision. Answer it before approving.".to_owned(),
+            );
+        }
         let head = head_of(&task.worktree_path)?;
         if head != handoff.commit_sha {
             return Err(format!(
@@ -414,8 +450,9 @@ fn start_ready_children(database: &Database) -> Result<Vec<CreatedTask>, String>
     })
 }
 
-/// A child whose setup cannot be read is failed with that error rather than launched as if it
-/// had no setup; the failure blocks its dependents and shows as the task's reason.
+/// A child whose setup cannot be read is not launched as if it had no setup. The start is
+/// retried, and after `MAX_START_FAILURES` failures the child stays failed (blocking its
+/// dependents) until the user reopens it.
 fn start_children(
     connection: &mut Connection,
     now: i64,
@@ -431,7 +468,8 @@ fn start_children(
                 Err(error) => {
                     let reason = format!("invalid setup configuration: {error}");
                     tracing::warn!(task = %id, %reason, "child task not started");
-                    fail_running(connection, &[id], &reason, now).map_err(|e| e.to_string())?;
+                    record_start_failure(connection, &id, &reason, now)
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -503,6 +541,25 @@ pub fn orchestration_set_scheduler(
     schedule_all(&app);
     if let Err(error) = app.emit(CHANGED_EVENT, ()) {
         tracing::debug!(%error, "could not tell the window about the scheduler change");
+    }
+    Ok(())
+}
+
+/// The user's decision to try a child that stopped after repeated start failures again.
+#[tauri::command]
+pub fn orchestration_reopen_child(
+    app: AppHandle,
+    database: State<'_, Database>,
+    task_id: String,
+) -> Result<(), String> {
+    {
+        let mut connection = database.lock()?;
+        reopen_failed(&mut connection, &task_id, crate::pr_status::now_ms())
+            .map_err(|e| e.to_string())?;
+    }
+    schedule_all(&app);
+    if let Err(error) = app.emit(CHANGED_EVENT, ()) {
+        tracing::debug!(%error, "could not tell the window about the reopened task");
     }
     Ok(())
 }
@@ -823,10 +880,19 @@ mod tests {
     fn a_child_with_invalid_setup_fails_instead_of_starting_with_none() {
         let (_dir, mut db) = setup();
         brachio_store::set_scheduler_enabled(&db, "lead", true).unwrap();
-        let started = start_children(&mut db, 1, |_| Err("bad brachio.toml".to_owned())).unwrap();
-        assert!(started.is_empty());
-        assert_eq!(build_view(&db, "lead").unwrap().children[0].state, "failed");
+        let bad = |_: &Path| Err("bad brachio.toml".to_owned());
+        for pass in 1..brachio_store::MAX_START_FAILURES {
+            assert!(start_children(&mut db, 1, bad).unwrap().is_empty());
+            let view = build_view(&db, "lead").unwrap();
+            assert_eq!(view.children[0].state, "queued", "pass {pass}");
+            assert!(!view.children[0].start_blocked);
+        }
+        assert!(start_children(&mut db, 1, bad).unwrap().is_empty());
+        let view = build_view(&db, "lead").unwrap();
+        assert_eq!(view.children[0].state, "failed");
+        assert!(view.children[0].start_blocked);
         let reason = brachio_store::state_reason(&db, "child").unwrap();
         assert!(reason.is_some_and(|r| r.contains("invalid setup configuration: bad brachio.toml")));
+        assert!(start_children(&mut db, 2, bad).unwrap().is_empty());
     }
 }

@@ -1,7 +1,7 @@
 import { IconButton } from "./ui/IconButton";
 import { Select } from "./ui/Input";
 import { Button } from "./ui/Button";
-import { For, Show, createComputed, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createComputed, createResource, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { TaskRow } from "../lib/tasks";
@@ -35,6 +35,8 @@ import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
+import { PromptQueue } from "./PromptQueue";
+import { SEND_SETTLE_MS, autoSendOn, queueAction, queuedPrompts, removeQueuedPrompt } from "../lib/prompt-queue";
 import { isMac } from "../lib/shortcut";
 import { clearSelectionRequest, fencedSelection, selectionRequest } from "../lib/selection-send";
 import { pushToast } from "../lib/toasts";
@@ -105,6 +107,10 @@ export function TaskView(props: {
   onReportProblem?: (message: string) => void;
 }) {
   const [inboxTab, setInboxTab] = createSignal<string>();
+  const [workerPreamble] = createResource(
+    () => (props.task.parentTaskId ? props.task.id : undefined),
+    (taskId) => invoke<string | null>("task_worker_preamble", { taskId }).catch(() => null),
+  );
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredTabs = new Set<string>();
@@ -294,6 +300,39 @@ export function TaskView(props: {
     if (prepared && await prepared.insert()) pushToast({ tone: "success", message: t("selection.sent") });
     else pushToast({ tone: "error", message: t("selection.notReady") });
   };
+  // Queued prompts go to a tab when its agent is idle. A tab is held after a send (or a draft) until
+  // the agent has left idle, so one prompt is never followed at once by the next.
+  const queueHolds = new Map<string, number>();
+  const [queueTick, setQueueTick] = createSignal(0);
+  const drainQueue = (key: string) => {
+    const tone = tabTone(key);
+    if (tone !== "ready") { queueHolds.delete(key); return; }
+    const item = queuedPrompts(key)[0];
+    if (!item) return;
+    const heldAt = queueHolds.get(key);
+    if (heldAt !== undefined && Date.now() - heldAt < SEND_SETTLE_MS) return;
+    const writer = key === terminalKey(props.task.id, "agent") ? primaryWriters.get(props.task.id) : secondaryWriters.get(key);
+    const prepared = writer?.(item.text);
+    const action = prepared && queueAction({ tone, hasItems: true, auto: autoSendOn(key), userTyped: prepared.userTyped,
+      holding: false });
+    if (!prepared || !action) return;
+    queueHolds.set(key, action === "draft" ? Number.POSITIVE_INFINITY : Date.now());
+    void prepared.insert(action === "send").then((ok) => {
+      if (ok) removeQueuedPrompt(key, item.id);
+      else queueHolds.delete(key);
+    }).catch(() => queueHolds.delete(key));
+  };
+  onMount(() => {
+    const timer = setInterval(() => setQueueTick((tick) => tick + 1), 1500);
+    onCleanup(() => clearInterval(timer));
+  });
+  createEffect(() => {
+    queueTick();
+    const id = props.task.id;
+    if (!props.visible) return;
+    for (const key of [terminalKey(id, "agent"), ...agentTabs(id).map((tab) => tabKey(id, tab))]) drainQueue(key);
+  });
+  const [queueOpen, setQueueOpen] = createSignal(false);
   const activeAgentTab = () => {
     if (layout() === "shell") return undefined;
     const id = props.task.id;
@@ -448,6 +487,11 @@ export function TaskView(props: {
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
+        <Show when={activeAgentTab()}>
+          {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")}
+            badge={queuedPrompts(key()).length} aria-expanded={queueOpen()}
+            onClick={() => setQueueOpen(!queueOpen())} />}
+        </Show>
         <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
           {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")}
             badge={props.unreadForTab?.(key()) ?? 0}
@@ -532,6 +576,14 @@ export function TaskView(props: {
         </Show>
       </div>
       <div class="pane">
+        <Show when={workerPreamble()}>
+          {(preamble) => (
+            <details class="terminal-recovery">
+              <summary>{t("task.workerPreamble")}</summary>
+              <pre class="terminal-recovery-prompt">{preamble()}</pre>
+            </details>
+          )}
+        </Show>
         <Show when={props.task.prompt}>
           {(prompt) => (
             <details class="terminal-recovery">
@@ -681,6 +733,9 @@ export function TaskView(props: {
             }}
           </For>
         </div>
+        <Show when={queueOpen() ? activeAgentTab() : undefined} keyed>
+          {(key) => <PromptQueue tabKey={key} />}
+        </Show>
         <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
           {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
             sourceTitle={(fromKey) => props.findTask(taskIdOf(fromKey))?.title ?? fromKey}

@@ -2,6 +2,7 @@
 
 mod child_report;
 mod database;
+mod decision_gate_record;
 mod message_record;
 mod orchestration_record;
 mod orchestration_schedule;
@@ -18,6 +19,9 @@ mod usage_record;
 
 pub use child_report::{child_reports, ChildReport};
 pub use database::{open, open_in_memory, StoreError};
+pub use decision_gate_record::{
+    gate_options, pending_gate, pending_gates, PendingGate, MAX_GATE_OPTIONS, MAX_GATE_OPTION_CHARS,
+};
 pub use message_record::{
     dismiss_messages, expire_read_messages, forget_task_messages, mark_read, peek_inbox,
     peek_next_batch, peek_unread, recent_messages, reply_recipient, send_message, take_unread,
@@ -30,8 +34,9 @@ pub use orchestration_record::{
     HandoffSource, NewHandoff, OrchestrationError,
 };
 pub use orchestration_schedule::{
-    fail_lost, fail_running, running_children, schedule_next, scheduled_leads, scheduler_enabled,
-    set_scheduler_enabled, state_reason, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN,
+    fail_lost, fail_running, record_start_failure, reopen_failed, running_children, schedule_next,
+    scheduled_leads, scheduler_enabled, set_scheduler_enabled, start_circuit_broken, state_reason,
+    StartOutcome, LOST_AFTER_RESTART, MAX_RUNNING_CHILDREN, MAX_START_FAILURES,
 };
 pub use pr_status_record::{forget_pr_status, load_pr_status, save_pr_status};
 pub use project_cue_record::{

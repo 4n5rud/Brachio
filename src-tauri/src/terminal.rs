@@ -97,6 +97,9 @@ pub struct Opened {
     pub id: SessionId,
     /// Whether the UI still has to type the first prompt in.
     pub prompt_delivery: PromptDelivery,
+    /// The first prompt as the agent gets it, with a child task's preamble above it. The UI
+    /// types this text, not its own, when it has to type the prompt in.
+    pub first_prompt: Option<String>,
     /// Whether setup input and first prompts should be suppressed.
     pub resumed: bool,
     /// Whether the runtime already owned this live process.
@@ -220,8 +223,12 @@ pub async fn terminal_open(
     if requested != worktree || request.agent != owner.agent {
         return Err("Terminal request does not match the registered task tab.".to_owned());
     }
-    request.cwd = owner.task.worktree_path;
+    request.cwd = owner.task.worktree_path.clone();
     request.session_id = owner.conversation;
+    if request.agent.is_some() && !request.resume {
+        request.prompt =
+            crate::worker_preamble::first_prompt(&*database.lock()?, &owner.task, request.prompt)?;
+    }
     let shell_id = owner.shell;
     request.project_root = brachio_store::RepoRecord::get(&*database.lock()?, &owner.task.repo_id)
         .ok()
@@ -253,6 +260,7 @@ pub async fn terminal_open(
     if let (Some(_), Some(key)) = (request.agent, request.key.as_deref()) {
         environment.extend(hook.mail_environment(key));
     }
+    let first_prompt = request.prompt.clone();
     let (command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => {
             let (prepared, returned_request) = tauri::async_runtime::spawn_blocking(move || {
@@ -289,6 +297,7 @@ pub async fn terminal_open(
         if let Some((id, attached)) = opened.map_err(|error| to_message(&error))? {
             return Ok(Opened {
                 id,
+                first_prompt,
                 prompt_delivery: if attached {
                     PromptDelivery::None
                 } else {
@@ -320,6 +329,7 @@ pub async fn terminal_open(
     }
     Ok(Opened {
         id,
+        first_prompt,
         prompt_delivery,
         resumed,
         attached: false,

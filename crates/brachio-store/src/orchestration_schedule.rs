@@ -5,6 +5,7 @@
 use brachio_core::task_graph::TaskState;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+use crate::decision_gate_record::pending_gates;
 use crate::orchestration_record::{load_graph, transition_in, OrchestrationError};
 
 /// Children of one lead that may run at the same time.
@@ -107,10 +108,19 @@ pub fn schedule_next(
         rows.collect::<Result<_, _>>()?
     };
     let graph = load_graph(&transaction, lead_id)?;
+    let mut gated = Vec::new();
+    for id in &open {
+        for dependency in graph.dependencies_of(id)? {
+            if !pending_gates(&transaction, dependency)?.is_empty() {
+                gated.push(id.clone());
+                break;
+            }
+        }
+    }
     let promote: Vec<String> = graph
         .ready_tasks()
         .into_iter()
-        .filter(|id| open.iter().any(|open_id| open_id == id))
+        .filter(|id| open.iter().any(|open_id| open_id == id) && !gated.iter().any(|g| g == id))
         .map(str::to_owned)
         .collect();
     for id in &promote {
@@ -128,7 +138,7 @@ pub fn schedule_next(
         if running >= MAX_RUNNING_CHILDREN {
             break;
         }
-        if graph.state(id)? == TaskState::Ready {
+        if graph.state(id)? == TaskState::Ready && !gated.contains(id) {
             transition_in(&transaction, id, TaskState::Running, now_ms)?;
             started.push(id.clone());
             running += 1;
@@ -136,6 +146,131 @@ pub fn schedule_next(
     }
     transaction.commit()?;
     Ok(started)
+}
+
+/// Failed starts of one child, in a row, after which it stays failed until the user reopens it.
+pub const MAX_START_FAILURES: u32 = 3;
+
+/// What recording a failed start led to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartOutcome {
+    /// The child is queued again and the scheduler will try once more.
+    Retrying {
+        /// Failed starts so far.
+        failures: u32,
+    },
+    /// The failure limit was reached: the child is failed, which blocks what depends on it, and
+    /// the scheduler leaves it alone until [`reopen_failed`] is called.
+    CircuitBroken,
+}
+
+/// Records that starting a running child failed. Below [`MAX_START_FAILURES`] the child goes
+/// back to queued with the reason; at the limit it is failed.
+///
+/// # Errors
+/// Fails when the task is unknown, is not running, or the database fails.
+pub fn record_start_failure(
+    connection: &mut Connection,
+    task_id: &str,
+    reason: &str,
+    now_ms: i64,
+) -> Result<StartOutcome, OrchestrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let (state, failures): (String, u32) = transaction.query_row(
+        "SELECT state, start_failures FROM task_orchestration WHERE task_id = ?1",
+        [task_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if state != "running" {
+        return Err(OrchestrationError::from(
+            rusqlite::Error::QueryReturnedNoRows,
+        ));
+    }
+    let failures = failures + 1;
+    let outcome = if failures >= MAX_START_FAILURES {
+        transition_in(&transaction, task_id, TaskState::Failed, now_ms)?;
+        StartOutcome::CircuitBroken
+    } else {
+        transaction.execute(
+            "UPDATE task_orchestration SET state = 'queued', updated_at_ms = ?2 WHERE task_id = ?1",
+            params![task_id, now_ms],
+        )?;
+        StartOutcome::Retrying { failures }
+    };
+    let reason = if outcome == StartOutcome::CircuitBroken {
+        format!("{reason} (failed to start {failures} times; stopped retrying)")
+    } else {
+        format!("{reason} (start attempt {failures} of {MAX_START_FAILURES})")
+    };
+    transaction.execute(
+        "UPDATE task_orchestration SET start_failures = ?2, reason = ?3 WHERE task_id = ?1",
+        params![task_id, failures, reason],
+    )?;
+    transaction.commit()?;
+    Ok(outcome)
+}
+
+/// A user's decision to try a failed child again: it is queued with a fresh failure count, and
+/// dependents that were blocked only by it are queued too. Returns the tasks that were queued.
+///
+/// # Errors
+/// Fails when the task is not failed or the database fails.
+pub fn reopen_failed(
+    connection: &mut Connection,
+    task_id: &str,
+    now_ms: i64,
+) -> Result<Vec<String>, OrchestrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transition_in(&transaction, task_id, TaskState::Queued, now_ms)?;
+    transaction.execute(
+        "UPDATE task_orchestration SET start_failures = 0 WHERE task_id = ?1",
+        [task_id],
+    )?;
+    let lead = crate::orchestration_record::lead_of(&transaction, task_id)?;
+    let mut queued = vec![task_id.to_owned()];
+    loop {
+        let graph = load_graph(&transaction, &lead)?;
+        let blocked: Vec<String> = {
+            let mut statement = transaction.prepare(
+                "SELECT task_id FROM task_orchestration WHERE state = 'blocked' ORDER BY task_id",
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut progressed = false;
+        for id in blocked {
+            if graph.state(&id).is_ok()
+                && transition_in(&transaction, &id, TaskState::Queued, now_ms).is_ok()
+            {
+                queued.push(id);
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    transaction.commit()?;
+    Ok(queued)
+}
+
+/// Whether the child failed to start [`MAX_START_FAILURES`] times and waits for the user.
+///
+/// # Errors
+/// Fails when the database fails.
+pub fn start_circuit_broken(
+    connection: &Connection,
+    task_id: &str,
+) -> Result<bool, OrchestrationError> {
+    let broken: Option<bool> = connection
+        .query_row(
+            "SELECT state = 'failed' AND start_failures >= ?2 FROM task_orchestration
+             WHERE task_id = ?1",
+            params![task_id, MAX_START_FAILURES],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(broken.unwrap_or(false))
 }
 
 /// Children recorded as running, across all leads.
@@ -330,5 +465,90 @@ mod tests {
         );
         assert!(fail_lost(&mut db, &lost, 6).unwrap().is_empty());
         assert!(schedule_next(&mut db, "lead", 7).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_open_decision_gate_holds_back_dependents_until_it_is_answered() {
+        use crate::{send_message, NewMessage};
+        let mut db = db(&["a", "b"]);
+        add_dependency(&mut db, "b", "a").unwrap();
+        set_scheduler_enabled(&db, "lead", true).unwrap();
+        db.execute(
+            "INSERT INTO task_orchestration (task_id, state, updated_at_ms) VALUES ('a', 'completed', 0)",
+            [],
+        )
+        .unwrap();
+        let message = |id: &'static str, reply_to: Option<&'static str>| NewMessage {
+            id,
+            from_key: if reply_to.is_some() {
+                "lead:agent"
+            } else {
+                "a:agent"
+            },
+            to_key: if reply_to.is_some() {
+                "a:agent"
+            } else {
+                "lead:agent"
+            },
+            kind: if reply_to.is_some() {
+                "status"
+            } else {
+                "decision_gate"
+            },
+            priority: "normal",
+            subject: "Pick",
+            body: "",
+            payload_json: reply_to.is_none().then_some(r#"{"options":["x","y"]}"#),
+            reply_to,
+            request_id: None,
+            created_at_ms: 1,
+        };
+        send_message(&db, &message("g1", None)).unwrap();
+        assert!(schedule_next(&mut db, "lead", 1).unwrap().is_empty());
+        assert_eq!(state(&db, "b"), TaskState::Queued);
+        send_message(&db, &message("r1", Some("g1"))).unwrap();
+        assert_eq!(schedule_next(&mut db, "lead", 2).unwrap(), vec!["b"]);
+    }
+
+    #[test]
+    fn a_child_that_fails_to_start_three_times_stays_failed_until_the_user_reopens_it() {
+        let mut db = db(&["a", "b"]);
+        add_dependency(&mut db, "b", "a").unwrap();
+        set_scheduler_enabled(&db, "lead", true).unwrap();
+        for attempt in 1..MAX_START_FAILURES {
+            assert_eq!(schedule_next(&mut db, "lead", 1).unwrap(), vec!["a"]);
+            assert_eq!(
+                record_start_failure(&mut db, "a", "bad setup", 2).unwrap(),
+                StartOutcome::Retrying { failures: attempt }
+            );
+            assert_eq!(state(&db, "a"), TaskState::Queued);
+        }
+        assert_eq!(schedule_next(&mut db, "lead", 3).unwrap(), vec!["a"]);
+        assert_eq!(
+            record_start_failure(&mut db, "a", "bad setup", 4).unwrap(),
+            StartOutcome::CircuitBroken
+        );
+        assert_eq!(state(&db, "a"), TaskState::Failed);
+        assert_eq!(state(&db, "b"), TaskState::Blocked);
+        assert!(state_reason(&db, "a")
+            .unwrap()
+            .unwrap()
+            .contains("stopped retrying"));
+        assert!(schedule_next(&mut db, "lead", 5).unwrap().is_empty());
+        assert!(schedule_next(&mut db, "lead", 6).unwrap().is_empty());
+
+        let queued = reopen_failed(&mut db, "a", 7).unwrap();
+        assert_eq!(queued, vec!["a", "b"]);
+        assert_eq!(schedule_next(&mut db, "lead", 8).unwrap(), vec!["a"]);
+        assert_eq!(
+            record_start_failure(&mut db, "a", "bad setup", 9).unwrap(),
+            StartOutcome::Retrying { failures: 1 }
+        );
+    }
+
+    #[test]
+    fn only_a_failed_child_can_be_reopened() {
+        let mut db = db(&["a"]);
+        assert!(reopen_failed(&mut db, "a", 1).is_err());
     }
 }

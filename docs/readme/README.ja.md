@@ -1,36 +1,66 @@
 <p align="center"><img src="../../src-tauri/icons/128x128@2x.png" width="96" alt="Brachio"></p>
 <h1 align="center">Brachio</h1>
-<p align="center"><b>Claude Code と Codex を、タスクごとに別々のワークツリーで並べて動かします。<br>判断が必要なときだけあなたを呼びます。</b></p>
+<p align="center"><b>複数のコーディングエージェントを動かし、主導権は自分に。</b></p>
+<p align="center">Claude Code と Codex のための、軽量でオープンソースのデスクトップワークスペース。<br>エージェントを並列で実行し、Git ワークツリーでタスクを分離し、成果を一か所でレビューできます。</p>
+
+<p align="center">Windows · macOS (実験的) · MIT · プレアルファ</p>
+<p align="center"><a href="https://github.com/4n5rud/Brachio/releases"><b>ダウンロード</b></a> · <a href="https://github.com/4n5rud/Brachio/issues/new/choose">Issue を報告</a></p>
 
 <p align="center">
-  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="release"></a>
-  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/downloads/4n5rud/Brachio/total?color=2ea043" alt="downloads"></a>
-  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Windows%20%7C%20macOS-555?style=flat" alt="Windows | macOS">
-  <a href="../../LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="MIT"></a>
-  <a href="https://x.com/4n5rud08"><img src="https://img.shields.io/badge/X-000000?logo=x&logoColor=white" alt="X"></a>
+  <a href="https://github.com/4n5rud/Brachio/releases"><img src="https://img.shields.io/github/v/release/4n5rud/Brachio?include_prereleases&label=release&color=2ea043" alt="最新リリース"></a>
+  <a href="https://github.com/4n5rud/Brachio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/4n5rud/Brachio/ci.yml?branch=main&label=CI" alt="CI の状態"></a>
+  <a href="../../LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT-555?style=flat" alt="ライセンス: MIT"></a>
 </p>
 
-<h3 align="center"><a href="https://github.com/4n5rud/Brachio/releases">Brachio をダウンロード</a></h3>
+<!-- screenshot: main window -->
 
 <p align="center">
 <a href="../../README.md">English</a> · <a href="README.ko.md">한국어</a> · 日本語 · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a> · <a href="README.pt.md">Português</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.ru.md">Русский</a>
 </p>
 
-> **プレアルファ。** 変化の速い初期版です。問題があれば [Issue で知らせてください](https://github.com/4n5rud/Brachio/issues/new/choose)。
+> **プレアルファ。** Brachio は若いプロジェクトで、変化が速く、粗い部分もあります。問題があれば [Issue で知らせてください](https://github.com/4n5rud/Brachio/issues/new/choose)。
+
+## Brachio を選ぶ理由
+
+### 並列で作業し、変更は分離
+Git プロジェクトでは、タスクごとに専用のブランチとワークツリーが用意され、エージェントは別々の作業ディレクトリで編集します。ワークツリーは後のマージコンフリクトを防がず、実行環境も分離しません。ポート、データベース、外部サービスは衝突することがあり、セキュリティ上のサンドボックスでもありません。1 つのタスクにエージェントとシェルのタブを複数持て、同じエージェントも複数開けます。通常のフォルダにも対応しますが、ブランチはありません。
+
+### ウィンドウを再起動しても作業を継続
+ターミナルはウィンドウではなく、別のローカルランタイムプロセスで動きます。ウィンドウを閉じても中のエージェントは動き続け、開き直せば再接続します。ランタイム自体が止まると実行中のプロセスは失われますが、保存した画面とエージェントの会話の再開で、会話の続きに戻れます。
+
+### 作業を任せ、結果をレビュー
+リードタスクが作業を子タスクに分けます(`brachio task create`、依存関係は `--after`)。
+
+1. リードが作業を子タスクに分け、あなたがアプリ内で承認します。
+2. 各ワーカーは専用のワークツリーとブランチで動きます。
+3. 完了したワーカーは、コミット、変更ファイル、要約を引き継ぎます。
+4. あなたが引き継ぎ内容を確認して承認し、それから初めて依存するタスクが始まります。
+
+タスク同士でメッセージも送れます。自動でマージされるものはありません。
+
+### Git ワークフローを内蔵
+変更ファイルと diff の確認、diff 行へのコメント、ステージ、コミット、プッシュ、プルリクエスト作成ができ、プルリクエストと CI の状態をタスクの横に表示します。対応している Claude Code の権限リクエスト、セットアップコマンド、QA 実行は、承認バーで待ち、あなたが判断します。
+
+### ローカルで動くオープンソース
+Brachio は MIT ライセンスで、あなたのマシン上で動きます。既存の Claude Code または Codex アカウントを使い、エージェントのアカウントを提供も中継もしません。Rust と Tauri のアプリです。
 
 ## ダウンロード
 
 | プラットフォーム | インストーラー |
 |---|---|
 | Windows 10/11 (x64) | [Brachio_0.1.0_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64-setup.exe) · [.msi](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64_en-US.msi) |
-| macOS (Apple silicon) | [Brachio_0.1.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_aarch64.dmg) |
+| macOS (Apple silicon、実験的) | [Brachio_0.1.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_aarch64.dmg) |
 
 すべてのバージョンとリリースノートは [リリースページ](https://github.com/4n5rud/Brachio/releases) にあります。各リリースの `SHA256SUMS.txt` に SHA-256 値があります。
 
-インストーラーはまだコード署名されていません。Windows で SmartScreen に止められたら **詳細情報 → 実行** を選びます。macOS ではアプリケーションフォルダの Brachio を Control-クリックして **開く** を選びます。
+インストーラーはまだコード署名されていません。上の公式リリースページからのみダウンロードし、ファイルの SHA-256 を `SHA256SUMS.txt` と照合してください。チェックサムが一致しても、ファイルが壊れず届いたことを示すだけで、ソフトウェアが安全であることは示しません。
 
-**必要なもの:** Git 2.38 以上と、ご自身の [Claude Code](https://docs.anthropic.com/en/docs/claude-code) または [Codex](https://github.com/openai/codex) アカウント。Brachio は手元のマシンだけで動き、エージェントのアカウントを提供・中継しません。
+- **Windows:** SmartScreen にインストーラーを止められたら、**詳細情報** を選び、続けて **実行** を選びます。
+- **macOS:** **システム設定 > プライバシーとセキュリティ** を開き、Brachio の **このまま開く** を選びます。
+
+macOS 対応は実験的です。CI は macOS で Rust コードをビルドしてテストしますが、ターミナルランタイムはまだ実際の Mac でテストしていません。
+
+**必要なもの:** Git 2.38 以上と、ご自身の [Claude Code](https://docs.anthropic.com/en/docs/claude-code) または [Codex](https://github.com/openai/codex) アカウント。
 
 ## 対応エージェント
 
@@ -41,27 +71,10 @@
 
 マシン上のシェルもタブとして開けます。Windows では PowerShell、コマンドプロンプト、Git Bash、WSL、macOS ではログインシェル、zsh、bash、fish です。
 
-## 機能
+## その他の機能
 
-### 複数のエージェントを一か所で
-タスクごとに Git ブランチとワークツリーが分かれるので、エージェント同士がぶつかりません。1 つのタスクにエージェントとシェルのタブを必要なだけ開け、同じエージェントも複数開けます。通常のフォルダにも対応します。
+ステータスバーのエージェント使用量、検索できるファイルツリー、クローンや新規作成ができるプロジェクト選択、ドラッグでの並べ替え、タスク検索、8 種類のカラーテーマ。
 
-### 消えないターミナル
-ターミナルは別のローカルランタイムで動きます。ウィンドウを閉じてもエージェントは作業を続け、開き直せば再接続します。ランタイムが止まっても、保存した画面と会話の再開でセッションを戻します。
-
-### 決めるのはあなた
-対応している Claude Code の権限リクエスト、セットアップコマンド、QA 実行、子タスクの作成は、アプリ内の承認バーで待ちます。自動でマージされるものはありません。
-
-### レビューと Git
-変更ファイルと diff の確認、diff 行へのコメント、ステージ、コミット、プッシュ、プルリクエスト作成ができ、PR と CI の状態をタスクの横に表示します。
-
-### リードタスクと子タスク
-リードタスクが作業を子タスクに分けます(`brachio task create`、順序は `--after`)。子タスクはコミット、変更ファイル、要約を渡し、あなたが結果を確認するまで次のタスクは始まりません。タスク同士でメッセージも送れます。
-
-### 毎日使いやすく
-ステータスバーのエージェント使用量、検索できるファイルツリー、クローンと新規作成ができるプロジェクト選択、ドラッグでの並べ替え、タスク検索、8 種類のカラーテーマ。
-
-### CLI、MCP、スキル
 `brachio` CLI でどのターミナルからでもタスクを操作できます。`brachio mcp` は stdio でタスクツールを提供します。`brachio-send` と `brachio-lead` スキルが Claude Code と Codex に使い方を教えます。
 
 ## プロジェクト設定
@@ -70,20 +83,20 @@
 
 ```toml
 [setup]
-copy = [".env"]
+copy = [".env.example"]
 run = ["pnpm install"]
 
 [qa]
-program = "npm"
+program = "pnpm"
 args = ["test"]
 timeout_secs = 600
 ```
 
-セットアップコマンドと QA 実行は必ず先に承認を求めます。
+セットアップコマンドと QA 実行は、実行前にあなたの承認を求めます。実際の `.env` をワークツリーにコピーするのは、信頼できるプロジェクトとエージェントだけにしてください。そのワークツリーのすべてのエージェントが読めます。
 
-## 未対応
+## 現在の範囲と制限
 
-自動マージ、2 階層以上のタスク、通常フォルダでの子タスク、リモートマシン、Linux アプリ。エージェントの状態、承認、復旧は各エージェントが報告する内容に依存します。
+未対応: 自動マージ、2 階層以上のタスク、通常フォルダでの子タスク、リモートマシン、Linux アプリ。エージェントの状態、承認、復旧は、各エージェントが報告する内容に依存します。
 
 ## ソースからビルド
 
@@ -106,8 +119,12 @@ CI は Windows、macOS、Ubuntu で Rust を、さらに UI を検査します�
 
 ## コントリビュート
 
-[コントリビューターガイド](../../.github/CONTRIBUTING.md) を読んでください。コーディングエージェントは [エージェント向けガイド](../../.github/CONTRIBUTING-AGENTS.md) も読んでください。セキュリティの問題は [非公開の脆弱性報告](../../.github/SECURITY.md) で知らせてください。
+コントリビュートを歓迎します。[コントリビューターガイド](../../.github/CONTRIBUTING.md) を読み、[`good first issue`](https://github.com/4n5rud/Brachio/labels/good%20first%20issue)、[`help wanted`](https://github.com/4n5rud/Brachio/labels/help%20wanted)、[`documentation`](https://github.com/4n5rud/Brachio/labels/documentation) のラベルが付いた Issue を探してください。コーディングエージェントは [エージェント向けコントリビューションガイド](../../.github/CONTRIBUTING-AGENTS.md) も読んでください。セキュリティの問題は [非公開の脆弱性報告](../../.github/SECURITY.md) で知らせてください。
+
+## 初期開発中
+
+Brachio は初期開発中のため、バグがあるかもしれません。Issue とプルリクエストを歓迎します。リポジトリにスターを付けると、更新を追いやすくなります。
 
 ## ライセンス
 
-[MIT License](../../LICENSE-MIT)
+Brachio は [MIT License](../../LICENSE-MIT) のもとで公開されています。

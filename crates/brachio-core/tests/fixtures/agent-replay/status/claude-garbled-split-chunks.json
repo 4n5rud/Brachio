@@ -1,0 +1,17 @@
+{
+  "description": "Output arrives in arbitrary chunks: a sequence split at every boundary, an aborted sequence, a body that is not UTF-8, and an unrelated OSC. Only the intact report counts.",
+  "steps": [
+    { "at_ms": 0, "output_hex": "1b5d37353031", "note": "ESC ] 7501 with the ';' still to come" },
+    { "at_ms": 10, "output": ";state=wor" },
+    { "at_ms": 20, "output": "king\u001b" },
+    { "at_ms": 30, "output": "\\" },
+    { "at_ms": 400, "expect": { "state": "working" } },
+    { "at_ms": 500, "output": "\u001b]7501;state=idle\u001b]0;title\u0007noise" },
+    { "at_ms": 1000, "expect": { "state": "working" } },
+    { "at_ms": 1100, "output_hex": "1b5d373530313b73746174653dff1b5c", "note": "body holds the invalid byte 0xff" },
+    { "at_ms": 1500, "expect": { "state": "working" } },
+    { "at_ms": 1600, "output": "\u001b]7501;state=idle\u001b\\" },
+    { "at_ms": 1700, "expect": { "state": "working" } },
+    { "at_ms": 1900, "expect": { "state": "idle" } }
+  ]
+}

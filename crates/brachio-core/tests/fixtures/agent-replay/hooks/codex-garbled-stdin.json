@@ -1,0 +1,11 @@
+{
+  "description": "A payload cut off mid-read is ignored.",
+  "agent": "codex",
+  "events": [
+    {
+      "stdin": "{\"session_id\": \"c1\", \"hook_event_name\": \"PermissionRequ",
+      "key": "k",
+      "expect_request": null
+    }
+  ]
+}

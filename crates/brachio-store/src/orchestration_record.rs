@@ -201,7 +201,10 @@ pub fn load_graph(
     Ok(graph)
 }
 
-fn lead_of(connection: &Connection, task_id: &str) -> Result<String, OrchestrationError> {
+pub(crate) fn lead_of(
+    connection: &Connection,
+    task_id: &str,
+) -> Result<String, OrchestrationError> {
     let row: Option<Option<String>> = connection
         .query_row(
             "SELECT parent_task_id FROM tasks WHERE id = ?1",

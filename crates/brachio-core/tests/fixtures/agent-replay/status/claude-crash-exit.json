@@ -1,0 +1,14 @@
+{
+  "description": "The agent reports an error, then the process dies with exit code 1. The exit is published at once and is final.",
+  "steps": [
+    { "at_ms": 0, "output": "\u001b]7501;state=working\u001b\\" },
+    { "at_ms": 300, "expect": { "state": "working" } },
+    { "at_ms": 1000, "output": "\u001b]7501;state=error\u001b\\" },
+    { "at_ms": 1100, "expect": { "state": "working" } },
+    { "at_ms": 1300, "expect": { "state": "error" } },
+    { "at_ms": 2000, "exit": { "code": 1 } },
+    { "at_ms": 2000, "expect": { "state": "exited", "code": 1 } },
+    { "at_ms": 2500, "output": "\u001b]7501;state=working\u001b\\late bytes" },
+    { "at_ms": 3000, "expect": { "state": "exited", "code": 1 } }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Codex is killed by a signal, so the platform reports no exit code. Plain output before that only counts as activity.",
+  "steps": [
+    { "at_ms": 0, "output": "plain output, no protocol" },
+    { "at_ms": 300, "expect": { "state": "working" } },
+    { "at_ms": 5000, "expect": { "state": "working" } },
+    { "at_ms": 5400, "expect": { "state": "unknown" } },
+    { "at_ms": 6000, "exit": { "code": null } },
+    { "at_ms": 6000, "expect": { "state": "exited", "code": null } }
+  ]
+}

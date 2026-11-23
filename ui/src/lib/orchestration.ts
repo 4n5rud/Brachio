@@ -43,6 +43,15 @@ export interface HandoffView {
   canReview: boolean;
 }
 
+export interface GateView {
+  id: string;
+  /** The child's own words; untrusted. */
+  subject: string;
+  body: string;
+  options: string[];
+  createdAtMs: number;
+}
+
 export interface ChildView {
   id: string;
   title: string;
@@ -50,8 +59,12 @@ export interface ChildView {
   state: ChildState;
   /** Why Brachio failed it, such as "lost after restart". */
   reason: string | null;
+  /** It failed to start too many times; only the user can reopen it. */
+  startBlocked: boolean;
   dependencies: DependencyView[];
   handoff: HandoffView | null;
+  /** Decisions the child asked the user to make; they hold back what depends on it. */
+  gates: GateView[];
 }
 
 export interface OrchestrationView {
@@ -65,12 +78,23 @@ export interface OrchestrationView {
 export const setScheduler = (leadTaskId: string, enabled: boolean) =>
   invoke<void>("orchestration_set_scheduler", { leadTaskId, enabled });
 
+export const reopenChild = (taskId: string) =>
+  invoke<void>("orchestration_reopen_child", { taskId });
+
 export const readOrchestration = (leadTaskId: string) =>
   invoke<OrchestrationView>("orchestration_view", { leadTaskId });
 
 /** Approve completes the child; reject needs a reason and sends it back to work. */
 export const reviewHandoff = (handoffId: string, approved: boolean, note?: string) =>
   invoke<void>("handoff_review", { handoffId, approved, note: note ?? null });
+
+/** Answers a child's decision with one of the options it offered; the answer goes back to it as a reply. */
+export const answerGate = (gateId: string, choice: number) =>
+  invoke<void>("decision_gate_answer", { gateId, choice });
+
+/** Tells the lead a child's agent stopped without handing off; the app decides whether that is news. */
+export const reportChildStopped = (taskId: string, state: string, code: number | null, detail: string | null) =>
+  invoke<void>("child_agent_stopped", { taskId, state, code, detail });
 
 /** Calls back whenever a child's state or handoff changed. Returns the unsubscribe. */
 export function watchOrchestration(onChanged: () => void): () => void {

@@ -1,0 +1,45 @@
+.prompt-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 18px;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-line);
+}
+.prompt-queue ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prompt-queue li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.prompt-queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--text-meta);
+  color: var(--color-text-2);
+}
+.prompt-queue-up svg {
+  transform: rotate(180deg);
+}
+.prompt-queue-add {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.prompt-queue-add > * {
+  min-width: 0;
+}
+.prompt-queue-add > :first-child {
+  flex: 1;
+}

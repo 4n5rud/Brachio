@@ -22,6 +22,8 @@ import { TaskOrchestration } from "./TaskOrchestration";
 import { TaskActivityList } from "./TaskActivityList";
 import { TaskAlwaysAllow } from "./TaskAlwaysAllow";
 import { TaskOverlaps } from "./TaskOverlaps";
+import { TaskCheckpoints } from "./TaskCheckpoints";
+import { turnActive } from "../lib/checkpoints";
 import { listTaskActivity } from "../lib/task-activity";
 import { revealRequest } from "../lib/file-reveal";
 import { openInEditor } from "../lib/editor";
@@ -152,6 +154,8 @@ export function Inspector(props: {
                       }}
                       onDraft={(text) => props.onDraft(id, text)} />
                     <TaskOverlaps taskId={id} changesRevision={currentChanges()?.data} />
+                    <TaskCheckpoints taskId={id} working={turnActive(props.task.status)} now={props.now}
+                      split={split()} onSplit={setSplit} onDraft={(text) => props.onDraft(id, text)} />
                     <Show when={currentChanges()?.data}>
                       {(data) => (
                         <>

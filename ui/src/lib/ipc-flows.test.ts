@@ -84,8 +84,10 @@ describe("handoff review", () => {
     branch: `brachio/${id}`,
     state,
     reason: null,
+    startBlocked: false,
     dependencies: [],
     handoff: null,
+    gates: [],
     ...extra,
   });
   const view = (children: ChildView[]): OrchestrationView => ({
