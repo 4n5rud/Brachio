@@ -1,6 +1,7 @@
 import { IconButton } from "./ui/IconButton";
 import { AttachButton } from "./AttachButton";
 import { terminalExcerpt } from "../lib/attachments";
+import { takeDraftProblem } from "../lib/draft-problem";
 import { readTerminalTail, terminalTailKeys } from "../lib/terminal-tail";
 import { Button } from "./ui/Button";
 import { For, Show, createComputed, createResource, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
@@ -373,7 +374,10 @@ export function TaskView(props: {
     terminalTailKeys().filter((key) => key !== own).map((key) => ({ key, label: tailLabel(key) }));
   const attach = async (draft: () => Promise<boolean> | undefined) => {
     try {
-      if (!(await draft())) props.onReportProblem?.(t("diff.notReady"));
+      if (!(await draft())) {
+        const problem = takeDraftProblem();
+        if (problem) props.onReportProblem?.(problem);
+      }
     } catch (failure) {
       props.onReportProblem?.(String(failure));
     }
@@ -656,7 +660,10 @@ export function TaskView(props: {
                   try {
                     const drafted = await props.onDraftOriginal?.(prompt());
                     if (drafted) pushToast({ tone: "success", message: t("task.promptDrafted") });
-                    else pushToast({ tone: "error", message: t("diff.notReady") });
+                    else {
+                      const problem = takeDraftProblem();
+                      if (problem) pushToast({ tone: "error", message: problem });
+                    }
                   } catch (error) {
                     pushToast({ tone: "error", title: t("error.title"), message: String(error) });
                   }

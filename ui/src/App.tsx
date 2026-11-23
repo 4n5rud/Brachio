@@ -26,6 +26,7 @@ import { openInEditor } from "./lib/editor";
 import { noteRecentFile, recentFiles } from "./lib/recent-files";
 import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
+import { clearDraftProblem, noteDraftProblem, takeDraftProblem } from "./lib/draft-problem";
 import { attachImages, attachPastedImage, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
@@ -554,7 +555,11 @@ export function App() {
     const getTarget = draftTargets.get(id);
     const target = getTarget?.();
     const draft = pasteText(text, true);
-    if (task?.id !== id || !getTarget || !target || !draft.trim()) return false;
+    clearDraftProblem();
+    if (task?.id !== id || !getTarget || !target || !draft.trim()) {
+      noteDraftProblem("noAgent");
+      return false;
+    }
     const stillAvailable = () => {
       const current = getTarget();
       return selected()?.id === id && draftTargets.get(id) === getTarget
@@ -563,9 +568,15 @@ export function App() {
         && activeAgentKey(id, target.key)
         && !questions().some((question) => question.key === target.key);
     };
-    if (!stillAvailable()) return false;
+    if (!stillAvailable()) {
+      noteDraftProblem(questions().some((question) => question.key === target.key) ? "approval" : "changed");
+      return false;
+    }
     const prepared = target.prepare(draft);
-    if (!prepared) return false;
+    if (!prepared) {
+      noteDraftProblem(target.prepare.problem?.() ?? "notReady");
+      return false;
+    }
     const { insert, userTyped } = prepared;
     const body = [
       t("draft.target").replace("{agent}", () => target.agent).replace("{task}", () => task.title),
@@ -580,7 +591,17 @@ export function App() {
       cancelLabel: t("workspace.close"),
       tone: "primary",
     });
-    return agreed && stillAvailable() && await insert();
+    if (!agreed) {
+      noteDraftProblem("cancelled");
+      return false;
+    }
+    if (!stillAvailable()) {
+      noteDraftProblem("changed");
+      return false;
+    }
+    const inserted = await insert();
+    if (!inserted) noteDraftProblem("changed");
+    return inserted;
   };
 
   // Codex has no hook that can announce mail, so the notice is typed into its input, never submitted.
@@ -591,6 +612,11 @@ export function App() {
     if (!activeAgentKey(id, key) || questions().some((question) => question.key === key)) return;
     const prepared = target.prepare(pasteText(MAILBOX_REMINDER));
     if (prepared && !prepared.userTyped) await prepared.insert();
+  };
+
+  const reportDraftProblem = () => {
+    const problem = takeDraftProblem();
+    if (problem) report(problem);
   };
 
   const report = (failure: unknown) => {
@@ -1205,7 +1231,7 @@ export function App() {
     }
     const draft = await attachmentPaths(task.id, paths);
     if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
-    if (!(await draftComment(task.id, fileReferences(draft) + " "))) report(t("diff.notReady"));
+    if (!(await draftComment(task.id, fileReferences(draft) + " "))) reportDraftProblem();
   };
 
   /** Files as worktree paths; images are first saved into the task's ignored attachments folder. */
@@ -1565,7 +1591,7 @@ export function App() {
               onReportProblem={inTauri ? (message) => setIssueReport(message) : undefined}
               onMailboxReminder={(key) => {
                 void draftComment(task().id, MAILBOX_REMINDER, key)
-                  .then((inserted) => { if (!inserted) report(t("diff.notReady")); })
+                  .then((inserted) => { if (!inserted) reportDraftProblem(); })
                   .catch(report);
               }}
             />

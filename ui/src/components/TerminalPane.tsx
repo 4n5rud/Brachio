@@ -22,6 +22,7 @@ import { previewIfRegistered } from "../lib/local-preview";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
+import { takeDraftProblem, type DraftProblem } from "../lib/draft-problem";
 import { bracketedPaste, isCopyKey, isNativePasteKey, pastedImage, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
 import { MAX_TERMINAL_LINES } from "../lib/attachments";
@@ -134,7 +135,10 @@ export interface DraftInsert {
 }
 
 /** `steering` also accepts a working agent, for a follow-up the agent folds into its running turn. */
-export type PrepareDraft = (text: string, options?: { steering?: boolean }) => DraftInsert | undefined;
+export type PrepareDraft = ((text: string, options?: { steering?: boolean }) => DraftInsert | undefined) & {
+  /** Why `prepare` returned nothing, for the message the person sees. */
+  problem?: (steering?: boolean) => DraftProblem;
+};
 
 export function TerminalPane(props: {
   session?: TerminalSession;
@@ -446,7 +450,7 @@ export function TerminalPane(props: {
       term.focus();
       return true;
     };
-    const unregister = props.registerDraftWriter?.((text, options) => {
+    const writeDraft: PrepareDraft = (text, options) => {
       const destination = handle;
       const steering = options?.steering === true;
       if (!destination || !canPasteDraft(steering)) return undefined;
@@ -461,7 +465,14 @@ export function TerminalPane(props: {
         return true;
       };
       return { insert, userTyped };
-    });
+    };
+    writeDraft.problem = (steering = false) => {
+      if (exited) return "exited";
+      if (blocked) return "blocked";
+      if (working && !steering) return "working";
+      return "notReady";
+    };
+    const unregister = props.registerDraftWriter?.(writeDraft);
 
     // Typed like a paste and never submitted, so dropped paths wait for the person to press Enter.
     const sessionTask = session?.key?.split(":")[0];
@@ -781,7 +792,10 @@ export function TerminalPane(props: {
   const insertPrompt = async () => {
     try {
       if (await props.onInsertPrompt?.()) pushToast({ tone: "success", message: t("task.promptDrafted") });
-      else pushToast({ tone: "error", message: t("diff.notReady") });
+      else {
+        const problem = takeDraftProblem();
+        if (problem) pushToast({ tone: "error", message: problem });
+      }
     } catch (error) {
       pushToast({ tone: "error", title: t("error.title"), message: String(error) });
     }
