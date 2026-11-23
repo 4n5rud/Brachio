@@ -31,7 +31,9 @@ mod runtime_terminals;
 mod session_tokens;
 mod system_check;
 mod task_activity;
+mod task_attachments;
 mod task_checkpoints;
+mod task_commits;
 mod task_file_actions;
 mod task_file_ops;
 mod task_folder;
@@ -363,6 +365,7 @@ pub fn run() {
             handoff_summary::task_handoff_summary,
             handoff_summary::task_handoff_send,
             agent_profiles::repo_profiles,
+            agent_profiles::task_profiles,
             agent_profiles::task_join_compare_group,
             workspace::task_has_live_terminals,
             workspace::repo_list,
@@ -392,6 +395,7 @@ pub fn run() {
             workspace::task_files,
             workspace::task_file_preview,
             workspace::task_file_media,
+            task_attachments::task_attach_images,
             task_file_ops::task_move_path,
             task_file_ops::task_copy_conflicts,
             task_file_ops::task_copy_in,
@@ -407,6 +411,8 @@ pub fn run() {
             worktree_import::worktree_import,
             task_overlaps::task_overlaps,
             pr_status::task_pr_status,
+            pr_status::task_link_pr,
+            pr_status::task_unlink_pr,
             auto_archive::task_archive_if_merged,
             qa_run::qa_run,
             qa_run::qa_last_result,
@@ -418,6 +424,8 @@ pub fn run() {
             task_checkpoints::task_checkpoint_list,
             task_checkpoints::task_checkpoint_diff,
             task_checkpoints::task_checkpoint_restore,
+            task_commits::task_commit_list,
+            task_commits::task_commit_diff,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,

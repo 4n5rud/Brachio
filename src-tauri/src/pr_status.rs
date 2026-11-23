@@ -4,15 +4,19 @@
 //! The latest answer of each task is also saved in the store, so after a restart, or while GitHub
 //! cannot be reached, the last known status is still shown, marked as out of date.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use brachio_git::{
-    backoff_seconds, fetch_pull_request, local_head, repository_of, PullRequestSnapshot,
-    PullRequestState, StatusError,
+    backoff_seconds, fetch_pull_request, fetch_pull_request_by_number, local_head,
+    parse_pull_request_reference, repository_of, PullRequestSnapshot, PullRequestState,
+    StatusError,
 };
-use brachio_store::{forget_pr_status, load_pr_status, save_pr_status, RepoRecord, TaskRecord};
+use brachio_store::{
+    add_linked_pr, forget_pr_status, linked_prs, load_pr_status, remove_linked_pr, save_pr_status,
+    LinkedPr, RepoRecord, TaskRecord,
+};
 use serde::Serialize;
 use tauri::State;
 
@@ -36,7 +40,36 @@ pub struct PrStatusReport {
     pub local_head: Option<String>,
     /// Whether the worktree is at the commit the checks belong to.
     pub head_matches_local: Option<bool>,
+    /// Pull requests the user linked besides the branch's own.
+    pub linked: Vec<LinkedPrReport>,
 }
+
+/// One linked pull request and what is known about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedPrReport {
+    /// `owner/name`.
+    pub repository: String,
+    /// The pull request number.
+    pub number: u64,
+    /// The last answer, kept while GitHub cannot be reached.
+    pub snapshot: Option<PullRequestSnapshot>,
+    /// When that answer was read, in milliseconds since the Unix epoch.
+    pub checked_at_ms: Option<i64>,
+    /// Why the latest attempt failed.
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
+struct LinkedEntry {
+    snapshot: Option<PullRequestSnapshot>,
+    checked_at_ms: Option<i64>,
+    error: Option<String>,
+    attempted_ms: i64,
+}
+
+/// An open linked pull request is looked at again after this long, unless the user insists.
+const LINKED_REFRESH_MS: i64 = 30_000;
 
 #[derive(Default)]
 struct Entry {
@@ -63,6 +96,8 @@ pub enum Decision {
 #[derive(Default)]
 pub struct Tracker {
     entries: HashMap<String, Entry>,
+    linked: HashMap<(String, String, u64), LinkedEntry>,
+    linked_in_flight: HashSet<String>,
 }
 
 impl Tracker {
@@ -120,6 +155,101 @@ impl Tracker {
         }
     }
 
+    /// The linked pull requests that need GitHub now, or none while another lookup of the task's
+    /// links runs. Merged and closed ones are read once; a failed one waits like an open one.
+    pub fn begin_linked(
+        &mut self,
+        task: &str,
+        links: &[LinkedPr],
+        now_ms: i64,
+        force: bool,
+    ) -> Vec<LinkedPr> {
+        if self.linked_in_flight.contains(task) {
+            return Vec::new();
+        }
+        let due: Vec<LinkedPr> = links
+            .iter()
+            .filter(|link| {
+                let Some(entry) =
+                    self.linked
+                        .get(&(task.to_owned(), link.repository.clone(), link.number))
+                else {
+                    return true;
+                };
+                let finished = entry
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.state != PullRequestState::Open);
+                if finished && !force {
+                    return false;
+                }
+                force || now_ms - entry.attempted_ms >= LINKED_REFRESH_MS
+            })
+            .cloned()
+            .collect();
+        if !due.is_empty() {
+            self.linked_in_flight.insert(task.to_owned());
+        }
+        due
+    }
+
+    /// Records the answers for what `begin_linked` returned. A failure keeps the last answer.
+    pub fn finish_linked(
+        &mut self,
+        task: &str,
+        now_ms: i64,
+        outcomes: Vec<(LinkedPr, Result<PullRequestSnapshot, StatusError>)>,
+    ) {
+        self.linked_in_flight.remove(task);
+        for (link, outcome) in outcomes {
+            let entry = self
+                .linked
+                .entry((task.to_owned(), link.repository, link.number))
+                .or_default();
+            entry.attempted_ms = now_ms;
+            match outcome {
+                Ok(snapshot) => {
+                    entry.snapshot = Some(snapshot);
+                    entry.checked_at_ms = Some(now_ms);
+                    entry.error = None;
+                }
+                Err(error) => entry.error = Some(error.to_string()),
+            }
+        }
+    }
+
+    /// Forgets a link that was removed.
+    pub fn forget_linked(&mut self, task: &str, repository: &str, number: u64) {
+        self.linked
+            .remove(&(task.to_owned(), repository.to_owned(), number));
+    }
+
+    /// What is known about each link, hiding the one that is the branch's own pull request.
+    #[must_use]
+    pub fn linked_report(&self, task: &str, links: &[LinkedPr]) -> Vec<LinkedPrReport> {
+        let own = self
+            .entries
+            .get(task)
+            .and_then(|entry| entry.snapshot.as_ref())
+            .map(|snapshot| (snapshot.repository.clone(), snapshot.number));
+        links
+            .iter()
+            .filter(|link| own.as_ref() != Some(&(link.repository.clone(), link.number)))
+            .map(|link| {
+                let entry =
+                    self.linked
+                        .get(&(task.to_owned(), link.repository.clone(), link.number));
+                LinkedPrReport {
+                    repository: link.repository.clone(),
+                    number: link.number,
+                    snapshot: entry.and_then(|entry| entry.snapshot.clone()),
+                    checked_at_ms: entry.and_then(|entry| entry.checked_at_ms),
+                    error: entry.and_then(|entry| entry.error.clone()),
+                }
+            })
+            .collect()
+    }
+
     /// Starts a task from an answer saved earlier. Does nothing when the task already has one.
     pub fn restore(&mut self, task: &str, snapshot: PullRequestSnapshot, checked_at_ms: i64) {
         self.entries
@@ -154,6 +284,7 @@ impl Tracker {
                 .then(|| u64::try_from((waiting_ms + 999) / 1000).unwrap_or(0)),
             local_head: None,
             head_matches_local: None,
+            linked: Vec::new(),
         }
     }
 }
@@ -244,6 +375,7 @@ pub async fn task_pr_status(
         });
     }
     restore_saved(&database, &statuses, &id)?;
+    let links = linked_prs(&*database.lock()?, &id).map_err(|error| error.to_string())?;
     let decision = statuses.tracker()?.begin(&id, now_ms(), force);
     if decision == Decision::Fetch {
         let worktree = task.worktree_path.clone();
@@ -269,7 +401,26 @@ pub async fn task_pr_status(
         }
         statuses.tracker()?.finish(&id, at, outcome);
     }
+    let due = statuses
+        .tracker()?
+        .begin_linked(&id, &links, now_ms(), force);
+    if !due.is_empty() {
+        let worktree = task.worktree_path.clone();
+        let outcomes = tauri::async_runtime::spawn_blocking(move || {
+            due.into_iter()
+                .map(|link| {
+                    let outcome =
+                        fetch_pull_request_by_number(&worktree, &link.repository, link.number);
+                    (link, outcome)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        statuses.tracker()?.finish_linked(&id, now_ms(), outcomes);
+    }
     let mut report = statuses.tracker()?.report(&id, now_ms());
+    report.linked = statuses.tracker()?.linked_report(&id, &links);
     report.local_head = local_head(&task.worktree_path).ok();
     report.head_matches_local = report
         .snapshot
@@ -277,6 +428,58 @@ pub async fn task_pr_status(
         .zip(report.local_head.as_ref())
         .map(|(snapshot, local)| &snapshot.head_sha == local);
     Ok(report)
+}
+
+/// Links another pull request to the task, by number or GitHub address. It is looked up first,
+/// so a number that does not exist is refused instead of kept.
+#[tauri::command]
+pub async fn task_link_pr(
+    database: State<'_, Database>,
+    statuses: State<'_, PrStatuses>,
+    id: String,
+    reference: String,
+) -> Result<(), String> {
+    let parsed = parse_pull_request_reference(&reference)
+        .ok_or("Enter a pull request number or a github.com pull request address.")?;
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(|error| error.to_string())?;
+    let worktree = task.worktree_path.clone();
+    let (repository, snapshot) = tauri::async_runtime::spawn_blocking(move || {
+        let repository = match parsed.repository {
+            Some(repository) => repository,
+            None => repository_of(&worktree)?,
+        };
+        let snapshot = fetch_pull_request_by_number(&worktree, &repository, parsed.number)?;
+        Ok::<_, StatusError>((repository, snapshot))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    let at = now_ms();
+    add_linked_pr(&*database.lock()?, &id, &repository, snapshot.number, at)
+        .map_err(|error| error.to_string())?;
+    let link = LinkedPr {
+        repository,
+        number: snapshot.number,
+    };
+    statuses
+        .tracker()?
+        .finish_linked(&id, at, vec![(link, Ok(snapshot))]);
+    Ok(())
+}
+
+/// Stops showing a linked pull request on the task.
+#[tauri::command]
+pub fn task_unlink_pr(
+    database: State<'_, Database>,
+    statuses: State<'_, PrStatuses>,
+    id: String,
+    repository: String,
+    number: u64,
+) -> Result<(), String> {
+    remove_linked_pr(&*database.lock()?, &id, &repository, number)
+        .map_err(|error| error.to_string())?;
+    statuses.tracker()?.forget_linked(&id, &repository, number);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -378,6 +581,55 @@ mod tests {
         tracker.finish("t", 0, Err(rate_limited()));
         assert_eq!(tracker.begin("t", 60_000, true), Decision::UseKnown);
         assert_eq!(tracker.begin("t", 300_000, false), Decision::Fetch);
+    }
+
+    fn link(number: u64) -> brachio_store::LinkedPr {
+        brachio_store::LinkedPr {
+            repository: "o/r".to_owned(),
+            number,
+        }
+    }
+
+    #[test]
+    fn a_linked_pull_request_is_read_once_when_merged_and_kept_when_github_fails() {
+        let mut tracker = Tracker::default();
+        let links = [link(8), link(9)];
+        assert_eq!(tracker.begin_linked("t", &links, 0, false).len(), 2);
+        assert!(tracker.begin_linked("t", &links, 0, true).is_empty());
+        tracker.finish_linked(
+            "t",
+            0,
+            vec![
+                (link(8), Ok(snapshot(PullRequestState::Merged, "m"))),
+                (link(9), Ok(snapshot(PullRequestState::Open, "o"))),
+            ],
+        );
+        assert!(tracker.begin_linked("t", &links, 10_000, false).is_empty());
+        assert_eq!(tracker.begin_linked("t", &links, 40_000, false), [link(9)]);
+        tracker.finish_linked("t", 40_000, vec![(link(9), Err(offline()))]);
+        let report = tracker.linked_report("t", &links);
+        assert_eq!(
+            report[0].snapshot.as_ref().map(|s| s.state),
+            Some(PullRequestState::Merged)
+        );
+        assert_eq!(
+            report[1].snapshot.as_ref().map(|s| s.head_sha.as_str()),
+            Some("o")
+        );
+        assert_eq!(report[1].error.as_deref(), Some("could not resolve host"));
+        assert_eq!(
+            tracker.begin_linked("t", &[link(8)], 99_000, true),
+            [link(8)]
+        );
+    }
+
+    #[test]
+    fn the_branchs_own_pull_request_is_not_listed_twice() {
+        let mut tracker = Tracker::default();
+        tracker.begin("t", 0, false);
+        tracker.finish("t", 0, Ok(Some(snapshot(PullRequestState::Open, "a"))));
+        let listed = tracker.linked_report("t", &[link(7), link(8)]);
+        assert_eq!(listed.iter().map(|l| l.number).collect::<Vec<_>>(), [8]);
     }
 
     #[test]

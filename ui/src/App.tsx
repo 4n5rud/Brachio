@@ -21,12 +21,15 @@ import { ToastHost } from "./components/ui/Toast";
 import { pushToast } from "./lib/toasts";
 import { clearOsDrop, dropOnTree, hoverOsDrop, overTree as overFilesTree } from "./lib/tree-drop";
 import { terminalAt } from "./lib/terminal-drop";
+import { dropIntoDialog } from "./lib/dialog-drop";
 import { openInEditor } from "./lib/editor";
 import { noteRecentFile, recentFiles } from "./lib/recent-files";
 import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
+import { attachImages, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
+import { LocalPreview } from "./components/LocalPreview";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { AddProjectDialog } from "./components/AddProjectDialog";
@@ -41,6 +44,8 @@ import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
 import { activityKindOf, recordTaskActivity } from "./lib/task-activity";
+import { CompareResults } from "./components/CompareResults";
+import { compareMembers } from "./lib/compare-results";
 import { WorkspaceDialog, type TaskActivity } from "./components/WorkspaceDialog";
 import { locale, setLocale, t } from "./i18n";
 import { sampleTasks } from "./lib/sample";
@@ -67,6 +72,8 @@ import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
 import { firstSwitchIndex, recentTasks, stepSwitchIndex, touchRecent } from "./lib/recent-tasks";
 import { isNewTabShortcut, isNewTaskShortcut, isSettingsShortcut, isShortcutListShortcut, isQuickOpenShortcut, panelToggleShortcut, recentTasksShortcut, taskNumberShortcut, isNextAttentionShortcut, RECENT_TASKS_KEYS, RECENT_TASKS_TERMINAL_KEYS, NEW_TASK_KEYS, SETTINGS_KEYS, SHORTCUT_LIST_KEYS } from "./lib/shortcut";
+import { PanelResizer } from "./components/PanelResizer";
+import { clampPanelWidth, loadInspectorWidth, loadSidebarWidth, saveInspectorWidth, saveSidebarWidth } from "./lib/panel-widths";
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import { statusTone, type AgentState } from "./lib/status";
 import { recordTurnBoundary, turnActive } from "./lib/checkpoints";
@@ -118,6 +125,34 @@ export function App() {
   onCleanup(() => narrowQuery.removeEventListener("change", closeWhenNarrow));
   const toggleSidebar = () => setSidebarOpen((open) => { saveSidebarOpen(!open); return !open; });
   const [inspectorWide, setInspectorWide] = createSignal(false);
+  const [windowWidth, setWindowWidth] = createSignal(window.innerWidth);
+  const trackWindowWidth = () => setWindowWidth(window.innerWidth);
+  window.addEventListener("resize", trackWindowWidth);
+  onCleanup(() => window.removeEventListener("resize", trackWindowWidth));
+  const [sidebarWidth, setSidebarWidth] = createSignal(loadSidebarWidth());
+  const [inspectorWidth, setInspectorWidth] = createSignal(loadInspectorWidth());
+  const panelWidthStyle = () => {
+    const sidebar = sidebarWidth();
+    const inspector = inspectorWidth();
+    const sidebarPx = sidebar === undefined ? undefined : clampPanelWidth("sidebar", sidebar, windowWidth(), inspector === undefined ? 360 : inspector);
+    const inspectorPx = inspector === undefined ? undefined : clampPanelWidth("inspector", inspector, windowWidth(), sidebarPx ?? 288);
+    return {
+      ...(sidebarPx === undefined ? {} : { "--size-sidebar": `${sidebarPx}px` }),
+      ...(inspectorPx === undefined ? {} : { "--size-inspector": `${inspectorPx}px` }),
+    };
+  };
+  const resizePanel = (panel: "sidebar" | "inspector", width: number) => {
+    const sidebarPx = sidebarWidth() ?? 288;
+    const inspectorPx = inspectorWidth() ?? 360;
+    if (panel === "sidebar") setSidebarWidth(clampPanelWidth("sidebar", width, windowWidth(), inspectorOpen() && selected() ? inspectorPx : 0));
+    else setInspectorWidth(clampPanelWidth("inspector", width, windowWidth(), sidebarOpen() ? sidebarPx : 0));
+  };
+  const commitPanelWidths = () => {
+    const sidebar = sidebarWidth();
+    const inspector = inspectorWidth();
+    if (sidebar !== undefined) saveSidebarWidth(sidebar);
+    if (inspector !== undefined) saveInspectorWidth(inspector);
+  };
   const toggleInspector = () => setInspectorOpen((open) => { saveInspectorOpen(!open); return !open; });
   const [repos, setRepos] = createSignal<RepoRecord[]>([]);
   const [tasks, setTasks] = createSignal<TaskRow[]>(inTauri ? [] : sampleTasks(now()));
@@ -823,9 +858,21 @@ export function App() {
   const create = async (input: NewTaskInput) => {
     const current = dialogRepo();
     if (!current) return;
+    // A background task starts its terminal and gets the "new" mark, but selection and focus stay put.
+    const settle = (record: CreatedTask) => {
+      if (!input.background) return open(record.id);
+      batch(() => {
+        setOpenIds((ids) => (ids.includes(record.id) ? ids : [...ids, record.id]));
+        setUnreadFinish((marks) => new Set(marks).add(record.id));
+      });
+      pushToast({
+        tone: "success",
+        message: t("newTask.createdBackground").replace("{title}", () => record.title),
+        action: { label: t("task.open"), onClick: () => open(record.id) },
+      });
+    };
     if (!input.compare) {
-      const record = await createOne(current.id, input, input.agent);
-      open(record.id);
+      settle(await createOne(current.id, input, input.agent));
       setDialogOpen(false);
       return;
     }
@@ -836,7 +883,7 @@ export function App() {
     } catch (failure) {
       pushToast({ tone: "error", title: t("newTask.compareSecondFailed"), message: String(failure) });
     }
-    open(first.id);
+    settle(first);
     setDialogOpen(false);
   };
 
@@ -1004,9 +1051,9 @@ export function App() {
     })();
   });
   // Ends a comparison: the other tasks run on the same prompt are archived and this one stays.
-  const keepOnly = async (task: TaskRow) => {
+  const keepOnly = async (task: TaskRow): Promise<boolean> => {
     const siblings = compareSiblings(tasks(), task);
-    if (archiving() || siblings.length === 0) return;
+    if (archiving() || siblings.length === 0) return false;
     setArchiving(true);
     try {
       if (!await confirmDialog({
@@ -1015,13 +1062,21 @@ export function App() {
         confirmLabel: t("task.keepOnlyConfirm"),
         cancelLabel: t("workspace.close"),
         tone: "primary",
-      })) return;
+      })) return false;
       for (const sibling of siblings) await archiveNow(sibling);
+      return true;
     } catch (failure) {
       pushToast({ tone: "error", title: t("task.archiveFailed"), message: String(failure) });
+      return false;
     } finally {
       setArchiving(false);
     }
+  };
+
+  const [compareOf, setCompareOf] = createSignal<TaskRow>();
+  const compared = () => {
+    const task = compareOf();
+    return task?.compareGroup ? compareMembers(tasks(), task.compareGroup, task.repoId) : [];
   };
 
   const restore = async (id: string) => {
@@ -1117,15 +1172,29 @@ export function App() {
   const dropFiles = async (paths: string[], position: { x: number; y: number }) => {
     const task = selected();
     if (!task?.worktreePath || dialogOpen() || workspacePanel() || !dropTargetsTerminal(position)) return;
-    const files = await resolveDroppedTaskPaths(task.id, paths);
-    if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
     const shell = terminalAt(position.x / window.devicePixelRatio, position.y / window.devicePixelRatio);
     if (shell?.kind === "shell") {
+      const files = await resolveDroppedTaskPaths(task.id, paths);
+      if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
       if (!(await shell.target.insert(quoteShellPaths(await shellKind(), files)))) report(t("diff.notReady"));
       return;
     }
-    const draft = files.map((path) => `@${/[\s"]/u.test(path) ? `"${path.replaceAll('"', '\\"')}"` : path}`).join(" ");
-    if (!(await draftComment(task.id, draft + " "))) report(t("diff.notReady"));
+    const draft = await attachmentPaths(task.id, paths);
+    if (selected()?.id !== task.id || view() !== "tasks" || dialogOpen() || workspacePanel()) return;
+    if (!(await draftComment(task.id, fileReferences(draft) + " "))) report(t("diff.notReady"));
+  };
+
+  /** Files as worktree paths; images are first saved into the task's ignored attachments folder. */
+  const attachmentPaths = async (id: string, paths: string[]) => {
+    const images = paths.filter(isImagePath);
+    const others = paths.filter((path) => !isImagePath(path));
+    if (others.length > MAX_ATTACHED_FILES || images.length > MAX_ATTACHED_IMAGES) {
+      throw new Error(t("attach.tooMany").replace("{files}", String(MAX_ATTACHED_FILES)).replace("{images}", String(MAX_ATTACHED_IMAGES)));
+    }
+    return [
+      ...(others.length ? await resolveDroppedTaskPaths(id, others) : []),
+      ...(images.length ? await attachImages(id, images) : []),
+    ];
   };
 
   onMount(() => {
@@ -1198,7 +1267,9 @@ export function App() {
           dropOnTree(payload.position.x / ratio, payload.position.y / ratio, payload.paths);
         } else if (dropTargetsTerminal(payload.position)) {
           void dropFiles(payload.paths, payload.position).catch(report);
-        } else if (!dialogOpen() && !workspacePanel()) {
+        } else if (dialogOpen()) {
+          dropIntoDialog(payload.paths);
+        } else if (!workspacePanel()) {
           void (async () => {
             for (const path of payload.paths) await addProject(path).catch(report);
           })();
@@ -1372,12 +1443,18 @@ export function App() {
           <Board tasks={rows()} repos={repos()} now={now()} onOpen={open} />
         </main>
       </Show>
-      <main class="layout" classList={{
+      <main class="layout" style={panelWidthStyle()} classList={{
         "layout-no-inspector": !selected() || !inspectorOpen(),
-        "layout-inspector-wide": inspectorWide() && !!selected() && inspectorOpen(),
+        "layout-inspector-wide": inspectorWide() && inspectorWidth() === undefined && !!selected() && inspectorOpen(),
         "layout-no-sidebar": !sidebarOpen(),
         "view-hidden": view() !== "tasks",
       }}>
+        <Show when={sidebarOpen() && view() === "tasks"}>
+          <PanelResizer panel="sidebar" onResize={(width) => resizePanel("sidebar", width)} onCommit={commitPanelWidths} />
+        </Show>
+        <Show when={!!selected() && inspectorOpen() && view() === "tasks"}>
+          <PanelResizer panel="inspector" onResize={(width) => resizePanel("inspector", width)} onCommit={commitPanelWidths} />
+        </Show>
         <Show when={sidebarOpen()}>
         <TaskList
           tasks={rows()}
@@ -1387,6 +1464,7 @@ export function App() {
           onNewTask={inTauri ? openNewTask : undefined}
           onImportWorktrees={inTauri ? setImportRepoId : undefined}
           onAddRepo={inTauri ? startAddProject : undefined}
+          onCompareResults={(id) => setCompareOf(tasks().find((item) => item.id === id))}
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}
           pinned={pinned()}
           onTogglePin={togglePin}
@@ -1445,6 +1523,7 @@ export function App() {
               statusForKey={(id, key) => live().get(id)?.get(key)?.status}
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
               onDraftOriginal={(text) => draftComment(task().id, text)}
+              onAttachPaths={async (paths) => draftComment(task().id, fileReferences(await attachmentPaths(task().id, paths)) + " ")}
               setupRequest={setupRequests().get(task().id)}
               setupFailure={setupFailures().get(task().id)}
               setupOutcome={setupOutcomes().get(task().id)}
@@ -1524,10 +1603,16 @@ export function App() {
           settingsPage={settingsPage()}
           onOpen={open} onClose={() => { setWorkspacePanel(undefined); setSettingsPage(undefined); }} />}
       </Show>
+      <Show when={compareOf() && compared().length > 1}>
+        <CompareResults tasks={compared()} now={now()} onClose={() => setCompareOf(undefined)}
+          onOpen={(id) => { setCompareOf(undefined); open(id); }}
+          onKeep={(task) => void keepOnly(task).then((kept) => { if (kept) setCompareOf(undefined); })} />
+      </Show>
       <Show when={cueManagerRepo()}>
         {(repoId) => <CuesDialog repoId={repoId()} repoName={repos().find((item) => item.id === repoId())?.name ?? ""}
           onClose={closeCueManager} />}
       </Show>
+      <LocalPreview />
       <Show when={issueReport() !== undefined}>
         <IssueReportDialog error={issueReport() ?? ""} onClose={() => setIssueReport(undefined)} />
       </Show>
@@ -1542,6 +1627,7 @@ export function App() {
             defaultBranch={current().defaultBranch}
             isGit={current().isGit}
             parents={inTauri ? rows().filter((task) => task.repoId === current().id) : rows()}
+            terminalLabel={(key) => `${findTask(taskIdOf(key))?.title ?? key} · ${key.split(":")[1]?.startsWith("shell") ? t("task.shell") : t("attach.agentTab")}`}
             onCreate={create}
             onClose={() => setDialogOpen(false)}
           />

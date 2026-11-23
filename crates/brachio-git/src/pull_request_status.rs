@@ -10,6 +10,7 @@ use std::process::Command;
 use std::time::Duration;
 
 const GH_TIME_LIMIT: Duration = Duration::from_secs(60);
+const PULL_REQUEST_FIELDS: &str = "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,reviewDecision,statusCheckRollup,updatedAt";
 
 use serde::{Deserialize, Serialize};
 
@@ -401,6 +402,69 @@ pub fn repository_of(worktree: &Path) -> Result<String, StatusError> {
     Ok(answer.trim().to_owned())
 }
 
+/// Where a pull request a user typed in lives. The repository is missing for a bare number,
+/// which means the task's own repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestReference {
+    /// `owner/name`, when the input named one.
+    pub repository: Option<String>,
+    /// The pull request number.
+    pub number: u64,
+}
+
+/// Reads `123`, `#123` or a `https://github.com/owner/name/pull/123` address. Other hosts are
+/// not accepted, because `gh` is asked about github.com repositories.
+#[must_use]
+pub fn parse_pull_request_reference(input: &str) -> Option<PullRequestReference> {
+    let input = input.trim();
+    let bare = input.strip_prefix('#').unwrap_or(input);
+    if let Ok(number) = bare.parse::<u64>() {
+        return (number > 0).then_some(PullRequestReference {
+            repository: None,
+            number,
+        });
+    }
+    let path = input
+        .strip_prefix("https://github.com/")
+        .or_else(|| input.strip_prefix("http://github.com/"))?;
+    let path = path.split(['?', '#']).next()?;
+    let mut parts = path.split('/');
+    let (owner, name, kind, number) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    let number = number.parse::<u64>().ok().filter(|number| *number > 0)?;
+    (kind == "pull" && !owner.is_empty() && !name.is_empty()).then(|| PullRequestReference {
+        repository: Some(format!("{owner}/{name}")),
+        number,
+    })
+}
+
+/// Reads one pull request by number. Unlike a branch lookup, a number that does not exist is an
+/// error: the user named it.
+///
+/// # Errors
+/// Fails when `gh` cannot be run, is refused, or answers with something unreadable.
+pub fn fetch_pull_request_by_number(
+    worktree: &Path,
+    repository: &str,
+    number: u64,
+) -> Result<PullRequestSnapshot, StatusError> {
+    let number = number.to_string();
+    let json = run_gh(
+        worktree,
+        &[
+            "pr",
+            "view",
+            &number,
+            "--repo",
+            repository,
+            "--json",
+            PULL_REQUEST_FIELDS,
+        ],
+    )?;
+    parse_pull_requests(repository, &format!("[{}]", json.trim()))?.ok_or_else(|| {
+        StatusError::Unreadable(format!("{repository}#{number} is not a pull request there"))
+    })
+}
+
 /// Reads the pull request of `branch` in `repository`. `None` when the branch has none.
 ///
 /// # Errors
@@ -424,7 +488,7 @@ pub fn fetch_pull_request(
             "--limit",
             "10",
             "--json",
-            "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,reviewDecision,statusCheckRollup,updatedAt",
+            PULL_REQUEST_FIELDS,
         ],
     )?;
     parse_pull_requests(repository, &json)
@@ -453,6 +517,42 @@ mod tests {
 
     fn parse(json: &str) -> Option<PullRequestSnapshot> {
         parse_pull_requests("4n5rud/Brachio", json).expect("readable")
+    }
+
+    #[test]
+    fn a_number_or_a_github_pull_request_address_is_understood_and_anything_else_is_not() {
+        let reference = |input: &str| parse_pull_request_reference(input);
+        let on = |repository: &str, number| {
+            Some(PullRequestReference {
+                repository: Some(repository.to_owned()),
+                number,
+            })
+        };
+        assert_eq!(
+            reference(" #42 "),
+            Some(PullRequestReference {
+                repository: None,
+                number: 42
+            })
+        );
+        assert_eq!(
+            reference("https://github.com/o/r/pull/7/files?x=1"),
+            on("o/r", 7)
+        );
+        assert_eq!(
+            reference("https://github.com/o/r/pull/7#issuecomment-1"),
+            on("o/r", 7)
+        );
+        for bad in [
+            "0",
+            "",
+            "abc",
+            "https://github.com/o/r/issues/7",
+            "https://example.com/o/r/pull/7",
+            "https://github.com/o/r/pull/x",
+        ] {
+            assert_eq!(reference(bad), None, "{bad}");
+        }
     }
 
     #[test]

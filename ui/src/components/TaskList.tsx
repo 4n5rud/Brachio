@@ -14,6 +14,8 @@ import { Icon } from "./Icon";
 import { attentionOf, sortByAttention } from "../lib/attention";
 import { prioritySortEnabled } from "../lib/sidebar-sort";
 import { TaskRowItem } from "./TaskRow";
+import { HiddenByFilter, TaskFilter } from "./TaskFilter";
+import { hiddenCount, passesFilter, sidebarFilter } from "../lib/sidebar-filter";
 import { createReorder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
 
@@ -57,6 +59,7 @@ export function TaskList(props: {
   onArchiveTask?: (id: string) => void;
   /** Archives the other tasks of a comparison and keeps this one. */
   onKeepOnly?: (id: string) => void;
+  onCompareResults?: (id: string) => void;
   /** Ids of the pinned tasks; they come first in their project. */
   pinned?: ReadonlySet<string>;
   onTogglePin?: (id: string, pinned: boolean) => void;
@@ -90,6 +93,7 @@ export function TaskList(props: {
     const groups = new Map(props.repos.map((repo) => [repo.id, [] as TaskRow[]]));
     const folders: TaskRow[] = [];
     for (const task of props.tasks) {
+      if (!passesFilter(task, sidebarFilter(), props.selectedId)) continue;
       (groups.get(task.repoId ?? "") ?? folders).push(task);
     }
     groups.set("", folders);
@@ -149,6 +153,7 @@ export function TaskList(props: {
         <Show when={props.needsYou > 0}>
           <span class="count" role="img" title={t("group.needs")} aria-label={`${t("group.needs")} ${props.needsYou}`}>{props.needsYou}</span>
         </Show>
+        <TaskFilter />
         <Show when={props.onAddRepo}>
           <IconButton icon="plus" size="sm" label={t("sidebar.addProject")} aria-haspopup="menu"
             aria-expanded={addMenu() !== undefined}
@@ -162,6 +167,7 @@ export function TaskList(props: {
           </Show>
         </Show>
       </div>
+      <HiddenByFilter count={hiddenCount(props.tasks, sidebarFilter(), props.selectedId)} />
       <nav class="task-groups" aria-label={t("sidebar.projects")} ref={groupsEl}>
         <For each={groupIds()}>
           {(id) => {
@@ -226,6 +232,8 @@ export function TaskList(props: {
                         comparing={compareSiblings(props.tasks, task).length > 0}
                         onKeepOnly={props.onKeepOnly && compareSiblings(props.tasks, task).length > 0
                           ? () => props.onKeepOnly?.(task.id) : undefined}
+                        onCompareResults={props.onCompareResults && compareSiblings(props.tasks, task).length > 0
+                          ? () => props.onCompareResults?.(task.id) : undefined}
                         onError={props.onError}
                       />
                     )}

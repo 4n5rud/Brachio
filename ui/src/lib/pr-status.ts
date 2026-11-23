@@ -26,6 +26,16 @@ export interface PullRequestSnapshot {
   conflict: Conflict;
 }
 
+/** A pull request the user linked to the task besides the branch's own. */
+export interface LinkedPrReport {
+  repository: string;
+  number: number;
+  snapshot: PullRequestSnapshot | null;
+  checkedAtMs: number | null;
+  /** Why the latest attempt failed. While set, the snapshot, if any, is out of date. */
+  error: string | null;
+}
+
 export interface PrStatusReport {
   snapshot: PullRequestSnapshot | null;
   /** When the snapshot was read, in milliseconds since the Unix epoch. */
@@ -36,11 +46,18 @@ export interface PrStatusReport {
   retryInSeconds: number | null;
   localHead: string | null;
   headMatchesLocal: boolean | null;
+  linked: LinkedPrReport[];
 }
 
 /** `force` is the user pressing Refresh; it skips the wait after a failure. */
 export const loadPrStatus = (id: string, force: boolean) =>
   invoke<PrStatusReport>("task_pr_status", { id, force });
+
+/** Links another pull request, given as a number or a github.com address. Rejects with the reason. */
+export const linkPr = (id: string, reference: string) => invoke<void>("task_link_pr", { id, reference });
+
+export const unlinkPr = (id: string, repository: string, number: number) =>
+  invoke<void>("task_unlink_pr", { id, repository, number });
 
 export const openExternalLink = (url: string) => invoke<void>("open_external_link", { url });
 
@@ -71,9 +88,11 @@ export interface PrChip {
 
 /** The one thing about a task's pull request that is worth a place in the list, or none. */
 export function chipOf(report: PrStatusReport | undefined): PrChip | null {
-  const snapshot = report?.snapshot;
-  if (!report || !snapshot) return null;
-  const stale = report.error !== null;
+  return report?.snapshot ? chipOfSnapshot(report.snapshot, report.error !== null) : null;
+}
+
+/** The chip for one pull request; `stale` marks an answer older than the latest failed attempt. */
+export function chipOfSnapshot(snapshot: PullRequestSnapshot, stale: boolean): PrChip {
   const chip = (key: PrChip["key"], tone: ChipTone): PrChip => ({ key, number: snapshot.number, tone, stale });
   if (snapshot.state === "merged") return chip("prChip.merged", "neutral");
   if (snapshot.state === "closed") return chip("prChip.closed", "neutral");
@@ -96,7 +115,8 @@ export function nextRefreshDelay(report: PrStatusReport): number | null {
     return Math.max(FAILURE_FLOOR, ((report.retryInSeconds ?? 0) + 1) * SECOND);
   }
   const snapshot = report.snapshot;
-  if (snapshot === null) return report.noPullRequest ? OPEN_INTERVAL : null;
-  if (snapshot.state !== "open") return null;
+  const linkedOpen = report.linked.some((link) => link.snapshot === null || link.snapshot.state === "open");
+  if (snapshot === null) return report.noPullRequest || linkedOpen ? OPEN_INTERVAL : null;
+  if (snapshot.state !== "open") return linkedOpen ? OPEN_INTERVAL : null;
   return snapshot.checks.overall === "pending" ? CHECKS_RUNNING_INTERVAL : OPEN_INTERVAL;
 }

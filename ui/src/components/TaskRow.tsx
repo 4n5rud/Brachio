@@ -35,6 +35,8 @@ export function TaskRowItem(props: {
   comparing?: boolean;
   /** Archives the other tasks of the comparison; left out when there is none. */
   onKeepOnly?: () => void;
+  /** Opens the comparison of the group's tasks side by side. */
+  onCompareResults?: () => void;
   /** Renames the task; the item is left out when missing. */
   onRename?: () => void;
   /** Opens the dialog that duplicates the task for several agents or profiles. */
@@ -145,6 +147,7 @@ export function TaskRowItem(props: {
             </Show>
             <Show when={props.onKeepOnly}>
               <MenuSeparator />
+              <MenuItem onSelect={() => act(() => props.onCompareResults?.())}>{t("taskMenu.compareResults")}</MenuItem>
               <MenuItem onSelect={() => act(() => props.onKeepOnly?.())}>{t("taskMenu.keepOnly")}</MenuItem>
             </Show>
             <Show when={props.onArchive}>
