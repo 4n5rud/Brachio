@@ -110,6 +110,16 @@ env = { TEAM = "docs" }
 
 To run one prompt with several agents or profiles, use "Duplicate as comparison task..." in a task's menu. Each run gets its own worktree and the tasks are grouped for comparison.
 
+Permission rules answer some of Brachio's own approval questions for the project, so you do not click the same answer every time. They never change an agent's flags or its own settings, and anything not listed is still asked:
+
+```toml
+[permissions]
+allow = ["Read", "Grep", "Glob"]                  # read-only tools only, inside the project folder
+deny = ["WebFetch", "Write:.env", "Edit:infra/"]  # a tool, or a tool and a project path; deny wins
+```
+
+A rule that decides is recorded in the task's Activity, and Settings shows each project's rules. If the section is not valid, nothing is applied and every request is asked.
+
 ## Current scope and limitations
 
 Not built yet: automatic merging, tasks nested more than one level, child tasks in plain folders, remote machines, and a Linux app. Agent status, approvals and recovery depend on what each agent reports.

@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use brachio_agent::PolicyDecision;
 use brachio_runtime::approval::{ApprovalRequest, Decision};
 use brachio_runtime::hook_token;
 use brachio_runtime::mailbox::{self, MailRequest, MailResponse};
@@ -27,6 +28,22 @@ use crate::child_task_request::{ChildRequest, ChildTasks};
 /// How long a hook may take to send its question once connected.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const REVIEW_PROMPT_CHARS: usize = 2000;
+
+/// The tool and its main input, for the Activity history.
+fn policy_summary(tool: &str, input: &Value) -> String {
+    let target = [
+        "command",
+        "file_path",
+        "path",
+        "notebook_path",
+        "url",
+        "pattern",
+    ]
+    .iter()
+    .find_map(|field| input.get(field)?.as_str())
+    .unwrap_or("");
+    format!("{tool}: {target}")
+}
 
 /// True when the client sends back an acknowledgement of exactly `ids` in time.
 ///
@@ -71,7 +88,18 @@ pub struct Question {
     pub key: String,
     /// The complete tool name and arguments, ready to display as text.
     pub review: String,
+    /// Why the project's permission rules were not used for this question, when they were not.
+    pub policy_note: Option<String>,
 }
+
+/// What the project's `[permissions]` say about a request, or why they cannot be used.
+pub enum PolicyAnswer {
+    Decided(PolicyDecision),
+    /// The rules could not be read; the user is asked, and told why.
+    Unusable(String),
+}
+
+type PolicyLookup = Box<dyn Fn(&str, &str, &Value) -> PolicyAnswer + Send + Sync>;
 
 /// What the interface needs to hear about.
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +113,13 @@ pub enum Notice {
     HungUp(u64),
     /// A remembered rule allowed a request without asking.
     AutoAllowed { key: String, summary: String },
+    /// The project's `[permissions]` answered a request without asking.
+    PolicyDecided {
+        key: String,
+        summary: String,
+        allowed: bool,
+        rule: String,
+    },
 }
 
 struct Pending {
@@ -107,6 +142,7 @@ pub struct Approvals {
     children: Box<dyn ChildTasks>,
     /// When set, a connection must open with this token or it is dropped unanswered.
     token: OnceLock<String>,
+    policy: OnceLock<PolicyLookup>,
 }
 
 impl Approvals {
@@ -162,6 +198,7 @@ impl Approvals {
             mail: Box::new(mail),
             children: Box::new(children),
             token: OnceLock::new(),
+            policy: OnceLock::new(),
         })
     }
 
@@ -169,6 +206,15 @@ impl Approvals {
     /// the socket is served.
     pub fn require_token(&self, token: String) {
         let _ = self.token.set(token);
+    }
+
+    /// Sets how a project's `[permissions]` are found for a terminal key. Without it every
+    /// request is asked. Only the first call has an effect.
+    pub fn set_policy(
+        &self,
+        lookup: impl Fn(&str, &str, &Value) -> PolicyAnswer + Send + Sync + 'static,
+    ) {
+        let _ = self.policy.set(Box::new(lookup));
     }
 
     /// Passes the user's choice to the waiting hook. `false` when the question is already over.
@@ -227,7 +273,9 @@ impl Approvals {
     /// Shows the user a question raised by the app itself and blocks until they answer. Call it
     /// off the async runtime. `None` when the question could not be shown.
     pub fn ask_blocking(&self, key: String, review: String) -> Option<Decision> {
-        let (id, receiver) = self.open(key, review, QuestionKind::QaRun, None).ok()?;
+        let (id, receiver) = self
+            .open(key, review, QuestionKind::QaRun, None, None)
+            .ok()?;
         let decision = receiver.blocking_recv().ok();
         if let Ok(mut map) = self.pending.lock() {
             map.remove(&id);
@@ -242,6 +290,7 @@ impl Approvals {
         review: String,
         kind: QuestionKind,
         remember: Option<Candidate>,
+        policy_note: Option<String>,
     ) -> Result<(u64, oneshot::Receiver<Decision>)> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
@@ -251,6 +300,7 @@ impl Approvals {
             id,
             key,
             review,
+            policy_note,
         };
         self.pending
             .lock()
@@ -359,9 +409,42 @@ impl Approvals {
         let Some(review) = request.review() else {
             return Ok(());
         };
-        let candidate = serde_json::from_str::<Value>(&request.review_input)
-            .ok()
-            .and_then(|input| always_allow::candidate(&request.tool_name, &input));
+        let input = serde_json::from_str::<Value>(&request.review_input).ok();
+        let mut policy_note = None;
+        if let (Some(lookup), Some(input)) = (self.policy.get(), &input) {
+            match lookup(&request.key, &request.tool_name, input) {
+                PolicyAnswer::Decided(PolicyDecision::Allow { rule }) => {
+                    (self.notify)(Notice::PolicyDecided {
+                        key: request.key.clone(),
+                        summary: policy_summary(&request.tool_name, input),
+                        allowed: true,
+                        rule,
+                    });
+                    write_message(reader.get_mut(), &Decision::Allow, MAX_RESPONSE).await?;
+                    return Ok(());
+                }
+                PolicyAnswer::Decided(PolicyDecision::Deny { rule }) => {
+                    (self.notify)(Notice::PolicyDecided {
+                        key: request.key.clone(),
+                        summary: policy_summary(&request.tool_name, input),
+                        allowed: false,
+                        rule: rule.clone(),
+                    });
+                    let denied = Decision::Deny {
+                        message: format!(
+                            "Refused by this project's brachio.toml [permissions] ({rule})."
+                        ),
+                    };
+                    write_message(reader.get_mut(), &denied, MAX_RESPONSE).await?;
+                    return Ok(());
+                }
+                PolicyAnswer::Decided(PolicyDecision::Ask) => {}
+                PolicyAnswer::Unusable(note) => policy_note = Some(note),
+            }
+        }
+        let candidate = input
+            .as_ref()
+            .and_then(|input| always_allow::candidate(&request.tool_name, input));
         if let Some(candidate) = &candidate {
             if self
                 .always
@@ -382,6 +465,7 @@ impl Approvals {
                 review,
                 QuestionKind::Tool,
                 candidate,
+                policy_note,
             )
             .await?;
         if let Some(decision) = asked {
@@ -398,8 +482,9 @@ impl Approvals {
         review: String,
         kind: QuestionKind,
         remember: Option<Candidate>,
+        policy_note: Option<String>,
     ) -> Result<Option<Decision>> {
-        let (id, receiver) = self.open(key, review, kind, remember)?;
+        let (id, receiver) = self.open(key, review, kind, remember, policy_note)?;
         let mut hung_up = false;
         let outcome = tokio::select! {
             decision = receiver => decision.ok(),
@@ -444,7 +529,7 @@ impl Approvals {
         );
         let key = request.key.clone();
         match self
-            .ask_user(reader, key, review, QuestionKind::CreateTask, None)
+            .ask_user(reader, key, review, QuestionKind::CreateTask, None, None)
             .await
         {
             Ok(Some(Decision::Allow)) => {}
@@ -684,6 +769,58 @@ mod tests {
             .iter()
             .filter(|notice| matches!(notice, Notice::Asked(_)))
             .count()
+    }
+
+    #[test]
+    fn a_project_rule_answers_without_a_question_and_is_logged_while_others_are_asked() {
+        tauri::async_runtime::block_on(async {
+            let (name, approvals, notices) = start("task1:agent");
+            approvals.set_policy(|_, tool, _| match tool {
+                "Read" => super::PolicyAnswer::Decided(brachio_agent::PolicyDecision::Allow {
+                    rule: "allow = \"Read\"".to_owned(),
+                }),
+                "WebFetch" => super::PolicyAnswer::Decided(brachio_agent::PolicyDecision::Deny {
+                    rule: "deny = \"WebFetch\"".to_owned(),
+                }),
+                _ => super::PolicyAnswer::Decided(brachio_agent::PolicyDecision::Ask),
+            });
+            let mut read = request("task1:agent");
+            read.tool_name = "Read".to_owned();
+            read.review_input = r#"{"file_path":"a.txt"}"#.to_owned();
+            let allowed = approval::ask(&name, &read, Duration::from_secs(5)).await;
+            assert_eq!(allowed, Some(Decision::Allow));
+
+            let mut fetch = request("task1:agent");
+            fetch.tool_name = "WebFetch".to_owned();
+            fetch.review_input = r#"{"url":"https://example.com"}"#.to_owned();
+            let refused = approval::ask(&name, &fetch, Duration::from_secs(5)).await;
+            assert!(
+                matches!(refused, Some(Decision::Deny { .. })),
+                "{refused:?}"
+            );
+
+            assert_eq!(asked_count(&notices), 0, "no bar for a decided request");
+            let decided: Vec<bool> = notices
+                .lock()
+                .expect("lock")
+                .iter()
+                .filter_map(|notice| match notice {
+                    Notice::PolicyDecided { allowed, .. } => Some(*allowed),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(decided, vec![true, false]);
+
+            let waiting = tokio::spawn({
+                let name = name.clone();
+                async move {
+                    approval::ask(&name, &request("task1:agent"), Duration::from_secs(5)).await
+                }
+            });
+            let id = first_question(&notices).await;
+            assert!(approvals.answer(id, Decision::Allow));
+            assert_eq!(waiting.await.expect("hook task"), Some(Decision::Allow));
+        });
     }
 
     #[test]

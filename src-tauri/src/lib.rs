@@ -23,6 +23,7 @@ mod pending_worktrees;
 mod pr_status;
 mod project_add;
 mod project_cues;
+mod project_permissions;
 mod prompt_history;
 mod qa_run;
 mod quit;
@@ -436,6 +437,7 @@ pub fn run() {
             scratch_workspace::scratch_list,
             scratch_workspace::scratch_convert,
             scratch_workspace::scratch_discard,
+            project_permissions::repo_permissions,
             workspace::task_git_action,
             open_local_port,
             task_folder::task_reveal,
@@ -472,6 +474,10 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         Ok(token) => approvals.require_token(token),
         Err(error) => tracing::warn!(%error, "the hook socket does not ask for a token"),
     }
+    let policy_app = app.handle().clone();
+    approvals.set_policy(move |key, tool, input| {
+        project_permissions::answer(&policy_app, key, tool, input)
+    });
     app.manage(Arc::clone(&approvals));
     tauri::async_runtime::spawn(async move {
         match brachio_runtime::transport::listen(&endpoint) {
@@ -490,7 +496,21 @@ fn forward_notice<R: tauri::Runtime>(app: &AppHandle<R>, notice: hook_socket::No
         hook_socket::Notice::Closed(id) => app.emit("approval-closed", id),
         hook_socket::Notice::HungUp(id) => app.emit("approval-hung-up", id),
         hook_socket::Notice::AutoAllowed { key, summary } => {
-            record_auto_allowed(app, &key, &summary);
+            record_auto_allowed(app, &key, "approval_auto_allowed", &summary);
+            Ok(())
+        }
+        hook_socket::Notice::PolicyDecided {
+            key,
+            summary,
+            allowed,
+            rule,
+        } => {
+            let kind = if allowed {
+                "approval_policy_allowed"
+            } else {
+                "approval_policy_denied"
+            };
+            record_auto_allowed(app, &key, kind, &format!("{rule} - {summary}"));
             Ok(())
         }
     };
@@ -499,7 +519,12 @@ fn forward_notice<R: tauri::Runtime>(app: &AppHandle<R>, notice: hook_socket::No
     }
 }
 
-fn record_auto_allowed<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, summary: &str) {
+fn record_auto_allowed<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    key: &str,
+    kind: &str,
+    summary: &str,
+) {
     let task_id = always_allow::task_of(key);
     let detail: String = brachio_qa::redact_secrets(summary, false)
         .lines()
@@ -513,13 +538,9 @@ fn record_auto_allowed<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, summary
         return;
     };
     let now = pr_status::now_ms();
-    if let Err(error) = brachio_store::record_activity(
-        &connection,
-        task_id,
-        "approval_auto_allowed",
-        Some(&detail),
-        now,
-    ) {
+    if let Err(error) =
+        brachio_store::record_activity(&connection, task_id, kind, Some(&detail), now)
+    {
         tracing::warn!(%error, "could not record an automatically allowed request");
     }
 }

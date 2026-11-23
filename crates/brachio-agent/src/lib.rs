@@ -6,6 +6,7 @@ mod agent_kind;
 mod catalog;
 mod codex_sessions;
 mod installed;
+mod permissions;
 mod profile;
 mod session_tokens;
 mod usage_scan;
@@ -20,6 +21,7 @@ pub use installed::{
     detect, detect_all, find_on_path, is_safe_for_cmd, locate, Installed, PromptDelivery,
     ResolvedCommand,
 };
+pub use permissions::{read_policy, PermissionPolicy, PolicyDecision, READ_ONLY_TOOLS};
 pub use profile::{
     find_profile, parse_profiles, read_profiles, AgentProfile, ProfileEntry, ProfileError,
     BYPASS_WORDS,
