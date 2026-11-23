@@ -215,7 +215,8 @@ p {
   white-space: nowrap;
 }
 .project-import,
-.project-new-task {
+.project-new-task,
+.project-more {
   flex: none;
   margin-inline-end: var(--space-2);
 }

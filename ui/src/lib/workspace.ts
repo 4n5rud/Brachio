@@ -57,6 +57,8 @@ export const reorderRepos = (ids: readonly string[]) => invoke<void>("repo_reord
 export const reorderTasks = (ids: readonly string[]) => invoke<void>("task_reorder", { ids });
 /** With `gitOnly`, a folder that is not a Git repository is refused instead of added as a folder workspace. */
 export const addRepo = (path: string, gitOnly = false) => invoke<RepoRecord>("repo_add", { path, gitOnly });
+/** Takes a project off the list; its files are not touched, and it must have no tasks left. */
+export const removeRepo = (id: string) => invoke<void>("repo_remove", { id });
 /** Clones `url` into a new folder inside `parent` and adds it. Rejects with "cancelled" when stopped. */
 export const cloneProject = (jobId: string, url: string, parent: string, name?: string) =>
   invoke<RepoRecord>("project_clone", { jobId, url, parent, name: name || null });

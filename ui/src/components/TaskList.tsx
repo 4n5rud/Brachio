@@ -1,5 +1,5 @@
 import { IconButton } from "./ui/IconButton";
-import { Menu } from "./ui/Menu";
+import { Menu, MenuItem } from "./ui/Menu";
 import { AddProjectItems } from "./AddProjectItems";
 import type { AddProjectKind } from "../lib/project-choices";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
@@ -41,6 +41,8 @@ export function TaskList(props: {
   onNewTask?: (repoId: string) => void;
   /** Opens the dialog that imports a Git project's existing worktrees. */
   onImportWorktrees?: (repoId: string) => void;
+  /** Takes the project off the list after the person confirms; its files stay. */
+  onRemoveProject?: (repoId: string) => void;
   /** Adds a git repository found inside a folder project as a project of its own. */
   onAddFolderRepo?: (path: string) => Promise<void>;
   onAddRepo?: (kind: AddProjectKind) => void;
@@ -90,6 +92,7 @@ export function TaskList(props: {
     onReorder: (ids) => props.onReorderProjects?.(ids),
   });
   const [addMenu, setAddMenu] = createSignal<HTMLElement>();
+  const [projectMenu, setProjectMenu] = createSignal<{ id: string; anchor: HTMLElement }>();
   const projects = createMemo(() => new Map(props.repos.map((repo) => [repo.id, repo.name])));
   const groupIds = createMemo(() => [...projects().keys(), ""]);
   const folderProjects = createMemo(() => new Set(props.repos.filter((repo) => repo.isGit === false).map((repo) => repo.id)));
@@ -181,6 +184,15 @@ export function TaskList(props: {
         </Show>
       </div>
       <HiddenByFilter count={hiddenCount(props.tasks, sidebarFilter(), props.selectedId)} />
+      <Show when={projectMenu()}>
+        {(open) => (
+          <Menu anchor={open().anchor} label={t("sidebar.projectActions")} onClose={() => setProjectMenu(undefined)}>
+            <MenuItem danger onSelect={() => { const id = open().id; setProjectMenu(undefined); props.onRemoveProject?.(id); }}>
+              {t("project.remove")}
+            </MenuItem>
+          </Menu>
+        )}
+      </Show>
       <nav class="task-groups" aria-label={t("sidebar.projects")} ref={groupsEl}>
         <For each={groupIds()}>
           {(id) => {
@@ -204,7 +216,12 @@ export function TaskList(props: {
             });
             return (
               <section class="project-card" ref={card} {...(id && props.onReorderProjects ? projectReorder.item(id) : {})}>
-                <div class="project-heading">
+                <div class="project-heading"
+                  onContextMenu={(event) => {
+                    if (!id || !props.onRemoveProject) return;
+                    event.preventDefault();
+                    setProjectMenu({ id, anchor: event.currentTarget });
+                  }}>
                   <button class="group-head" type="button" aria-expanded={expanded()}
                     title={expanded() ? undefined : countsTitle(tasks())} onClick={() => toggle(id)}>
                     <Icon name={expanded() ? "chevronDown" : "chevronRight"} class="icon-xs" />
@@ -220,6 +237,11 @@ export function TaskList(props: {
                     <IconButton class="project-new-task" data-no-drag icon="plus" size="sm"
                       title={t("sidebar.newTask")} label={t("sidebar.newTaskIn").replace("{project}", () => name())}
                       onClick={() => props.onNewTask?.(id)} />
+                  </Show>
+                  <Show when={id && props.onRemoveProject}>
+                    <IconButton class="project-more" data-no-drag icon="more" size="sm"
+                      label={t("sidebar.projectActions")} aria-haspopup="menu" aria-expanded={projectMenu()?.id === id}
+                      onClick={(event) => setProjectMenu(projectMenu()?.id === id ? undefined : { id, anchor: event.currentTarget })} />
                   </Show>
                 </div>
                 <Show when={expanded()}>

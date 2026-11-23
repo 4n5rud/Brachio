@@ -99,7 +99,7 @@ import { loadOpenWorkspaceTasks, saveOpenWorkspaceTasks } from "./lib/open-works
 import { deleteBlock } from "./lib/delete-preview";
 import { finishedUnseen, loadUnreadFinish, saveUnreadFinish } from "./lib/unread-finish";
 import { placeInOrder } from "./lib/drag-reorder";
-import { addRepo, archiveTask, reorderRepos, reorderTasks, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
+import { addRepo, removeRepo, archiveTask, reorderRepos, reorderTasks, createTask, deleteTask, listArchivedTasks, listRemoteUrls, listRepos, listTaskFiles, listTasks,
   previewTaskDeletion, resolveDroppedTaskPaths, restoreTask, retrySetupCopy,
   toTaskRow, type CreatedTask, type RepoRecord, type TaskRecord } from "./lib/workspace";
 
@@ -612,6 +612,33 @@ export function App() {
     if (!activeAgentKey(id, key) || questions().some((question) => question.key === key)) return;
     const prepared = target.prepare(pasteText(MAILBOX_REMINDER));
     if (prepared && !prepared.userTyped) await prepared.insert();
+  };
+
+  // The backend refuses while any task, archived or not, is left; the words say which kind.
+  const removeProject = async (id: string) => {
+    const repo = repos().find((item) => item.id === id);
+    if (!repo) return;
+    const name = repo.name;
+    if (tasks().some((task) => task.repoId === id)) {
+      pushToast({ tone: "error", message: t("project.removeHasTasks").replace("{name}", () => name) });
+      return;
+    }
+    const agreed = await confirmDialog({
+      title: t("project.removeTitle").replace("{name}", () => name),
+      body: t("project.removeBody"),
+      confirmLabel: t("project.remove"),
+    });
+    if (!agreed) return;
+    try {
+      await removeRepo(id);
+      setRepos((list) => list.filter((item) => item.id !== id));
+    } catch (failure) {
+      const text = String(failure);
+      pushToast({
+        tone: "error",
+        message: text.includes("still has") ? t("project.removeHasArchived").replace("{name}", () => name) : `${t("project.removeFailed")} ${text}`,
+      });
+    }
   };
 
   const reportDraftProblem = () => {
@@ -1516,6 +1543,7 @@ export function App() {
           onSelect={open}
           onNewTask={inTauri ? openNewTask : undefined}
           onImportWorktrees={inTauri ? setImportRepoId : undefined}
+          onRemoveProject={inTauri ? (id) => void removeProject(id) : undefined}
           onAddRepo={inTauri ? startAddProject : undefined}
           onCompareResults={(id) => setCompareOf(tasks().find((item) => item.id === id))}
           onKeepOnly={(id) => { const task = tasks().find((item) => item.id === id); if (task) void keepOnly(task); }}

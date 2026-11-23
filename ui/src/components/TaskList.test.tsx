@@ -55,3 +55,27 @@ test("subagent worktrees are listed under their task as read-only rows", () => {
   // Subagent rows are not tasks: they take no part in reordering.
   expect(subagentRows.every((row) => !row.hasAttribute("data-reorder-id"))).toBe(true);
 });
+
+test("a project's menu offers removal and reports which project", () => {
+  const removed: string[] = [];
+  const root = document.createElement("div");
+  document.body.append(root);
+  dispose = render(() => (
+    <TaskList
+      tasks={[]}
+      repos={[{ id: "repo", name: "Repo", isGit: true }]}
+      selectedId={undefined}
+      onSelect={() => {}}
+      initialCollapsed={new Set()}
+      prFor={() => null}
+      needsYou={0}
+      now={0}
+      onRemoveProject={(id) => removed.push(id)}
+    />
+  ), root);
+  root.querySelector<HTMLButtonElement>(".project-more")?.click();
+  const item = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((node) => node.textContent?.includes("Remove project"));
+  expect(item).toBeDefined();
+  item?.click();
+  expect(removed).toEqual(["repo"]);
+});
