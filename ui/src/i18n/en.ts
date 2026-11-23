@@ -955,6 +955,9 @@ export const en = {
 
   "time.now": "now",
   "checkpoints.title": "Restore points",
+  "commits.title": "Commits",
+  "commits.empty": "No commits on this branch yet.",
+  "commits.noFiles": "This commit changed no files.",
   "checkpoints.empty": "Restore points appear here after the agent changes files.",
   "checkpoints.turnStart": "Before turn",
   "checkpoints.turnEnd": "After turn",
