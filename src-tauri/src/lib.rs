@@ -363,6 +363,7 @@ pub fn run() {
             handoff_summary::task_handoff_summary,
             handoff_summary::task_handoff_send,
             agent_profiles::repo_profiles,
+            agent_profiles::task_profiles,
             agent_profiles::task_join_compare_group,
             workspace::task_has_live_terminals,
             workspace::repo_list,

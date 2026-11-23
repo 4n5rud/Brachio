@@ -1,0 +1,45 @@
+.compare-cols {
+  display: grid;
+  grid-template-columns: repeat(var(--compare-count), minmax(180px, 1fr));
+  gap: var(--space-3);
+  overflow-x: auto;
+}
+.compare-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+.compare-col h2 {
+  margin: 0;
+  font: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compare-col header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.compare-who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.compare-profile,
+.compare-branch {
+  font: var(--text-caption);
+  color: var(--color-text-3);
+}
+.compare-col footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: auto;
+}
