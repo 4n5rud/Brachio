@@ -35,18 +35,14 @@ export function FilesQaStates() {
   const [filter, setFilter] = createSignal("lim");
   return (
     <div class="catalog-cells">
-      <Cell cap="Files: search, then preview">
+      <Cell cap="Files: search">
         {files({ filter: filter(), onFilter: setFilter, matches: FILES.filter((file) => file.includes(filter())),
-          selected: FILES[0], preview: { text: "use std::time::Instant;\n\npub struct Limiter {\n    rate: u32,\n}" } }) }
+          selected: FILES[0] }) }
       </Cell>
       <Cell cap="Files: loading the list">{files({ loading: true, matches: [] })}</Cell>
       <Cell cap="Files: nothing matches">{files({ filter: "zzz", matches: [] })}</Cell>
       <Cell cap="Files: could not list">{files({ matches: [], error: "The worktree folder is missing." })}</Cell>
       <Cell cap="Files: too many">{files({ matches: MANY })}</Cell>
-      <Cell cap="Files: binary file">{files({ matches: [FILES[0] ?? ""], selected: FILES[0] ?? "", preview: { text: null } })}</Cell>
-      <Cell cap="Files: long file cut">
-        {files({ selected: FILES[1], preview: { text: "fn login() {}", truncated: true } })}
-      </Cell>
       <Cell cap="Local ports: assigned and added">{ports({ ports: [{ port: 5173, secure: false }, { port: 8443, secure: true }], input: "3000" })}</Cell>
       <Cell cap="Local ports: could not save">{ports({ input: "5173", error: t("ports.storageError") })}</Cell>
       <Cell cap="Local ports: assignment failed">
