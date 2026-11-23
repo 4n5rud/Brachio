@@ -29,6 +29,21 @@ export function isNativePasteKey(event: { key: string; ctrlKey: boolean; metaKey
   return mac ? event.metaKey : event.ctrlKey || event.metaKey;
 }
 
+/**
+ * Whether a key press copies the terminal selection instead of reaching the program.
+ * On macOS only ⌘C and ⌘⇧C copy, so Ctrl+C always interrupts, as in other terminals.
+ * Elsewhere Ctrl+C copies while text is selected, and Ctrl+Shift+C always copies.
+ */
+export function isCopyKey(
+  event: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  mac: boolean,
+  hasSelection: boolean,
+): boolean {
+  if (event.key.toLowerCase() !== "c") return false;
+  const primary = mac ? event.metaKey : event.ctrlKey || event.metaKey;
+  return primary && (event.shiftKey || hasSelection);
+}
+
 // An escaped UTF-16 unit can use six JSON bytes. This leaves room for the
 // protocol envelope inside the runtime's 64 KiB message limit.
 const MAX_INPUT_UNITS = 8 * 1024;
