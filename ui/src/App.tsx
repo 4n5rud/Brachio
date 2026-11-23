@@ -27,6 +27,7 @@ import { quoteShellPaths } from "./lib/shell-quote";
 import { attachImages, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
+import { LocalPreview } from "./components/LocalPreview";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { AddProjectDialog } from "./components/AddProjectDialog";
@@ -1548,6 +1549,7 @@ export function App() {
         {(repoId) => <CuesDialog repoId={repoId()} repoName={repos().find((item) => item.id === repoId())?.name ?? ""}
           onClose={closeCueManager} />}
       </Show>
+      <LocalPreview />
       <Show when={issueReport() !== undefined}>
         <IssueReportDialog error={issueReport() ?? ""} onClose={() => setIssueReport(undefined)} />
       </Show>
