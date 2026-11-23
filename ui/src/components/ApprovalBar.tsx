@@ -23,7 +23,10 @@ export function ApprovalBar(props: {
   /** The answer is on its way: buttons stay off and Allow shows the working arc. */
   sending?: boolean;
   onAllow?: () => void;
-  onAllowAlways?: () => void;
+  /** The leading words that "always allow" can cover instead of the exact request, such as "gh pr merge". */
+  alwaysPrefix?: string;
+  /** `prefix` is true for the leading words, false for the exact request. */
+  onAllowAlways?: (prefix: boolean) => void;
   onDeny?: () => void;
 }) {
   const canAllow = () => !!props.review && !!props.onAllow && !props.sending;
@@ -63,9 +66,23 @@ export function ApprovalBar(props: {
           {props.allowLabel ?? t("approval.allowOnce")}
         </Button>
         <Show when={props.onAllowAlways}>
-          <Button size="sm" disabled={!!props.sending} onClick={() => props.onAllowAlways?.()}>
-            {t("approval.allowAlways")}
-          </Button>
+          <Show when={props.alwaysPrefix} fallback={
+            <Button size="sm" disabled={!!props.sending} onClick={() => props.onAllowAlways?.(false)}>
+              {t("approval.allowAlways")}
+            </Button>
+          }>
+            {(prefix) => (
+              <>
+                <Button size="sm" disabled={!!props.sending} title={t("approval.allowAlwaysPrefixHint").replace("{prefix}", () => prefix())}
+                  onClick={() => props.onAllowAlways?.(true)}>
+                  {t("approval.allowAlwaysPrefix").replace("{prefix}", () => prefix())}
+                </Button>
+                <Button size="sm" disabled={!!props.sending} onClick={() => props.onAllowAlways?.(false)}>
+                  {t("approval.allowAlwaysExact")}
+                </Button>
+              </>
+            )}
+          </Show>
         </Show>
         <Button variant="ghost" size="sm" kbd="Esc" disabled={!canDeny()} onClick={deny}>
           {props.denyLabel ?? t("approval.deny")}

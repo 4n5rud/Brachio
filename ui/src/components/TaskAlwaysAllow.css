@@ -8,14 +8,27 @@
 .always-allow-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: var(--space-2, 8px);
 }
 .always-allow-tool {
   font-weight: 600;
 }
+.always-allow-what {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+/* A long command wraps over at most three lines instead of being cut off on one. */
 .always-allow-target {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.always-allow-kind {
+  color: var(--color-text-3);
+  font: var(--text-caption);
 }

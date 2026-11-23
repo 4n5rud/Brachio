@@ -545,6 +545,7 @@ function Catalog() {
       <Section title="ApprovalBar">
         <div class="catalog-stack" style={{ width: "100%" }}>
           <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" onAllow={() => {}} onAllowAlways={() => {}} onDeny={() => {}} /></div>
+          <div class="catalog-frame"><ApprovalBar review="Bash: gh pr merge 483 --merge" alwaysPrefix="gh pr merge" agent="Claude Code" onAllow={() => {}} onAllowAlways={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame"><ApprovalBar review={EDIT_REQUEST} agent="Claude Code" onAllow={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame"><ApprovalBar review={REQUEST} agent="Claude Code" sending onAllow={() => {}} onDeny={() => {}} /></div>
           <div class="catalog-frame">
@@ -569,8 +570,9 @@ function Catalog() {
           </div>
           <div class="catalog-frame">
             <AlwaysAllowList onRevoke={() => {}} rules={[
-              { id: 1, tool: "Bash", target: "cargo test -p brachio-auth" },
-              { id: 2, tool: "Edit", target: "crates/brachio-auth/src/login.rs" },
+              { id: 1, tool: "Bash", kind: "prefix", target: "gh pr merge" },
+              { id: 2, tool: "Bash", kind: "exact", target: "for i in 1 2 3 4 5 6; do m=$(gh pr view 494 --json mergeable --jq .mergeable); [ \"$m\" != \"UNKNOWN\" ] && break; sleep 8; done" },
+              { id: 3, tool: "Edit", kind: "exact", target: "crates/brachio-auth/src/login.rs" },
             ]} />
           </div>
           <div class="catalog-frame"><ApprovalBar review={LONG_REQUEST} agent="Claude Code" onAllow={() => {}} onDeny={() => {}} /></div>
