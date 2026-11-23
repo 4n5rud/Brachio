@@ -322,6 +322,11 @@ export function TerminalPane(props: {
           setRestoredFrame(true);
           return;
         }
+        if (message.type === "reset") {
+          earlyOutput.drain();
+          term.reset();
+          return;
+        }
         if (message.type === "detached") {
           flushEarlyOutput((bytes) => term.write(bytes));
           exited = true;

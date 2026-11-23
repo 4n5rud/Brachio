@@ -123,6 +123,8 @@ pub(crate) enum ChannelMessage {
     Detached { detached: bool },
     /// The screen just sent is the last one of a shell that is gone, shown before its restart.
     Restored { restored: bool },
+    /// Output was lost on the way: clear the screen, a fresh frame follows.
+    Reset { reset: bool },
 }
 
 /// Errors cross the IPC boundary as display strings.

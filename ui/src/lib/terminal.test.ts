@@ -32,6 +32,10 @@ describe("decodeMessage", () => {
     expect(m).toEqual({ type: "output", bytes: new Uint8Array([104, 105]) });
   });
 
+  it("reads the reset notice sent when output was lost", () => {
+    expect(decodeMessage({ reset: true })).toEqual({ type: "reset" });
+  });
+
   it("reads the exit notice", () => {
     expect(decodeMessage({ exitCode: 3 })).toEqual({ type: "exit", exitCode: 3 });
   });
