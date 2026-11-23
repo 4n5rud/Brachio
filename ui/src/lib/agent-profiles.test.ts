@@ -10,6 +10,7 @@ describe("agent profiles", () => {
     expect(compareChoices(profiles)).toEqual([
       { agent: "claude" }, { agent: "claude", profile: "careful" },
       { agent: "codex" }, { agent: "codex", profile: "fast" },
+      { agent: "grok" },
     ]);
     expect(profilesFor(profiles, "codex").map((item) => item.name)).toEqual(["fast"]);
   });
