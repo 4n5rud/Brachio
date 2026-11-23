@@ -497,6 +497,10 @@ export function TaskView(props: {
           {AGENT_NAME[props.task.agent]}
           <MailboxBadge count={props.unreadForTab?.(terminalKey(props.task.id, "agent")) ?? 0} />
         </button>
+        {/* The main session is the task itself, so its x archives the task (App asks first). */}
+        <Show when={props.task.worktreePath && props.onArchive}>
+          <TabClose label={t("task.archive")} onClose={() => props.onArchive?.()} />
+        </Show>
         <For each={tabsOf(props.task.id)}>
           {(tab) => (
             <div class="tab-item" role="presentation"
@@ -869,13 +873,13 @@ function RecentChip(props: { show: boolean }) {
 }
 
 /** Sits beside its tab, not inside it, so a button never nests in a button. */
-function TabClose(props: { onClose: () => void; disabled?: boolean }) {
+function TabClose(props: { onClose: () => void; disabled?: boolean; label?: string }) {
   const close = (event: Event) => {
     event.stopPropagation();
     if (!props.disabled) props.onClose();
   };
   return (
-    <button class="tab-close" type="button" aria-label={t("task.closeTab")} aria-disabled={props.disabled} onClick={close}>
+    <button class="tab-close" type="button" aria-label={props.label ?? t("task.closeTab")} title={props.label} aria-disabled={props.disabled} onClick={close}>
       <Icon name="x" class="icon-xs" />
     </button>
   );
