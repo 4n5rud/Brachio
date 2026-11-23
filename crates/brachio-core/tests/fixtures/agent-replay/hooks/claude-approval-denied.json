@@ -1,0 +1,31 @@
+{
+  "description": "The person denies; the agent receives the reason.",
+  "agent": "claude",
+  "events": [
+    {
+      "stdin": "{\"session_id\": \"s1\", \"hook_event_name\": \"PermissionRequest\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"rm -rf build\"}, \"tool_use_id\": \"t2\"}",
+      "key": "task1:agent",
+      "expect_request": {
+        "key": "task1:agent",
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "tool_use_id": "t2"
+      },
+      "decision": {
+        "behavior": "deny",
+        "message": "Not now"
+      },
+      "expect_output": {
+        "continue": true,
+        "hookSpecificOutput": {
+          "hookEventName": "PermissionRequest",
+          "decision": {
+            "behavior": "deny",
+            "message": "Not now",
+            "reason": "Not now"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -11,6 +11,8 @@ Send when you finish something others depend on, are blocked, or need a decision
 - `--type` (default status): status, dispatch, worker_done, merge_ready, escalation, handoff,
   decision_gate, question, heartbeat.
 - `--to parent` reaches the task that created yours.
+- `--type decision_gate --option "A" --option "B"` (2 to 6 options) asks the user to choose; work that
+  depends on you waits, and the answer arrives as a reply. Nothing is decided for you.
 - Keep the body short. Put long text in a file and send its path in the body.
 - `ask` sends a question (type question) and returns. `reply` needs no `--to`; it goes to the
   other participant of that message's thread. `--body -` reads the body from stdin.

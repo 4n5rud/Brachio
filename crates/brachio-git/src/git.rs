@@ -59,6 +59,7 @@ fn did_you_mean(suggestions: &[PathBuf]) -> String {
 #[derive(Debug, Clone)]
 pub struct Git {
     repo: PathBuf,
+    envs: Vec<(String, String)>,
 }
 
 impl Git {
@@ -67,7 +68,15 @@ impl Git {
     pub fn new(repo: &Path) -> Self {
         Self {
             repo: repo.to_path_buf(),
+            envs: Vec::new(),
         }
+    }
+
+    /// The same CLI with one more environment variable set on every command it runs.
+    #[must_use]
+    pub fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.envs.push((key.to_owned(), value.to_owned()));
+        self
     }
 
     /// The repository directory.
@@ -127,6 +136,7 @@ impl Git {
         command
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")
+            .envs(self.envs.iter().map(|(key, value)| (key, value)))
             .args(args);
         command
     }

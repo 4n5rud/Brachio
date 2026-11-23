@@ -46,3 +46,26 @@ For an ownership check, run a separate Brachio instance with its own `BRACHIO_RU
 - Private bytes measure committed memory private to each process. Sum these values across the owned processes. The app status bar uses working set on Windows, so publish the private-bytes figure with its metric label. Samples where `ExpectedProcesses` and `MeasuredProcesses` differ can undercount memory, so report how many samples were affected and repeat steady runs with missing measurements.
 - For each run, report the sample median and the highest observed `TotalPrivateBytes`, along with CPU median and peak. For each scenario, report the median of the run medians, the range across runs and the highest observed peak. State the sample interval with the results.
 - Before committing baseline results, remove account names, private paths, sensitive executable names and machine-identifying details. Keep the aggregate results, versions, settings and a command with placeholder PIDs.
+
+## Automated upper bound
+
+A smoke check guards against large regressions between full benchmark runs. It does not replace the methodology above and its numbers are not benchmark results.
+
+`crates/brachio-runtime/tests/memory_bound.rs` starts a real runtime and, for 1, 5 and 10 shell sessions, runs a short local print workload in each, reads every session the way the app does, then takes five working-set samples 0.5 seconds apart. It compares the highest sample of two measurements with a bound:
+
+| Measured | Bound |
+| --- | --- |
+| Working set of the runtime process tree (runtime and its shells) | 48 MiB plus 24 MiB for each session |
+| Working set of the test process, which stands in for the app side | 32 MiB plus 2 MiB for each session |
+
+The test process holds the client library and the output pages it reads, but not the web view, so it is not the figure the status bar shows. Working set is not the private bytes the manual procedure reports, and pages shared between processes can be counted more than once. The test runs a debug build.
+
+The bounds were set about 1.5 times above the first local run on one Windows machine (runtime tree 31, 103 and 194 MiB; client 12 to 13 MiB). They are meant to catch a leak or a per-session jump, not a small drift. Change them only with a measurement and the reason in the same pull request.
+
+Run it locally on Windows with:
+
+```powershell
+cargo test -p brachio-runtime --test memory_bound -- --ignored --nocapture
+```
+
+It is ignored by default, so `cargo test --workspace` skips it. The `Memory bound` workflow runs it on `windows-latest` for pull requests that touch the runtime or the workflow, on a weekly schedule and on demand. The job does not block other checks: it is not a required check and its failure does not fail the workflow. The output is a CSV of the measured and bound values per session count. Make it blocking only after several runs show that its noise is well below the bounds.

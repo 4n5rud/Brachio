@@ -1,0 +1,28 @@
+{
+  "description": "Hand-written Codex permission hook payload with the same shape; allowed in the app.",
+  "agent": "codex",
+  "events": [
+    {
+      "stdin": "{\"session_id\": \"c1\", \"hook_event_name\": \"PermissionRequest\", \"tool_name\": \"shell\", \"tool_input\": {\"command\": [\"bash\", \"-lc\", \"cargo test\"], \"workdir\": \"/work\"}, \"tool_use_id\": \"call_9\"}",
+      "key": "task2:agent",
+      "expect_request": {
+        "key": "task2:agent",
+        "session_id": "c1",
+        "tool_name": "shell",
+        "tool_use_id": "call_9"
+      },
+      "decision": {
+        "behavior": "allow"
+      },
+      "expect_output": {
+        "continue": true,
+        "hookSpecificOutput": {
+          "hookEventName": "PermissionRequest",
+          "decision": {
+            "behavior": "allow"
+          }
+        }
+      }
+    }
+  ]
+}
