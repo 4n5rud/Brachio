@@ -70,7 +70,6 @@
   color: var(--color-text-2);
 }
 .chart-table summary {
-  cursor: default;
   color: var(--color-text-3);
 }
 .chart-table table {
