@@ -50,6 +50,8 @@ import type { AgentKind } from "../lib/agent-catalog";
 import { tokenUsage } from "../lib/token-usage";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
+import { SplitResizer } from "./PanelResizer";
+import { DEFAULT_SPLIT_RATIO, SPLIT_HANDLE_PX, clampSplitRatio, loadSplitRatio, saveSplitRatio } from "../lib/split-ratio";
 
 export interface DraftTarget {
   key: string;
@@ -122,6 +124,8 @@ export function TaskView(props: {
     (taskId) => invoke<string | null>("task_worker_preamble", { taskId }).catch(() => null),
   );
   const [shells, setLayouts] = createSignal<ReadonlyMap<string, TerminalLayout>>(loadLayouts());
+  // One left-terminal share for every split task; each slot clamps it to its own width.
+  const [splitRatio, setSplitRatio] = createSignal(loadSplitRatio());
   const [tabMenu, setTabMenu] = createSignal<HTMLElement>();
   const restoredTabs = new Set<string>();
   const [tabsByTask, setTabsByTask] = createSignal<ReadonlyMap<string, readonly TaskTab[]>>(new Map());
@@ -709,8 +713,24 @@ export function TaskView(props: {
               const selected = () => props.visible && id === props.task.id;
               const mode = () => shells().get(id);
               const extraSelected = () => isSecondarySelected(id);
+              let slot: HTMLDivElement | undefined;
+              // The room both terminals share; a hidden slot reports 0 until it is shown again.
+              const [splitRoom, setSplitRoom] = createSignal(0);
+              onMount(() => {
+                const element = slot;
+                if (!element) return;
+                const observer = new ResizeObserver(() => setSplitRoom(element.clientWidth - SPLIT_HANDLE_PX));
+                observer.observe(element);
+                onCleanup(() => observer.disconnect());
+              });
+              const shownRatio = () => clampSplitRatio(splitRatio(), splitRoom());
+              const splitColumns = () => {
+                const left = shownRatio();
+                return `minmax(0, ${left}fr) ${SPLIT_HANDLE_PX}px minmax(0, ${Math.round((1 - left) * 1000) / 1000}fr)`;
+              };
               return (
-                <div class="terminal-slot" classList={{ "terminal-split": mode() === "split" }}
+                <div ref={slot} class="terminal-slot" classList={{ "terminal-split": mode() === "split" }}
+                  style={mode() === "split" ? { "grid-template-columns": splitColumns() } : undefined}
                   hidden={id !== props.task.id}>
                   <div class="terminal-cell" hidden={mode() === "shell"}>
                     <div class="terminal-cell" hidden={extraSelected()}>
@@ -791,6 +811,12 @@ export function TaskView(props: {
                       }}
                     </For>
                   </div>
+                  <Show when={mode() === "split" && props.findTask(id)?.worktreePath}>
+                    <SplitResizer ratio={shownRatio()}
+                      onResize={(ratio) => setSplitRatio(clampSplitRatio(ratio, splitRoom()))}
+                      onCommit={() => saveSplitRatio(splitRatio())}
+                      onReset={() => { setSplitRatio(DEFAULT_SPLIT_RATIO); saveSplitRatio(DEFAULT_SPLIT_RATIO); }} />
+                  </Show>
                   <Show when={mode() && props.findTask(id)?.worktreePath}>
                     {(cwd) => (
                       <div class="terminal-cell" hidden={mode() === "agent"}>

@@ -59,3 +59,69 @@ export function PanelResizer(props: {
     />
   );
 }
+
+/**
+ * The drag handle between side-by-side terminals, in the middle column of their grid. Arrow keys
+ * move it too and a double-click puts it back in the middle.
+ */
+export function SplitResizer(props: {
+  /** The left terminal's share of the room both terminals share, as shown now. */
+  ratio: number;
+  /** Receives the wanted share; the owner clamps it. */
+  onResize: (ratio: number) => void;
+  onCommit: () => void;
+  onReset: () => void;
+}) {
+  const room = (handle: HTMLElement) => (handle.parentElement?.clientWidth ?? 0) - handle.offsetWidth;
+
+  const startDrag = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    // Without this the press starts a text selection that runs across the terminals.
+    event.preventDefault();
+    const handle = event.currentTarget as HTMLElement;
+    const left = handle.parentElement?.getBoundingClientRect().left ?? 0;
+    const width = room(handle);
+    if (width <= 0) return;
+    handle.setPointerCapture(event.pointerId);
+    // Keeps the resize cursor and blocks selection while the pointer is over a terminal.
+    document.documentElement.classList.add("split-resizing");
+    const move = (next: PointerEvent) => props.onResize((next.clientX - left - handle.offsetWidth / 2) / width);
+    const end = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      handle.removeEventListener("lostpointercapture", end);
+      document.documentElement.classList.remove("split-resizing");
+      props.onCommit();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    handle.addEventListener("lostpointercapture", end);
+  };
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const width = room(event.currentTarget as HTMLElement);
+    const step = width > 0 ? KEY_STEP / width : 0.02;
+    props.onResize(props.ratio + (event.key === "ArrowRight" ? step : -step));
+    props.onCommit();
+  };
+
+  return (
+    <div
+      class="panel-resizer panel-resizer-split"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t("layout.resizeSplit")}
+      aria-valuenow={Math.round(props.ratio * 100)}
+      aria-valuemin="0"
+      aria-valuemax="100"
+      tabindex="0"
+      onPointerDown={startDrag}
+      onKeyDown={onKeyDown}
+      onDblClick={() => props.onReset()}
+    />
+  );
+}
