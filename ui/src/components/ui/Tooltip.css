@@ -16,6 +16,15 @@
   pointer-events: none;
   white-space: nowrap;
 }
+.tooltip-text {
+  display: grid;
+  gap: 2px;
+}
+.tooltip-hint {
+  max-width: 240px;
+  color: var(--color-text-3);
+  white-space: normal;
+}
 .tooltip-keys {
   display: inline-flex;
   gap: 2px;

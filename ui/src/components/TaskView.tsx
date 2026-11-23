@@ -529,7 +529,7 @@ export function TaskView(props: {
           </div>
         </Show>
         <Show when={props.task.worktreePath}>
-          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} aria-haspopup="menu"
+          <IconButton icon="plus" size="sm" class="tab-add" label={t("task.addTab")} hint={t("task.addTabHint")} aria-haspopup="menu"
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
@@ -543,18 +543,18 @@ export function TaskView(props: {
             })} />}
         </Show>
         <Show when={activeAgentTab()}>
-          {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")}
+          {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")} hint={t("queue.hint")}
             badge={queuedPrompts(key()).length} aria-expanded={queueOpen()}
             onClick={() => setQueueOpen(!queueOpen())} />}
         </Show>
         <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
-          {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")}
+          {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")} hint={t("mailbox.inboxHint")}
             badge={props.unreadForTab?.(key()) ?? 0}
             aria-expanded={inboxTab() === key()}
             onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
         </Show>
         <Show when={activeAgentTab() && props.workspaceTasks.length > 1}>
-          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} onClick={() => setHandingOver(true)} />
+          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} hint={t("handoff.openHint")} onClick={() => setHandingOver(true)} />
         </Show>
         <Show when={handingOver() ? activeAgentTab() : undefined}>
           {(key) => (
