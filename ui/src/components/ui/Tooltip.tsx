@@ -1,5 +1,6 @@
-import { For, Show, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import { shiftIntoWindow } from "../../lib/tooltip-fit";
 import { Kbd } from "./Kbd";
 import "./Tooltip.css";
 
@@ -29,6 +30,14 @@ export function Tooltip(props: {
   children: (trigger: TooltipTrigger) => JSX.Element;
 }) {
   const [at, setAt] = createSignal<{ x: number; y: number }>();
+  /** Sideways move that keeps the tooltip inside the window, measured once it is on screen. */
+  const [shift, setShift] = createSignal(0);
+  let tip: HTMLDivElement | undefined;
+  createEffect(() => {
+    if (!at()) return;
+    const frame = requestAnimationFrame(() => tip && setShift(shiftIntoWindow(tip.getBoundingClientRect(), window.innerWidth)));
+    onCleanup(() => cancelAnimationFrame(frame));
+  });
   let timer: number | undefined;
   const hide = () => {
     window.clearTimeout(timer);
@@ -39,6 +48,7 @@ export function Tooltip(props: {
     window.clearTimeout(timer);
     const show = () => {
       const rect = target.getBoundingClientRect();
+      setShift(0);
       setAt({ x: rect.left + rect.width / 2, y: rect.top });
     };
     if (Date.now() < warmUntil) show();
@@ -63,7 +73,8 @@ export function Tooltip(props: {
       <Show when={at()}>
         {(point) => (
           <Portal>
-            <div class="tooltip" role="tooltip" style={{ left: `${point().x}px`, top: `${point().y - 4}px` }}>
+            <div class="tooltip" role="tooltip" ref={(element) => { tip = element; }}
+              style={{ left: `${point().x + shift()}px`, top: `${point().y - 4}px` }}>
               <span class="tooltip-text">
                 {props.label}
                 <Show when={props.hint}>{(hint) => <span class="tooltip-hint">{hint()}</span>}</Show>
