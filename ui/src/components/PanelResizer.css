@@ -1,0 +1,21 @@
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resizer-sidebar {
+  left: calc(var(--size-sidebar) - 3px);
+}
+.panel-resizer-inspector {
+  right: calc(var(--inspector-now) - 3px);
+}
+.panel-resizer:hover,
+.panel-resizer:focus-visible {
+  background: var(--color-accent);
+  opacity: 0.5;
+  outline: none;
+}
