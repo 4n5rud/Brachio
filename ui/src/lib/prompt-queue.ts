@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { AGENT_CATALOG, type AgentKind } from "./agent-catalog";
 import type { StatusTone } from "./status";
 
 export interface QueuedPrompt {
@@ -87,4 +88,19 @@ export function queueAction(input: {
 }): QueueAction | undefined {
   if (!input.hasItems || input.holding || input.userTyped || input.tone !== "ready") return undefined;
   return input.auto ? "send" : "draft";
+}
+
+export type SteerBlock = "unsupported" | "idle" | "blocked" | "typing" | "empty";
+
+/**
+ * Why "Steer now" cannot go: it needs an agent with a documented way to take input mid-turn, a turn in
+ * progress (an idle agent uses the queue), no approval question open, and nothing typed in its input.
+ */
+export function steerBlock(input: { agent: AgentKind; tone: StatusTone; userTyped: boolean; text: string }): SteerBlock | undefined {
+  if (AGENT_CATALOG[input.agent].steer === null) return "unsupported";
+  if (input.tone === "blocked") return "blocked";
+  if (input.tone !== "working") return "idle";
+  if (input.userTyped) return "typing";
+  if (!input.text.trim()) return "empty";
+  return undefined;
 }

@@ -131,7 +131,8 @@ export interface DraftInsert {
   userTyped: boolean;
 }
 
-export type PrepareDraft = (text: string) => DraftInsert | undefined;
+/** `steering` also accepts a working agent, for a follow-up the agent folds into its running turn. */
+export type PrepareDraft = (text: string, options?: { steering?: boolean }) => DraftInsert | undefined;
 
 export function TerminalPane(props: {
   session?: TerminalSession;
@@ -428,8 +429,8 @@ export function TerminalPane(props: {
       term.focus();
     };
     void prepareOpen(session?.resume === true && session.agent !== null, session?.prompt ?? null);
-    const canPasteDraft = () => session?.agent && !exited && !disposed && !blocked
-      && !working && props.active && term.modes.bracketedPasteMode;
+    const canPasteDraft = (steering = false) => session?.agent && !exited && !disposed && !blocked
+      && (steering || !working) && props.active && term.modes.bracketedPasteMode;
     // Puts the command in the agent's input without pressing Enter. Unlike a draft it is allowed
     // while the agent waits for sign-in, which is what marks the terminal as blocked.
     insertSignIn = async () => {
@@ -441,12 +442,13 @@ export function TerminalPane(props: {
       term.focus();
       return true;
     };
-    const unregister = props.registerDraftWriter?.((text) => {
+    const unregister = props.registerDraftWriter?.((text, options) => {
       const destination = handle;
-      if (!destination || !canPasteDraft()) return undefined;
+      const steering = options?.steering === true;
+      if (!destination || !canPasteDraft(steering)) return undefined;
       const revision = inputRevision;
       const insert = async (submit = false) => {
-        if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
+        if (handle !== destination || inputRevision !== revision || !canPasteDraft(steering)) return false;
         inputRevision += 1;
         editedBeforePrompt = true;
         await destination.write(bracketedPaste(text, true) + (submit ? "\r" : ""));
