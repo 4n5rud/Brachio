@@ -13,6 +13,7 @@ const base: PrStatusReport = {
   retryInSeconds: null,
   localHead: null,
   headMatchesLocal: null,
+  linked: [],
 };
 
 describe("pull request status scheduler", () => {

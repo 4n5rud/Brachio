@@ -8,7 +8,7 @@ const report = (over: Record<string, unknown>): PrStatusReport => ({
     checks: { overall: "success", passing: 1, failing: 0, pending: 0, skipped: 0 }, failedChecks: [],
     review: "approved", conflict: "clean", ...over,
   } as PrStatusReport["snapshot"],
-  checkedAtMs: 1, noPullRequest: false, error: null, retryInSeconds: null, localHead: null, headMatchesLocal: null,
+  checkedAtMs: 1, noPullRequest: false, error: null, retryInSeconds: null, localHead: null, headMatchesLocal: null, linked: [],
 });
 const working = { status: { state: "working" } } as never;
 const blocked = { status: { state: "blocked", reason: "permission" } } as never;
