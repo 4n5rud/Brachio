@@ -109,21 +109,23 @@ p {
 }
 
 .layout {
+  --inspector-now: var(--size-inspector);
+  position: relative;
   display: grid;
-  grid-template-columns: var(--size-sidebar) minmax(0, 1fr) var(--size-inspector);
+  grid-template-columns: var(--size-sidebar) minmax(0, 1fr) var(--inspector-now);
   min-height: 0;
 }
 .layout-no-inspector {
   grid-template-columns: var(--size-sidebar) minmax(0, 1fr);
 }
 .layout-no-sidebar {
-  grid-template-columns: minmax(0, 1fr) var(--size-inspector);
+  grid-template-columns: minmax(0, 1fr) var(--inspector-now);
 }
 .layout-inspector-wide {
-  grid-template-columns: var(--size-sidebar) minmax(0, 1fr) clamp(var(--size-inspector), calc(100vw - var(--size-sidebar) - 352px), var(--size-inspector-wide));
+  --inspector-now: clamp(var(--size-inspector), calc(100vw - var(--size-sidebar) - 352px), var(--size-inspector-wide));
 }
 .layout-inspector-wide.layout-no-sidebar {
-  grid-template-columns: minmax(0, 1fr) clamp(var(--size-inspector), calc(100vw - 352px), var(--size-inspector-wide));
+  --inspector-now: clamp(var(--size-inspector), calc(100vw - 352px), var(--size-inspector-wide));
 }
 .layout-no-sidebar.layout-no-inspector {
   grid-template-columns: minmax(0, 1fr);

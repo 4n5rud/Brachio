@@ -30,7 +30,9 @@ mod runtime_terminals;
 mod session_tokens;
 mod system_check;
 mod task_activity;
+mod task_attachments;
 mod task_checkpoints;
+mod task_commits;
 mod task_file_actions;
 mod task_file_ops;
 mod task_folder;
@@ -391,6 +393,7 @@ pub fn run() {
             workspace::task_files,
             workspace::task_file_preview,
             workspace::task_file_media,
+            task_attachments::task_attach_images,
             task_file_ops::task_move_path,
             task_file_ops::task_copy_conflicts,
             task_file_ops::task_copy_in,
@@ -416,6 +419,8 @@ pub fn run() {
             task_checkpoints::task_checkpoint_list,
             task_checkpoints::task_checkpoint_diff,
             task_checkpoints::task_checkpoint_restore,
+            task_commits::task_commit_list,
+            task_commits::task_commit_diff,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,

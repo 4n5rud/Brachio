@@ -20,6 +20,10 @@ import { AgentIcon } from "./AgentIcon";
 import { Toggle } from "./ui/Toggle";
 import { SUBMIT_KEYS } from "../lib/shortcut";
 import { loadPromptHistory, recallStep, rememberPrompt, type PromptHistoryEntry } from "../lib/prompt-history";
+import { AttachButton } from "./AttachButton";
+import { fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES, relativeToProject, terminalExcerpt } from "../lib/attachments";
+import { registerDialogDrop } from "../lib/dialog-drop";
+import { readTerminalTail, terminalTailKeys } from "../lib/terminal-tail";
 import { repoCodexConversations, titleFromPrompt } from "../lib/workspace";
 
 /** What the dialog hands back when the user creates a task. */
@@ -36,6 +40,8 @@ export interface NewTaskInput {
   compare?: boolean;
   /** A profile from the project's `brachio.toml`. */
   profile?: string;
+  /** Create the task and start its agent without switching to it. */
+  background?: boolean;
 }
 
 const conversationLabel = (item: { id: string; timestamp: string | null }) => {
@@ -64,6 +70,8 @@ export function NewTaskDialog(props: {
   /** A plain folder has no branch to base a task on and no parent task. */
   isGit: boolean;
   parents?: readonly TaskRow[];
+  /** Names an open terminal, for the "last lines of a terminal" attachment. */
+  terminalLabel?: (key: string) => string;
   onCreate: (input: NewTaskInput) => Promise<void>;
   onClose: () => void;
 }) {
@@ -184,7 +192,7 @@ export function NewTaskDialog(props: {
     }
   };
 
-  const submit = async () => {
+  const submit = async (background = false) => {
     if (!canCreate()) return;
     setBusy(true);
     setError(null);
@@ -194,12 +202,28 @@ export function NewTaskDialog(props: {
         base: base().trim(), parentTaskId: parentTaskId() || undefined,
         codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
         compare: comparing() || undefined,
+        background: background || undefined,
         profile: profileChoices().some((item) => item.name === profile()) ? profile() : undefined });
     } catch (failure) {
       setError(String(failure));
       setBusy(false);
     }
   };
+
+  const addToPrompt = (text: string) =>
+    setPrompt((current) => `${current}${current === "" || /\s$/u.test(current) ? "" : "\n"}${text}`);
+  // The task's worktree does not exist yet, so images stay where they are and go in by their own path.
+  const attachPaths = (paths: string[]) => {
+    const root = props.projects.find((project) => project.id === props.repoId)?.path;
+    const files = paths.filter((path) => !isImagePath(path));
+    const images = paths.filter(isImagePath);
+    if (files.length > MAX_ATTACHED_FILES || images.length > MAX_ATTACHED_IMAGES) {
+      setError(t("attach.tooMany").replace("{files}", String(MAX_ATTACHED_FILES)).replace("{images}", String(MAX_ATTACHED_IMAGES)));
+      return;
+    }
+    addToPrompt(fileReferences([...files.map((path) => (root ? relativeToProject(root, path) : path)), ...images]) + " ");
+  };
+  onCleanup(registerDialogDrop(attachPaths));
 
   let promptBox!: HTMLTextAreaElement;
   onMount(() => promptBox.focus());
@@ -222,6 +246,10 @@ export function NewTaskDialog(props: {
           <Button variant="ghost" disabled={busy() || confirmingClose()} onClick={() => void requestClose()}>
             {t("newTask.cancel")}
           </Button>
+          <Button variant="secondary" disabled={!canCreate()} title={t("newTask.createBackgroundHint")}
+            onClick={() => void submit(true)}>
+            {t("newTask.createBackground")}
+          </Button>
           <Button variant="primary" icon="plus" kbd={SUBMIT_KEYS()} disabled={!canCreate()}
             loading={busy()} loadingLabel={t("newTask.creating")} onClick={() => void submit()}>
             {createError() ? t("newTask.retry") : t("newTask.create")}
@@ -232,6 +260,15 @@ export function NewTaskDialog(props: {
       <TextArea ref={promptBox} label={t("newTask.prompt")} value={prompt()}
         onInput={(event) => { recallPosition = -1; setPrompt(event.currentTarget.value); }}
         onKeyDown={recall} />
+      <div class="attach-row">
+        <AttachButton defaultPath={props.projects.find((project) => project.id === props.repoId)?.path}
+          tails={() => terminalTailKeys().map((key) => ({ key, label: props.terminalLabel?.(key) ?? key }))}
+          onPaths={(paths) => attachPaths(paths)}
+          onTail={(key) => {
+            const lines = readTerminalTail(key);
+            if (lines) addToPrompt(terminalExcerpt(props.terminalLabel?.(key) ?? key, lines));
+          }} />
+      </div>
       <div class="form-grid">
         <Combobox label={t("project.label")} listLabel={t("project.list")} value={projectText()}
           options={projectOptions()} emptyText={t("project.empty")}
