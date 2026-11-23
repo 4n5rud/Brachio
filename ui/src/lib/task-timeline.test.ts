@@ -27,3 +27,11 @@ describe("timeline entries", () => {
     expect(describeActivity(entry("pr_event", "something #1")).detail).toBe("something #1");
   });
 });
+
+describe("steered prompts", () => {
+  it("name the agent tab and carry no prompt text", () => {
+    const row = describeActivity({ id: 1, kind: "prompt_sent", detail: "steer:Claude Code 2", at: 0 });
+    expect(row.detail).toMatch(/Claude Code 2$/u);
+    expect(describeActivity({ id: 1, kind: "prompt_sent", detail: "queue", at: 0 }).detail).not.toContain("Claude");
+  });
+});

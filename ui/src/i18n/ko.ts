@@ -833,7 +833,7 @@ export const ko: Messages = {
   "activity.promptSent": "프롬프트 전송",
   "activity.prompt.first": "첫 프롬프트",
   "activity.prompt.queue": "대기열에서",
-  "activity.prompt.steer": "작업 중 바로 보냄",
+  "activity.prompt.steer": "바로 보냄",
   "activity.agentWorking": "에이전트 작업 중",
   "activity.agentIdle": "에이전트 대기",
   "activity.agentBlocked": "에이전트 멈춤",

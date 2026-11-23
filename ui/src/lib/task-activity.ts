@@ -127,8 +127,9 @@ export function describeActivity(entry: StoredActivity): ActivityRow {
       : { ...base, label: t("activity.other"), detail: null, tone: "unknown" };
   }
   if (kind === "prompt_sent") {
-    const source = PROMPT_SOURCE[detail ?? ""];
-    return { ...base, label: t("activity.promptSent"), detail: source ? t(source) : null, tone: "ready" };
+    const [how = "", tab] = (detail ?? "").split(":");
+    const source = PROMPT_SOURCE[how];
+    return { ...base, label: t("activity.promptSent"), detail: source ? [t(source), tab].filter(Boolean).join(" · ") : null, tone: "ready" };
   }
   if (kind === "restore_point") {
     const [action, number] = (detail ?? "").split(" ");
