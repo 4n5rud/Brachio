@@ -721,8 +721,8 @@ export function TerminalPane(props: {
       clearTimeout(promptTimer);
       clearTimeout(resizeTimer);
       unregister?.();
-      host.removeEventListener("paste", noteUserInput, true);
-      host.removeEventListener("compositionstart", noteUserInput, true);
+      host.removeEventListener("paste", notePastedInput, true);
+      host.removeEventListener("compositionstart", notePastedInput, true);
       stopShellDrop?.();
       stopShellPane?.();
       stopTail?.();
