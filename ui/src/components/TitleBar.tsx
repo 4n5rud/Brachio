@@ -78,11 +78,12 @@ export function TitleBar(props: {
             { value: "tasks", label: t("view.tasks"), icon: "list" },
             { value: "board", label: t("view.board"), icon: "board" },
           ]} />
+        <IconButton icon="bell" aria-haspopup="dialog" badge={props.needsYou}
+          label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity} />
+        {/* Last, at the right edge, as the sidebar button is first at the left: each sits over the panel it opens. */}
         <IconButton icon="panelRight" aria-pressed={props.inspectorOpen}
           label={t("titlebar.toggleInspector")} title={`${t("titlebar.toggleInspector")} (${TOGGLE_INSPECTOR_KEYS()})`}
           onClick={props.onToggleInspector} />
-        <IconButton icon="bell" aria-haspopup="dialog" badge={props.needsYou}
-          label={`${t("activity.title")}: ${props.needsYou}`} onClick={props.onActivity} />
         {platform() === "windows" && <WindowButtons />}
       </div>
     </header>
