@@ -120,7 +120,6 @@ export const ko: Messages = {
   "settings.defaultShellHint": "새 셸 탭을 열 때 쓰는 셸",
   "settings.systemShell": "시스템 기본",
   "task.shell": "셸",
-  "task.openedTasks": "열어 둔 작업",
   "task.originalPrompt": "원래 작업 프롬프트",
   "task.draftOriginalPrompt": "원래 프롬프트 넣기",
   "task.workerPreamble": "이 하위 작업의 첫 프롬프트 위에 붙는 안내",
