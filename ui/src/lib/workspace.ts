@@ -199,7 +199,8 @@ export const renameTaskPath = (id: string, from: string, newName: string) =>
   invoke<string>("task_file_rename", { id, from, newName });
 export const createTaskEntry = (id: string, dir: string, name: string, folder: boolean) =>
   invoke<string>("task_file_create", { id, dir, name, folder });
-/** Moves to the system trash; nothing is deleted for good. */
-export const trashTaskPath = (id: string, path: string) => invoke<void>("task_file_trash", { id, path });
+/** Moves to the system trash; nothing is deleted for good. Resolves to whether `restoreTaskPath` can bring it back. */
+export const trashTaskPath = (id: string, path: string) => invoke<boolean>("task_file_trash", { id, path });
+export const restoreTaskPath = (id: string, path: string) => invoke<void>("task_file_restore", { id, path });
 export const discardTaskFile = (id: string, path: string) => invoke<void>("task_discard_file", { id, path });
 export const discardTaskHunk = (id: string, patch: string) => invoke<void>("task_discard_hunk", { id, patch });
