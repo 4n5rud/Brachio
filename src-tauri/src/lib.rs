@@ -467,6 +467,10 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
     );
+    match brachio_runtime::hook_token::issue(&endpoint) {
+        Ok(token) => approvals.require_token(token),
+        Err(error) => tracing::warn!(%error, "the hook socket does not ask for a token"),
+    }
     app.manage(Arc::clone(&approvals));
     tauri::async_runtime::spawn(async move {
         match brachio_runtime::transport::listen(&endpoint) {

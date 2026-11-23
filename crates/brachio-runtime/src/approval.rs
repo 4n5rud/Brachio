@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use tokio::io::BufReader;
 
-use crate::transport;
 use crate::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 
 /// Names the socket the app listens on for permission questions.
@@ -142,7 +141,7 @@ pub fn hook_output(decision: &Decision) -> Option<String> {
 /// app is not running, it closed the connection, or the wait ran out.
 pub async fn ask(endpoint: &str, request: &ApprovalRequest, wait: Duration) -> Option<Decision> {
     let exchange = async {
-        let mut stream = transport::connect(endpoint).await.ok()?;
+        let mut stream = crate::hook_token::connect(endpoint).await.ok()?;
         write_message(&mut stream, request, MAX_MESSAGE)
             .await
             .ok()?;
