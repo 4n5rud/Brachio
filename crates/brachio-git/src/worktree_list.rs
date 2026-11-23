@@ -269,7 +269,10 @@ mod tests {
         let entries = vec![entry(&resolved, Some("worktree-agent-1"))];
         let spelled = task.join("..").join("task");
         let grouped = subagent_worktrees(&entries, &[spelled], &[]);
-        assert_eq!(grouped, vec![vec![entry(&resolved, Some("worktree-agent-1"))]]);
+        assert_eq!(
+            grouped,
+            vec![vec![entry(&resolved, Some("worktree-agent-1"))]]
+        );
         let entries = vec![entry(&agent, Some("worktree-agent-1"))];
         let canonical_task = std::fs::canonicalize(&task).expect("canonical");
         let grouped = subagent_worktrees(&entries, &[canonical_task], &[]);
