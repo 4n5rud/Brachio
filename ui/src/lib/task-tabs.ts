@@ -1,6 +1,7 @@
 import type { AgentKind } from "./tasks";
 import { AGENT_NAME } from "./tasks";
-import { agentOfTab, isTabKind, type TabKind } from "./tab-kinds";
+import { t } from "../i18n";
+import { agentOfTab, hasTerminal, isTabKind, type TabKind } from "./tab-kinds";
 
 export type { TabKind };
 
@@ -10,6 +11,8 @@ export interface TaskTab {
   kind: TabKind;
   /** The shell a shell tab runs; null is the default shell. */
   shell: string | null;
+  /** What a browser tab shows (an address) or a file tab opens (a path inside the task). */
+  target?: string | null;
   /** A name the user gave the tab; absent keeps the automatic label. */
   name?: string | null;
 }
@@ -20,11 +23,27 @@ export interface TabSpec {
   shell: string | null;
 }
 
-/** Stable name of the terminal behind an extra tab, which the backend registered. */
-export const tabKey = (taskId: string, tab: Pick<TaskTab, "id" | "kind">): string =>
-  `${taskId}:${agentOfTab(tab) === null ? "shell" : "agent"}-${tab.id}`;
+/**
+ * Stable name of an extra tab. For a terminal tab it is the name of the terminal the backend
+ * registered; a browser or file tab has no terminal and gets a name nothing else uses.
+ */
+export const tabKey = (taskId: string, tab: Pick<TaskTab, "id" | "kind">): string => {
+  if (!hasTerminal(tab.kind)) return `${taskId}:${tab.kind}-${tab.id}`;
+  return `${taskId}:${agentOfTab(tab) === null ? "shell" : "agent"}-${tab.id}`;
+};
 
 export const sameSpec = (a: TabSpec, b: TabSpec): boolean => a.kind === b.kind && a.shell === b.shell;
+
+/** The last part of a path, which names a file tab. */
+const fileName = (path: string) => path.replaceAll("\\", "/").split("/").filter(Boolean).pop() ?? path;
+
+function baseLabel(tab: TaskTab, shellName: (id: string | null) => string): string {
+  const agent = agentOfTab(tab);
+  if (agent !== null) return AGENT_NAME[agent];
+  if (tab.kind === "browser") return t("tab.browser");
+  if (tab.kind === "file") return tab.target ? fileName(tab.target) : t("tab.file");
+  return shellName(tab.shell);
+}
 
 /**
  * Names for a task's tabs: the first of a kind keeps its plain name, later ones count up
@@ -38,8 +57,7 @@ export function tabLabels(
   const seen = new Map<string, number>([[AGENT_NAME[primary], 1]]);
   const labels = new Map<string, string>();
   for (const tab of tabs) {
-    const agent = agentOfTab(tab);
-    const base = agent === null ? shellName(tab.shell) : AGENT_NAME[agent];
+    const base = baseLabel(tab, shellName);
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
     labels.set(tab.id, tab.name || (count > 1 ? `${base} ${count}` : base));
@@ -55,7 +73,7 @@ export function loadRecentSpec(): TabSpec | undefined {
     const stored: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "null");
     if (stored === null || typeof stored !== "object") return undefined;
     const { kind, shell } = stored as Record<string, unknown>;
-    if (!isTabKind(kind)) return undefined;
+    if (!isTabKind(kind) || !hasTerminal(kind)) return undefined;
     return { kind, shell: typeof shell === "string" ? shell : null };
   } catch {
     return undefined;

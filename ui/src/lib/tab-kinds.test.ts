@@ -3,7 +3,7 @@ import { agentOfKind, agentOfTab, hasTerminal, isAgentKind, isAgentTab, isTabKin
 
 test("names the kinds a tab can have", () => {
   expect(["claude_code", "codex", "shell"].every(isTabKind)).toBe(true);
-  expect(isTabKind("browser")).toBe(false);
+  expect(isTabKind("hologram")).toBe(false);
   expect(isTabKind("toString")).toBe(false);
   expect(isTabKind(undefined)).toBe(false);
 });
@@ -19,7 +19,14 @@ test("tells agent tabs from shell tabs and says which agent", () => {
   expect(agentOfKind("codex")).toBe("codex");
 });
 
-test("every current kind is a terminal", () => {
+test("agents and shells are terminals; browser and file tabs are not", () => {
   expect(surfaceOf("shell")).toBe("terminal");
   expect(hasTerminal("claude_code")).toBe(true);
+  expect(surfaceOf("browser")).toBe("browser");
+  expect(surfaceOf("file")).toBe("file");
+  expect(hasTerminal("browser")).toBe(false);
+  expect(hasTerminal("file")).toBe(false);
+  expect(isAgentKind("browser")).toBe(false);
+  expect(agentOfTab({ kind: "file" })).toBeNull();
+  expect(isTabKind("browser") && isTabKind("file")).toBe(true);
 });

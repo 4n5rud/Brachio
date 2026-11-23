@@ -589,3 +589,17 @@ p {
   border-color: var(--color-accent-text);
   box-shadow: 0 0 0 1px var(--color-accent-text);
 }
+
+/* A tab whose surface is not built yet */
+.tab-surface-placeholder {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  color: var(--color-text-3);
+  font: var(--text-label);
+}
+.tab-surface-placeholder strong {
+  color: var(--color-text-2);
+}

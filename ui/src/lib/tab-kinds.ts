@@ -1,13 +1,13 @@
 import type { AgentKind } from "./tasks";
 
-/** What an extra tab runs. Agent names are the core's. */
-export type TabKind = "claude_code" | "codex" | "shell";
+/** What an extra tab holds. Agent names are the core's. */
+export type TabKind = "claude_code" | "codex" | "shell" | "browser" | "file";
 
 /** The tab kinds that run an agent. */
-export type AgentTabKind = Exclude<TabKind, "shell">;
+export type AgentTabKind = "claude_code" | "codex";
 
-/** What fills the tab area: today only a terminal. Browser and file tabs add their own. */
-export type TabSurface = "terminal";
+/** What fills the tab area: a terminal, a web page or a file. */
+export type TabSurface = "terminal" | "browser" | "file";
 
 interface TabKindInfo {
   surface: TabSurface;
@@ -20,6 +20,8 @@ const TAB_KINDS: Record<TabKind, TabKindInfo> = {
   claude_code: { surface: "terminal", agent: "claude" },
   codex: { surface: "terminal", agent: "codex" },
   shell: { surface: "terminal", agent: null },
+  browser: { surface: "browser", agent: null },
+  file: { surface: "file", agent: null },
 };
 
 /** Whether a stored or typed value names a tab kind. */
