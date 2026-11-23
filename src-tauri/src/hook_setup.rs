@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use brachio_fs::write_atomic;
 use brachio_runtime::approval::{DEFAULT_WAIT, ENDPOINT_VARIABLE, KEY_VARIABLE};
 
 /// What the terminals of Claude Code tasks need for in-app approval.
@@ -150,7 +151,7 @@ fn write_codex_instructions(folder: &Path) -> Result<PathBuf> {
         .map(|(_, skill)| skill_body(skill))
         .collect::<Vec<_>>()
         .join("\n\n");
-    fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
+    write_atomic(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(path)
 }
 
@@ -158,19 +159,20 @@ fn write_codex_instructions(folder: &Path) -> Result<PathBuf> {
 fn write_plugin(folder: &Path) -> Result<PathBuf> {
     let plugin = folder.join("plugin");
     fs::create_dir_all(plugin.join(".claude-plugin"))?;
-    fs::write(
-        plugin.join(".claude-plugin").join("plugin.json"),
+    write_atomic(
+        &plugin.join(".claude-plugin").join("plugin.json"),
         serde_json::json!({
             "name": "brachio",
             "version": env!("CARGO_PKG_VERSION"),
             "description": "Lets agents in Brachio tasks message each other and split work into child tasks."
         })
-        .to_string(),
+        .to_string()
+        .as_bytes(),
     )?;
     for (name, text) in SKILLS {
         let skill = plugin.join("skills").join(name);
         fs::create_dir_all(&skill).with_context(|| format!("create {}", skill.display()))?;
-        fs::write(skill.join("SKILL.md"), text)?;
+        write_atomic(&skill.join("SKILL.md"), text.as_bytes())?;
     }
     Ok(plugin)
 }
@@ -181,7 +183,7 @@ fn write_settings(folder: &Path) -> Result<Option<PathBuf>> {
     };
     fs::create_dir_all(folder).with_context(|| format!("create {}", folder.display()))?;
     let path = folder.join("claude-settings.json");
-    fs::write(&path, settings_json(&helper))?;
+    write_atomic(&path, settings_json(&helper).as_bytes())?;
     Ok(Some(path))
 }
 
@@ -278,7 +280,10 @@ mod tests {
             .expect("key");
         assert_eq!(named, file.to_string_lossy().replace('\\', "/"));
         let text = std::fs::read_to_string(&file).expect("file");
-        assert!(text.contains("brachio task create") && text.contains("brachio peers"));
+        assert!(
+            text.contains("brachio skills get brachio-send")
+                && text.contains("brachio skills get brachio-lead")
+        );
         assert!(!text.contains("name: brachio-"), "front matter is left out");
         for program in ["C:/npm/codex.cmd", "C:/bin/codex.exe"] {
             brachio_agent::ResolvedCommand::new(Path::new(program), &arguments)

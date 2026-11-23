@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AgentKind as CoreAgent } from "./terminal";
+import { AGENT_KINDS, agentOfCore } from "./agent-catalog";
 import type { AgentKind } from "./tasks";
 
 /** A profile from the repository's `brachio.toml`, or the reason it cannot be used. */
@@ -24,11 +25,9 @@ export interface CompareTarget {
   profile?: string;
 }
 
-const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "codex" };
-
 /** The usable profiles of one agent. */
 export const profilesFor = (profiles: readonly AgentProfileView[], agent: AgentKind) =>
-  profiles.filter((profile) => profile.error === null && profile.agent !== "" && UI_AGENT[profile.agent] === agent);
+  profiles.filter((profile) => profile.error === null && profile.agent !== "" && agentOfCore(profile.agent) === agent);
 
 /** Short text for a profile choice: its name and model. */
 export const profileLabel = (profile: AgentProfileView) =>
@@ -37,7 +36,7 @@ export const profileLabel = (profile: AgentProfileView) =>
 /** The agents and profiles a comparison can run, in display order. */
 export const compareChoices = (profiles: readonly AgentProfileView[]): CompareTarget[] => {
   const choices: CompareTarget[] = [];
-  for (const agent of ["claude", "codex"] as const) {
+  for (const agent of AGENT_KINDS) {
     choices.push({ agent });
     for (const profile of profilesFor(profiles, agent)) choices.push({ agent, profile: profile.name });
   }

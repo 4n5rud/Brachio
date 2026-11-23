@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 brachio-mcp = { path = "../brachio-mcp" }
+brachio-fs.workspace = true
 brachio-runtime.workspace = true
 clap.workspace = true
 serde_json.workspace = true

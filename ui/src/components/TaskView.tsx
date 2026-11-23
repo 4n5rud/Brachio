@@ -30,6 +30,7 @@ import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, type TabKind, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
 import { RenameDialog } from "./RenameDialog";
+import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
@@ -107,6 +108,7 @@ export function TaskView(props: {
   onReportProblem?: (message: string) => void;
 }) {
   const [inboxTab, setInboxTab] = createSignal<string>();
+  const [handingOver, setHandingOver] = createSignal(false);
   const [workerPreamble] = createResource(
     () => (props.task.parentTaskId ? props.task.id : undefined),
     (taskId) => invoke<string | null>("task_worker_preamble", { taskId }).catch(() => null),
@@ -497,6 +499,18 @@ export function TaskView(props: {
             badge={props.unreadForTab?.(key()) ?? 0}
             aria-expanded={inboxTab() === key()}
             onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
+        </Show>
+        <Show when={activeAgentTab() && props.workspaceTasks.length > 1}>
+          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} onClick={() => setHandingOver(true)} />
+        </Show>
+        <Show when={handingOver() ? activeAgentTab() : undefined}>
+          {(key) => (
+            <HandoffSummaryDialog targetKey={key()}
+              sources={props.workspaceTasks.filter((task) => task.id !== props.task.id && task.worktreePath)}
+              initialSourceId={props.task.parentTaskId ?? props.workspaceTasks.find((task) => task.id !== props.task.id)?.id ?? ""}
+              onDraft={(text) => props.onDraftOriginal?.(text) ?? Promise.resolve(false)}
+              onClose={() => setHandingOver(false)} />
+          )}
         </Show>
         <Show when={tabActions()}>
           {(current) => (

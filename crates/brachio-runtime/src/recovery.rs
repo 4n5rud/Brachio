@@ -17,12 +17,15 @@ mod stop_tests;
 mod tests;
 
 impl Journal {
-    /// Records left by runtimes that are gone. Unreadable files are reported and set aside.
+    /// Records left by runtimes that are gone. Corrupt files are reported and set aside.
     pub(crate) fn read_lost(&self) -> HashMap<String, SessionRecord> {
         match self.load() {
             Ok(loaded) => {
                 for path in &loaded.unreadable {
-                    eprintln!("set aside unreadable journal file {}", path.display());
+                    eprintln!(
+                        "warning: set aside corrupt journal file as {}",
+                        path.display()
+                    );
                 }
                 loaded
                     .records

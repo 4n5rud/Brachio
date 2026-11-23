@@ -10,6 +10,7 @@ mod decision_gate;
 mod external_link;
 mod file_in_use;
 mod folder_access;
+mod handoff_summary;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
@@ -358,6 +359,8 @@ pub fn run() {
             orchestration::orchestration_schedule,
             orchestration::orchestration_reopen_child,
             worker_preamble::task_worker_preamble,
+            handoff_summary::task_handoff_summary,
+            handoff_summary::task_handoff_send,
             agent_profiles::repo_profiles,
             agent_profiles::task_join_compare_group,
             workspace::task_has_live_terminals,
@@ -506,7 +509,7 @@ fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
         return false;
     };
     terminal_authorization::resolve(&connection, key)
-        .is_ok_and(|owner| owner.agent == Some(brachio_agent::AgentKind::ClaudeCode))
+        .is_ok_and(|owner| owner.agent.is_some_and(|agent| agent.spec().approval_relay))
 }
 
 fn install_tray(app: &App) -> tauri::Result<()> {

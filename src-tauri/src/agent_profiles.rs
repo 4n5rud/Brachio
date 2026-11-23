@@ -24,18 +24,11 @@ pub struct ProfileView {
     pub error: Option<String>,
 }
 
-fn agent_name(kind: AgentKind) -> &'static str {
-    match kind {
-        AgentKind::ClaudeCode => "claude_code",
-        AgentKind::Codex => "codex",
-    }
-}
-
 fn view(entry: ProfileEntry) -> ProfileView {
     match entry.profile {
         Ok(profile) => ProfileView {
             name: entry.name,
-            agent: agent_name(profile.agent).to_owned(),
+            agent: profile.agent.spec().id.to_owned(),
             model: profile.model,
             args: profile.args,
             env: profile.env.into_iter().map(|(name, _)| name).collect(),

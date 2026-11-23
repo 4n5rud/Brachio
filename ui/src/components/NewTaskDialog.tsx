@@ -9,6 +9,7 @@ import { AddProjectItems } from "./AddProjectItems";
 import { Icon } from "./Icon";
 import { filterProjects, projectSubline, type AddProjectKind, type ProjectChoice } from "../lib/project-choices";
 import { t } from "../i18n";
+import { AGENT_CATALOG, AGENT_KINDS } from "../lib/agent-catalog";
 import { AGENT_NAME, type AgentKind, type TaskRow } from "../lib/tasks";
 import { profileLabel, profilesFor, repoProfiles } from "../lib/agent-profiles";
 import { CORE_AGENT, detectAgents } from "../lib/terminal";
@@ -43,7 +44,7 @@ const conversationLabel = (item: { id: string; timestamp: string | null }) => {
   return label ? `${label} · ${item.id.slice(0, 8)}` : item.id;
 };
 
-const AGENTS: readonly AgentKind[] = ["claude", "codex"];
+const AGENTS: readonly AgentKind[] = AGENT_KINDS;
 
 /** The agent's own version line says "(Claude Code)" after the number; the card already shows the name. */
 const plainVersion = (version: string | null) => version?.replace(/\s*\(Claude Code\)/i, "") ?? null;
@@ -285,6 +286,9 @@ export function NewTaskDialog(props: {
             )}
           </For>
         </div>
+        <Show when={!AGENT_CATALOG[agent()].approvalRelay}>
+          <p class="form-hint">{t("newTask.agentOwnTerminal").replace("{name}", () => AGENT_NAME[agent()])}</p>
+        </Show>
       </fieldset>
       <Show when={profileChoices().length > 0}>
         <Select label={t("newTask.profile")} hint={t("newTask.profileHint")} value={profile()}

@@ -110,6 +110,7 @@ const SIGN_IN_INPUT = "/login";
 const SIGN_IN: Record<AgentKind, { name: string; command: string }> = {
   claude_code: { name: "Claude Code", command: "claude auth login" },
   codex: { name: "Codex", command: "codex login" },
+  grok: { name: "Grok", command: "grok" },
 };
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();

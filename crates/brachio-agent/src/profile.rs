@@ -125,6 +125,7 @@ fn check_args(agent: AgentKind, args: &[String]) -> Result<(), ProfileError> {
     let (plain, numeric): (&[&str], &[&str]) = match agent {
         AgentKind::ClaudeCode => (&["--verbose"], &["--max-turns"]),
         AgentKind::Codex => (&["--search"], &[]),
+        AgentKind::Grok => (&[], &[]),
     };
     if args.len() > MAX_ARGS {
         return Err(ProfileError::Refused(format!(
@@ -209,15 +210,17 @@ fn check(name: &str, raw: RawProfile) -> Result<AgentProfile, ProfileError> {
             "a profile name uses letters, digits, - and _ (at most 40)".to_owned(),
         ));
     }
-    let agent = match raw.agent.as_str() {
-        "claude_code" => AgentKind::ClaudeCode,
-        "codex" => AgentKind::Codex,
-        other => {
-            return Err(ProfileError::Refused(format!(
-                "unknown agent {other:?}; use claude_code or codex"
-            )))
-        }
-    };
+    let agent = AgentKind::from_id(&raw.agent).ok_or_else(|| {
+        ProfileError::Refused(format!(
+            "unknown agent {:?}; use claude_code, codex or grok",
+            raw.agent
+        ))
+    })?;
+    if agent == AgentKind::Grok && raw.model.is_some() {
+        return Err(ProfileError::Refused(
+            "a Grok profile cannot set a model yet".to_owned(),
+        ));
+    }
     if let Some(model) = &raw.model {
         let valid = !model.is_empty()
             && model.chars().count() <= MAX_MODEL_CHARS

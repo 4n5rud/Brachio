@@ -412,6 +412,7 @@ dependencies = [
  "anyhow",
  "brachio-agent",
  "brachio-core",
+ "brachio-fs",
  "brachio-git",
  "brachio-process",
  "brachio-pty",
@@ -444,6 +445,7 @@ name = "brachio-cli"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "brachio-fs",
  "brachio-mcp",
  "brachio-runtime",
  "clap",
@@ -461,6 +463,14 @@ dependencies = [
  "base64 0.22.1",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "brachio-fs"
+version = "0.2.0"
+dependencies = [
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -523,6 +533,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "brachio-core",
+ "brachio-fs",
  "brachio-pty",
  "clap",
  "interprocess",

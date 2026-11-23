@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import type { AgentKind as CoreAgent, CodexConversation } from "./terminal";
+import { agentOfCore } from "./agent-catalog";
 import type { AgentKind, TaskRow } from "./tasks";
 
 /** A repository as the core stores it. */
@@ -153,7 +154,7 @@ export type TaskGitAction =
 export const runTaskGitAction = (id: string, request: TaskGitAction) =>
   invoke<string | null>("task_git_action", { id, request });
 
-const UI_AGENT: Record<CoreAgent, AgentKind> = { claude_code: "claude", codex: "codex" };
+const UI_AGENT = (core: CoreAgent): AgentKind => agentOfCore(core);
 
 /**
  * Shapes a stored task for the list. Live status and diff counts are not
@@ -165,7 +166,7 @@ export function toTaskRow(record: TaskRecord): TaskRow {
     repoId: record.repoId,
     title: record.title,
     prompt: record.prompt || undefined,
-    agent: UI_AGENT[record.agentKind ?? "claude_code"],
+    agent: UI_AGENT(record.agentKind ?? "claude_code"),
     branch: record.branch,
     status: { state: "unknown" },
     updatedAt: record.createdAtMs,

@@ -511,7 +511,7 @@ fn earlier_conversation(kind: AgentKind, session_id: Option<&str>) -> Option<Str
     match kind {
         AgentKind::ClaudeCode => session_id.map(str::to_owned),
         // The Codex tab UUID identifies the PTY, not a Codex conversation.
-        AgentKind::Codex => None,
+        AgentKind::Codex | AgentKind::Grok => None,
     }
 }
 

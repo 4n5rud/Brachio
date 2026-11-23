@@ -1693,10 +1693,7 @@ fn to_text(error: impl std::fmt::Display) -> String {
 }
 
 pub(crate) fn agent_name(agent: AgentKind) -> &'static str {
-    match agent {
-        AgentKind::ClaudeCode => "claude_code",
-        AgentKind::Codex => "codex",
-    }
+    agent.spec().id
 }
 
 fn folder_name(path: &Path) -> String {
