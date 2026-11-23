@@ -41,6 +41,8 @@ export const en = {
   "sidebar.noProjectTasks": "No open tasks",
   "sidebar.newTaskIn": "New task in {project}",
   "sidebar.newTask": "New task",
+  "layout.resizeSidebar": "Resize the task list",
+  "layout.resizeInspector": "Resize the inspector",
   "sidebar.dropTitle": "Drop to add a project",
   "sidebar.dropBody": "A Git repository becomes a project with worktrees. Any other folder becomes a folder workspace.",
   "recent.title": "Recent tasks",
