@@ -136,6 +136,39 @@ impl RepoRecord {
         Ok(())
     }
 
+    /// Turns a plain folder project into a git project at `path`, and points the folder's own
+    /// tasks at the new place on `branch`. Either everything changes or nothing does.
+    ///
+    /// # Errors
+    /// Fails with `NotFound` when no plain folder project has this id, and when the path is
+    /// registered already.
+    pub fn become_git(
+        connection: &mut Connection,
+        id: &str,
+        path: &Path,
+        branch: &str,
+    ) -> Result<Self, StoreError> {
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
+            "UPDATE repos SET path = ?2, default_branch = ?3, is_git = 1
+              WHERE id = ?1 AND is_git = 0",
+            params![id, path.to_string_lossy(), branch],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound {
+                table: "repos",
+                id: id.to_owned(),
+            });
+        }
+        transaction.execute(
+            "UPDATE tasks SET worktree_path = ?2, branch = ?3 WHERE repo_id = ?1 AND branch = ''",
+            params![id, path.to_string_lossy(), branch],
+        )?;
+        let repo = Self::get(&transaction, id)?;
+        transaction.commit()?;
+        Ok(repo)
+    }
+
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
         let path: String = row.get(2)?;
         Ok(Self {
@@ -163,6 +196,51 @@ mod tests {
             added_at_ms: 1,
             is_git: true,
         }
+    }
+
+    #[test]
+    fn a_folder_project_becomes_a_git_project_with_its_tasks_moved_along() {
+        let mut connection = database::open_in_memory().expect("open database");
+        let old = Path::new("/scratch/idea");
+        let mut folder = sample("f", old);
+        folder.is_git = false;
+        folder.default_branch = "";
+        RepoRecord::insert(&connection, &folder).expect("insert");
+        connection
+            .execute(
+                "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+                 VALUES ('t', 'f', 'T', '', '', '/scratch/idea', 'new', 0)",
+                [],
+            )
+            .expect("task");
+
+        let moved = Path::new("/work/idea");
+        let repo = RepoRecord::become_git(&mut connection, "f", moved, "main").expect("convert");
+        assert!(repo.is_git && repo.path == moved && repo.default_branch == "main");
+        let (path, branch): (String, String) = connection
+            .query_row(
+                "SELECT worktree_path, branch FROM tasks WHERE id = 't'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("task row");
+        assert_eq!((path.as_str(), branch.as_str()), ("/work/idea", "main"));
+
+        let again = RepoRecord::become_git(&mut connection, "f", moved, "main");
+        assert!(again.is_err(), "a git project cannot be converted twice");
+    }
+
+    #[test]
+    fn a_failed_conversion_changes_nothing() {
+        let mut connection = database::open_in_memory().expect("open database");
+        let mut folder = sample("f", Path::new("/scratch/idea"));
+        folder.is_git = false;
+        RepoRecord::insert(&connection, &folder).expect("insert");
+        RepoRecord::insert(&connection, &sample("g", Path::new("/work/taken"))).expect("other");
+        let clash = RepoRecord::become_git(&mut connection, "f", Path::new("/work/taken"), "main");
+        assert!(clash.is_err());
+        let kept = RepoRecord::get(&connection, "f").expect("get");
+        assert!(!kept.is_git && kept.path == Path::new("/scratch/idea"));
     }
 
     #[test]

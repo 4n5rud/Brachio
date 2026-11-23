@@ -565,7 +565,7 @@ pub async fn repo_codex_conversations(
 
 /// A task in a plain folder: it runs in the folder itself, so there is no branch to make and no
 /// setup to copy.
-fn create_folder_task(
+pub(crate) fn create_folder_task(
     database: &Database,
     repo: &RepoRecord,
     request: &CreateTaskRequest,
@@ -957,7 +957,7 @@ fn ensure_loss_unchanged(confirmed: &str, current: &str) -> Result<(), String> {
 const TERMINAL_RUNNING_PREFIX: &str = "terminal still running:";
 
 /// Refuses deletion while a terminal of the task runs, or when that could not be checked.
-fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), String> {
+pub(crate) fn ensure_no_live_terminals(live: Result<Vec<String>, String>) -> Result<(), String> {
     let keys =
         live.map_err(|_| "could not verify that the task's terminals are stopped".to_owned())?;
     if keys.is_empty() {
@@ -1111,8 +1111,9 @@ async fn delete_task(
     let _guard = worktrees.acquire(&repo_id).await?;
     let (task, repo) = archived_task(database, id)?;
     ensure_no_live_terminals(live_task_terminals(database, terminals, in_app, id).await)?;
-    // A folder project's task runs in the user's own folder, which must never be removed.
-    if repo.is_git {
+    // A folder project's task runs in the user's own folder, which must never be removed. The
+    // same holds for a task that runs in the project's own root, as a converted scratch task does.
+    if repo.is_git && task.worktree_path != repo.path {
         let expected_fingerprint = expected_fingerprint.to_owned();
         tauri::async_runtime::spawn_blocking(move || {
             let git = Git::new(&repo.path);
