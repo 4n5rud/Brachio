@@ -31,6 +31,7 @@ import { onShellInput } from "../lib/shell-input";
 import { typedSinceSubmit } from "../lib/typed-input";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 import { silenceDeviceAttributes } from "../lib/terminal-queries";
+import { keepHangulSyllables } from "../lib/hangul-input";
 import { requestSelectionSend } from "../lib/selection-send";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -560,6 +561,8 @@ export function TerminalPane(props: {
     const notePastedInput = () => { noteUserInput(); userTyped = true; };
     host.addEventListener("paste", notePastedInput, true);
     host.addEventListener("compositionstart", notePastedInput, true);
+    // WebKit types Korean without composition events; it counts as typing like a composition does.
+    const stopHangul = keepHangulSyllables(term, host, notePastedInput);
     let lastWriteFailure = "";
     const pasteClipboard = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
@@ -726,8 +729,9 @@ export function TerminalPane(props: {
       clearTimeout(promptTimer);
       clearTimeout(resizeTimer);
       unregister?.();
-      host.removeEventListener("paste", noteUserInput, true);
-      host.removeEventListener("compositionstart", noteUserInput, true);
+      host.removeEventListener("paste", notePastedInput, true);
+      host.removeEventListener("compositionstart", notePastedInput, true);
+      stopHangul();
       stopShellDrop?.();
       stopShellPane?.();
       stopTail?.();
