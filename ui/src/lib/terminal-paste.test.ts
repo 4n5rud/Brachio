@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
-import { bracketedPaste, isNativePasteKey, terminalClipboardText, terminalInputFrames, terminalInputWriter } from "./terminal-paste";
+import { bracketedPaste, isCopyKey, isNativePasteKey, terminalClipboardText, terminalInputFrames, terminalInputWriter } from "./terminal-paste";
 
-const press = (key: string, mods: { ctrlKey?: boolean; metaKey?: boolean }) =>
-  ({ key, ctrlKey: false, metaKey: false, ...mods });
+const press = (key: string, mods: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) =>
+  ({ key, ctrlKey: false, metaKey: false, shiftKey: false, ...mods });
 
 test("leaves Ctrl+V to the terminal on macOS so agents can read a clipboard image", () => {
   expect(isNativePasteKey(press("v", { ctrlKey: true }), true)).toBe(false);
@@ -15,6 +15,21 @@ test("keeps Ctrl+V and Ctrl+Shift+V as paste outside macOS", () => {
   expect(isNativePasteKey(press("v", { ctrlKey: true }), false)).toBe(true);
   expect(isNativePasteKey(press("V", { ctrlKey: true }), false)).toBe(true);
   expect(isNativePasteKey(press("c", { ctrlKey: true }), false)).toBe(false);
+});
+
+test("leaves Ctrl+C to the terminal on macOS even with a selection, so it still interrupts", () => {
+  expect(isCopyKey(press("c", { ctrlKey: true }), true, true)).toBe(false);
+  expect(isCopyKey(press("c", { ctrlKey: true, shiftKey: true }), true, true)).toBe(false);
+  expect(isCopyKey(press("c", { metaKey: true }), true, true)).toBe(true);
+  expect(isCopyKey(press("c", { metaKey: true }), true, false)).toBe(false);
+  expect(isCopyKey(press("C", { metaKey: true, shiftKey: true }), true, false)).toBe(true);
+});
+
+test("copies with Ctrl+C on a selection and Ctrl+Shift+C outside macOS", () => {
+  expect(isCopyKey(press("c", { ctrlKey: true }), false, true)).toBe(true);
+  expect(isCopyKey(press("c", { ctrlKey: true }), false, false)).toBe(false);
+  expect(isCopyKey(press("C", { ctrlKey: true, shiftKey: true }), false, false)).toBe(true);
+  expect(isCopyKey(press("v", { ctrlKey: true }), false, true)).toBe(false);
 });
 
 test("keeps multiline prompts in a single paste and strips terminal control sequences", () => {
