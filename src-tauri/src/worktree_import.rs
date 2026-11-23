@@ -1,9 +1,12 @@
-//! Takes over worktrees git already has for a project as tasks, without touching their files.
+//! Takes over worktrees git already has for a project as tasks, without touching their files, and
+//! lists the worktrees subagents made inside a task's folder.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
-use brachio_git::{importable, list_worktrees, select_importable, Git};
+use brachio_git::{importable, list_worktrees, select_importable, subagent_worktrees, Git};
 use brachio_store::{NewTask, RepoRecord, TaskRecord};
+use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
 
@@ -17,6 +20,16 @@ pub struct ImportCandidate {
     branch: String,
 }
 
+/// Worktree folders of every task, open or archived.
+fn task_paths(connection: &Connection) -> Result<Vec<PathBuf>, String> {
+    Ok(TaskRecord::list_open(connection)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .chain(TaskRecord::list_archived(connection).map_err(|error| error.to_string())?)
+        .map(|task| task.worktree_path)
+        .collect())
+}
+
 fn project_and_known_paths(
     database: &Database,
     repo_id: &str,
@@ -26,12 +39,7 @@ fn project_and_known_paths(
     if !repo.is_git {
         return Err("Only Git projects have worktrees to import.".to_owned());
     }
-    let mut known: Vec<PathBuf> = TaskRecord::list_open(&connection)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .chain(TaskRecord::list_archived(&connection).map_err(|error| error.to_string())?)
-        .map(|task| task.worktree_path)
-        .collect();
+    let mut known = task_paths(&connection)?;
     known.push(repo.path.clone());
     Ok((repo, known))
 }
@@ -108,4 +116,75 @@ pub async fn worktree_import(
     }
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(records)
+}
+
+/// A worktree a subagent made inside a task's folder, under `.claude/worktrees/`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentWorktree {
+    path: String,
+    /// `None` for a detached HEAD.
+    branch: Option<String>,
+}
+
+/// At most this many tasks are looked up in one call.
+const MAX_SUBAGENT_TASKS: usize = 64;
+
+/// The subagent worktrees inside each task's folder, by task id. Tasks without any are left out,
+/// and so is a project git cannot list, so the sidebar shows nothing for it. Worktrees that are
+/// already tasks are not listed.
+#[tauri::command]
+pub async fn task_subagent_worktrees(
+    database: State<'_, Database>,
+    ids: Vec<String>,
+) -> Result<HashMap<String, Vec<SubagentWorktree>>, String> {
+    let (projects, known) = {
+        let connection = database.lock()?;
+        let mut projects: HashMap<String, (PathBuf, Vec<TaskRecord>)> = HashMap::new();
+        for id in ids.iter().take(MAX_SUBAGENT_TASKS) {
+            let Ok(task) = TaskRecord::get(&connection, id) else {
+                continue;
+            };
+            if let Some((_, tasks)) = projects.get_mut(&task.repo_id) {
+                tasks.push(task);
+                continue;
+            }
+            let Ok(repo) = RepoRecord::get(&connection, &task.repo_id) else {
+                continue;
+            };
+            if repo.is_git {
+                projects.insert(repo.id, (repo.path, vec![task]));
+            }
+        }
+        (projects, task_paths(&connection)?)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut found: HashMap<String, Vec<SubagentWorktree>> = HashMap::new();
+        for (repo_path, tasks) in projects.into_values() {
+            let Ok(entries) = list_worktrees(&Git::new(&repo_path)) else {
+                continue;
+            };
+            let folders: Vec<PathBuf> = tasks
+                .iter()
+                .map(|task| task.worktree_path.clone())
+                .collect();
+            let grouped = subagent_worktrees(&entries, &folders, &known);
+            for (task, worktrees) in tasks.into_iter().zip(grouped) {
+                if worktrees.is_empty() {
+                    continue;
+                }
+                let listed = worktrees
+                    .into_iter()
+                    .map(|entry| SubagentWorktree {
+                        path: entry.path.to_string_lossy().into_owned(),
+                        branch: entry.branch,
+                    })
+                    .collect();
+                found.insert(task.id, listed);
+            }
+        }
+        found
+    })
+    .await
+    .map_err(|error| error.to_string())
 }

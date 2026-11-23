@@ -410,6 +410,7 @@ pub fn run() {
             workspace::task_changes,
             worktree_import::worktree_import_candidates,
             worktree_import::worktree_import,
+            worktree_import::task_subagent_worktrees,
             task_overlaps::task_overlaps,
             pr_status::task_pr_status,
             pr_status::task_link_pr,

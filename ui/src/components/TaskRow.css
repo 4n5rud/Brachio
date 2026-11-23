@@ -132,3 +132,25 @@
 .task-pr-blocked {
   color: var(--color-status-blocked);
 }
+/* A worktree a subagent made inside the task's folder: lighter than a task, with a dashed link. */
+.task-item-subagent {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  color: var(--color-text-3);
+}
+.task-item-subagent::before {
+  border-left-style: dashed;
+  border-bottom-style: dashed;
+}
+.task-item-subagent .task-title {
+  font: var(--text-meta);
+  color: var(--color-text-2);
+}
+.task-item-subagent-deep {
+  width: calc(100% - 48px);
+  margin-left: 42px;
+}
+.task-subagent-icon {
+  justify-self: center;
+  color: var(--color-text-3);
+}

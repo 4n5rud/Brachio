@@ -104,6 +104,40 @@ pub fn importable(entries: &[WorktreeEntry], known: &[PathBuf]) -> Vec<WorktreeE
         .collect()
 }
 
+/// Where Claude Code puts the worktrees of subagents started with worktree isolation, relative to
+/// the folder the agent works in.
+pub const SUBAGENT_WORKTREES_DIR: &str = ".claude/worktrees";
+
+/// For each folder in `folders`, the worktrees inside its `.claude/worktrees/` folder: worktrees a
+/// subagent made while working there. Bare and missing entries are left out, and so is any path in
+/// `known`, such as a worktree that is already a task. Paths are compared with [`path_key`].
+#[must_use]
+pub fn subagent_worktrees(
+    entries: &[WorktreeEntry],
+    folders: &[PathBuf],
+    known: &[PathBuf],
+) -> Vec<Vec<WorktreeEntry>> {
+    let known: Vec<String> = known.iter().map(|path| path_key(path)).collect();
+    let candidates: Vec<(String, &WorktreeEntry)> = entries
+        .iter()
+        .filter(|entry| !entry.bare && !entry.prunable)
+        .map(|entry| (path_key(&entry.path), entry))
+        .filter(|(key, _)| !known.contains(key))
+        .collect();
+    folders
+        .iter()
+        .map(|folder| {
+            let mut prefix = path_key(&folder.join(SUBAGENT_WORKTREES_DIR));
+            prefix.push('/');
+            candidates
+                .iter()
+                .filter(|(key, _)| key.starts_with(&prefix))
+                .map(|(_, entry)| (*entry).clone())
+                .collect()
+        })
+        .collect()
+}
+
 /// The entries the user asked to import. Each requested path must be one of the repository's own
 /// importable worktrees, so a path from outside the repository is refused whole.
 ///
@@ -177,6 +211,69 @@ mod tests {
         ];
         let found = importable(&entries, &[known]);
         assert_eq!(found, vec![entry(&hotfix, Some("fix/crash"))]);
+    }
+
+    #[test]
+    fn subagent_worktrees_are_grouped_under_the_task_folder_they_were_made_in() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let make = |path: PathBuf| {
+            std::fs::create_dir_all(&path).expect("dir");
+            path
+        };
+        let main = make(folder.path().join("main"));
+        let task = make(folder.path().join("task-a"));
+        let other = make(folder.path().join("task-b"));
+        let agent = make(task.join(".claude/worktrees/agent-1"));
+        let named = make(task.join(".claude/worktrees/agent-2"));
+        let imported = make(task.join(".claude/worktrees/agent-3"));
+        let elsewhere = make(task.join("not-worktrees/agent-4"));
+        let sibling = make(folder.path().join("task-a-copy/.claude/worktrees/agent-5"));
+        let other_agent = make(other.join(".claude/worktrees/agent-6"));
+        let mut gone = entry(&task.join(".claude/worktrees/agent-7"), Some("gone"));
+        gone.prunable = true;
+        let mut bare = entry(&task.join(".claude/worktrees/agent-8"), None);
+        bare.bare = true;
+        let entries = vec![
+            entry(&main, Some("main")),
+            entry(&task, Some("task-a")),
+            entry(&other, Some("task-b")),
+            entry(&agent, Some("worktree-agent-1")),
+            entry(&named, None),
+            entry(&imported, Some("imported")),
+            entry(&elsewhere, Some("elsewhere")),
+            entry(&sibling, Some("sibling")),
+            entry(&other_agent, Some("worktree-agent-6")),
+            gone,
+            bare,
+        ];
+        let known = vec![main, task.clone(), other.clone(), imported];
+        let grouped = subagent_worktrees(&entries, &[task, other], &known);
+        assert_eq!(
+            grouped,
+            vec![
+                vec![entry(&agent, Some("worktree-agent-1")), entry(&named, None)],
+                vec![entry(&other_agent, Some("worktree-agent-6"))],
+            ]
+        );
+    }
+
+    #[test]
+    fn subagent_worktrees_match_another_spelling_of_the_task_folder() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let task = folder.path().join("task");
+        let agent = task.join(".claude").join("worktrees").join("agent-1");
+        std::fs::create_dir_all(&agent).expect("dir");
+        let resolved = std::fs::canonicalize(&agent).expect("canonical");
+        // git may report the resolved path (such as /private/var on macOS) while the task keeps
+        // the path it was created with, and the other way around.
+        let entries = vec![entry(&resolved, Some("worktree-agent-1"))];
+        let spelled = task.join("..").join("task");
+        let grouped = subagent_worktrees(&entries, &[spelled], &[]);
+        assert_eq!(grouped, vec![vec![entry(&resolved, Some("worktree-agent-1"))]]);
+        let entries = vec![entry(&agent, Some("worktree-agent-1"))];
+        let canonical_task = std::fs::canonicalize(&task).expect("canonical");
+        let grouped = subagent_worktrees(&entries, &[canonical_task], &[]);
+        assert_eq!(grouped, vec![vec![entry(&agent, Some("worktree-agent-1"))]]);
     }
 
     #[test]

@@ -2,7 +2,9 @@ import { IconButton } from "./ui/IconButton";
 import { Menu } from "./ui/Menu";
 import { AddProjectItems } from "./AddProjectItems";
 import type { AddProjectKind } from "../lib/project-choices";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { SubagentWorktreeRow } from "./SubagentWorktreeRow";
+import { subagentWorktrees, watchSubagentWorktrees, type SubagentWorktree } from "../lib/subagent-worktrees";
 import { t } from "../i18n";
 import { SETTINGS_KEYS } from "../lib/shortcut";
 import { AGENT_KINDS } from "../lib/agent-catalog";
@@ -70,6 +72,8 @@ export function TaskList(props: {
   initialCollapsed?: ReadonlySet<string>;
   /** Pull request chip per task; read from the pull request store when left out. */
   prFor?: (taskId: string) => PrChip | null;
+  /** Worktrees subagents made inside a task's folder; read from git in the app when left out. */
+  subagentsFor?: (taskId: string) => readonly SubagentWorktree[];
   needsYou: number;
   now: number;
   unreadForTask?: (taskId: string) => number;
@@ -104,6 +108,15 @@ export function TaskList(props: {
   if ("__TAURI_INTERNALS__" in window) {
     onCleanup(watchPrStatuses(() => props.tasks.filter((task) => task.worktreePath).map((task) => task.id)));
   }
+  // Worktrees subagents made in each task's folder. They are read again when a task is added or
+  // removed, on window focus, and every 15 seconds.
+  const worktreeTaskIds = createMemo(() => props.tasks.filter((task) => task.worktreePath).map((task) => task.id).join("\n"));
+  if (!props.subagentsFor && "__TAURI_INTERNALS__" in window) {
+    const watch = watchSubagentWorktrees(() => worktreeTaskIds().split("\n").filter((id) => id.length > 0));
+    createEffect(on(worktreeTaskIds, () => watch.refresh()));
+    onCleanup(watch.stop);
+  }
+  const subagentsOf = (taskId: string) => (props.subagentsFor ?? subagentWorktrees)(taskId);
   const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(props.initialCollapsed ?? loadCollapsedProjects());
   createEffect(() => {
     const ids = groupIds().flatMap((id) => collapsed().has(id)
@@ -211,32 +224,40 @@ export function TaskList(props: {
                 </div>
                 <Show when={expanded()}>
                   <For each={tasks()} fallback={<p class="project-empty">{t("sidebar.noProjectTasks")}</p>}>
-                    {(task) => (
-                      <TaskRowItem
-                        task={task}
-                        child={task.parentTaskId !== undefined && tasks().some((other) => other.id === task.parentTaskId)}
-                        selected={task.id === props.selectedId}
-                        now={props.now}
-                        unread={props.unreadForTask?.(task.id) ?? 0}
-                        finished={props.finishedUnread?.(task.id)}
-                        pr={props.prFor?.(task.id)}
-                        onSelect={() => props.onSelect(task.id)}
-                        reorder={props.onReorderTasks ? taskReorder.item(task.id) : undefined}
-                        pinned={props.pinned?.has(task.id)}
-                        onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(task.id, !props.pinned?.has(task.id)) : undefined}
-                        onRename={props.onRenameTask ? () => props.onRenameTask?.(task.id) : undefined}
-                        onCompare={props.onCompareTask && task.repoId ? () => props.onCompareTask?.(task.id) : undefined}
-                        duplicateAgents={otherAgents(task)}
-                        onDuplicate={props.onDuplicateTask ? (agent) => props.onDuplicateTask?.(task.id, agent) : undefined}
-                        onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}
-                        comparing={compareSiblings(props.tasks, task).length > 0}
-                        onKeepOnly={props.onKeepOnly && compareSiblings(props.tasks, task).length > 0
-                          ? () => props.onKeepOnly?.(task.id) : undefined}
-                        onCompareResults={props.onCompareResults && compareSiblings(props.tasks, task).length > 0
-                          ? () => props.onCompareResults?.(task.id) : undefined}
-                        onError={props.onError}
-                      />
-                    )}
+                    {(task) => {
+                      const child = () => task.parentTaskId !== undefined && tasks().some((other) => other.id === task.parentTaskId);
+                      return (
+                        <>
+                          <TaskRowItem
+                            task={task}
+                            child={child()}
+                            selected={task.id === props.selectedId}
+                            now={props.now}
+                            unread={props.unreadForTask?.(task.id) ?? 0}
+                            finished={props.finishedUnread?.(task.id)}
+                            pr={props.prFor?.(task.id)}
+                            onSelect={() => props.onSelect(task.id)}
+                            reorder={props.onReorderTasks ? taskReorder.item(task.id) : undefined}
+                            pinned={props.pinned?.has(task.id)}
+                            onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(task.id, !props.pinned?.has(task.id)) : undefined}
+                            onRename={props.onRenameTask ? () => props.onRenameTask?.(task.id) : undefined}
+                            onCompare={props.onCompareTask && task.repoId ? () => props.onCompareTask?.(task.id) : undefined}
+                            duplicateAgents={otherAgents(task)}
+                            onDuplicate={props.onDuplicateTask ? (agent) => props.onDuplicateTask?.(task.id, agent) : undefined}
+                            onArchive={task.worktreePath ? () => props.onArchiveTask?.(task.id) : undefined}
+                            comparing={compareSiblings(props.tasks, task).length > 0}
+                            onKeepOnly={props.onKeepOnly && compareSiblings(props.tasks, task).length > 0
+                              ? () => props.onKeepOnly?.(task.id) : undefined}
+                            onCompareResults={props.onCompareResults && compareSiblings(props.tasks, task).length > 0
+                              ? () => props.onCompareResults?.(task.id) : undefined}
+                            onError={props.onError}
+                          />
+                          <For each={subagentsOf(task.id)}>
+                            {(worktree) => <SubagentWorktreeRow worktree={worktree} underChild={child()} />}
+                          </For>
+                        </>
+                      );
+                    }}
                   </For>
                   <Show when={folderProjects().has(id) && props.onAddFolderRepo}>
                     <FolderRepos projectId={id} onAdd={(path) => props.onAddFolderRepo?.(path) ?? Promise.resolve()} />
