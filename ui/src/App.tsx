@@ -58,6 +58,8 @@ import { tokenLabel, tokenUsage, tokenTotal, watchTokenUsage } from "./lib/token
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { typingTarget } from "./lib/typing-target";
 import { ShortcutsDialog } from "./components/ShortcutList";
+import { CompareTaskDialog } from "./components/CompareTaskDialog";
+import { compareTitle, joinCompareGroup, type CompareTarget } from "./lib/agent-profiles";
 import { RenameDialog } from "./components/RenameDialog";
 import { attentionOf, nextAttentionId } from "./lib/attention";
 import { RecentTasksSwitcher } from "./components/RecentTasksSwitcher";
@@ -804,6 +806,7 @@ export function App() {
       base: input.base === "" ? null : input.base,
       codexConversationId: input.codexConversationId ?? null,
       compareGroup: compareGroup ?? null,
+      profile: input.profile ?? null,
     });
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;
@@ -867,6 +870,27 @@ export function App() {
       setTasks((list) => list.map((task) => (task.id === id ? { ...task, title: before } : task)));
       report(failure);
     });
+  };
+  const [comparingTask, setComparingTask] = createSignal<string>();
+  /** Runs the task's prompt again for each target, grouping the new tasks with the original. */
+  const compareTask = async (id: string, targets: CompareTarget[]) => {
+    const task = findTask(id);
+    if (!task?.repoId || !task.prompt) return;
+    const group = await joinCompareGroup(id, crypto.randomUUID());
+    setTasks((list) => list.map((item) => (item.id === id ? { ...item, compareGroup: group } : item)));
+    let first: string | undefined;
+    for (const target of targets) {
+      try {
+        const record = await createOne(task.repoId, {
+          prompt: task.prompt, title: compareTitle(task.title, target, AGENT_NAME[target.agent]),
+          agent: target.agent, base: "", profile: target.profile,
+        }, target.agent, group);
+        first ??= record.id;
+      } catch (failure) {
+        pushToast({ tone: "error", title: t("newTask.compareSecondFailed"), message: String(failure) });
+      }
+    }
+    if (first) open(first);
   };
   const duplicateTask = (id: string, agent: AgentKind) => {
     const task = findTask(id);
@@ -1332,6 +1356,7 @@ export function App() {
           pinned={pinned()}
           onTogglePin={togglePin}
           onRenameTask={inTauri ? setRenamingTask : undefined}
+          onCompareTask={inTauri ? setComparingTask : undefined}
           onDuplicateTask={inTauri ? duplicateTask : undefined}
           onVisibleChange={setVisibleTaskIds}
           onReorderProjects={inTauri ? reorderProjects : undefined}
@@ -1426,6 +1451,16 @@ export function App() {
         {(id) => (
           <RenameDialog title={t("rename.task")} value={findTask(id)?.title ?? ""} maxLength={200}
             onSave={(title) => renameTask(id, title)} onClose={() => setRenamingTask(undefined)} />
+        )}
+      </Show>
+      <Show when={comparingTask()} keyed>
+        {(id) => (
+          <Show when={findTask(id)?.repoId}>
+            {(repoId) => (
+              <CompareTaskDialog title={findTask(id)?.title ?? ""} repoId={repoId()}
+                onCreate={(targets) => compareTask(id, targets)} onClose={() => setComparingTask(undefined)} />
+            )}
+          </Show>
         )}
       </Show>
       <Show when={shortcutsOpen()}><ShortcutsDialog onClose={() => setShortcutsOpen(false)} /></Show>

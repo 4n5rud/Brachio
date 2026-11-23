@@ -5,6 +5,7 @@
 mod agent_kind;
 mod codex_sessions;
 mod installed;
+mod profile;
 mod session_tokens;
 mod usage_scan;
 
@@ -16,6 +17,10 @@ pub use codex_sessions::{
 pub use installed::{
     detect, detect_all, find_on_path, is_safe_for_cmd, locate, Installed, PromptDelivery,
     ResolvedCommand,
+};
+pub use profile::{
+    find_profile, parse_profiles, read_profiles, AgentProfile, ProfileEntry, ProfileError,
+    BYPASS_WORDS,
 };
 pub use session_tokens::{
     claude_log_in, claude_log_path, encode_claude_cwd, LogFormat, TokenUsage, UsageTracker,

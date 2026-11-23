@@ -13,6 +13,7 @@ mod qa_result_record;
 mod repo_record;
 mod task_activity_record;
 mod task_pin_record;
+mod task_profile_record;
 mod task_record;
 mod task_tabs;
 mod usage_record;
@@ -56,6 +57,7 @@ pub use task_activity_record::{
     MAX_TASK_ACTIVITY,
 };
 pub use task_pin_record::{pinned_task_ids, set_task_pinned};
+pub use task_profile_record::{join_compare_group, set_task_profile, task_profile};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{
     add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs, rename_task_tab,

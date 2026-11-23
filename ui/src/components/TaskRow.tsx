@@ -37,6 +37,8 @@ export function TaskRowItem(props: {
   onKeepOnly?: () => void;
   /** Renames the task; the item is left out when missing. */
   onRename?: () => void;
+  /** Opens the dialog that duplicates the task for several agents or profiles. */
+  onCompare?: () => void;
   /** Agents the same prompt can be started with in a new task. */
   duplicateAgents?: readonly AgentKind[];
   onDuplicate?: (agent: AgentKind) => void;
@@ -125,6 +127,9 @@ export function TaskRowItem(props: {
                   </MenuItem>
                 )}
               </For>
+            </Show>
+            <Show when={props.onCompare && props.task.prompt}>
+              <MenuItem onSelect={() => act(() => props.onCompare?.())}>{t("taskMenu.compare")}</MenuItem>
             </Show>
             <MenuItem disabled={!props.task.branch}
               onSelect={() => act(async () => { await navigator.clipboard.writeText(props.task.branch ?? ""); pushToast({ tone: "success", message: t("taskMenu.branchCopied") }); })}>

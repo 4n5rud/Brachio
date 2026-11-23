@@ -45,6 +45,8 @@ export interface CreateTaskRequest {
   codexConversationId?: string | null;
   /** Marks the task as one of several run on one prompt to compare agents. */
   compareGroup?: string | null;
+  /** A profile from the repository's `brachio.toml`, applied whenever the agent starts. */
+  profile?: string | null;
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");

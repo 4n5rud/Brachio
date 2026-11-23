@@ -228,6 +228,7 @@ impl<R: Runtime> ChildTasks for AppChildTasks<R> {
                     base: request.base,
                     codex_conversation_id: None,
                     compare_group: None,
+                    profile: None,
                     max_open_children: Some(MAX_OPEN_CHILDREN),
                 },
             )
