@@ -14,7 +14,7 @@ use tokio::sync::watch;
 
 use crate::journal::SessionRecord;
 use crate::output::{OutputHistory, Page};
-use crate::screen::TerminalScreen;
+use crate::screen::{Frame, TerminalScreen};
 
 /// The cursor position query that a terminal program sends at startup; the runtime answers it
 /// so the program can start without a screen.
@@ -92,9 +92,7 @@ impl Session {
 
     pub(crate) fn snapshot(&self) -> Result<ResponseResult> {
         let state = lock(&self.output)?;
-        let frame = state.screen.frame();
-        let resume_offset =
-            (frame.at_boundary && !frame.alternate_screen).then(|| state.history.end());
+        let (frame, resume_offset) = state.frame_with_resume_offset();
         Ok(ResponseResult::Snapshot {
             session: self.info(&state),
             screen: ScreenSnapshot {
@@ -172,6 +170,16 @@ impl StartupOutput {
             resize_revision: self.screen.resize_revision(),
             exited: self.exited,
         }
+    }
+
+    /// The screen to draw and the output offset live output continues from, read together so no
+    /// byte falls between them or is drawn twice. `None` when the screen cannot be continued
+    /// from here: mid-sequence, or on the alternate screen.
+    pub(crate) fn frame_with_resume_offset(&self) -> (Frame, Option<u64>) {
+        let frame = self.screen.frame();
+        let resume_offset =
+            (frame.at_boundary && !frame.alternate_screen).then(|| self.history.end());
+        (frame, resume_offset)
     }
 
     pub(crate) fn record(&mut self, bytes: &[u8]) -> Option<(SessionId, Vec<u8>)> {
@@ -255,6 +263,76 @@ mod tests {
     }
 
     use super::*;
+
+    /// What a reconnecting terminal ends up showing: the frame, then the output after its offset.
+    fn reconnected(state: &StartupOutput, frame: &Frame, offset: u64) -> String {
+        let mut screen = TerminalScreen::default();
+        screen.process(frame.ansi.as_bytes());
+        let page = state.history.read(offset).expect("offset is retained");
+        assert!(!page.truncated);
+        screen.process(&page.bytes);
+        screen.frame().ansi
+    }
+
+    #[test]
+    fn output_between_the_frame_and_the_follow_is_neither_lost_nor_repeated() {
+        let mut state = StartupOutput::default();
+        state.record(
+            b"alpha
+bravo
+",
+        );
+        let (frame, offset) = state.frame_with_resume_offset();
+        let offset = offset.expect("settled frame");
+        assert_eq!(
+            offset,
+            b"alpha
+bravo
+"
+            .len() as u64
+        );
+
+        // Arrives after the snapshot and before the follow request is served.
+        state.record(
+            b"charlie
+",
+        );
+        state.record(
+            b"delta
+",
+        );
+
+        let page = state.history.read(offset).expect("page");
+        assert_eq!(page.start, offset);
+        assert_eq!(
+            page.bytes,
+            b"charlie
+delta
+"
+        );
+        assert_eq!(
+            reconnected(&state, &frame, offset),
+            state.screen.frame().ansi,
+            "the reconnected screen must equal the live one"
+        );
+    }
+
+    #[test]
+    fn a_frame_taken_mid_sequence_offers_no_resume_offset() {
+        let mut state = StartupOutput::default();
+        state.record(
+            b"ok
+[3",
+        );
+        assert_eq!(state.frame_with_resume_offset().1, None);
+        state.record(b"1mred");
+        let (frame, offset) = state.frame_with_resume_offset();
+        assert_eq!(offset, Some(state.history.end()));
+        assert_eq!(
+            reconnected(&state, &frame, offset.expect("offset")),
+            frame.ansi
+        );
+    }
 
     #[test]
     fn startup_queries_are_each_answered_once_even_when_split() {

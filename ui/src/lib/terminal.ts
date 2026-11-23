@@ -65,7 +65,8 @@ export type TerminalMessage =
   | { type: "exit"; exitCode: number | null }
   | { type: "status"; status: AgentState; message: string | null }
   | { type: "detached" }
-  | { type: "restored" };
+  | { type: "restored" }
+  | { type: "reset" };
 
 /** Output frames arrive as raw bytes, the exit notice as JSON. */
 export function decodeMessage(raw: unknown): TerminalMessage | null {
@@ -78,6 +79,7 @@ export function decodeMessage(raw: unknown): TerminalMessage | null {
   }
   if (raw !== null && typeof raw === "object" && "detached" in raw) return { type: "detached" };
   if (raw !== null && typeof raw === "object" && "restored" in raw) return { type: "restored" };
+  if (raw !== null && typeof raw === "object" && "reset" in raw) return { type: "reset" };
   if (raw !== null && typeof raw === "object" && "exitCode" in raw) {
     const code = (raw as { exitCode: unknown }).exitCode;
     return { type: "exit", exitCode: typeof code === "number" ? code : null };

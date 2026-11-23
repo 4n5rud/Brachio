@@ -325,13 +325,21 @@ impl RuntimeTerminals {
             .parse()
             .map_err(|_| anyhow!("invalid runtime session ID"))?;
         let forwarding = Arc::new(AtomicBool::new(true));
+        let reopen = (client.clone(), key.clone());
         self.register(
             id,
             key,
             client,
             (reply.instance, session_id),
             &forwarding,
-            pump(first, following, channel, agent, Arc::clone(&forwarding)),
+            pump(
+                reopen,
+                first,
+                following,
+                channel,
+                agent,
+                Arc::clone(&forwarding),
+            ),
         )?;
         Ok(Some((id, attached)))
     }
@@ -713,6 +721,7 @@ async fn open_frame(client: &Client, key: &str) -> Result<(Reply, Following), Cl
 
 /// Forward everything the runtime reports to the web view until the program ends.
 async fn pump(
+    (client, key): (Client, String),
     first: Reply,
     mut following: Following,
     channel: Channel<InvokeResponseBody>,
@@ -724,8 +733,23 @@ async fn pump(
     let mut live = false;
     let mut next = Some(first);
     loop {
-        if let Some(reply) = next.take() {
+        if let Some(mut reply) = next.take() {
             let forward = forwarding.load(Ordering::Relaxed);
+            if live && forward && skipped_output(&reply) {
+                // The runtime dropped output this pane never received. Redraw from a fresh frame
+                // instead of showing a screen with a hole in it.
+                send_message(&channel, &ChannelMessage::Reset { reset: true });
+                match open_frame(&client, &key).await {
+                    Ok((frame, resumed)) => {
+                        reply = frame;
+                        following = resumed;
+                    }
+                    Err(_) => {
+                        send_message(&channel, &ChannelMessage::Detached { detached: true });
+                        return;
+                    }
+                }
+            }
             if deliver(
                 reply,
                 &mut last_status,
@@ -746,6 +770,14 @@ async fn pump(
             }
         }
     }
+}
+
+/// Whether the runtime no longer held output this follower had not yet read.
+fn skipped_output(reply: &Reply) -> bool {
+    matches!(
+        &reply.result,
+        ResponseResult::Success { output: Some(page), .. } if page.truncated
+    )
 }
 
 /// Send one reply on; `true` once the program has ended and its output is fully sent.
@@ -952,9 +984,41 @@ mod handle_tests {
 mod tests {
     use std::path::PathBuf;
 
-    use brachio_runtime::wire::{LostInfo, ResponseResult, ScreenSnapshot};
+    use brachio_runtime::wire::{
+        LostInfo, OutputPage, Reply, ResponseResult, ScreenSnapshot, SessionInfo,
+    };
 
-    use super::{saved_screen_from, task_terminal_keys, SavedScreen};
+    use super::{saved_screen_from, skipped_output, task_terminal_keys, SavedScreen};
+
+    fn page_reply(truncated: bool) -> Reply {
+        Reply {
+            version: 1,
+            instance: "i".into(),
+            result: ResponseResult::Success {
+                session: SessionInfo {
+                    session_id: serde_json::from_str("1").expect("session id"),
+                    pid: 7,
+                    output_bytes: 300_000,
+                    exited: false,
+                    exit_code: None,
+                    status: None,
+                },
+                output: Some(OutputPage {
+                    start: 40_000,
+                    next: 48_000,
+                    end: 300_000,
+                    truncated,
+                    bytes: Vec::new(),
+                }),
+            },
+        }
+    }
+
+    #[test]
+    fn a_page_that_starts_after_the_requested_offset_means_output_was_skipped() {
+        assert!(skipped_output(&page_reply(true)));
+        assert!(!skipped_output(&page_reply(false)));
+    }
 
     #[test]
     fn a_recovered_screen_keeps_its_frame_and_how_the_program_ended() {
