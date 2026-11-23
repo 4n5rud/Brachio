@@ -31,6 +31,78 @@ pub async fn task_attach_images(
         .map_err(to_text)?
 }
 
+/// The task's attachments folder, created with an ignore file so nothing in it shows as a change.
+fn attachment_folder(root: &Path) -> Result<PathBuf, String> {
+    let root = root.canonicalize().map_err(to_text)?;
+    let folder = root.join(ATTACHMENT_DIR);
+    fs::create_dir_all(&folder).map_err(to_text)?;
+    let ignore = root.join(".brachio").join(".gitignore");
+    if !ignore.exists() {
+        fs::write(&ignore, "*\n").map_err(to_text)?;
+    }
+    Ok(folder)
+}
+
+/// `stem.extension`, or `stem-2.extension` and so on until the name is unused.
+fn free_name(folder: &Path, stem: &str, extension: &str) -> String {
+    let mut name = format!("{stem}.{extension}");
+    let mut counter = 1;
+    while folder.join(&name).exists() {
+        counter += 1;
+        name = format!("{stem}-{counter}.{extension}");
+    }
+    name
+}
+
+/// Saves a picture pasted from the clipboard, sent by the window as raw bytes, and returns its
+/// worktree-relative path.
+#[tauri::command]
+pub async fn task_attach_pasted_image(
+    database: State<'_, Database>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("The image arrived in an unexpected form.".to_owned());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+            .ok_or_else(|| format!("Missing {name}."))
+    };
+    let id = header("x-task-id")?;
+    let extension = header("x-image-extension")?;
+    let bytes = bytes.clone();
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        save_pasted_image(&task.worktree_path, &extension, &bytes)
+    })
+    .await
+    .map_err(to_text)?
+}
+
+fn save_pasted_image(root: &Path, extension: &str, bytes: &[u8]) -> Result<String, String> {
+    let extension = extension.to_ascii_lowercase();
+    if !IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        return Err("Only PNG, JPEG, GIF and WebP images can be attached.".to_owned());
+    }
+    if bytes.is_empty() {
+        return Err("The pasted image is empty.".to_owned());
+    }
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "An image is larger than {} MB.",
+            MAX_IMAGE_BYTES / 1024 / 1024
+        ));
+    }
+    let folder = attachment_folder(root)?;
+    let name = free_name(&folder, "pasted-image", &extension);
+    fs::write(folder.join(&name), bytes).map_err(to_text)?;
+    Ok(format!("{ATTACHMENT_DIR}/{name}"))
+}
+
 fn save_images(root: &Path, sources: &[PathBuf]) -> Result<Vec<String>, String> {
     if sources.is_empty() || sources.len() > MAX_IMAGES {
         return Err(format!("Attach between 1 and {MAX_IMAGES} images."));
@@ -56,13 +128,7 @@ fn save_images(root: &Path, sources: &[PathBuf]) -> Result<Vec<String>, String> 
         }
         checked.push((source, extension));
     }
-    let root = root.canonicalize().map_err(to_text)?;
-    let folder = root.join(ATTACHMENT_DIR);
-    fs::create_dir_all(&folder).map_err(to_text)?;
-    let ignore = root.join(".brachio").join(".gitignore");
-    if !ignore.exists() {
-        fs::write(&ignore, "*\n").map_err(to_text)?;
-    }
+    let folder = attachment_folder(root)?;
     let mut saved = Vec::new();
     for (source, extension) in checked {
         let stem: String = source
@@ -79,12 +145,7 @@ fn save_images(root: &Path, sources: &[PathBuf]) -> Result<Vec<String>, String> 
             })
             .take(40)
             .collect();
-        let mut name = format!("{stem}.{extension}");
-        let mut counter = 1;
-        while folder.join(&name).exists() {
-            counter += 1;
-            name = format!("{stem}-{counter}.{extension}");
-        }
+        let name = free_name(&folder, &stem, &extension);
         fs::copy(source, folder.join(&name)).map_err(to_text)?;
         saved.push(format!("{ATTACHMENT_DIR}/{name}"));
     }
@@ -93,7 +154,7 @@ fn save_images(root: &Path, sources: &[PathBuf]) -> Result<Vec<String>, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::save_images;
+    use super::{save_images, save_pasted_image};
     use std::fs;
 
     #[test]
@@ -128,5 +189,20 @@ mod tests {
             .expect("size");
         assert!(save_images(task.path(), &[big]).is_err());
         assert!(save_images(task.path(), &[]).is_err());
+    }
+
+    #[test]
+    fn saves_a_pasted_picture_without_overwriting_and_refuses_bad_ones() {
+        let task = tempfile::tempdir().expect("task");
+
+        let first = save_pasted_image(task.path(), "png", b"png").expect("first");
+        let second = save_pasted_image(task.path(), "PNG", b"png").expect("second");
+
+        assert_eq!(first, ".brachio/attachments/pasted-image.png");
+        assert_eq!(second, ".brachio/attachments/pasted-image-2.png");
+        assert!(save_pasted_image(task.path(), "svg", b"x").is_err());
+        assert!(save_pasted_image(task.path(), "png", b"").is_err());
+        let big = vec![0_u8; 11 * 1024 * 1024];
+        assert!(save_pasted_image(task.path(), "png", &big).is_err());
     }
 }

@@ -26,7 +26,7 @@ import { openInEditor } from "./lib/editor";
 import { noteRecentFile, recentFiles } from "./lib/recent-files";
 import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
-import { attachImages, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
+import { attachImages, attachPastedImage, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
 import { IssueReportDialog } from "./components/IssueReportDialog";
 import { LocalPreview } from "./components/LocalPreview";
@@ -1551,6 +1551,7 @@ export function App() {
               onArchive={task().worktreePath && !archiving() ? () => void archive(task()) : undefined}
               onDraftOriginal={(text) => draftComment(task().id, text)}
               onAttachPaths={async (paths) => draftComment(task().id, fileReferences(await attachmentPaths(task().id, paths)) + " ")}
+              onAttachPastedImage={async (image) => draftComment(task().id, fileReferences([await attachPastedImage(task().id, image)]) + " ")}
               setupRequest={setupRequests().get(task().id)}
               setupFailure={setupFailures().get(task().id)}
               setupOutcome={setupOutcomes().get(task().id)}

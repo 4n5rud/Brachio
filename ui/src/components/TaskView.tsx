@@ -94,6 +94,7 @@ export function TaskView(props: {
   onDraftOriginal?: (text: string) => Promise<boolean>;
   /** Files and images chosen in the picker; they go into the agent input as a draft. */
   onAttachPaths?: (paths: string[]) => Promise<boolean>;
+  onAttachPastedImage?: (image: Blob) => Promise<boolean>;
   /** Commands from brachio.toml waiting for the user's yes or no. */
   setupRequest?: { commands: readonly string[]; answer: (run: boolean) => void };
   setupFailure?: string;
@@ -722,6 +723,7 @@ export function TaskView(props: {
                         active={selected() && mode() !== "shell" && !extraSelected()}
                         theme={props.theme}
                         onStatus={(status, message) => props.onStatus?.(id, terminalKey(id, "agent"), status, message)}
+                        onPasteImage={props.onAttachPastedImage}
                         registerDraftWriter={(prepare) => {
                           primaryWriters.set(id, prepare);
                           const unregister = props.registerDraftTarget(id, () => {
@@ -773,7 +775,8 @@ export function TaskView(props: {
                                 onReport={props.onReportProblem}
                                 theme={props.theme}
                                 onStatus={(status, message) => props.onStatus?.(id, key, status, message)}
-                                registerDraftWriter={(prepare) => {
+                                onPasteImage={props.onAttachPastedImage}
+                        registerDraftWriter={(prepare) => {
                                   secondaryWriters.set(key, prepare);
                                   return () => {
                                     if (secondaryWriters.get(key) === prepare) secondaryWriters.delete(key);

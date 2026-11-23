@@ -44,6 +44,20 @@ export function isCopyKey(
   return primary && (event.shiftKey || hasSelection);
 }
 
+const PASTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/**
+ * The picture a paste carries when it has no text, such as a screenshot copied with ⌘⌃⇧4.
+ * The terminal cannot insert a picture, so Brachio saves it and hands the agent its path.
+ */
+export function pastedImage<T extends { type: string }>(data: {
+  files: ArrayLike<T>;
+  getData: (type: string) => string;
+}): T | undefined {
+  if (terminalClipboardText(data.getData("text/plain")) !== "") return undefined;
+  return Array.from(data.files).find((file) => PASTED_IMAGE_TYPES.includes(file.type));
+}
+
 // An escaped UTF-16 unit can use six JSON bytes. This leaves room for the
 // protocol envelope inside the runtime's 64 KiB message limit.
 const MAX_INPUT_UNITS = 8 * 1024;
