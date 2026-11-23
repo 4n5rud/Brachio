@@ -287,7 +287,10 @@ mod tests {
         for name in AGENT_SESSION_VARIABLES {
             assert_eq!(command.get_env(name), None, "{name}");
         }
-        assert_eq!(command.get_env("CLAUDE_CODE_USE_BEDROCK"), Some(std::ffi::OsStr::new("1")));
+        assert_eq!(
+            command.get_env("CLAUDE_CODE_USE_BEDROCK"),
+            Some(std::ffi::OsStr::new("1"))
+        );
     }
 
     #[test]
