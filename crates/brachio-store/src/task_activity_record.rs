@@ -5,13 +5,13 @@ use rusqlite::{params, Connection};
 use crate::StoreError;
 
 /// Entries kept per task; recording one more drops the oldest.
-pub const MAX_TASK_ACTIVITY: usize = 200;
+pub const MAX_TASK_ACTIVITY: usize = 500;
 
 /// Longest detail kept, in characters. Details are titles and subjects, never prompts or output.
 pub const MAX_ACTIVITY_DETAIL_CHARS: usize = 200;
 
 /// What can be recorded. The interface chooses the wording for each.
-pub const ACTIVITY_KINDS: [&str; 17] = [
+pub const ACTIVITY_KINDS: [&str; 21] = [
     "permission_asked",
     "approval_answered",
     "approval_auto_allowed",
@@ -29,6 +29,10 @@ pub const ACTIVITY_KINDS: [&str; 17] = [
     "qa_run",
     "mail_received",
     "git_action",
+    "prompt_sent",
+    "agent_status",
+    "restore_point",
+    "pr_event",
 ];
 
 /// One recorded event.
@@ -185,13 +189,13 @@ mod tests {
         )
         .unwrap();
         record_activity(&db, "other", "agent_finished", None, 0).unwrap();
-        for n in 0..205 {
+        for n in 0..505 {
             record_activity(&db, "t", "status_changed", Some(&n.to_string()), n).unwrap();
         }
         let entries = task_activity(&db, "t").unwrap();
-        assert_eq!(entries.len(), 200);
-        assert_eq!(entries[0].detail.as_deref(), Some("204"));
-        assert_eq!(entries[199].detail.as_deref(), Some("5"));
+        assert_eq!(entries.len(), 500);
+        assert_eq!(entries[0].detail.as_deref(), Some("504"));
+        assert_eq!(entries[499].detail.as_deref(), Some("5"));
         assert_eq!(task_activity(&db, "other").unwrap().len(), 1);
     }
 
