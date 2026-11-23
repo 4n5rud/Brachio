@@ -503,7 +503,7 @@ fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
         return false;
     };
     terminal_authorization::resolve(&connection, key)
-        .is_ok_and(|owner| owner.agent == Some(brachio_agent::AgentKind::ClaudeCode))
+        .is_ok_and(|owner| owner.agent.is_some_and(|agent| agent.spec().approval_relay))
 }
 
 fn install_tray(app: &App) -> tauri::Result<()> {

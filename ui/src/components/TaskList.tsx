@@ -5,6 +5,7 @@ import type { AddProjectKind } from "../lib/project-choices";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { SETTINGS_KEYS } from "../lib/shortcut";
+import { AGENT_KINDS } from "../lib/agent-catalog";
 import { compareSiblings, orderWithChildren, orderWithCompare, pinnedFirst, taskGroup, type AgentKind, type TaskRow } from "../lib/tasks";
 import type { PrChip } from "../lib/pr-status";
 import { FolderRepos } from "./FolderRepos";
@@ -105,7 +106,7 @@ export function TaskList(props: {
       : orderWithCompare(orderWithChildren(pinnedFirst(tasksByGroup().get(id) ?? [], props.pinned ?? new Set()))).map((task) => task.id));
     props.onVisibleChange?.(ids);
   });
-  const otherAgents = (task: TaskRow): AgentKind[] => (["claude", "codex"] as const).filter((agent) => agent !== task.agent);
+  const otherAgents = (task: TaskRow): AgentKind[] => AGENT_KINDS.filter((agent) => agent !== task.agent);
   const countsTitle = (tasks: readonly TaskRow[]) => {
     const needs = tasks.filter((task) => taskGroup(task.status) === "needs").length;
     const parts = [t("sidebar.countTasks").replace("{count}", String(tasks.length))];

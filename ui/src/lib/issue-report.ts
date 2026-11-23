@@ -30,7 +30,7 @@ export interface IssueEnvironment {
   agents: readonly InstalledAgent[];
 }
 
-const AGENT_LABEL = { claude_code: "Claude Code", codex: "Codex" } as const;
+const AGENT_LABEL = { claude_code: "Claude Code", codex: "Codex", grok: "Grok" } as const;
 
 // The body is written in English because it is read by the project's maintainers.
 export function issueBody(error: string, environment: IssueEnvironment): string {

@@ -29,6 +29,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0022_usage_analytics.sql"),
     include_str!("../migrations/0023_prompt_history.sql"),
     include_str!("../migrations/0024_start_failures.sql"),
+    include_str!("../migrations/0025_task_agent_kind_explicit.sql"),
 ];
 
 /// Why a storage call failed.
@@ -250,5 +251,39 @@ mod tests {
             .map(|tab| tab.tab_id)
             .collect();
         assert_eq!(tabs, ["b", "a"]);
+    }
+
+    #[test]
+    fn tasks_without_a_recorded_agent_become_claude_code_and_other_ids_stay() {
+        let mut connection = Connection::open_in_memory().expect("open");
+        for sql in &MIGRATIONS[..23] {
+            connection.execute_batch(sql).expect("old migration");
+        }
+        connection
+            .pragma_update(None, "user_version", 23)
+            .expect("version");
+        connection
+            .execute_batch(
+                "INSERT INTO repos (id, name, path, default_branch, added_at_ms)
+                 VALUES ('r', 'one', '/1', 'main', 1);
+                 INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, agent_kind)
+                 VALUES ('none', 'r', 't', 'p', 'b1', '/w1', 'active', 1, NULL),
+                        ('codex', 'r', 't', 'p', 'b2', '/w2', 'active', 2, 'codex'),
+                        ('odd', 'r', 't', 'p', 'b3', '/w3', 'active', 3, 'future_agent');",
+            )
+            .expect("old rows");
+
+        migrate(&mut connection).expect("upgrade");
+
+        let kind = |id: &str| -> Option<String> {
+            connection
+                .query_row("SELECT agent_kind FROM tasks WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .expect("task")
+        };
+        assert_eq!(kind("none").as_deref(), Some("claude_code"));
+        assert_eq!(kind("codex").as_deref(), Some("codex"));
+        assert_eq!(kind("odd").as_deref(), Some("future_agent"));
     }
 }

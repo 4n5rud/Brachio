@@ -61,7 +61,8 @@ fn agent_kind(name: &str) -> Result<AgentKind, String> {
     match name {
         "claude" => Ok(AgentKind::ClaudeCode),
         "codex" => Ok(AgentKind::Codex),
-        _ => Err("The agent must be claude or codex.".to_owned()),
+        "grok" => Ok(AgentKind::Grok),
+        _ => Err("The agent must be claude, codex or grok.".to_owned()),
     }
 }
 

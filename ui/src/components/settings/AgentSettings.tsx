@@ -41,6 +41,7 @@ function usageRow(window: QuotaWindow): UsageRow {
 function AgentAccount(props: { agent: InstalledAgent }) {
   const kind = props.agent.kind;
   const [account, { refetch }] = createResource(async (): Promise<AccountState> => {
+    if (kind === "grok") return { state: "ownTerminal" };
     try {
       const status = await invoke<AuthStatus>("agent_auth_status", { kind });
       return status.signedIn ? { state: "signedIn", account: status.account } : { state: "signedOut" };
