@@ -37,6 +37,7 @@ export function HandoffSummaryDialog(props: {
   const size = () => utf8Length(text());
   const tooLong = () => size() > maxBytes();
   const canSend = () => !loading() && !busy() && text().trim() !== "" && !tooLong();
+  const requestId = crypto.randomUUID();
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(undefined);
@@ -57,7 +58,7 @@ export function HandoffSummaryDialog(props: {
           if (!(await props.onDraft(text()))) throw new Error(t("diff.notReady"));
         })}>{t("handoff.draft")}</Button>
         <Button variant="primary" disabled={!canSend() || sourceId() === ""} onClick={() => void run(() =>
-          sendHandoffSummary(sourceId(), props.targetKey, text()))}>{t("handoff.send")}</Button>
+          sendHandoffSummary(sourceId(), props.targetKey, text(), requestId))}>{t("handoff.send")}</Button>
       </>}>
       <p class="muted">{t("handoff.note")}</p>
       <Select label={t("handoff.source")} value={sourceId()} onChange={(event) => setSourceId(event.currentTarget.value)}>

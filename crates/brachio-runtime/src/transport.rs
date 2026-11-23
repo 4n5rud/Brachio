@@ -81,24 +81,52 @@ mod platform {
     /// Unix socket paths are short (104 bytes on macOS), so the directory stays flat.
     const LONGEST_PATH: usize = 100;
 
+    /// Where sockets go when the temporary folder is too deep for them. macOS gives each user a
+    /// temporary folder such as `/var/folders/xx/<28 characters>/T`, which leaves too little room
+    /// for most endpoint names.
+    const SHORT_ROOT: &str = "/tmp";
+
     pub(super) fn socket_path(endpoint: &str) -> io::Result<PathBuf> {
+        let uid = rustix::process::geteuid().as_raw();
+        socket_path_in(endpoint, &std::env::temp_dir(), Path::new(SHORT_ROOT), uid)
+    }
+
+    /// The socket of an endpoint, chosen only from the endpoint, the folders and the user, so the
+    /// app, the runtime and the command line all find the same file without sharing any state.
+    /// The `brachio-runtime` folder in the temporary folder is used whenever the path fits, which
+    /// keeps the place earlier versions used. Otherwise the socket goes in a private
+    /// `brachio-<uid>` folder under the short root.
+    fn socket_path_in(
+        endpoint: &str,
+        temp_dir: &Path,
+        short_root: &Path,
+        uid: u32,
+    ) -> io::Result<PathBuf> {
         if endpoint.is_empty() || endpoint.contains(['/', '\\']) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "endpoint must be a plain name",
             ));
         }
-        let uid = rustix::process::geteuid().as_raw();
-        let parent = trusted_temp_directory(&std::env::temp_dir(), uid)?;
+        let file = format!("{endpoint}.sock");
+        let parent = trusted_temp_directory(temp_dir, uid)?;
         let directory = parent.join("brachio-runtime");
-        ensure_private_directory(&directory, uid)?;
-        let path = directory.join(format!("{endpoint}.sock"));
+        let path = directory.join(&file);
+        if path.as_os_str().len() <= LONGEST_PATH {
+            ensure_private_directory(&directory, uid)?;
+            return Ok(path);
+        }
+        // The root is resolved and checked like the temporary folder; `/tmp` is a link on macOS.
+        let root = trusted_temp_directory(short_root, uid)?;
+        let directory = root.join(format!("brachio-{uid}"));
+        let path = directory.join(&file);
         if path.as_os_str().len() > LONGEST_PATH {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "endpoint path is too long for a Unix socket",
             ));
         }
+        ensure_private_directory(&directory, uid)?;
         Ok(path)
     }
 
@@ -173,11 +201,15 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::{ensure_private_directory, trusted_temp_directory};
+        use super::{
+            ensure_private_directory, socket_path_in, trusted_temp_directory, LONGEST_PATH,
+            SHORT_ROOT,
+        };
         use std::fs::{self, DirBuilder, Permissions};
         use std::io;
         use std::os::unix::fs::{symlink, DirBuilderExt, PermissionsExt};
-        use std::path::PathBuf;
+        use std::os::unix::net::UnixListener;
+        use std::path::{Path, PathBuf};
 
         struct Fixture(PathBuf);
 
@@ -197,6 +229,103 @@ mod platform {
             fn drop(&mut self) {
                 let _ = fs::remove_dir_all(&self.0);
             }
+        }
+
+        /// A temporary folder as deep as the one macOS gives each user, such as
+        /// `/private/var/folders/97/<28 characters>/T` (57 characters once resolved).
+        fn deep_temp_directory(fixture: &Fixture) -> PathBuf {
+            let mut path = fs::canonicalize(&fixture.0).expect("resolve fixture");
+            while path.as_os_str().len() < 57 {
+                path = path.join("deep-folder");
+                DirBuilder::new()
+                    .mode(0o700)
+                    .create(&path)
+                    .expect("create deep folder");
+            }
+            path
+        }
+
+        fn endpoints_for_a_long_user_name() -> [String; 2] {
+            // The longest user part the app keeps, and a unique hash so parallel runs do not
+            // share a socket under the short root.
+            let user = "abcdefghijklmnop";
+            assert_eq!(user.len(), 16);
+            let hash = &uuid::Uuid::new_v4().simple().to_string()[..8];
+            [
+                format!("brachio-{user}-{hash}-g5"),
+                format!("brachio-{user}-{hash}-hooks"),
+            ]
+        }
+
+        #[test]
+        fn moves_sockets_of_a_deep_temp_directory_under_the_short_root() {
+            let fixture = Fixture::new();
+            let temp = deep_temp_directory(&fixture);
+            let uid = rustix::process::geteuid().as_raw();
+            let root = fs::canonicalize(SHORT_ROOT).expect("resolve short root");
+            for endpoint in endpoints_for_a_long_user_name() {
+                let file = format!("{endpoint}.sock");
+                let original = temp.join("brachio-runtime").join(&file);
+                assert!(original.as_os_str().len() > LONGEST_PATH, "{original:?}");
+
+                let path = socket_path_in(&endpoint, &temp, Path::new(SHORT_ROOT), uid)
+                    .expect("resolve socket path");
+                assert_eq!(path, root.join(format!("brachio-{uid}")).join(&file));
+                assert!(path.as_os_str().len() <= LONGEST_PATH, "{path:?}");
+                let again = socket_path_in(&endpoint, &temp, Path::new(SHORT_ROOT), uid)
+                    .expect("resolve socket path again");
+                assert_eq!(path, again);
+
+                let directory = path.parent().expect("socket folder");
+                let metadata = fs::symlink_metadata(directory).expect("folder metadata");
+                assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+                let _ = fs::remove_file(&path);
+                let listener = UnixListener::bind(&path).expect("bind socket");
+                drop(listener);
+                fs::remove_file(&path).expect("remove socket");
+            }
+            assert!(!temp.join("brachio-runtime").exists());
+        }
+
+        #[test]
+        fn keeps_the_original_folder_when_the_path_fits() {
+            let uid = rustix::process::geteuid().as_raw();
+            let temp = Path::new(SHORT_ROOT);
+            let resolved = fs::canonicalize(temp).expect("resolve temp folder");
+            for endpoint in endpoints_for_a_long_user_name() {
+                let path = socket_path_in(&endpoint, temp, Path::new(SHORT_ROOT), uid)
+                    .expect("resolve socket path");
+                let file = format!("{endpoint}.sock");
+                assert_eq!(path, resolved.join("brachio-runtime").join(&file));
+            }
+        }
+
+        #[test]
+        fn rejects_an_endpoint_too_long_for_both_folders() {
+            let fixture = Fixture::new();
+            let temp = deep_temp_directory(&fixture);
+            let uid = rustix::process::geteuid().as_raw();
+            let endpoint = "e".repeat(LONGEST_PATH);
+            let error = socket_path_in(&endpoint, &temp, Path::new(SHORT_ROOT), uid)
+                .expect_err("reject long endpoint");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        }
+
+        #[test]
+        fn rejects_a_short_root_that_others_can_replace() {
+            let fixture = Fixture::new();
+            let temp = deep_temp_directory(&fixture);
+            let root = fixture.0.join("open");
+            DirBuilder::new()
+                .mode(0o700)
+                .create(&root)
+                .expect("create root");
+            fs::set_permissions(&root, Permissions::from_mode(0o777)).expect("set writable mode");
+            let uid = rustix::process::geteuid().as_raw();
+            let [_, endpoint] = endpoints_for_a_long_user_name();
+            let error =
+                socket_path_in(&endpoint, &temp, &root, uid).expect_err("reject replaceable root");
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         }
 
         #[test]

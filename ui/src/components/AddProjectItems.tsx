@@ -3,7 +3,7 @@ import type { AddProjectKind } from "../lib/project-choices";
 import { Icon } from "./Icon";
 import { MenuItem } from "./ui/Menu";
 
-/** The three ways to add a project, as menu rows. The combobox footer and the sidebar "+" share them. */
+/** The ways to add a project, and the scratch task, as menu rows. The combobox footer and the sidebar "+" share them. */
 export function AddProjectItems(props: { onPick: (kind: AddProjectKind) => void }) {
   return (
     <>
@@ -15,6 +15,9 @@ export function AddProjectItems(props: { onPick: (kind: AddProjectKind) => void 
       </MenuItem>
       <MenuItem icon={<Icon name="plus" class="icon-sm" />} onSelect={() => props.onPick("create")}>
         {t("project.addCreate")}
+      </MenuItem>
+      <MenuItem icon={<Icon name="file" class="icon-sm" />} onSelect={() => props.onPick("scratch")}>
+        {t("project.addScratch")}
       </MenuItem>
     </>
   );

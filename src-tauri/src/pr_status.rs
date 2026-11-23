@@ -10,12 +10,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use brachio_git::{
     backoff_seconds, fetch_pull_request, fetch_pull_request_by_number, local_head,
-    parse_pull_request_reference, repository_of, PullRequestSnapshot, PullRequestState,
-    StatusError,
+    parse_pull_request_reference, repository_of, ChecksOverall, PullRequestSnapshot,
+    PullRequestState, StatusError,
 };
 use brachio_store::{
-    add_linked_pr, forget_pr_status, linked_prs, load_pr_status, remove_linked_pr, save_pr_status,
-    LinkedPr, RepoRecord, TaskRecord,
+    add_linked_pr, forget_pr_status, linked_prs, load_pr_status, record_activity, remove_linked_pr,
+    save_pr_status, LinkedPr, RepoRecord, TaskRecord,
 };
 use serde::Serialize;
 use tauri::State;
@@ -355,6 +355,51 @@ fn save_snapshot(database: &Database, id: &str, snapshot: &PullRequestSnapshot, 
     }
 }
 
+/// What changed between two answers, as `<event> #<number>` lines for the task's timeline.
+fn pull_request_events(
+    prior: Option<&PullRequestSnapshot>,
+    current: &PullRequestSnapshot,
+) -> Vec<String> {
+    let number = current.number;
+    let Some(prior) = prior.filter(|prior| prior.number == number) else {
+        return vec![format!("found #{number}")];
+    };
+    let mut events = Vec::new();
+    if prior.state != current.state {
+        let event = match current.state {
+            PullRequestState::Open => "reopened",
+            PullRequestState::Merged => "merged",
+            PullRequestState::Closed => "closed",
+        };
+        events.push(format!("{event} #{number}"));
+    }
+    if prior.checks.overall != current.checks.overall {
+        match current.checks.overall {
+            ChecksOverall::Success => events.push(format!("checks_passed #{number}")),
+            ChecksOverall::Failure => events.push(format!("checks_failed #{number}")),
+            ChecksOverall::Pending | ChecksOverall::None => {}
+        }
+    }
+    events
+}
+
+fn record_pull_request_events(
+    database: &Database,
+    id: &str,
+    prior: Option<&PullRequestSnapshot>,
+    current: &PullRequestSnapshot,
+    at: i64,
+) {
+    let Ok(connection) = database.lock() else {
+        return;
+    };
+    for event in pull_request_events(prior, current) {
+        if let Err(error) = record_activity(&connection, id, "pr_event", Some(&event), at) {
+            tracing::warn!(%error, "could not record a pull request event");
+        }
+    }
+}
+
 /// Reads where the task's pull request stands. `force` is the user pressing Refresh.
 #[tauri::command]
 pub async fn task_pr_status(
@@ -375,6 +420,7 @@ pub async fn task_pr_status(
         });
     }
     restore_saved(&database, &statuses, &id)?;
+    let prior = statuses.tracker()?.report(&id, now_ms()).snapshot;
     let links = linked_prs(&*database.lock()?, &id).map_err(|error| error.to_string())?;
     let decision = statuses.tracker()?.begin(&id, now_ms(), force);
     if decision == Decision::Fetch {
@@ -394,7 +440,10 @@ pub async fn task_pr_status(
         });
         let at = now_ms();
         match &outcome {
-            Ok(Some(snapshot)) => save_snapshot(&database, &id, snapshot, at),
+            Ok(Some(snapshot)) => {
+                save_snapshot(&database, &id, snapshot, at);
+                record_pull_request_events(&database, &id, prior.as_ref(), snapshot, at);
+            }
             // The pull request is gone, so the saved one must not come back after a restart.
             Ok(None) => forget_snapshot(&database, &id),
             Err(_) => {}
@@ -489,7 +538,7 @@ mod tests {
         StatusError,
     };
 
-    use super::{Decision, Tracker};
+    use super::{pull_request_events, Decision, Tracker};
 
     fn snapshot(state: PullRequestState, head: &str) -> PullRequestSnapshot {
         PullRequestSnapshot {
@@ -630,6 +679,28 @@ mod tests {
         tracker.finish("t", 0, Ok(Some(snapshot(PullRequestState::Open, "a"))));
         let listed = tracker.linked_report("t", &[link(7), link(8)]);
         assert_eq!(listed.iter().map(|l| l.number).collect::<Vec<_>>(), [8]);
+    }
+
+    #[test]
+    fn timeline_events_name_what_changed_in_the_pull_request() {
+        let open = snapshot(PullRequestState::Open, "a");
+        assert_eq!(pull_request_events(None, &open), ["found #7"]);
+
+        let mut failing = open.clone();
+        failing.checks.overall = ChecksOverall::Failure;
+        assert_eq!(
+            pull_request_events(Some(&open), &failing),
+            ["checks_failed #7"]
+        );
+        assert_eq!(
+            pull_request_events(Some(&failing), &open),
+            ["checks_passed #7"]
+        );
+
+        let merged = snapshot(PullRequestState::Merged, "a");
+        assert_eq!(pull_request_events(Some(&open), &merged), ["merged #7"]);
+        assert_eq!(pull_request_events(Some(&merged), &open), ["reopened #7"]);
+        assert!(pull_request_events(Some(&open), &open).is_empty());
     }
 
     #[test]

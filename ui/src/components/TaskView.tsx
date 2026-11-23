@@ -44,6 +44,7 @@ import { SEND_SETTLE_MS, autoSendOn, queueAction, queuedPrompts, removeQueuedPro
 import { isMac } from "../lib/shortcut";
 import { clearSelectionRequest, fencedSelection, selectionRequest } from "../lib/selection-send";
 import { pushToast } from "../lib/toasts";
+import { recordTaskActivity } from "../lib/task-activity";
 import type { AgentKind } from "../lib/agent-catalog";
 import { tokenUsage } from "../lib/token-usage";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
@@ -310,6 +311,9 @@ export function TaskView(props: {
   };
   // Queued prompts go to a tab when its agent is idle. A tab is held after a send (or a draft) until
   // the agent has left idle, so one prompt is never followed at once by the next.
+  const noteSentPrompt = (how: "queue" | "steer") => {
+    if ("__TAURI_INTERNALS__" in window) void recordTaskActivity(props.task.id, "prompt_sent", how, Date.now()).catch(() => {});
+  };
   const queueHolds = new Map<string, number>();
   const [queueTick, setQueueTick] = createSignal(0);
   const drainQueue = (key: string) => {
@@ -326,6 +330,7 @@ export function TaskView(props: {
     if (!prepared || !action) return;
     queueHolds.set(key, action === "draft" ? Number.POSITIVE_INFINITY : Date.now());
     void prepared.insert(action === "send").then((ok) => {
+      if (ok && action === "send") noteSentPrompt("queue");
       if (ok) removeQueuedPrompt(key, item.id);
       else queueHolds.delete(key);
     }).catch(() => queueHolds.delete(key));

@@ -41,7 +41,7 @@ pub(crate) struct Loaded {
 
 impl Journal {
     pub(crate) fn open(directory: &Path) -> io::Result<Self> {
-        fs::create_dir_all(directory)?;
+        brachio_runtime::paths::ensure_private_directory(directory)?;
         Ok(Self {
             directory: directory.to_owned(),
             #[cfg(test)]

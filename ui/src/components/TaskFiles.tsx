@@ -13,13 +13,14 @@ import { InspectorSection } from "./InspectorSection";
 import { Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { confirmDialog } from "./ui/ConfirmDialog";
 import { pushToast } from "../lib/toasts";
+import { pushUndoToast } from "../lib/undo";
 import { registerTreeDrop } from "../lib/tree-drop";
 import type { TerminalDrop } from "../lib/terminal-drop";
 import { quoteShellPaths } from "../lib/shell-quote";
 import { shellKind } from "../lib/terminal";
 import { t } from "../i18n";
 import { useAsyncAction } from "../lib/async-action";
-import { copyIntoTask, createTaskEntry, listTaskFiles, moveTaskPath, previewTaskFile, previewTaskMedia, renameTaskPath, taskCopyConflicts, trashTaskPath } from "../lib/workspace";
+import { copyIntoTask, createTaskEntry, listTaskFiles, moveTaskPath, previewTaskFile, previewTaskMedia, renameTaskPath, restoreTaskPath, taskCopyConflicts, trashTaskPath } from "../lib/workspace";
 
 const RESULT_LIMIT = 100;
 const mediaTypes = new Map([
@@ -156,7 +157,10 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
       const next = await moveTaskPath(props.taskId, from, toDir);
       if (path() === from || path().startsWith(`${from}/`)) setPath(next + path().slice(from.length));
       await refetch();
-      pushToast({ tone: "success", message: t("files.moved").replace("{path}", () => next) });
+      pushUndoToast(t("files.moved").replace("{path}", () => next), async () => {
+        await moveTaskPath(props.taskId, next, from.slice(0, Math.max(0, from.lastIndexOf("/"))));
+        await refetch();
+      });
     } catch (failure) {
       failed(t("files.moveFailed"), failure);
     }
@@ -237,10 +241,17 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
       });
       if (!ok) return;
       try {
-        await trashTaskPath(props.taskId, target);
+        const restorable = await trashTaskPath(props.taskId, target);
         if (path() === target || path().startsWith(`${target}/`)) setPath("");
         await refetch();
-        pushToast({ tone: "success", message: t("files.trashed") });
+        if (restorable) {
+          pushUndoToast(t("files.trashed"), async () => {
+            await restoreTaskPath(props.taskId, target);
+            await refetch();
+          });
+        } else {
+          pushToast({ tone: "success", message: t("files.trashed") });
+        }
       } catch (failure) {
         failed(t("files.trashFailed"), failure);
       }

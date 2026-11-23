@@ -91,7 +91,9 @@ export const importWorktrees = (repoId: string, paths: string[]) =>
 export const listTasks = () => invoke<TaskRecord[]>("task_list");
 /** A task that was just created, with the setup commands its repository asks to run. */
 export type CreatedTask = TaskRecord & { setupCommands: string[]; setupCopyError?: string | null };
-export const createTask = (request: CreateTaskRequest) => invoke<CreatedTask>("task_create", { request });
+/** A repeated `requestId` returns the task the first call created instead of making another. */
+export const createTask = (request: CreateTaskRequest, requestId?: string) =>
+  invoke<CreatedTask>("task_create", { request, requestId });
 export const repoCodexConversations = (id: string) =>
   invoke<CodexConversation[]>("repo_codex_conversations", { id });
 export const retrySetupCopy = (id: string) => invoke<void>("task_retry_setup_copy", { id });
@@ -200,7 +202,8 @@ export const renameTaskPath = (id: string, from: string, newName: string) =>
   invoke<string>("task_file_rename", { id, from, newName });
 export const createTaskEntry = (id: string, dir: string, name: string, folder: boolean) =>
   invoke<string>("task_file_create", { id, dir, name, folder });
-/** Moves to the system trash; nothing is deleted for good. */
-export const trashTaskPath = (id: string, path: string) => invoke<void>("task_file_trash", { id, path });
+/** Moves to the system trash; nothing is deleted for good. Resolves to whether `restoreTaskPath` can bring it back. */
+export const trashTaskPath = (id: string, path: string) => invoke<boolean>("task_file_trash", { id, path });
+export const restoreTaskPath = (id: string, path: string) => invoke<void>("task_file_restore", { id, path });
 export const discardTaskFile = (id: string, path: string) => invoke<void>("task_discard_file", { id, path });
 export const discardTaskHunk = (id: string, patch: string) => invoke<void>("task_discard_hunk", { id, patch });

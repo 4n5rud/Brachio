@@ -354,6 +354,15 @@ pub fn review_decision(
 ) -> Result<(), String> {
     let handoff = Handoff::get(connection, handoff_id).map_err(|e| e.to_string())?;
     let task = TaskRecord::get(connection, &handoff.task_id).map_err(|e| e.to_string())?;
+    // A second click on the same decision has nothing left to do; the opposite one is refused.
+    let wanted = if approved {
+        HandoffReview::Approved
+    } else {
+        HandoffReview::Rejected
+    };
+    if handoff.review == Some(wanted) {
+        return Ok(());
+    }
     if approved {
         if !pending_gates(connection, &task.id)
             .map_err(|e| e.to_string())?
@@ -775,6 +784,22 @@ mod tests {
             build_view(&db, "lead").unwrap().children[0].state,
             "completed"
         );
+    }
+
+    #[test]
+    fn approving_twice_completes_once_and_the_opposite_decision_is_still_refused() {
+        let (dir, mut db) = setup();
+        let head = worktree_head(dir.path()).unwrap();
+        let worktree_head_of = |_: &Path| Ok(head.clone());
+        handoff_request(&mut db, "child:agent", "done", &[], 5, "h1").unwrap();
+        review_decision(&mut db, "h1", true, None, worktree_head_of, 6, "m1").unwrap();
+        review_decision(&mut db, "h1", true, None, worktree_head_of, 7, "m2").unwrap();
+        assert_eq!(
+            build_view(&db, "lead").unwrap().children[0].state,
+            "completed"
+        );
+        let reversed = review_decision(&mut db, "h1", false, Some("no"), worktree_head_of, 8, "m3");
+        assert!(reversed.is_err());
     }
 
     #[test]

@@ -42,6 +42,8 @@ export interface NewTaskInput {
   profile?: string;
   /** Create the task and start its agent without switching to it. */
   background?: boolean;
+  /** One per dialog, so a repeated submit returns the task the first one created. */
+  requestId: string;
 }
 
 const conversationLabel = (item: { id: string; timestamp: string | null }) => {
@@ -85,6 +87,7 @@ export function NewTaskDialog(props: {
   const [compare, setCompare] = createSignal(false);
   const [profile, setProfile] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const requestId = crypto.randomUUID();
   const [history, setHistory] = createSignal<readonly PromptHistoryEntry[]>([]);
   let recallPosition = -1;
   let ownText = "";
@@ -201,7 +204,7 @@ export function NewTaskDialog(props: {
       await props.onCreate({ prompt: prompt().trim(), title: finalTitle(), agent: agent(),
         base: base().trim(), parentTaskId: parentTaskId() || undefined,
         codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
-        compare: comparing() || undefined,
+        compare: comparing() || undefined, requestId,
         background: background || undefined,
         profile: profileChoices().some((item) => item.name === profile()) ? profile() : undefined });
     } catch (failure) {

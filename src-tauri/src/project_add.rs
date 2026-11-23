@@ -148,7 +148,7 @@ pub(crate) fn check_folder_name(name: &str) -> Result<(), String> {
 
 /// Where the new project goes: `name` inside the existing folder `parent`. The target must not
 /// exist yet, or be an empty folder. Returns it and whether it already existed.
-fn checked_target(parent: &Path, name: &str) -> Result<(PathBuf, bool), String> {
+pub(crate) fn checked_target(parent: &Path, name: &str) -> Result<(PathBuf, bool), String> {
     check_folder_name(name)?;
     if !parent.is_dir() {
         return Err(format!("{} is not a folder.", parent.display()));
@@ -361,7 +361,7 @@ pub async fn project_init(
     add_project(&database, &target, true)
 }
 
-fn init_repository(target: &Path, existed: bool) -> Result<(), String> {
+pub(crate) fn init_repository(target: &Path, existed: bool) -> Result<(), String> {
     if !existed {
         std::fs::create_dir(target)
             .map_err(|error| format!("could not create {}: {error}", target.display()))?;

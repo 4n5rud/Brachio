@@ -252,20 +252,68 @@ pub async fn task_file_create(
     .map_err(to_text)?
 }
 
-/// Moves a file or folder to the system trash, so it can be restored. Nothing is deleted for good.
+/// Moves a file or folder to the system trash. Nothing is deleted for good. Returns whether
+/// `task_file_restore` can bring it back, which the macOS trash does not allow.
 #[tauri::command]
 pub async fn task_file_trash(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+) -> Result<bool, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_, parent, name) = parent_and_name(&task.worktree_path, &path)?;
+        trash::delete(parent.join(name)).map_err(to_text)?;
+        Ok(cfg!(not(target_os = "macos")))
+    })
+    .await
+    .map_err(to_text)?
+}
+
+/// Puts a file or folder that `task_file_trash` removed back where it was.
+#[tauri::command]
+pub async fn task_file_restore(
     database: State<'_, Database>,
     id: String,
     path: String,
 ) -> Result<(), String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let (_, parent, name) = parent_and_name(&task.worktree_path, &path)?;
-        trash::delete(parent.join(name)).map_err(to_text)
+        let original = canonical_root(&task.worktree_path)?.join(clean_relative(&path)?);
+        restore_from_trash(&original)
     })
     .await
     .map_err(to_text)?
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_from_trash(original: &Path) -> Result<(), String> {
+    let same = |item: &trash::TrashItem| {
+        let found = item.original_path();
+        if cfg!(windows) {
+            // The trash lists plain drive paths; a canonical path carries the `\\?\` prefix.
+            let plain = |path: &Path| {
+                path.to_string_lossy()
+                    .trim_start_matches(r"\\?\")
+                    .to_owned()
+            };
+            plain(&found).eq_ignore_ascii_case(&plain(original))
+        } else {
+            found == original
+        }
+    };
+    let newest = trash::os_limited::list()
+        .map_err(to_text)?
+        .into_iter()
+        .filter(same)
+        .max_by_key(|item| item.time_deleted)
+        .ok_or_else(|| "It is no longer in the trash.".to_owned())?;
+    trash::os_limited::restore_all([newest]).map_err(to_text)
+}
+
+#[cfg(target_os = "macos")]
+fn restore_from_trash(_original: &Path) -> Result<(), String> {
+    Err("Restore it from the Trash in Finder.".to_owned())
 }
 
 /// Throws away a file's changes: a tracked file goes back to `HEAD`; a new file goes to the trash.

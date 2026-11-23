@@ -25,9 +25,11 @@ mod project_cues;
 mod prompt_history;
 mod qa_run;
 mod quit;
+mod request_receipts;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
+mod scratch_workspace;
 mod session_tokens;
 mod system_check;
 mod task_activity;
@@ -404,6 +406,7 @@ pub fn run() {
             task_file_actions::task_file_rename,
             task_file_actions::task_file_create,
             task_file_actions::task_file_trash,
+            task_file_actions::task_file_restore,
             task_file_actions::task_discard_file,
             task_file_actions::task_discard_hunk,
             workspace::task_changes,
@@ -428,6 +431,10 @@ pub fn run() {
             task_commits::task_commit_diff,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
+            scratch_workspace::scratch_create,
+            scratch_workspace::scratch_list,
+            scratch_workspace::scratch_convert,
+            scratch_workspace::scratch_discard,
             workspace::task_git_action,
             open_local_port,
             task_folder::task_reveal,
@@ -460,6 +467,10 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
     );
+    match brachio_runtime::hook_token::issue(&endpoint) {
+        Ok(token) => approvals.require_token(token),
+        Err(error) => tracing::warn!(%error, "the hook socket does not ask for a token"),
+    }
     app.manage(Arc::clone(&approvals));
     tauri::async_runtime::spawn(async move {
         match brachio_runtime::transport::listen(&endpoint) {
@@ -612,5 +623,6 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(workspace::Database(Mutex::new(connection)));
     app.manage(workspace::TaskWorktreeLocks::default());
+    app.manage(workspace::TaskCreateReceipts::default());
     Ok(())
 }

@@ -33,6 +33,8 @@ import { LocalPreview } from "./components/LocalPreview";
 import { NewTaskDialog, type NewTaskInput } from "./components/NewTaskDialog";
 import { ImportWorktreesDialog } from "./components/ImportWorktreesDialog";
 import { AddProjectDialog } from "./components/AddProjectDialog";
+import { ScratchDialog } from "./components/ScratchDialog";
+import { PROJECTS_CHANGED } from "./lib/scratch";
 import type { AddProjectKind, ProjectChoice } from "./lib/project-choices";
 import { DropVeil } from "./components/DropVeil";
 import { StatusBar } from "./components/StatusBar";
@@ -61,6 +63,7 @@ import { registerActions, registerGoToSource } from "./lib/actions";
 import { CuesDialog } from "./components/CuesDialog";
 import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
 import { pushUndoToast } from "./lib/undo";
+import { agentLimit, exceedsAgentLimit, runningInProject } from "./lib/agent-limit";
 import { tokenLabel, tokenUsage, tokenTotal, watchTokenUsage } from "./lib/token-usage";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { typingTarget } from "./lib/typing-target";
@@ -111,6 +114,7 @@ interface LiveStatus {
   at: number;
 }
 
+const TIMELINE_STATES: ReadonlySet<string> = new Set(["working", "idle", "blocked"]);
 const ACTIVITY_LIMIT = 100;
 
 export function App() {
@@ -256,6 +260,7 @@ export function App() {
   const [switcher, setSwitcher] = createSignal<{ tasks: TaskRow[]; index: number; hold: "Control" | "Meta"; terminal: boolean }>();
   const [dialogRepoId, setDialogRepoId] = createSignal<string>();
   const [addProjectMode, setAddProjectMode] = createSignal<"clone" | "create">();
+  const [scratchOpen, setScratchOpen] = createSignal(false);
   // Remotes are read when the new task dialog opens, to label each project with its owner/repo.
   const [remoteUrls] = createResource(
     () => (inTauri && dialogOpen() ? true : undefined),
@@ -541,6 +546,7 @@ export function App() {
   const takePrompt = (taskId: string) => {
     const prompt = firstPrompts.get(taskId);
     firstPrompts.delete(taskId);
+    if (inTauri && prompt) recordTaskActivity(taskId, "prompt_sent", "first", Date.now()).catch(report);
     return prompt;
   };
   const draftComment = async (id: string, text: string, reminderFor?: string) => {
@@ -645,6 +651,9 @@ export function App() {
     const wasActive = taskActive();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
     if (inTauri && wasActive !== taskActive()) void recordTurnBoundary(taskId, taskActive());
+    if (inTauri && previous.state !== status.state && TIMELINE_STATES.has(status.state)) {
+      recordTaskActivity(taskId, "agent_status", status.state, at).catch(report);
+    }
     const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
     if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     if (task.parentTaskId && sessionKey === `${taskId}:agent` && inTauri && previous.state !== status.state
@@ -763,6 +772,7 @@ export function App() {
 
   const startAddProject = (kind: AddProjectKind) => {
     if (kind === "folder") void chooseRepo("folder").catch(report);
+    else if (kind === "scratch") setScratchOpen(true);
     else setAddProjectMode(kind);
   };
 
@@ -833,7 +843,12 @@ export function App() {
     setSetupRevision((revision) => revision + 1);
   };
 
-  const createOne = async (repoId: string, input: NewTaskInput, agent: AgentKind, compareGroup?: string) => {
+  const createOne = async (
+    repoId: string,
+    input: Omit<NewTaskInput, "requestId"> & { requestId?: string },
+    agent: AgentKind,
+    compareGroup?: string,
+  ) => {
     const record = await createTask({
       repoId,
       parentTaskId: input.parentTaskId ?? null,
@@ -844,7 +859,7 @@ export function App() {
       codexConversationId: input.codexConversationId ?? null,
       compareGroup: compareGroup ?? null,
       profile: input.profile ?? null,
-    });
+    }, input.requestId && `${input.requestId}:${agent}`);
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;
     if (setupCopyError) {
@@ -858,6 +873,15 @@ export function App() {
   const create = async (input: NewTaskInput) => {
     const current = dialogRepo();
     if (!current) return;
+    const running = runningInProject(live(), tasks(), current.id);
+    if (exceedsAgentLimit(agentLimit(), running, input.compare ? 2 : 1)) {
+      pushToast({
+        tone: "error",
+        message: t("newTask.agentLimit").replace("{project}", () => current.name)
+          .replace("{running}", String(running)).replace("{limit}", String(agentLimit())),
+      });
+      return;
+    }
     // A background task starts its terminal and gets the "new" mark, but selection and focus stay put.
     const settle = (record: CreatedTask) => {
       if (!input.background) return open(record.id);
@@ -1278,6 +1302,9 @@ export function App() {
       dropListener.catch(report);
       onCleanup(() => { void dropListener.then((unlisten) => unlisten(), () => {}); });
       load().catch(report);
+      const reloadProjects = () => { load().catch(report); };
+      window.addEventListener(PROJECTS_CHANGED, reloadProjects);
+      onCleanup(() => window.removeEventListener(PROJECTS_CHANGED, reloadProjects));
       const stopApprovals = watchApprovals(
         (question) => {
           const id = taskIdOf(question.key);
@@ -1632,6 +1659,19 @@ export function App() {
             onClose={() => setDialogOpen(false)}
           />
         )}
+      </Show>
+      <Show when={scratchOpen()}>
+        <ScratchDialog
+          onStarted={async (record) => {
+            createdThisRun.add(record.id);
+            if (record.prompt) firstPrompts.set(record.id, record.prompt);
+            setRepos(await listRepos());
+            setTasks((list) => [toTaskRow(record), ...list]);
+            switchRepo(record.repoId);
+            open(record.id);
+            setScratchOpen(false);
+          }}
+          onClose={() => setScratchOpen(false)} />
       </Show>
       <Show when={addProjectMode()}>
         {(mode) => (

@@ -21,13 +21,14 @@ import { ThemePicker } from "../ui/ThemePicker";
 import { Toggle } from "../ui/Toggle";
 import { resumeLastTaskEnabled, updateResumeLastTask } from "../../lib/lazy-resume";
 import { AgentSettings } from "./AgentSettings";
+import { ScratchFolders } from "./ScratchFolders";
 import { UsageAnalytics } from "./UsageAnalytics";
 import { SettingRow } from "./SettingRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { TerminalSettings } from "./TerminalSettings";
 import "./SettingsPanel.css";
 
-export type SettingsPage = "general" | "appearance" | "terminal" | "agents" | "notifications" | "shortcuts" | "updates" | "archived";
+export type SettingsPage = "general" | "appearance" | "terminal" | "agents" | "notifications" | "shortcuts" | "updates" | "archived" | "scratch";
 
 export interface UpdateSettingsProps {
   enabled: boolean;
@@ -50,6 +51,7 @@ const PAGES: { page: SettingsPage; icon: IconName; label: () => string; desktopO
   { page: "shortcuts", icon: "keyboard", label: () => t("settings.navShortcuts") },
   { page: "updates", icon: "download", label: () => t("updates.title"), desktopOnly: true },
   { page: "archived", icon: "list", label: () => t("task.archived"), desktopOnly: true },
+  { page: "scratch", icon: "folderOpen", label: () => t("settings.navScratch"), desktopOnly: true },
 ];
 
 function LanguageRow() {
@@ -234,6 +236,9 @@ export function SettingsPanel(props: {
             <ShortcutList editable />
           </Match>
           <Match when={page() === "updates" && props.updates}>{(updates) => <UpdatesPage updates={updates()} />}</Match>
+          <Match when={page() === "scratch"}>
+            <ScratchFolders />
+          </Match>
           <Match when={page() === "archived"}>
             <ArchivedPage archived={props.archived} repos={props.repos} now={props.now} onRestore={props.onRestore} onDelete={props.onDelete} />
           </Match>
