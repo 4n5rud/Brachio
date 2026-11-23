@@ -1,0 +1,34 @@
+name: Memory bound
+
+# Opt-in smoke check of memory against the bounds in docs/windows-memory-benchmark.md.
+# It does not block other jobs: it is a separate workflow, and the job continues on error.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+  pull_request:
+    paths:
+      - "crates/brachio-runtime/**"
+      - "crates/brachio-pty/**"
+      - ".github/workflows/memory-bound.yml"
+
+concurrency:
+  group: memory-bound-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  memory-bound:
+    name: Memory bound (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain pinned in rust-toolchain.toml
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Measure the runtime with 1, 5 and 10 sessions
+        run: cargo test -p brachio-runtime --test memory_bound --locked -- --ignored --nocapture
