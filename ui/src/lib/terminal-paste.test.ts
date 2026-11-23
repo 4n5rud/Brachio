@@ -1,5 +1,21 @@
 import { expect, test } from "vitest";
-import { bracketedPaste, terminalClipboardText, terminalInputFrames, terminalInputWriter } from "./terminal-paste";
+import { bracketedPaste, isNativePasteKey, terminalClipboardText, terminalInputFrames, terminalInputWriter } from "./terminal-paste";
+
+const press = (key: string, mods: { ctrlKey?: boolean; metaKey?: boolean }) =>
+  ({ key, ctrlKey: false, metaKey: false, ...mods });
+
+test("leaves Ctrl+V to the terminal on macOS so agents can read a clipboard image", () => {
+  expect(isNativePasteKey(press("v", { ctrlKey: true }), true)).toBe(false);
+  expect(isNativePasteKey(press("v", { metaKey: true }), true)).toBe(true);
+  expect(isNativePasteKey(press("V", { metaKey: true }), true)).toBe(true);
+  expect(isNativePasteKey(press("c", { metaKey: true }), true)).toBe(false);
+});
+
+test("keeps Ctrl+V and Ctrl+Shift+V as paste outside macOS", () => {
+  expect(isNativePasteKey(press("v", { ctrlKey: true }), false)).toBe(true);
+  expect(isNativePasteKey(press("V", { ctrlKey: true }), false)).toBe(true);
+  expect(isNativePasteKey(press("c", { ctrlKey: true }), false)).toBe(false);
+});
 
 test("keeps multiline prompts in a single paste and strips terminal control sequences", () => {
   expect(bracketedPaste("first\r\n\t코드\x1b[201~\x07", true))

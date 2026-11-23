@@ -21,7 +21,7 @@ import { openExternalLink } from "../lib/pr-status";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
-import { bracketedPaste, pasteText, terminalClipboardText } from "../lib/terminal-paste";
+import { bracketedPaste, isNativePasteKey, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
 import { MAX_TERMINAL_LINES } from "../lib/attachments";
 import { registerTerminalTail } from "../lib/terminal-tail";
@@ -659,8 +659,8 @@ export function TerminalPane(props: {
         if (name === "k" && (isMac ? !event.shiftKey : event.shiftKey)) return handled(clearScreen);
         if (name === "e" && event.shiftKey && term.hasSelection()) return handled(sendSelectionFromKeys);
       }
+      if (isNativePasteKey(event, isMac)) return false; // Let the WebView dispatch the native paste event.
       const key = event.key.toLowerCase();
-      if (key === "v") return false; // Let the WebView dispatch the native paste event.
       if (key !== "c" || (!event.shiftKey && !term.hasSelection())) return true;
       if (event.shiftKey && event.type === "keydown") {
         event.preventDefault();

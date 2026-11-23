@@ -19,6 +19,16 @@ export function terminalClipboardText(text: string): string {
   return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/gu, "");
 }
 
+/**
+ * Whether a key press is left to the WebView's native paste event.
+ * On macOS only ⌘V pastes. Ctrl+V reaches the program as ^V, which agents
+ * such as Claude Code use to read an image from the clipboard.
+ */
+export function isNativePasteKey(event: { key: string; ctrlKey: boolean; metaKey: boolean }, mac: boolean): boolean {
+  if (event.key.toLowerCase() !== "v") return false;
+  return mac ? event.metaKey : event.ctrlKey || event.metaKey;
+}
+
 // An escaped UTF-16 unit can use six JSON bytes. This leaves room for the
 // protocol envelope inside the runtime's 64 KiB message limit.
 const MAX_INPUT_UNITS = 8 * 1024;
