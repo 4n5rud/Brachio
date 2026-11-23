@@ -2,8 +2,6 @@ import { IconTabs, type IconTab } from "./ui/IconTabs";
 import { For, Match, Show, Switch, createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { useAsyncAction } from "../lib/async-action";
-import { TaskPorts } from "./TaskPorts";
-import { TaskProcesses } from "./TaskProcesses";
 import type { TaskRow } from "../lib/tasks";
 import { readTaskChanges } from "../lib/workspace";
 import { diffFiles, diffTotals, type DiffTotals } from "../lib/diff";
@@ -108,11 +106,7 @@ export function Inspector(props: {
           <Show when={props.task.worktreePath && props.task.id} keyed
             fallback={<InspectorSection title={t("files.title")}><InspectorNote>{t("files.empty")}</InspectorNote></InspectorSection>}>
             {(id) => (
-              <>
-                <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
-                <TaskPorts taskId={id} />
-                <TaskProcesses taskId={id} />
-              </>
+              <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
             )}
           </Show>
         </Match>
