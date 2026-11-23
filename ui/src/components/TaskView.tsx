@@ -1,5 +1,6 @@
 import { IconButton } from "./ui/IconButton";
 import { AttachButton } from "./AttachButton";
+import { TabClose } from "./TabClose";
 import { terminalExcerpt } from "../lib/attachments";
 import { takeDraftProblem } from "../lib/draft-problem";
 import { readTerminalTail, terminalTailKeys } from "../lib/terminal-tail";
@@ -867,19 +868,6 @@ const AGENT_SPECS: readonly TabSpec[] = [{ kind: "claude_code", shell: null }, {
 // TODO: replace with the shared Menu shortcut chip once the primitive lands.
 function RecentChip(props: { show: boolean }) {
   return <Show when={props.show}><kbd class="menu-chip">{NEW_TAB_KEYS()}</kbd></Show>;
-}
-
-/** Sits beside its tab, not inside it, so a button never nests in a button. */
-function TabClose(props: { onClose: () => void; disabled?: boolean; label?: string }) {
-  const close = (event: Event) => {
-    event.stopPropagation();
-    if (!props.disabled) props.onClose();
-  };
-  return (
-    <button class="tab-close" type="button" aria-label={props.label ?? t("task.closeTab")} title={props.label} aria-disabled={props.disabled} onClick={close}>
-      <Icon name="x" class="icon-xs" />
-    </button>
-  );
 }
 
 /** Choose the agent tab that receives the selection; with one candidate there is a single item. */
