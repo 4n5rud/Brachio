@@ -7,6 +7,7 @@ mod claude_usage;
 mod external_link;
 mod file_in_use;
 mod folder_access;
+mod handoff_summary;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
@@ -351,6 +352,8 @@ pub fn run() {
             orchestration::orchestration_schedule,
             orchestration::orchestration_reopen_child,
             worker_preamble::task_worker_preamble,
+            handoff_summary::task_handoff_summary,
+            handoff_summary::task_handoff_send,
             workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,
