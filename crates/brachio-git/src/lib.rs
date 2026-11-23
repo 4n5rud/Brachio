@@ -37,8 +37,10 @@ pub use operation::{stopped_operation, StoppedOperation};
 pub use port_pool::{PortBlock, PortPool};
 pub use pull_request::{create_pull_request, PullRequest, PullRequestError};
 pub use pull_request_status::{
-    backoff_seconds, fetch_pull_request, local_head, repository_of, ChecksOverall, ChecksSummary,
-    Conflict, FailedCheck, PullRequestSnapshot, PullRequestState, ReviewState, StatusError,
+    backoff_seconds, fetch_pull_request, fetch_pull_request_by_number, local_head,
+    parse_pull_request_reference, repository_of, ChecksOverall, ChecksSummary, Conflict,
+    FailedCheck, PullRequestReference, PullRequestSnapshot, PullRequestState, ReviewState,
+    StatusError,
 };
 pub use push_target::push_remote;
 pub use repo_info::{find_repositories, inspect_repo, RepoInfo};

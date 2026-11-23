@@ -9,14 +9,19 @@ export interface AgentEntry {
   approvalRelay: boolean;
   /** Whether a closed conversation can be continued. */
   resume: boolean;
+  /**
+   * How a follow-up reaches the agent while it works: `enter` is its own TUI behaviour (type the text and press Enter, which it
+   * folds into the running turn); none means no documented way, so the window does not steer it.
+   */
+  steer: "enter" | null;
   /** Key of the mark in the agent icon set; none means the generic bot glyph. */
   icon: "claude" | "codex" | null;
 }
 
 export const AGENT_CATALOG = {
-  claude: { coreId: "claude_code", name: "Claude Code", status: "hooks", approvalRelay: true, resume: true, icon: "claude" },
-  codex: { coreId: "codex", name: "Codex", status: "osc7501", approvalRelay: false, resume: true, icon: "codex" },
-  grok: { coreId: "grok", name: "Grok", status: "osc7501", approvalRelay: false, resume: false, icon: null },
+  claude: { coreId: "claude_code", name: "Claude Code", status: "hooks", approvalRelay: true, resume: true, steer: "enter", icon: "claude" },
+  codex: { coreId: "codex", name: "Codex", status: "osc7501", approvalRelay: false, resume: true, steer: "enter", icon: "codex" },
+  grok: { coreId: "grok", name: "Grok", status: "osc7501", approvalRelay: false, resume: false, steer: null, icon: null },
 } as const satisfies Record<string, AgentEntry>;
 
 /** The short agent names the window uses. */

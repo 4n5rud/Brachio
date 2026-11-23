@@ -1,7 +1,7 @@
 import { repoSlug } from "./clone-url";
 
-/** The three ways to bring a project in; the combobox footer and the sidebar "+" offer the same ones. */
-export type AddProjectKind = "folder" | "clone" | "create";
+/** The ways to bring a project in, or to start without one; the combobox footer and the sidebar "+" offer the same ones. */
+export type AddProjectKind = "folder" | "clone" | "create" | "scratch";
 
 /** A project as the new task dialog lists it. */
 export interface ProjectChoice {

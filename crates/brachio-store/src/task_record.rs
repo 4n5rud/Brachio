@@ -274,6 +274,16 @@ impl TaskRecord {
         Ok(u64::try_from(count).unwrap_or(0))
     }
 
+    /// Ids of the tasks, archived or not, in a repository.
+    ///
+    /// # Errors
+    /// Fails when the query fails.
+    pub fn ids_for_repo(connection: &Connection, repo_id: &str) -> Result<Vec<String>, StoreError> {
+        let mut statement = connection.prepare("SELECT id FROM tasks WHERE repo_id = ?1")?;
+        let ids = statement.query_map([repo_id], |row| row.get(0))?;
+        Ok(ids.collect::<rusqlite::Result<Vec<String>>>()?)
+    }
+
     /// One task by id.
     ///
     /// # Errors

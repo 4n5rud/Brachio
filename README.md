@@ -77,6 +77,10 @@ Agent usage in the status bar, a file tree with search, a project picker that ca
 
 The `brachio` CLI drives tasks from any terminal, `brachio mcp` serves task tools over stdio, and the `brachio-send` and `brachio-lead` skills teach Claude Code and Codex how to use them.
 
+## Scratch tasks
+
+To try an idea without a folder or repository, choose "Scratch task" from the add-project menu. The agent works in a temporary folder inside Brachio's data folder, with no git repository. Settings lists the scratch folders that were not kept: "Turn into project" moves one to a folder you choose, runs `git init` there and adds it as a project, and "Delete" removes it.
+
 ## Project configuration
 
 A repository may add `brachio.toml` to copy files and run setup in each new worktree, and to define a QA command:

@@ -18,6 +18,7 @@ import { registerShellCueRunner } from "../lib/cues";
 import { openInEditor } from "../lib/editor";
 import { noteRecentFile } from "../lib/recent-files";
 import { openExternalLink } from "../lib/pr-status";
+import { previewIfRegistered } from "../lib/local-preview";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
@@ -30,6 +31,7 @@ import { onShellInput } from "../lib/shell-input";
 import { typedSinceSubmit } from "../lib/typed-input";
 import { createEarlyOutput, EARLY_OUTPUT_MAX_BYTES } from "../lib/early-output";
 import { silenceDeviceAttributes } from "../lib/terminal-queries";
+import { keepHangulSyllables } from "../lib/hangul-input";
 import { requestSelectionSend } from "../lib/selection-send";
 
 /** What to run. Without it the pane stays an empty terminal. */
@@ -131,7 +133,8 @@ export interface DraftInsert {
   userTyped: boolean;
 }
 
-export type PrepareDraft = (text: string) => DraftInsert | undefined;
+/** `steering` also accepts a working agent, for a follow-up the agent folds into its running turn. */
+export type PrepareDraft = (text: string, options?: { steering?: boolean }) => DraftInsert | undefined;
 
 export function TerminalPane(props: {
   session?: TerminalSession;
@@ -428,8 +431,8 @@ export function TerminalPane(props: {
       term.focus();
     };
     void prepareOpen(session?.resume === true && session.agent !== null, session?.prompt ?? null);
-    const canPasteDraft = () => session?.agent && !exited && !disposed && !blocked
-      && !working && props.active && term.modes.bracketedPasteMode;
+    const canPasteDraft = (steering = false) => session?.agent && !exited && !disposed && !blocked
+      && (steering || !working) && props.active && term.modes.bracketedPasteMode;
     // Puts the command in the agent's input without pressing Enter. Unlike a draft it is allowed
     // while the agent waits for sign-in, which is what marks the terminal as blocked.
     insertSignIn = async () => {
@@ -441,12 +444,13 @@ export function TerminalPane(props: {
       term.focus();
       return true;
     };
-    const unregister = props.registerDraftWriter?.((text) => {
+    const unregister = props.registerDraftWriter?.((text, options) => {
       const destination = handle;
-      if (!destination || !canPasteDraft()) return undefined;
+      const steering = options?.steering === true;
+      if (!destination || !canPasteDraft(steering)) return undefined;
       const revision = inputRevision;
       const insert = async (submit = false) => {
-        if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
+        if (handle !== destination || inputRevision !== revision || !canPasteDraft(steering)) return false;
         inputRevision += 1;
         editedBeforePrompt = true;
         await destination.write(bracketedPaste(text, true) + (submit ? "\r" : ""));
@@ -557,6 +561,8 @@ export function TerminalPane(props: {
     const notePastedInput = () => { noteUserInput(); userTyped = true; };
     host.addEventListener("paste", notePastedInput, true);
     host.addEventListener("compositionstart", notePastedInput, true);
+    // WebKit types Korean without composition events; it counts as typing like a composition does.
+    const stopHangul = keepHangulSyllables(term, host, notePastedInput);
     let lastWriteFailure = "";
     const pasteClipboard = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
@@ -600,11 +606,13 @@ export function TerminalPane(props: {
     window.addEventListener("blur", releaseModifier);
     host.addEventListener("mousemove", trackModifier);
     const openLink = (link: ReturnType<typeof findTerminalLinks>[number]) => {
+      const taskId = session?.key?.split(":")[0];
       if (link.kind === "url") {
-        openExternalLink(link.url).catch((failure: unknown) => pushToast({ tone: "error", message: String(failure) }));
+        const external = () => openExternalLink(link.url).catch((failure: unknown) => pushToast({ tone: "error", message: String(failure) }));
+        if (!taskId) { void external(); return; }
+        previewIfRegistered(taskId, link.url).then((shown) => { if (!shown) return external(); }, external);
         return;
       }
-      const taskId = session?.key?.split(":")[0];
       const relative = session ? taskRelativePath(link.path, session.cwd) : undefined;
       if (!taskId || !relative) {
         pushToast({ tone: "error", message: t("terminal.linkOutside") });
@@ -721,8 +729,9 @@ export function TerminalPane(props: {
       clearTimeout(promptTimer);
       clearTimeout(resizeTimer);
       unregister?.();
-      host.removeEventListener("paste", noteUserInput, true);
-      host.removeEventListener("compositionstart", noteUserInput, true);
+      host.removeEventListener("paste", notePastedInput, true);
+      host.removeEventListener("compositionstart", notePastedInput, true);
+      stopHangul();
       stopShellDrop?.();
       stopShellPane?.();
       stopTail?.();

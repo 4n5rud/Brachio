@@ -27,6 +27,7 @@ mod quit;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
+mod scratch_workspace;
 mod session_tokens;
 mod system_check;
 mod task_activity;
@@ -364,6 +365,7 @@ pub fn run() {
             handoff_summary::task_handoff_summary,
             handoff_summary::task_handoff_send,
             agent_profiles::repo_profiles,
+            agent_profiles::task_profiles,
             agent_profiles::task_join_compare_group,
             workspace::task_has_live_terminals,
             workspace::repo_list,
@@ -409,6 +411,10 @@ pub fn run() {
             worktree_import::worktree_import,
             task_overlaps::task_overlaps,
             pr_status::task_pr_status,
+            pr_status::task_link_pr,
+            pr_status::task_unlink_pr,
+            pr_status::task_link_pr,
+            pr_status::task_unlink_pr,
             qa_run::qa_run,
             qa_run::qa_last_result,
             qa_run::qa_delete_output,
@@ -423,6 +429,10 @@ pub fn run() {
             task_commits::task_commit_diff,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
+            scratch_workspace::scratch_create,
+            scratch_workspace::scratch_list,
+            scratch_workspace::scratch_convert,
+            scratch_workspace::scratch_discard,
             workspace::task_git_action,
             open_local_port,
             task_folder::task_reveal,
