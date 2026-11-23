@@ -22,7 +22,7 @@ import { previewIfRegistered } from "../lib/local-preview";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
-import { bracketedPaste, isCopyKey, isNativePasteKey, pasteText, terminalClipboardText } from "../lib/terminal-paste";
+import { bracketedPaste, isCopyKey, isImageOnlyPaste, isNativePasteKey, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
 import { MAX_TERMINAL_LINES } from "../lib/attachments";
 import { registerTerminalTail } from "../lib/terminal-tail";
@@ -570,6 +570,8 @@ export function TerminalPane(props: {
       event.stopPropagation();
       const text = terminalClipboardText(event.clipboardData.getData("text/plain"));
       if (text) term.paste(text);
+      // Agents read a clipboard picture when they receive Ctrl+V, the same as pressing it.
+      else if (session?.agent && isImageOnlyPaste(event.clipboardData)) term.input("\x16", true);
     };
     host.addEventListener("paste", pasteClipboard, true);
     const changeFontSize = (step: number) => {

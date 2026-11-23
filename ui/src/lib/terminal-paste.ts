@@ -44,6 +44,15 @@ export function isCopyKey(
   return primary && (event.shiftKey || hasSelection);
 }
 
+/**
+ * Whether a paste event carries a picture and no text, such as a screenshot copied with ⌘⌃⇧4.
+ * The terminal cannot insert a picture, so the agent is asked to read it from the clipboard itself.
+ */
+export function isImageOnlyPaste(data: { types: readonly string[]; getData: (type: string) => string }): boolean {
+  if (terminalClipboardText(data.getData("text/plain")) !== "") return false;
+  return data.types.includes("Files") || data.types.some((type) => type.startsWith("image/"));
+}
+
 // An escaped UTF-16 unit can use six JSON bytes. This leaves room for the
 // protocol envelope inside the runtime's 64 KiB message limit.
 const MAX_INPUT_UNITS = 8 * 1024;
