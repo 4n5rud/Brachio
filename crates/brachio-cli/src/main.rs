@@ -4,6 +4,7 @@
 mod mail;
 mod mail_hook;
 mod mcp_tools;
+mod skills;
 mod task;
 
 use std::io::Read;
@@ -49,6 +50,11 @@ enum Command {
         #[command(subcommand)]
         command: task::TaskCommand,
     },
+    /// Print the skill guides built into this binary.
+    Skills {
+        #[command(subcommand)]
+        command: skills::SkillsCommand,
+    },
     /// Commands that an agent's hooks run.
     Hook {
         #[command(subcommand)]
@@ -86,6 +92,7 @@ fn main() -> Result<()> {
         Command::Inbox(args) => mail::inbox(&args),
         Command::Peers => mail::peers(),
         Command::Task { command } => task::run(command),
+        Command::Skills { command } => skills::run(command),
         Command::Notify { event } => bail!("notify is not implemented yet (event {event}); M1"),
         Command::Mcp => {
             brachio_mcp::serve(
