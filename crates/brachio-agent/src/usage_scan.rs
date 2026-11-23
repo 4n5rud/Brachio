@@ -87,10 +87,18 @@ pub struct ClaudeProvider;
 /// Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<session>.jsonl`.
 pub struct CodexProvider;
 
+/// Grok: `~/.grok/sessions/**/<session>/updates.jsonl`. The layout and field names follow
+/// third-party descriptions and have not been checked against an installed Grok.
+pub struct GrokProvider;
+
 /// Every provider the app knows.
 #[must_use]
 pub fn providers() -> Vec<Box<dyn UsageProvider>> {
-    vec![Box::new(ClaudeProvider), Box::new(CodexProvider)]
+    vec![
+        Box::new(ClaudeProvider),
+        Box::new(CodexProvider),
+        Box::new(GrokProvider),
+    ]
 }
 
 fn home_dir(var: &str, default: &str) -> Option<PathBuf> {
@@ -271,6 +279,94 @@ fn scan_codex(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
     Ok(finish(file, state, days, buffer.len() as u64))
 }
 
+/// The first of `keys` that holds a count.
+fn first_count(value: &Value, keys: &[&str]) -> u64 {
+    keys.iter()
+        .find_map(|key| value.get(key).and_then(Value::as_u64))
+        .unwrap_or(0)
+}
+
+/// Grok reports usage once per finished turn, so each record is added as it is, not differenced.
+/// `input_tokens` is the uncached input; reasoning tokens count as output.
+fn scan_grok(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
+    let buffer = new_lines(&file.path, state)?;
+    let mut days: BTreeMap<String, TokenUsage> = BTreeMap::new();
+    for line in buffer.split(|byte| *byte == b'\n') {
+        if line.len() > MAX_LINE_BYTES || !has(line, b"turn_completed") {
+            continue;
+        }
+        let Ok(record) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        let body = record
+            .get("update")
+            .or_else(|| record.get("payload"))
+            .unwrap_or(&record);
+        let kind = ["type", "event", "kind", "sessionUpdate"]
+            .iter()
+            .find_map(|key| {
+                body.get(key)
+                    .or_else(|| record.get(key))
+                    .and_then(Value::as_str)
+            });
+        if kind != Some("turn_completed") {
+            continue;
+        }
+        if let Some(cwd) = body
+            .get("cwd")
+            .or_else(|| record.get("cwd"))
+            .and_then(Value::as_str)
+        {
+            if state.project.is_empty() {
+                cwd.clone_into(&mut state.project);
+            }
+        }
+        let Some(usage) = body.get("usage").or_else(|| record.get("usage")) else {
+            continue;
+        };
+        let added = TokenUsage {
+            input: count(usage, "input_tokens"),
+            output: count(usage, "output_tokens") + count(usage, "reasoning_tokens"),
+            cache_read: first_count(
+                usage,
+                &[
+                    "cache_read_tokens",
+                    "cached_input_tokens",
+                    "cache_read_input_tokens",
+                ],
+            ),
+            cache_write: first_count(
+                usage,
+                &["cache_write_tokens", "cache_creation_input_tokens"],
+            ),
+        };
+        let Some(day) = day_of(body).or_else(|| day_of(&record)) else {
+            continue;
+        };
+        let slot = days.entry(day).or_default();
+        slot.input += added.input;
+        slot.output += added.output;
+        slot.cache_read += added.cache_read;
+        slot.cache_write += added.cache_write;
+    }
+    Ok(finish(file, state, days, buffer.len() as u64))
+}
+
+fn grok_session(path: &Path) -> Option<String> {
+    if path.file_name().and_then(|name| name.to_str()) != Some("updates.jsonl") {
+        return None;
+    }
+    path.parent()?.file_name()?.to_str().map(str::to_owned)
+}
+
+/// Grok session logs under `sessions`.
+#[must_use]
+pub fn grok_logs_in(sessions: &Path) -> Vec<LogFile> {
+    let mut found = Vec::new();
+    collect_logs(sessions, 0, &grok_session, &mut found);
+    newest_first(found)
+}
+
 fn newest_first(mut files: Vec<(std::time::SystemTime, LogFile)>) -> Vec<LogFile> {
     files.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     files.truncate(MAX_LOG_FILES);
@@ -306,9 +402,11 @@ pub fn claude_logs_in(projects: &Path) -> Vec<LogFile> {
     newest_first(found)
 }
 
-fn collect_rollouts(
+/// Walks `folder` for files `session_of` accepts, giving each the session it returns.
+fn collect_logs(
     folder: &Path,
     depth: usize,
+    session_of: &dyn Fn(&Path) -> Option<String>,
     found: &mut Vec<(std::time::SystemTime, LogFile)>,
 ) {
     let Ok(entries) = fs::read_dir(folder) else {
@@ -321,22 +419,13 @@ fn collect_rollouts(
         };
         if kind.is_dir() {
             if depth < 4 {
-                collect_rollouts(&path, depth + 1, found);
+                collect_logs(&path, depth + 1, session_of, found);
             }
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        let Some(session) = session_of(&path) else {
             continue;
         };
-        if !stem.starts_with("rollout-")
-            || path.extension().and_then(|e| e.to_str()) != Some("jsonl")
-        {
-            continue;
-        }
-        let session = stem
-            .get(stem.len().saturating_sub(36)..)
-            .unwrap_or(stem)
-            .to_owned();
         let modified = entry
             .metadata()
             .and_then(|m| m.modified())
@@ -345,11 +434,23 @@ fn collect_rollouts(
     }
 }
 
+fn rollout_session(path: &Path) -> Option<String> {
+    let stem = path.file_stem().and_then(|s| s.to_str())?;
+    if !stem.starts_with("rollout-") || path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        return None;
+    }
+    Some(
+        stem.get(stem.len().saturating_sub(36)..)
+            .unwrap_or(stem)
+            .to_owned(),
+    )
+}
+
 /// Rollout logs of Codex under `sessions`.
 #[must_use]
 pub fn codex_logs_in(sessions: &Path) -> Vec<LogFile> {
     let mut found = Vec::new();
-    collect_rollouts(sessions, 0, &mut found);
+    collect_logs(sessions, 0, &rollout_session, &mut found);
     newest_first(found)
 }
 
@@ -388,6 +489,25 @@ impl UsageProvider for CodexProvider {
     }
     fn scan(&self, file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         scan_codex(file, state)
+    }
+}
+
+impl UsageProvider for GrokProvider {
+    fn id(&self) -> &'static str {
+        "grok"
+    }
+    fn display_name(&self) -> &'static str {
+        "Grok"
+    }
+    fn icon(&self) -> &'static str {
+        "grok"
+    }
+    fn log_files(&self) -> Vec<LogFile> {
+        home_dir("GROK_HOME", ".grok")
+            .map_or_else(Vec::new, |dir| grok_logs_in(&dir.join("sessions")))
+    }
+    fn scan(&self, file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
+        scan_grok(file, state)
     }
 }
 
@@ -531,5 +651,62 @@ mod tests {
             .expect("scan")
             .buckets
             .is_empty());
+    }
+
+    #[test]
+    fn grok_turns_add_up_per_day_with_reasoning_as_output() {
+        let dir = tempfile::tempdir().expect("dir");
+        let file = file_in(dir.path());
+        let turn = |day: &str, input: u64, output: u64, reasoning: u64, cache: u64| {
+            format!(
+                r#"{{"timestamp":"{day}T09:00:00Z","update":{{"type":"turn_completed","cwd":"/work/g","usage":{{"input_tokens":{input},"output_tokens":{output},"reasoning_tokens":{reasoning},"cache_read_tokens":{cache}}}}}}}"#
+            )
+        };
+        write(
+            &file.path,
+            &format!(
+                "{}\n{}\n{}\n{}\n",
+                turn("2026-11-01", 100, 10, 5, 40),
+                turn("2026-11-01", 20, 2, 0, 0),
+                r#"{"type":"other"}"#,
+                turn("2026-11-02", 7, 1, 1, 3)
+            ),
+        );
+        let mut state = FileState::default();
+        let scanned = scan_grok(&file, &mut state).expect("scan");
+        let found: Vec<_> = scanned
+            .buckets
+            .iter()
+            .map(|b| {
+                (
+                    b.day.as_str(),
+                    b.usage.input,
+                    b.usage.output,
+                    b.usage.cache_read,
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [("2026-11-01", 120, 17, 40), ("2026-11-02", 7, 2, 3)]
+        );
+        assert_eq!(scanned.buckets[0].project, "/work/g");
+        assert!(scan_grok(&file, &mut state)
+            .expect("scan")
+            .buckets
+            .is_empty());
+    }
+
+    #[test]
+    fn grok_logs_are_found_by_name_and_a_missing_folder_gives_none() {
+        let sessions = tempfile::tempdir().expect("dir");
+        let folder = sessions.path().join("2026").join("abc123");
+        fs::create_dir_all(&folder).expect("folder");
+        write(&folder.join("updates.jsonl"), "{}\n");
+        write(&folder.join("other.jsonl"), "{}\n");
+        let logs = grok_logs_in(sessions.path());
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].session, "abc123");
+        assert!(grok_logs_in(&sessions.path().join("none")).is_empty());
     }
 }
