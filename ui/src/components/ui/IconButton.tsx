@@ -9,6 +9,8 @@ export interface IconButtonProps
   icon: IconName;
   /** Accessible name and tooltip: the action in words. Required because the button has no text. */
   label: string;
+  /** One line under the name in the tooltip saying what the button does. */
+  hint?: string;
   /** Shortcut shown as key caps in the tooltip. */
   keys?: readonly string[];
   size?: "md" | "sm";
@@ -24,9 +26,9 @@ export interface IconButtonProps
 
 /** Square icon-only chrome button; hovering or focusing it names the action in a tooltip. */
 export function IconButton(props: IconButtonProps) {
-  const [own, rest] = splitProps(props, ["icon", "label", "keys", "size", "badge", "busy", "done", "class", "type"]);
+  const [own, rest] = splitProps(props, ["icon", "label", "hint", "keys", "size", "badge", "busy", "done", "class", "type"]);
   return (
-    <Tooltip label={own.label} keys={own.keys}>
+    <Tooltip label={own.label} hint={own.hint} keys={own.keys}>
       {(tip) => (
         <button
           {...rest}
@@ -34,6 +36,7 @@ export function IconButton(props: IconButtonProps) {
           type={own.type ?? "button"}
           class={`icon-button${own.size === "sm" ? " icon-button-sm" : ""}${own.busy ? " is-busy" : ""}${own.class ? ` ${own.class}` : ""}`}
           aria-label={own.label}
+          aria-description={own.hint}
           aria-busy={own.busy ? "true" : undefined}
           disabled={rest.disabled || own.busy}
         >

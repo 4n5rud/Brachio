@@ -33,7 +33,7 @@ export function AttachButton(props: {
   };
   return (
     <>
-      <IconButton icon="file" size={props.size ?? "sm"} class={props.class} label={t("attach.title")} aria-haspopup="menu"
+      <IconButton icon="file" size={props.size ?? "sm"} class={props.class} label={t("attach.title")} hint={t("attach.hint")} aria-haspopup="menu"
         aria-expanded={anchor() !== undefined}
         onClick={(event) => setAnchor(anchor() ? undefined : event.currentTarget)} />
       <Show when={anchor()}>

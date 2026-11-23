@@ -23,6 +23,8 @@ export function Tooltip(props: {
   label: string;
   /** Shortcut key names, one per key cap. */
   keys?: readonly string[];
+  /** One line saying what the control does, under the name. */
+  hint?: string;
   /** Renders the control and spreads the trigger handlers onto it. */
   children: (trigger: TooltipTrigger) => JSX.Element;
 }) {
@@ -62,7 +64,10 @@ export function Tooltip(props: {
         {(point) => (
           <Portal>
             <div class="tooltip" role="tooltip" style={{ left: `${point().x}px`, top: `${point().y - 4}px` }}>
-              {props.label}
+              <span class="tooltip-text">
+                {props.label}
+                <Show when={props.hint}>{(hint) => <span class="tooltip-hint">{hint()}</span>}</Show>
+              </span>
               <Show when={props.keys?.length}>
                 <span class="tooltip-keys"><For each={props.keys}>{(key) => <Kbd>{key}</Kbd>}</For></span>
               </Show>
