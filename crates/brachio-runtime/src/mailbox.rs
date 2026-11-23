@@ -10,7 +10,6 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::BufReader;
 
-use crate::transport;
 use crate::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 
 /// How long a command waits for the app to answer.
@@ -306,7 +305,7 @@ pub async fn call_with_ack(
     show: impl FnOnce(&MailResponse) -> Result<()>,
 ) -> Result<MailResponse> {
     let exchange = async {
-        let mut stream = transport::connect(endpoint)
+        let mut stream = crate::hook_token::connect(endpoint)
             .await
             .map_err(|_| anyhow!("Brachio is not running or does not accept messages."))?;
         write_message(&mut stream, request, MAX_MESSAGE).await?;
@@ -346,7 +345,7 @@ pub async fn call_with_timeout(
     timeout: Duration,
 ) -> Result<MailResponse> {
     let exchange = async {
-        let mut stream = transport::connect(endpoint)
+        let mut stream = crate::hook_token::connect(endpoint)
             .await
             .map_err(|_| anyhow!("Brachio is not running or does not accept messages."))?;
         write_message(&mut stream, request, MAX_MESSAGE).await?;

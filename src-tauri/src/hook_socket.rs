@@ -6,11 +6,12 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use brachio_runtime::approval::{ApprovalRequest, Decision};
+use brachio_runtime::hook_token;
 use brachio_runtime::mailbox::{self, MailRequest, MailResponse};
 use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 use interprocess::local_socket::tokio::prelude::*;
@@ -104,6 +105,8 @@ pub struct Approvals {
     mail: Box<dyn Fn(MailRequest) -> MailResponse + Send + Sync>,
     delivered: Delivered,
     children: Box<dyn ChildTasks>,
+    /// When set, a connection must open with this token or it is dropped unanswered.
+    token: OnceLock<String>,
 }
 
 impl Approvals {
@@ -158,7 +161,14 @@ impl Approvals {
             notify: Box::new(notify),
             mail: Box::new(mail),
             children: Box::new(children),
+            token: OnceLock::new(),
         })
+    }
+
+    /// Makes every connection prove it knows `token` before its request is read. Set once, before
+    /// the socket is served.
+    pub fn require_token(&self, token: String) {
+        let _ = self.token.set(token);
     }
 
     /// Passes the user's choice to the waiting hook. `false` when the question is already over.
@@ -271,6 +281,14 @@ impl Approvals {
 
     async fn handle(&self, stream: Stream) -> Result<()> {
         let mut reader = BufReader::new(stream);
+        if let Some(token) = self.token.get() {
+            let proven = tokio::time::timeout(READ_TIMEOUT, hook_token::verify(&mut reader, token))
+                .await
+                .unwrap_or(false);
+            if !proven {
+                return Err(anyhow!("connection did not present the hook token"));
+            }
+        }
         let message = tokio::time::timeout(READ_TIMEOUT, read_message(&mut reader, MAX_MESSAGE))
             .await??
             .ok_or_else(|| anyhow!("connection closed before a question"))?;
@@ -513,6 +531,8 @@ mod tests {
 
     use brachio_runtime::approval::{self, ApprovalRequest, Decision};
     use brachio_runtime::transport;
+    use brachio_runtime::wire::{write_message, MAX_MESSAGE};
+    use serde_json::json;
 
     use super::{Approvals, BufReader, Notice, Stream};
     use crate::child_task_request::{ChildRequest, ChildTask, ChildTasks, CreateFuture};
@@ -580,6 +600,38 @@ mod tests {
             assert!(approvals.answer(id, Decision::Allow));
             assert_eq!(waiting.await.expect("hook task"), Some(Decision::Allow));
             assert!(approvals.pending_questions().is_empty());
+        });
+    }
+
+    #[test]
+    fn a_connection_without_the_token_is_dropped_and_one_with_it_is_asked() {
+        tauri::async_runtime::block_on(async {
+            let (name, approvals, notices) = start("task1:agent");
+            approvals.require_token("secret".to_owned());
+            let refused =
+                approval::ask(&name, &request("task1:agent"), Duration::from_secs(3)).await;
+            assert_eq!(refused, None);
+            assert!(notices.lock().expect("lock").is_empty());
+
+            let mut stream = transport::connect(&name).await.expect("connect");
+            write_message(&mut stream, &json!({ "hook_token": "wrong" }), MAX_MESSAGE)
+                .await
+                .expect("send hello");
+            write_message(&mut stream, &request("task1:agent"), MAX_MESSAGE)
+                .await
+                .expect("send request");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(notices.lock().expect("lock").is_empty());
+
+            let mut stream = transport::connect(&name).await.expect("connect");
+            write_message(&mut stream, &json!({ "hook_token": "secret" }), MAX_MESSAGE)
+                .await
+                .expect("send hello");
+            write_message(&mut stream, &request("task1:agent"), MAX_MESSAGE)
+                .await
+                .expect("send request");
+            let id = first_question(&notices).await;
+            assert!(approvals.answer(id, Decision::Allow));
         });
     }
 
