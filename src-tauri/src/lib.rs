@@ -3,6 +3,7 @@
 mod agent_accounts;
 mod agent_profiles;
 mod always_allow;
+mod auto_archive;
 mod child_escalation;
 mod child_task_request;
 mod claude_usage;
@@ -415,8 +416,7 @@ pub fn run() {
             pr_status::task_pr_status,
             pr_status::task_link_pr,
             pr_status::task_unlink_pr,
-            pr_status::task_link_pr,
-            pr_status::task_unlink_pr,
+            auto_archive::task_archive_if_merged,
             qa_run::qa_run,
             qa_run::qa_last_result,
             qa_run::qa_delete_output,

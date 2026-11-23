@@ -641,11 +641,11 @@ pub fn task_archive(database: State<'_, Database>, id: String) -> Result<(), Str
 }
 
 /// Stable start of the refusal, so the UI can recognise it.
-const OPEN_CHILDREN_PREFIX: &str = "has open children:";
+pub(crate) const OPEN_CHILDREN_PREFIX: &str = "has open children:";
 
 /// Archives the task, but not a lead whose child tasks are still open: they could no longer reach
 /// their parent with `send --to parent`, and nothing would show that they lost their supervisor.
-fn archive_unless_children_open(
+pub(crate) fn archive_unless_children_open(
     connection: &Connection,
     id: &str,
     now_ms: i64,
