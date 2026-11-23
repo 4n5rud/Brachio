@@ -57,7 +57,7 @@ export function AgentCard(props: AgentCardProps) {
   const accountName = () => (props.account.state === "signedIn" ? props.account.account : null);
   const tone = () => (checking() ? "working" : props.account.state === "signedIn" ? "ready" : "done");
   return (
-    <div class="agent-card">
+    <div class="agent-account-card">
       <div class="agent-card-head">
         <AgentIcon agent={ICON_OF[props.kind]} />
         <strong>{AGENT_NAMES[props.kind]}</strong>
