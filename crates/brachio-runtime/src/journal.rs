@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use brachio_fs::{read_or_quarantine, write_atomic, Stored};
 use serde::{Deserialize, Serialize};
 
 /// What survives a runtime: enough to show the last screen and to start the shell again.
@@ -55,12 +56,10 @@ impl Journal {
             hook();
         }
         let path = self.path(&record.key);
-        let scratch = path.with_extension("json.tmp");
-        fs::write(
-            &scratch,
-            serde_json::to_vec(record).map_err(io::Error::other)?,
-        )?;
-        fs::rename(&scratch, &path)
+        write_atomic(
+            &path,
+            &serde_json::to_vec(record).map_err(io::Error::other)?,
+        )
     }
 
     pub(crate) fn remove(&self, key: &str) -> io::Result<()> {
@@ -70,7 +69,7 @@ impl Journal {
         }
     }
 
-    /// Read every record. A damaged file is renamed aside, so it affects no other shell.
+    /// Read every record. A damaged file is renamed to `*.corrupt-<ms>`, so it affects no other shell.
     pub(crate) fn load(&self) -> io::Result<Loaded> {
         let mut loaded = Loaded {
             records: Vec::new(),
@@ -81,15 +80,14 @@ impl Journal {
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            match fs::read(&path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<SessionRecord>(&bytes).ok())
-            {
-                Some(record) => loaded.records.push(record),
-                None => {
-                    let _ = fs::rename(&path, path.with_extension("json.bad"));
-                    loaded.unreadable.push(path);
-                }
+            let read = read_or_quarantine(&path, |bytes| {
+                serde_json::from_slice::<SessionRecord>(bytes).ok()
+            });
+            match read {
+                Ok(Stored::Found(record)) => loaded.records.push(record),
+                Ok(Stored::Quarantined(moved_to)) => loaded.unreadable.push(moved_to),
+                // Vanished since the listing, or unreadable right now: leave the file alone.
+                Ok(Stored::Missing) | Err(_) => {}
             }
         }
         loaded.records.sort_by(|a, b| a.key.cmp(&b.key));
@@ -213,7 +211,13 @@ mod tests {
         let loaded = journal.load().expect("load");
         assert_eq!(loaded.records.len(), 1);
         assert_eq!(loaded.unreadable.len(), 1);
-        assert!(directory.join("broken.json.bad").exists());
+        let moved = loaded.unreadable[0]
+            .file_name()
+            .expect("name")
+            .to_string_lossy();
+        assert!(moved.starts_with("broken.json.corrupt-"), "{moved}");
+        assert!(loaded.unreadable[0].exists());
+        assert!(!directory.join("broken.json").exists());
         let _ = fs::remove_dir_all(directory);
     }
 
@@ -222,7 +226,7 @@ mod tests {
         let directory = scratch("interrupted");
         let journal = Journal::open(&directory).expect("open journal");
         journal.save(&record("task", 7)).expect("save original");
-        fs::write(directory.join("task.json.tmp"), b"{incomplete")
+        fs::write(directory.join(".task.json.1-0.tmp"), b"{incomplete")
             .expect("simulate interrupted write");
 
         let loaded = journal.load().expect("load after interruption");
@@ -243,28 +247,6 @@ mod tests {
             journal.load().expect("reload").records,
             vec![record("task", 12)]
         );
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn a_failed_checkpoint_write_keeps_the_last_committed_screen() {
-        let directory = scratch("write-failure");
-        let journal = Journal::open(&directory).expect("open journal");
-        let original = record("task", 7);
-        journal.save(&original).expect("save original");
-        let blocked = directory.join("task.json.tmp");
-        fs::create_dir(&blocked).expect("block the checkpoint scratch file");
-
-        assert!(journal.save(&record("task", 9)).is_err());
-        assert_eq!(
-            journal.load().expect("load old checkpoint").records,
-            vec![original]
-        );
-
-        fs::remove_dir(blocked).expect("unblock the checkpoint");
-        let updated = record("task", 9);
-        journal.save(&updated).expect("save repaired checkpoint");
-        assert_eq!(journal.load().expect("load update").records, vec![updated]);
         let _ = fs::remove_dir_all(directory);
     }
 

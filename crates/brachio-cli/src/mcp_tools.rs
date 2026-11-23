@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use brachio_mcp::{Backend, ReviewRequest, SpawnTask};
+use brachio_mcp::{Backend, DecisionGate, ReviewRequest, SpawnTask};
 use brachio_runtime::mailbox::{
     MailRequest, MailResponse, SendMail, CALL_TIMEOUT, CREATE_TASK_TIMEOUT,
 };
@@ -91,6 +91,24 @@ impl Backend for McpTools {
             subject: request.subject,
             body: request.body,
             payload: None,
+            reply_to: None,
+            request_id: None,
+        });
+        let MailResponse::Sent { id, to, .. } = call(&request, CALL_TIMEOUT)? else {
+            return Err(unexpected());
+        };
+        Ok(json!({"id":id,"to":to}))
+    }
+
+    fn raise_decision_gate(&mut self, request: DecisionGate) -> Result<Value, String> {
+        let request = MailRequest::Send(SendMail {
+            from: own_key()?,
+            to: "parent".to_owned(),
+            kind: "decision_gate".to_owned(),
+            priority: Some("high".to_owned()),
+            subject: request.subject,
+            body: request.body,
+            payload: Some(json!({ "options": request.options }).to_string()),
             reply_to: None,
             request_id: None,
         });

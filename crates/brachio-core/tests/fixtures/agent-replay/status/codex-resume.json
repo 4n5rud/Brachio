@@ -1,0 +1,12 @@
+{
+  "description": "Codex resumes: it re-announces the protocol and reports a blocked auth state before work starts.",
+  "steps": [
+    { "at_ms": 0, "output": "\u001b]7501;?\u0007" },
+    { "at_ms": 0, "expect_replies": 1 },
+    { "at_ms": 100, "output": "\u001b]7501;state=blocked:kind=auth\u0007" },
+    { "at_ms": 200, "expect": { "state": "unknown" } },
+    { "at_ms": 400, "expect": { "state": "blocked", "reason": "auth" } },
+    { "at_ms": 2000, "output": "\u001b]7501;state=working\u0007" },
+    { "at_ms": 2400, "expect": { "state": "working" } }
+  ]
+}

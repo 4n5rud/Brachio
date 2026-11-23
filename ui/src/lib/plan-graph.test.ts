@@ -11,6 +11,7 @@ const child = (id: string, waitsFor: Array<[string, string]> = []): ChildView =>
   startBlocked: false,
   dependencies: waitsFor.map(([dependency, state]) => ({ id: dependency, title: dependency, state })),
   handoff: null,
+  gates: [],
 });
 
 describe("planLayout", () => {

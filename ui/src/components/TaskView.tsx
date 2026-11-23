@@ -30,11 +30,14 @@ import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, UI_AGENT, type TabKind, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
 import { RenameDialog } from "./RenameDialog";
+import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
 import { onNewTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
+import { PromptQueue } from "./PromptQueue";
+import { SEND_SETTLE_MS, autoSendOn, queueAction, queuedPrompts, removeQueuedPrompt } from "../lib/prompt-queue";
 import { isMac } from "../lib/shortcut";
 import { clearSelectionRequest, fencedSelection, selectionRequest } from "../lib/selection-send";
 import { pushToast } from "../lib/toasts";
@@ -105,6 +108,7 @@ export function TaskView(props: {
   onReportProblem?: (message: string) => void;
 }) {
   const [inboxTab, setInboxTab] = createSignal<string>();
+  const [handingOver, setHandingOver] = createSignal(false);
   const [workerPreamble] = createResource(
     () => (props.task.parentTaskId ? props.task.id : undefined),
     (taskId) => invoke<string | null>("task_worker_preamble", { taskId }).catch(() => null),
@@ -298,6 +302,39 @@ export function TaskView(props: {
     if (prepared && await prepared.insert()) pushToast({ tone: "success", message: t("selection.sent") });
     else pushToast({ tone: "error", message: t("selection.notReady") });
   };
+  // Queued prompts go to a tab when its agent is idle. A tab is held after a send (or a draft) until
+  // the agent has left idle, so one prompt is never followed at once by the next.
+  const queueHolds = new Map<string, number>();
+  const [queueTick, setQueueTick] = createSignal(0);
+  const drainQueue = (key: string) => {
+    const tone = tabTone(key);
+    if (tone !== "ready") { queueHolds.delete(key); return; }
+    const item = queuedPrompts(key)[0];
+    if (!item) return;
+    const heldAt = queueHolds.get(key);
+    if (heldAt !== undefined && Date.now() - heldAt < SEND_SETTLE_MS) return;
+    const writer = key === terminalKey(props.task.id, "agent") ? primaryWriters.get(props.task.id) : secondaryWriters.get(key);
+    const prepared = writer?.(item.text);
+    const action = prepared && queueAction({ tone, hasItems: true, auto: autoSendOn(key), userTyped: prepared.userTyped,
+      holding: false });
+    if (!prepared || !action) return;
+    queueHolds.set(key, action === "draft" ? Number.POSITIVE_INFINITY : Date.now());
+    void prepared.insert(action === "send").then((ok) => {
+      if (ok) removeQueuedPrompt(key, item.id);
+      else queueHolds.delete(key);
+    }).catch(() => queueHolds.delete(key));
+  };
+  onMount(() => {
+    const timer = setInterval(() => setQueueTick((tick) => tick + 1), 1500);
+    onCleanup(() => clearInterval(timer));
+  });
+  createEffect(() => {
+    queueTick();
+    const id = props.task.id;
+    if (!props.visible) return;
+    for (const key of [terminalKey(id, "agent"), ...agentTabs(id).map((tab) => tabKey(id, tab))]) drainQueue(key);
+  });
+  const [queueOpen, setQueueOpen] = createSignal(false);
   const activeAgentTab = () => {
     if (layout() === "shell") return undefined;
     const id = props.task.id;
@@ -452,11 +489,28 @@ export function TaskView(props: {
             aria-expanded={tabMenu() !== undefined}
             onClick={(event) => setTabMenu(tabMenu() ? undefined : event.currentTarget)} />
         </Show>
+        <Show when={activeAgentTab()}>
+          {(key) => <IconButton icon="list" size="sm" class="tab-queue" label={t("queue.title")}
+            badge={queuedPrompts(key()).length} aria-expanded={queueOpen()}
+            onClick={() => setQueueOpen(!queueOpen())} />}
+        </Show>
         <Show when={activeAgentTab() && props.unreadForTab && activeAgentTab()}>
           {(key) => <IconButton icon="message" size="sm" class="tab-inbox" label={t("mailbox.inbox")}
             badge={props.unreadForTab?.(key()) ?? 0}
             aria-expanded={inboxTab() === key()}
             onClick={() => setInboxTab(inboxTab() === key() ? undefined : key())} />}
+        </Show>
+        <Show when={activeAgentTab() && props.workspaceTasks.length > 1}>
+          <IconButton icon="mail" size="sm" class="tab-inbox" label={t("handoff.open")} onClick={() => setHandingOver(true)} />
+        </Show>
+        <Show when={handingOver() ? activeAgentTab() : undefined}>
+          {(key) => (
+            <HandoffSummaryDialog targetKey={key()}
+              sources={props.workspaceTasks.filter((task) => task.id !== props.task.id && task.worktreePath)}
+              initialSourceId={props.task.parentTaskId ?? props.workspaceTasks.find((task) => task.id !== props.task.id)?.id ?? ""}
+              onDraft={(text) => props.onDraftOriginal?.(text) ?? Promise.resolve(false)}
+              onClose={() => setHandingOver(false)} />
+          )}
         </Show>
         <Show when={tabActions()}>
           {(current) => (
@@ -693,6 +747,9 @@ export function TaskView(props: {
             }}
           </For>
         </div>
+        <Show when={queueOpen() ? activeAgentTab() : undefined} keyed>
+          {(key) => <PromptQueue tabKey={key} />}
+        </Show>
         <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
           {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
             sourceTitle={(fromKey) => props.findTask(taskIdOf(fromKey))?.title ?? fromKey}

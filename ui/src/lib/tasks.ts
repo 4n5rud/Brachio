@@ -1,6 +1,8 @@
 import type { AgentState } from "./status";
 
-export type AgentKind = "claude" | "codex";
+import { AGENT_CATALOG, AGENT_KINDS, type AgentKind } from "./agent-catalog";
+
+export type { AgentKind };
 
 export interface QaSummary {
   passed: number;
@@ -65,7 +67,9 @@ export function groupTasks(tasks: readonly TaskRow[]): Map<TaskGroup, TaskRow[]>
   return groups;
 }
 
-export const AGENT_NAME: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex" };
+export const AGENT_NAME = Object.fromEntries(
+  AGENT_KINDS.map((kind) => [kind, AGENT_CATALOG[kind].name]),
+) as Record<AgentKind, string>;
 
 /** Branch without the `brachio/` prefix, for tight rows. */
 export function shortBranch(branch: string): string {

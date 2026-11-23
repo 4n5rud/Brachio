@@ -2,11 +2,14 @@
 
 mod agent_accounts;
 mod always_allow;
+mod child_escalation;
 mod child_task_request;
 mod claude_usage;
+mod decision_gate;
 mod external_link;
 mod file_in_use;
 mod folder_access;
+mod handoff_summary;
 mod hook_setup;
 mod hook_socket;
 mod issue_report;
@@ -26,6 +29,7 @@ mod runtime_terminals;
 mod session_tokens;
 mod system_check;
 mod task_activity;
+mod task_checkpoints;
 mod task_file_actions;
 mod task_file_ops;
 mod task_folder;
@@ -276,6 +280,7 @@ pub fn run() {
         .manage(session_tokens::TokenTrackers::default())
         .manage(usage_analytics::UsageScanLock::default())
         .manage(task_overlaps::ChangedPathCache::default())
+        .manage(task_checkpoints::TurnTracker::default())
         .manage(agent_accounts::SignInRun::default())
         .manage(claude_usage::ClaudeUsageCache::default())
         .manage(Arc::new(qa_run::QaResults::default()))
@@ -346,11 +351,15 @@ pub fn run() {
             mailbox::mailbox_inbox,
             mailbox::mailbox_dismiss,
             orchestration::orchestration_view,
+            child_escalation::child_agent_stopped,
+            decision_gate::decision_gate_answer,
             orchestration::handoff_review,
             orchestration::orchestration_set_scheduler,
             orchestration::orchestration_schedule,
             orchestration::orchestration_reopen_child,
             worker_preamble::task_worker_preamble,
+            handoff_summary::task_handoff_summary,
+            handoff_summary::task_handoff_send,
             workspace::task_has_live_terminals,
             workspace::repo_list,
             workspace::repo_add,
@@ -400,6 +409,10 @@ pub fn run() {
             external_link::open_external_link,
             issue_report::open_issue_draft,
             workspace::task_merge_preview,
+            task_checkpoints::task_checkpoint_turn,
+            task_checkpoints::task_checkpoint_list,
+            task_checkpoints::task_checkpoint_diff,
+            task_checkpoints::task_checkpoint_restore,
             task_ports::task_assign_port,
             workspace::task_pr_feedback,
             workspace::task_git_action,
@@ -493,7 +506,7 @@ fn task_is_open(app: &tauri::AppHandle, key: &str) -> bool {
         return false;
     };
     terminal_authorization::resolve(&connection, key)
-        .is_ok_and(|owner| owner.agent == Some(brachio_agent::AgentKind::ClaudeCode))
+        .is_ok_and(|owner| owner.agent.is_some_and(|agent| agent.spec().approval_relay))
 }
 
 fn install_tray(app: &App) -> tauri::Result<()> {

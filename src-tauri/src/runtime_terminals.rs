@@ -1,9 +1,8 @@
 //! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
 
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::future::Future;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -669,10 +668,8 @@ fn save_pending_launch(record: &PendingLaunch) -> Result<()> {
 fn save_pending_launch_in(folder: &Path, record: &PendingLaunch) -> Result<()> {
     fs::create_dir_all(folder)?;
     let path = record_path(folder, record)?;
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    serde_json::to_writer(&mut file, record)?;
-    file.flush()?;
-    file.sync_all()?;
+    anyhow::ensure!(!path.exists(), "pending launch record already exists");
+    brachio_fs::write_atomic(&path, &serde_json::to_vec(record)?)?;
     Ok(())
 }
 

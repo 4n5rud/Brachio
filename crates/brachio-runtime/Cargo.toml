@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 brachio-core.workspace = true
+brachio-fs.workspace = true
 brachio-pty.workspace = true
 clap.workspace = true
 interprocess = { version = "2.4.8", features = ["tokio"] }
@@ -28,6 +29,7 @@ widestring = "1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
 [lints]
 workspace = true

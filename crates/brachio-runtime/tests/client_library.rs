@@ -246,7 +246,20 @@ async fn concurrent_recovery_is_read_only_and_reconnect_does_not_replay_input() 
     };
     assert_eq!(lost.len(), 1);
     assert_eq!(lost[0].key, key);
-    assert!(fs::metadata(state.join("other.json.bad")).is_ok());
+    assert!(!state.join("other.json").exists());
+    let set_aside = fs::read_dir(&state)
+        .expect("list state")
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("other.json.corrupt-")
+        });
+    assert!(
+        set_aside,
+        "the corrupt entry is renamed to other.json.corrupt-<ms>"
+    );
 
     let recover = || Action::Recover { key: key.clone() };
     let (left, right) = tokio::join!(client.call(recover()), peer.call(recover()));

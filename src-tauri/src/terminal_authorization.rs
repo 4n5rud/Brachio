@@ -21,9 +21,10 @@ pub(crate) fn resolve(connection: &Connection, key: &str) -> Result<TerminalOwne
         return Err("Restore the task before opening its terminal.".to_owned());
     }
     let primary = match task.agent_kind.as_deref() {
-        Some("codex") => AgentKind::Codex,
-        None | Some("claude_code") => AgentKind::ClaudeCode,
-        Some(_) => return Err("The task has an unsupported agent.".to_owned()),
+        None => AgentKind::ClaudeCode,
+        Some(id) => {
+            AgentKind::from_id(id).ok_or_else(|| "The task has an unsupported agent.".to_owned())?
+        }
     };
     let (agent, conversation, shell) = match pane {
         "shell" => (None, None, None),
@@ -138,5 +139,21 @@ mod tests {
         brachio_store::close_task_tab(&db, "task", first).expect("close first");
         assert!(resolve(&db, &format!("task:agent-{first}")).is_err());
         assert!(resolve(&db, &format!("task:agent-{second}")).is_ok());
+    }
+
+    #[test]
+    fn a_grok_task_resolves_to_grok_and_an_unknown_agent_is_refused() {
+        let db = brachio_store::open_in_memory().expect("test database");
+        db.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, agent_kind)
+             VALUES ('grok', 'r', 'Task', '', 'a', 'worktree', 'active', 1, 'grok'),
+                    ('odd', 'r', 'Task', '', 'b', 'worktree', 'active', 1, 'future_agent');",
+        ).expect("test tasks");
+        assert_eq!(
+            resolve(&db, "grok:agent").expect("grok").agent,
+            Some(AgentKind::Grok)
+        );
+        assert!(resolve(&db, "odd:agent").is_err());
     }
 }

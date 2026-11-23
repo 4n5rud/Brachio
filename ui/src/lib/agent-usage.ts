@@ -74,6 +74,8 @@ export { refreshing as agentUsageRefreshing, updatedAt as agentUsageUpdatedAt, u
 async function signedInAgents(): Promise<AgentKind[]> {
   const found: AgentKind[] = [];
   for (const installed of await detectAgents()) {
+    // Only Claude Code and Codex report plan usage.
+    if (installed.kind !== "claude_code" && installed.kind !== "codex") continue;
     const agent = installed.kind === "codex" ? "codex" : "claude";
     try {
       const status = await invoke<{ signedIn: boolean }>("agent_auth_status", { kind: installed.kind });

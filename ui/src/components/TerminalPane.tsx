@@ -20,7 +20,7 @@ import { noteRecentFile } from "../lib/recent-files";
 import { openExternalLink } from "../lib/pr-status";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
-import { codexConversations, forgetUncertainLaunch, openTerminal, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
+import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { bracketedPaste, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
 import { SetupMarkerFilter, type SetupResult } from "../lib/setup-signal";
@@ -110,6 +110,7 @@ const SIGN_IN_INPUT = "/login";
 const SIGN_IN: Record<AgentKind, { name: string; command: string }> = {
   claude_code: { name: "Claude Code", command: "claude auth login" },
   codex: { name: "Codex", command: "codex login" },
+  grok: { name: "Grok", command: "grok" },
 };
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -122,7 +123,8 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
  * a handful at once.
  */
 export interface DraftInsert {
-  insert: () => Promise<boolean>;
+  /** Types the text into the agent input; with `submit` it also presses Enter. */
+  insert: (submit?: boolean) => Promise<boolean>;
   /** The user typed in this tab's input since they last submitted it, so the draft lands after it. */
   userTyped: boolean;
 }
@@ -156,6 +158,8 @@ export function TerminalPane(props: {
   const [restoredFrame, setRestoredFrame] = createSignal(false);
   const [continuity, setContinuity] = createSignal<"terminal.liveAttached" | "terminal.conversationResuming" | "terminal.newConversation" | "terminal.resumeFailed">();
   const [ended, setEnded] = createSignal<Ended>();
+  /** The last screen of a program that is gone, shown read-only until it starts again. */
+  const [savedView, setSavedView] = createSignal<{ exitCode: number | null }>();
   const [inputFailure, setInputFailure] = createSignal<string>();
   const [outputTrimmed, setOutputTrimmed] = createSignal(false);
   const [promptNote, setPromptNote] = createSignal<"notSent" | "deferred">();
@@ -260,6 +264,8 @@ export function TerminalPane(props: {
     let typeInPrompt: string | null = null;
     let initialInputPending = session?.initialInput ?? null;
     const start = (resume: boolean, initialPrompt: string | null, codexConversationId?: string) => {
+      if (savedView()) term.reset();
+      setSavedView(undefined);
       setContinuity(undefined);
       setEnded(undefined);
       setInputFailure(undefined);
@@ -346,6 +352,14 @@ export function TerminalPane(props: {
         setEnded({ kind: "exited", code: message.exitCode });
         term.writeln(`\r\n[${t("terminal.exited")}${code}]`);
         props.onStatus?.({ state: "exited", code: message.exitCode }, null);
+        if (session.key) {
+          void savedScreen(session.key).then((saved) => {
+            if (!saved || disposed || launch !== generation) return;
+            term.reset();
+            term.write(saved.ansi);
+            setSavedView({ exitCode: saved.exitCode ?? message.exitCode });
+          }).catch(() => {});
+        }
       })
         .then((opened) => {
           // The stream can disconnect before the open RPC resolves. Closing the returned
@@ -429,11 +443,12 @@ export function TerminalPane(props: {
       const destination = handle;
       if (!destination || !canPasteDraft()) return undefined;
       const revision = inputRevision;
-      const insert = async () => {
+      const insert = async (submit = false) => {
         if (handle !== destination || inputRevision !== revision || !canPasteDraft()) return false;
         inputRevision += 1;
         editedBeforePrompt = true;
-        await destination.write(bracketedPaste(text, true));
+        await destination.write(bracketedPaste(text, true) + (submit ? "\r" : ""));
+        if (submit) userTyped = false;
         if (destination === handle && props.active) term.focus();
         return true;
       };
@@ -812,7 +827,15 @@ export function TerminalPane(props: {
           </Notice>
         )}
       </Show>
-      <Show when={ended()}>
+      <Show when={savedView()}>
+        {(view) => (
+          <Notice tone="info" lead={t("terminal.savedScreen")}
+            actions={<Button size="sm" variant="primary" onClick={() => reopen()}>{t("terminal.startAgain")}</Button>}>
+            {view().exitCode === null ? t("terminal.exitedNoCode") : t("terminal.exitedCode").replace("{code}", String(view().exitCode))}
+          </Notice>
+        )}
+      </Show>
+      <Show when={!savedView() && ended()}>
         {(end) => {
           const e = end();
           if (e.kind === "exited") {
@@ -865,7 +888,7 @@ export function TerminalPane(props: {
           </Notice>
         )}
       </Show>
-      <div ref={host} class="terminal-host" classList={{ "terminal-dim": uncertainOperation() !== undefined }}
+      <div ref={host} class="terminal-host" classList={{ "terminal-dim": uncertainOperation() !== undefined || savedView() !== undefined }}
         data-agent-terminal={props.session?.agent ? "" : undefined} />
     </div>
   );
