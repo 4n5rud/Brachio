@@ -16,7 +16,9 @@ As a lead:
   It works only when "Start automatically" is on for your task in the Tasks tab.
 - `task wait` blocks inside the app until every open child reported worker_done (`--any`: one).
   It prints each reporter's key and subject. Exit status 3 means timeout; it lists who is pending.
-  Default wait 600s, at most 3600. Never poll in a loop.
+  Default wait 600s, at most 3600. Never poll in a loop. Your shell tool may stop a command
+  before that; if the wait is long, end your turn instead and run `brachio task wait` again when
+  you are woken.
 
 As a child (a task a lead created):
 
