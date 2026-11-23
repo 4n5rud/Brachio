@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 anyhow.workspace = true
 brachio-core.workspace = true
 brachio-fs.workspace = true
+brachio-power.workspace = true
 brachio-pty.workspace = true
 brachio-git.workspace = true
 brachio-process.workspace = true
@@ -40,9 +41,6 @@ tracing.workspace = true
 trash = "5"
 tracing-subscriber.workspace = true
 uuid.workspace = true
-
-[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-keepawake = { version = "=0.6.1", default-features = false }
 
 [lints]
 workspace = true

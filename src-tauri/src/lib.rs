@@ -276,7 +276,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(keep_awake::KeepAwake::start())
+        .manage(brachio_power::KeepAwake::start())
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(
             Arc::new(SessionManager::default()),
@@ -307,7 +307,7 @@ pub fn run() {
             resource_usage::task_processes,
             resource_usage::task_process_kill,
             tray_update,
-            keep_awake::keep_awake_supported,
+            keep_awake::keep_awake_status,
             keep_awake::keep_awake_set,
             terminal::agents_detect,
             update_release::open_update_release,

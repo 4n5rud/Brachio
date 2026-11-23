@@ -12,13 +12,21 @@ function load(): boolean {
 }
 
 const [enabled, setEnabled] = createSignal(load());
-const [supported, setSupported] = createSignal(false);
+export type KeepAwakeStatus =
+  | { state: "supported" }
+  | { state: "unavailable"; reason: string }
+  | { state: "unsupported" };
+
+const [status, setStatus] = createSignal<KeepAwakeStatus>({ state: "unsupported" });
 
 /** Whether the user asked to keep the computer awake while an agent works. */
 export const keepAwakeEnabled = enabled;
 
-/** Whether this system can be kept awake; the setting is hidden where it cannot. */
-export const keepAwakeSupported = supported;
+/** Whether this system can be kept awake: offered, shown as unavailable with a reason, or hidden. */
+export const keepAwakeStatus = status;
+
+/** Whether the setting works right now. */
+export const keepAwakeSupported = () => status().state === "supported";
 
 export function updateKeepAwake(next: boolean): void {
   setEnabled(next);
@@ -31,7 +39,7 @@ export function updateKeepAwake(next: boolean): void {
 
 /** Asks the app whether keeping awake works here. Only the desktop app can answer. */
 export function detectKeepAwake(): void {
-  invoke<boolean>("keep_awake_supported").then(setSupported, () => setSupported(false));
+  invoke<KeepAwakeStatus>("keep_awake_status").then(setStatus, () => setStatus({ state: "unsupported" }));
 }
 
 /** Holds the computer awake or lets it sleep; rejects when the system refuses. */

@@ -662,6 +662,7 @@ export const ko: Messages = {
   "settings.keepAwake": "컴퓨터 절전 막기",
   "settings.keepAwakeHint": "에이전트가 일하는 동안만 막고, 모두 멈추면 다시 잠들 수 있습니다.",
   "settings.keepAwakeFailed": "절전 방지 설정 실패",
+  "settings.keepAwakeUnavailable": "이 환경에서는 쓸 수 없습니다. 절전 방지 서비스가 응답하지 않습니다.",
   "settings.notifications": "데스크톱 알림",
   "settings.reportProblem": "문제 신고하기",
   "settings.navGeneral": "일반",
