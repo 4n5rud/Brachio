@@ -798,7 +798,7 @@ export const en = {
   "activity.promptSent": "Prompt sent",
   "activity.prompt.first": "First prompt",
   "activity.prompt.queue": "From the queue",
-  "activity.prompt.steer": "Steered while working",
+  "activity.prompt.steer": "Steered",
   "activity.agentWorking": "Agent working",
   "activity.agentIdle": "Agent idle",
   "activity.agentBlocked": "Agent blocked",

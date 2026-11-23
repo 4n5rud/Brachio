@@ -311,8 +311,9 @@ export function TaskView(props: {
   };
   // Queued prompts go to a tab when its agent is idle. A tab is held after a send (or a draft) until
   // the agent has left idle, so one prompt is never followed at once by the next.
-  const noteSentPrompt = (how: "queue" | "steer") => {
-    if ("__TAURI_INTERNALS__" in window) void recordTaskActivity(props.task.id, "prompt_sent", how, Date.now()).catch(() => {});
+  const noteSentPrompt = (how: "queue" | "steer", tab?: string) => {
+    const detail = tab ? `${how}:${tab}` : how;
+    if ("__TAURI_INTERNALS__" in window) void recordTaskActivity(props.task.id, "prompt_sent", detail, Date.now()).catch(() => {});
   };
   const queueHolds = new Map<string, number>();
   const [queueTick, setQueueTick] = createSignal(0);
@@ -358,7 +359,10 @@ export function TaskView(props: {
       pushToast({ tone: "error", message: t("queue.steer.typing") });
       return false;
     }
-    if (prepared && await prepared.insert(true)) return true;
+    if (prepared && await prepared.insert(true)) {
+      noteSentPrompt("steer", selectionTargets("").find((target) => target.key === key)?.label);
+      return true;
+    }
     pushToast({ tone: "error", message: t("queue.steerFailed") });
     return false;
   };
