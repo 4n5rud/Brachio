@@ -1,0 +1,13 @@
+[package]
+name = "brachio-power"
+description = "Keeps the computer from sleeping while agents work."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
+keepawake = { version = "=0.6.1", default-features = false }

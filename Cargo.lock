@@ -414,13 +414,13 @@ dependencies = [
  "brachio-core",
  "brachio-fs",
  "brachio-git",
+ "brachio-power",
  "brachio-process",
  "brachio-pty",
  "brachio-qa",
  "brachio-runtime",
  "brachio-store",
  "interprocess",
- "keepawake",
  "rusqlite",
  "serde",
  "serde_json",
@@ -493,6 +493,13 @@ version = "0.2.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "brachio-power"
+version = "0.2.0-rc.1"
+dependencies = [
+ "keepawake",
 ]
 
 [[package]]

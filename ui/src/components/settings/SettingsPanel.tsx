@@ -4,7 +4,7 @@ import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
 import { isMac } from "../../lib/shortcut";
 import { prioritySortEnabled, updatePrioritySort } from "../../lib/sidebar-sort";
-import { keepAwakeEnabled, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
+import { keepAwakeEnabled, keepAwakeStatus, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
 import { AlertSoundSettings } from "./AlertSoundSettings";
 import { openSystemCheck } from "../SystemCheckDialog";
 import { quitConfirmEnabled, setQuitConfirmEnabled } from "../../lib/quit-confirm";
@@ -174,8 +174,10 @@ export function SettingsPanel(props: {
               onChange={props.onNotifications} />
             <Toggle checked={prioritySortEnabled()} label={t("settings.prioritySort")} hint={t("settings.prioritySortHint")}
               onChange={updatePrioritySort} />
-            <Show when={keepAwakeSupported()}>
-              <Toggle checked={keepAwakeEnabled()} label={t("settings.keepAwake")} hint={t("settings.keepAwakeHint")}
+            <Show when={keepAwakeStatus().state !== "unsupported"}>
+              <Toggle checked={keepAwakeSupported() && keepAwakeEnabled()} label={t("settings.keepAwake")}
+                disabled={!keepAwakeSupported()}
+                hint={keepAwakeSupported() ? t("settings.keepAwakeHint") : t("settings.keepAwakeUnavailable")}
                 onChange={updateKeepAwake} />
             </Show>
             <Toggle checked={quitConfirmEnabled()} label={t("settings.confirmQuit")} hint={t("settings.confirmQuitHint")}

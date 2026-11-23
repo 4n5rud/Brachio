@@ -640,6 +640,7 @@ export const en = {
   "settings.keepAwake": "Keep the computer awake",
   "settings.keepAwakeHint": "While any agent is working. It can sleep again once they stop.",
   "settings.keepAwakeFailed": "Could not keep the computer awake.",
+  "settings.keepAwakeUnavailable": "Not supported here: no power inhibitor answered on this system.",
   "settings.notifications": "Desktop notifications",
   "settings.reportProblem": "Report a problem",
   "settings.navGeneral": "General",

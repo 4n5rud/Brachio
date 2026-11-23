@@ -4,6 +4,7 @@ members = [
     "crates/brachio-core",
     "crates/brachio-process",
     "crates/brachio-fs",
+    "crates/brachio-power",
     "crates/brachio-pty",
     "crates/brachio-runtime",
     "crates/brachio-git",
@@ -20,6 +21,7 @@ default-members = [
     "crates/brachio-core",
     "crates/brachio-process",
     "crates/brachio-fs",
+    "crates/brachio-power",
     "crates/brachio-pty",
     "crates/brachio-runtime",
     "crates/brachio-git",
@@ -41,6 +43,7 @@ repository = "https://github.com/4n5rud/Brachio"
 brachio-core = { path = "crates/brachio-core" }
 brachio-process = { path = "crates/brachio-process" }
 brachio-fs = { path = "crates/brachio-fs" }
+brachio-power = { path = "crates/brachio-power" }
 brachio-pty = { path = "crates/brachio-pty" }
 brachio-git = { path = "crates/brachio-git" }
 brachio-agent = { path = "crates/brachio-agent" }

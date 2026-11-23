@@ -39,7 +39,7 @@ import { StatusBar } from "./components/StatusBar";
 import type { SettingsPage } from "./components/settings/SettingsPanel";
 import { TaskList } from "./components/TaskList";
 import { listPinnedTasks, setTaskPinned } from "./lib/task-pins";
-import { detectKeepAwake, holdAwake, keepAwakeEnabled } from "./lib/keep-awake";
+import { detectKeepAwake, holdAwake, keepAwakeEnabled, keepAwakeSupported } from "./lib/keep-awake";
 import { TaskView, type DraftTarget } from "./components/TaskView";
 import { TitleBar, type View } from "./components/TitleBar";
 import { loadColorTheme, loadThemeMode, resolveDataTheme, saveColorTheme, saveThemeMode, type ColorTheme, type ThemeMode } from "./lib/theme";
@@ -229,7 +229,7 @@ export function App() {
   const anyAgentWorking = createMemo(() => rows().some((task) => taskGroup(task.status) === "working"));
   createEffect(() => {
     if (!inTauri) return;
-    const on = keepAwakeEnabled() && anyAgentWorking();
+    const on = keepAwakeEnabled() && keepAwakeSupported() && anyAgentWorking();
     holdAwake(on).catch((failure) => {
       if (on) pushToast({ tone: "error", title: t("settings.keepAwakeFailed"), message: String(failure) });
     });
