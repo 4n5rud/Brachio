@@ -613,13 +613,11 @@ mod tests {
             assert_eq!(refused, None);
             assert!(notices.lock().expect("lock").is_empty());
 
+            // The app may close the connection before these writes finish.
             let mut stream = transport::connect(&name).await.expect("connect");
-            write_message(&mut stream, &json!({ "hook_token": "wrong" }), MAX_MESSAGE)
-                .await
-                .expect("send hello");
-            write_message(&mut stream, &request("task1:agent"), MAX_MESSAGE)
-                .await
-                .expect("send request");
+            let _ =
+                write_message(&mut stream, &json!({ "hook_token": "wrong" }), MAX_MESSAGE).await;
+            let _ = write_message(&mut stream, &request("task1:agent"), MAX_MESSAGE).await;
             tokio::time::sleep(Duration::from_millis(300)).await;
             assert!(notices.lock().expect("lock").is_empty());
 
