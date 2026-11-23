@@ -6,6 +6,9 @@ import { detectAgents, type InstalledAgent } from "../../lib/terminal";
 import { Button } from "../ui/Button";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { Notice } from "../ui/Notice";
+import { agentLimit, MAX_AGENT_LIMIT, updateAgentLimit } from "../../lib/agent-limit";
+import { Input } from "../ui/Input";
+import { SettingRow } from "./SettingRow";
 import { AgentCard, type AccountState, type UsageRow } from "./AgentCard";
 
 interface AuthStatus {
@@ -132,7 +135,13 @@ export function AgentList(props: {
 export function AgentSettings() {
   const [agents, { refetch }] = createResource(detectAgents);
   return (
-    <AgentList agents={agents.error ? [] : agents()} error={agents.error ? String(agents.error) : undefined}
-      onRefresh={() => void refetch()} card={(agent) => <AgentAccount agent={agent} />} />
+    <>
+      <SettingRow label={t("settings.agentLimit")} hint={t("settings.agentLimitHint")}>
+        <Input class="input-num" type="number" aria-label={t("settings.agentLimit")} min={1} max={MAX_AGENT_LIMIT} step={1}
+          value={agentLimit() === 0 ? "" : String(agentLimit())} onChange={(event) => updateAgentLimit(event.currentTarget.value)} />
+      </SettingRow>
+      <AgentList agents={agents.error ? [] : agents()} error={agents.error ? String(agents.error) : undefined}
+        onRefresh={() => void refetch()} card={(agent) => <AgentAccount agent={agent} />} />
+    </>
   );
 }
