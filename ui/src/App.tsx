@@ -56,6 +56,7 @@ import { registerActions, registerGoToSource } from "./lib/actions";
 import { CuesDialog } from "./components/CuesDialog";
 import { canRunShellCues, cueManagerRepo, closeCueManager, cuesOf, loadCues, openCueManager, registerPromptCueSender, runCue } from "./lib/cues";
 import { pushUndoToast } from "./lib/undo";
+import { agentLimit, exceedsAgentLimit, runningInProject } from "./lib/agent-limit";
 import { tokenLabel, tokenUsage, tokenTotal, watchTokenUsage } from "./lib/token-usage";
 import { loadFilesUnlessCancelled } from "./lib/quick-open";
 import { typingTarget } from "./lib/typing-target";
@@ -853,6 +854,15 @@ export function App() {
   const create = async (input: NewTaskInput) => {
     const current = dialogRepo();
     if (!current) return;
+    const running = runningInProject(live(), tasks(), current.id);
+    if (exceedsAgentLimit(agentLimit(), running, input.compare ? 2 : 1)) {
+      pushToast({
+        tone: "error",
+        message: t("newTask.agentLimit").replace("{project}", () => current.name)
+          .replace("{running}", String(running)).replace("{limit}", String(agentLimit())),
+      });
+      return;
+    }
     // A background task starts its terminal and gets the "new" mark, but selection and focus stay put.
     const settle = (record: CreatedTask) => {
       if (!input.background) return open(record.id);
