@@ -43,6 +43,7 @@ export const en = {
   "sidebar.newTask": "New task",
   "layout.resizeSidebar": "Resize the task list",
   "layout.resizeInspector": "Resize the inspector",
+  "layout.resizeSplit": "Resize the split terminals",
   "sidebar.dropTitle": "Drop to add a project",
   "sidebar.dropBody": "A Git repository becomes a project with worktrees. Any other folder becomes a folder workspace.",
   "recent.title": "Recent tasks",

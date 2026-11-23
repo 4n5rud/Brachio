@@ -1,11 +1,14 @@
 .panel-resizer {
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resizer-sidebar,
+.panel-resizer-inspector {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 6px;
-  z-index: 5;
-  cursor: col-resize;
-  touch-action: none;
 }
 .panel-resizer-sidebar {
   left: calc(var(--size-sidebar) - 3px);
@@ -13,9 +16,21 @@
 .panel-resizer-inspector {
   right: calc(var(--inspector-now) - 3px);
 }
+/* Fills the middle column of the split terminal grid. */
+.panel-resizer-split {
+  position: relative;
+  min-height: 0;
+}
 .panel-resizer:hover,
 .panel-resizer:focus-visible {
   background: var(--color-accent);
   opacity: 0.5;
   outline: none;
+}
+/* Set while a split handle is dragged, so the pointer over a terminal neither selects text nor changes cursor. */
+:root.split-resizing,
+:root.split-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
