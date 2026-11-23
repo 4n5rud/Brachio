@@ -40,10 +40,11 @@ import { onNewTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
 import { PromptQueue } from "./PromptQueue";
-import { SEND_SETTLE_MS, autoSendOn, queueAction, queuedPrompts, removeQueuedPrompt } from "../lib/prompt-queue";
+import { SEND_SETTLE_MS, autoSendOn, queueAction, queuedPrompts, removeQueuedPrompt, steerBlock } from "../lib/prompt-queue";
 import { isMac } from "../lib/shortcut";
 import { clearSelectionRequest, fencedSelection, selectionRequest } from "../lib/selection-send";
 import { pushToast } from "../lib/toasts";
+import type { AgentKind } from "../lib/agent-catalog";
 import { tokenUsage } from "../lib/token-usage";
 import { NEW_TAB_KEYS } from "../lib/shortcut";
 import { TerminalPane, type PrepareDraft, type TerminalSession } from "./TerminalPane";
@@ -340,6 +341,22 @@ export function TaskView(props: {
     for (const key of [terminalKey(id, "agent"), ...agentTabs(id).map((tab) => tabKey(id, tab))]) drainQueue(key);
   });
   const [queueOpen, setQueueOpen] = createSignal(false);
+  const agentOfKey = (key: string): AgentKind => {
+    const tab = agentTabs(props.task.id).find((candidate) => tabKey(props.task.id, candidate) === key);
+    return tab ? UI_AGENT[tab.kind as Exclude<TabKind, "shell">] : props.task.agent;
+  };
+  // Typed into the working agent and sent with Enter, which is how the agent itself folds in a follow-up.
+  const steerTab = async (key: string, text: string) => {
+    const writer = key === terminalKey(props.task.id, "agent") ? primaryWriters.get(props.task.id) : secondaryWriters.get(key);
+    const prepared = writer?.(text, { steering: true });
+    if (prepared && steerBlock({ agent: agentOfKey(key), tone: tabTone(key), userTyped: prepared.userTyped, text }) === "typing") {
+      pushToast({ tone: "error", message: t("queue.steer.typing") });
+      return false;
+    }
+    if (prepared && await prepared.insert(true)) return true;
+    pushToast({ tone: "error", message: t("queue.steerFailed") });
+    return false;
+  };
   const tailLabel = (key: string) => {
     const title = props.findTask(taskIdOf(key))?.title ?? key;
     return `${title} · ${key.split(":")[1]?.startsWith("shell") ? t("task.shell") : t("attach.agentTab")}`;
@@ -775,7 +792,7 @@ export function TaskView(props: {
           </For>
         </div>
         <Show when={queueOpen() ? activeAgentTab() : undefined} keyed>
-          {(key) => <PromptQueue tabKey={key} />}
+          {(key) => <PromptQueue tabKey={key} agent={agentOfKey(key)} tone={tabTone(key)} onSteer={(text) => steerTab(key, text)} />}
         </Show>
         <Show when={activeAgentTab() && activeAgentTab() === inboxTab() ? inboxTab() : undefined} keyed>
           {(key) => <MailboxInbox tabKey={key} revision={props.mailboxRevision}
