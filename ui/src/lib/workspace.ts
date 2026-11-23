@@ -91,7 +91,9 @@ export const importWorktrees = (repoId: string, paths: string[]) =>
 export const listTasks = () => invoke<TaskRecord[]>("task_list");
 /** A task that was just created, with the setup commands its repository asks to run. */
 export type CreatedTask = TaskRecord & { setupCommands: string[]; setupCopyError?: string | null };
-export const createTask = (request: CreateTaskRequest) => invoke<CreatedTask>("task_create", { request });
+/** A repeated `requestId` returns the task the first call created instead of making another. */
+export const createTask = (request: CreateTaskRequest, requestId?: string) =>
+  invoke<CreatedTask>("task_create", { request, requestId });
 export const repoCodexConversations = (id: string) =>
   invoke<CodexConversation[]>("repo_codex_conversations", { id });
 export const retrySetupCopy = (id: string) => invoke<void>("task_retry_setup_copy", { id });

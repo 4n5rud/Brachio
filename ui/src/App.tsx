@@ -835,7 +835,12 @@ export function App() {
     setSetupRevision((revision) => revision + 1);
   };
 
-  const createOne = async (repoId: string, input: NewTaskInput, agent: AgentKind, compareGroup?: string) => {
+  const createOne = async (
+    repoId: string,
+    input: Omit<NewTaskInput, "requestId"> & { requestId?: string },
+    agent: AgentKind,
+    compareGroup?: string,
+  ) => {
     const record = await createTask({
       repoId,
       parentTaskId: input.parentTaskId ?? null,
@@ -846,7 +851,7 @@ export function App() {
       codexConversationId: input.codexConversationId ?? null,
       compareGroup: compareGroup ?? null,
       profile: input.profile ?? null,
-    });
+    }, input.requestId && `${input.requestId}:${agent}`);
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;
     if (setupCopyError) {

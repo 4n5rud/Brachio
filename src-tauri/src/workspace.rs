@@ -319,8 +319,11 @@ pub fn task_list(database: State<'_, Database>) -> Result<Vec<TaskRecord>, Strin
     TaskRecord::list_open(&*database.lock()?).map_err(to_text)
 }
 
+/// Answers already given to `task_create`, by the id the window chose for the submission.
+pub type TaskCreateReceipts = crate::request_receipts::RequestReceipts<CreatedTask>;
+
 /// A task that was just created.
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedTask {
     #[serde(flatten)]
@@ -352,9 +355,17 @@ impl CreatedTask {
 pub async fn task_create(
     database: State<'_, Database>,
     worktrees: State<'_, TaskWorktreeLocks>,
+    receipts: State<'_, TaskCreateReceipts>,
     request: CreateTaskRequest,
+    request_id: Option<String>,
 ) -> Result<CreatedTask, String> {
-    create_task(&database, &worktrees, request).await
+    // The dialog sends one id per submission, so a double click or a retry gets the first task.
+    let Some(request_id) = request_id.filter(|id| !id.trim().is_empty()) else {
+        return create_task(&database, &worktrees, request).await;
+    };
+    receipts
+        .once(&request_id, || create_task(&database, &worktrees, request))
+        .await
 }
 
 /// The work of [`task_create`], shared with tasks that agents ask for. A profile is checked
@@ -639,6 +650,14 @@ fn archive_unless_children_open(
     id: &str,
     now_ms: i64,
 ) -> Result<(), String> {
+    if TaskRecord::get(connection, id)
+        .map_err(to_text)?
+        .archived_at_ms
+        .is_some()
+    {
+        // A second click must not move the archive time.
+        return Ok(());
+    }
     let children: Vec<String> = TaskRecord::list_open(connection)
         .map_err(to_text)?
         .into_iter()
@@ -1017,6 +1036,25 @@ pub(crate) async fn live_task_terminals(
 
 /// Loads an archived task and the repository it belongs to. Only archived tasks can be deleted,
 /// so no terminal is still using the worktree.
+/// `None` when a concurrent delete finished first.
+fn archived_task_if_present(
+    database: &Database,
+    id: &str,
+) -> Result<Option<(TaskRecord, RepoRecord)>, String> {
+    match archived_task(database, id) {
+        Ok(found) => Ok(Some(found)),
+        Err(_)
+            if matches!(
+                TaskRecord::get(&*database.lock()?, id),
+                Err(brachio_store::StoreError::NotFound { .. })
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecord), String> {
     let connection = database.lock()?;
     let task = TaskRecord::get(&connection, id).map_err(to_text)?;
@@ -1105,11 +1143,16 @@ async fn delete_task(
     id: &str,
     expected_fingerprint: &str,
 ) -> Result<(), String> {
-    let repo_id = TaskRecord::get(&*database.lock()?, id)
-        .map_err(to_text)?
-        .repo_id;
-    let _guard = worktrees.acquire(&repo_id).await?;
-    let (task, repo) = archived_task(database, id)?;
+    let existing = match TaskRecord::get(&*database.lock()?, id) {
+        Ok(task) => task,
+        // A repeated delete, or a retry after the first one finished.
+        Err(brachio_store::StoreError::NotFound { .. }) => return Ok(()),
+        Err(error) => return Err(to_text(error)),
+    };
+    let _guard = worktrees.acquire(&existing.repo_id).await?;
+    let Some((task, repo)) = archived_task_if_present(database, id)? else {
+        return Ok(());
+    };
     ensure_no_live_terminals(live_task_terminals(database, terminals, in_app, id).await)?;
     // A folder project's task runs in the user's own folder, which must never be removed. The
     // same holds for a task that runs in the project's own root, as a converted scratch task does.
@@ -2124,6 +2167,18 @@ mod folder_task_deletion_tests {
         tauri::async_runtime::block_on(delete_task(&database, &locks, &runtime, &in_app, "t1", ""))
             .expect("deleted once stopped");
         assert!(TaskRecord::get(&database.lock().expect("lock"), "t1").is_err());
+
+        tauri::async_runtime::block_on(delete_task(&database, &locks, &runtime, &in_app, "t1", ""))
+            .expect("a repeated delete is a no-op");
+    }
+
+    #[test]
+    fn archiving_twice_keeps_the_first_archive_time() {
+        let database = folder_task_database();
+        let connection = database.lock().expect("lock");
+        super::archive_unless_children_open(&connection, "t1", 99).expect("repeat archive");
+        let task = TaskRecord::get(&connection, "t1").expect("task");
+        assert_eq!(task.archived_at_ms, Some(1));
     }
 }
 
