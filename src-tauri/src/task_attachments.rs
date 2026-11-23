@@ -43,12 +43,16 @@ fn save_images(root: &Path, sources: &[PathBuf]) -> Result<Vec<String>, String> 
             .map(str::to_ascii_lowercase)
             .filter(|text| IMAGE_EXTENSIONS.contains(&text.as_str()))
             .ok_or_else(|| "Only PNG, JPEG, GIF and WebP images can be attached.".to_owned())?;
-        let kind = fs::symlink_metadata(source).map_err(|_| "An image no longer exists.".to_owned())?;
+        let kind =
+            fs::symlink_metadata(source).map_err(|_| "An image no longer exists.".to_owned())?;
         if !kind.is_file() {
             return Err("Only image files can be attached.".to_owned());
         }
         if kind.len() > MAX_IMAGE_BYTES {
-            return Err(format!("An image is larger than {} MB.", MAX_IMAGE_BYTES / 1024 / 1024));
+            return Err(format!(
+                "An image is larger than {} MB.",
+                MAX_IMAGE_BYTES / 1024 / 1024
+            ));
         }
         checked.push((source, extension));
     }
@@ -66,7 +70,13 @@ fn save_images(root: &Path, sources: &[PathBuf]) -> Result<Vec<String>, String> 
             .and_then(|text| text.to_str())
             .unwrap_or("image")
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .take(40)
             .collect();
         let mut name = format!("{stem}.{extension}");
@@ -98,7 +108,10 @@ mod tests {
 
         assert_eq!(first, [".brachio/attachments/My-shot.png"]);
         assert_eq!(second, [".brachio/attachments/My-shot-2.png"]);
-        assert_eq!(fs::read_to_string(task.path().join(".brachio/.gitignore")).expect("ignore"), "*\n");
+        assert_eq!(
+            fs::read_to_string(task.path().join(".brachio/.gitignore")).expect("ignore"),
+            "*\n"
+        );
     }
 
     #[test]
@@ -109,7 +122,10 @@ mod tests {
         assert!(save_images(task.path(), &[text]).is_err());
 
         let big = task.path().join("big.png");
-        fs::File::create(&big).expect("big").set_len(11 * 1024 * 1024).expect("size");
+        fs::File::create(&big)
+            .expect("big")
+            .set_len(11 * 1024 * 1024)
+            .expect("size");
         assert!(save_images(task.path(), &[big]).is_err());
         assert!(save_images(task.path(), &[]).is_err());
     }
