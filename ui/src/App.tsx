@@ -106,6 +106,7 @@ interface LiveStatus {
   at: number;
 }
 
+const TIMELINE_STATES: ReadonlySet<string> = new Set(["working", "idle", "blocked"]);
 const ACTIVITY_LIMIT = 100;
 
 export function App() {
@@ -536,6 +537,7 @@ export function App() {
   const takePrompt = (taskId: string) => {
     const prompt = firstPrompts.get(taskId);
     firstPrompts.delete(taskId);
+    if (inTauri && prompt) recordTaskActivity(taskId, "prompt_sent", "first", Date.now()).catch(report);
     return prompt;
   };
   const draftComment = async (id: string, text: string, reminderFor?: string) => {
@@ -640,6 +642,9 @@ export function App() {
     const wasActive = taskActive();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
     if (inTauri && wasActive !== taskActive()) void recordTurnBoundary(taskId, taskActive());
+    if (inTauri && previous.state !== status.state && TIMELINE_STATES.has(status.state)) {
+      recordTaskActivity(taskId, "agent_status", status.state, at).catch(report);
+    }
     const watching = selectedId() === taskId && view() === "tasks" && windowFocused();
     if (finishedUnseen(previous, status, watching)) setUnreadFinish((marks) => new Set(marks).add(taskId));
     if (task.parentTaskId && sessionKey === `${taskId}:agent` && inTauri && previous.state !== status.state

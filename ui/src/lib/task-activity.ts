@@ -62,12 +62,34 @@ const SIMPLE: Record<string, { key: MessageKey; tone: StatusTone }> = {
   handoff_rejected: { key: "activity.handoffRejected", tone: "error" },
   mail_received: { key: "activity.mailReceived", tone: "unknown" },
   git_action: { key: "activity.gitAction", tone: "done" },
+  prompt_sent: { key: "activity.promptSent", tone: "ready" },
 };
 
 const GIT_LABEL: Record<string, MessageKey> = {
   commit: "activity.git.commit",
   push: "activity.git.push",
   "pull request": "activity.git.pullRequest",
+};
+
+const AGENT_STATUS: Record<string, { key: MessageKey; tone: StatusTone }> = {
+  working: { key: "activity.agentWorking", tone: "working" },
+  idle: { key: "activity.agentIdle", tone: "ready" },
+  blocked: { key: "activity.agentBlocked", tone: "blocked" },
+};
+
+const PROMPT_SOURCE: Record<string, MessageKey> = {
+  first: "activity.prompt.first",
+  queue: "activity.prompt.queue",
+  steer: "activity.prompt.steer",
+};
+
+const PR_EVENT: Record<string, { key: MessageKey; tone: StatusTone }> = {
+  found: { key: "activity.pr.found", tone: "unknown" },
+  merged: { key: "activity.pr.merged", tone: "done" },
+  closed: { key: "activity.pr.closed", tone: "unknown" },
+  reopened: { key: "activity.pr.reopened", tone: "ready" },
+  checks_passed: { key: "activity.pr.checksPassed", tone: "ready" },
+  checks_failed: { key: "activity.pr.checksFailed", tone: "error" },
 };
 
 const QA_OUTCOME: Record<string, MessageKey> = {
@@ -95,6 +117,26 @@ export function describeActivity(entry: StoredActivity): ActivityRow {
       detail: outcome ? t(outcome) : null,
       tone: passed ? "ready" : "error",
     };
+  }
+  if (kind === "agent_status") {
+    const status = AGENT_STATUS[detail ?? ""];
+    return status ? { ...base, label: t(status.key), detail: null, tone: status.tone }
+      : { ...base, label: t("activity.other"), detail: null, tone: "unknown" };
+  }
+  if (kind === "prompt_sent") {
+    const source = PROMPT_SOURCE[detail ?? ""];
+    return { ...base, label: t("activity.promptSent"), detail: source ? t(source) : null, tone: "ready" };
+  }
+  if (kind === "restore_point") {
+    const [action, number] = (detail ?? "").split(" ");
+    const label = action === "restored" ? t("activity.restorePointRestored") : t("activity.restorePointCreated");
+    return { ...base, label, detail: number ?? null, tone: action === "restored" ? "blocked" : "unknown" };
+  }
+  if (kind === "pr_event") {
+    const [event, number] = (detail ?? "").split(" ");
+    const known = PR_EVENT[event ?? ""];
+    return known ? { ...base, label: t(known.key), detail: number ?? null, tone: known.tone }
+      : { ...base, label: t("activity.pr.other"), detail: detail, tone: "unknown" };
   }
   if (kind === "git_action") {
     const git = detail && GIT_LABEL[detail];

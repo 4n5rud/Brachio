@@ -113,8 +113,12 @@ pub async fn task_checkpoint_turn(
     } else {
         CaptureKind::TurnEnd
     };
+    let task_id = id.clone();
     let created =
         blocking(move || brachio_git::capture_checkpoint(&Git::new(&worktree), &id, kind)).await?;
+    if let Some(point) = &created {
+        record_restore_point(&database, &task_id, &format!("created #{}", point.number));
+    }
     Ok(created.is_some())
 }
 
@@ -173,6 +177,7 @@ pub async fn task_checkpoint_restore(
     if tracker.is_active(&id)? {
         return Err("The agent is working. Wait for the turn to finish, then restore.".to_owned());
     }
+    let task_id = id.clone();
     let _task_guard = locks.acquire(&format!("checkpoint:{id}")).await?;
     let (task, _repo_guard) = lock_open_git_task(&database, &locks, &id).await?;
     if tracker.is_active(&id)? {
@@ -183,9 +188,23 @@ pub async fn task_checkpoint_restore(
         brachio_git::restore_checkpoint(&Git::new(&worktree), Path::new(&worktree), &id, number)
     })
     .await?;
+    record_restore_point(&database, &task_id, &format!("restored #{number}"));
     Ok(CheckpointRestored {
         backup_number: restored.backup_number,
     })
+}
+
+/// Puts a restore point on the task's timeline; a failure only loses that line, so it is logged.
+fn record_restore_point(database: &Database, task_id: &str, detail: &str) {
+    let Ok(connection) = database.lock() else {
+        return;
+    };
+    let at = crate::pr_status::now_ms();
+    if let Err(error) =
+        brachio_store::record_activity(&connection, task_id, "restore_point", Some(detail), at)
+    {
+        tracing::warn!(%error, "could not record a restore point");
+    }
 }
 
 /// Drops all of a task's restore points, for when it is archived or deleted. A failure only
