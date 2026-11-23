@@ -1,0 +1,18 @@
+{
+  "description": "A tool call blocks on permission with a base64 message, the person approves in the terminal, and the turn continues.",
+  "steps": [
+    { "at_ms": 0, "output": "\u001b]7501;state=working\u001b\\" },
+    { "at_ms": 300, "expect": { "state": "working" } },
+    { "at_ms": 1000, "output": "\u001b]7501;state=blocked:kind=permission:msg=QmFzaDogcG5wbSBhZGQgem9k\u001b\\" },
+    { "at_ms": 1100, "expect": { "state": "working" } },
+    { "at_ms": 1300, "expect": { "state": "blocked", "reason": "permission" } },
+    { "at_ms": 1300, "expect_message": "Bash: pnpm add zod" },
+    { "at_ms": 5000, "output": "\u001b]7501;state=working\u001b\\" },
+    { "at_ms": 5100, "expect": { "state": "blocked", "reason": "permission" } },
+    { "at_ms": 5300, "expect": { "state": "working" } },
+    { "at_ms": 5300, "expect_message": null },
+    { "at_ms": 9000, "output": "\u001b]7501;state=done\u001b\\" },
+    { "at_ms": 9100, "expect": { "state": "working" } },
+    { "at_ms": 9300, "expect": { "state": "idle" } }
+  ]
+}

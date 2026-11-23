@@ -1,0 +1,28 @@
+{
+  "description": "Claude Code asks to run a command; the person allows it in the app.",
+  "agent": "claude",
+  "events": [
+    {
+      "stdin": "{\"session_id\": \"s1\", \"hook_event_name\": \"PermissionRequest\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"pnpm add zod\"}, \"tool_use_id\": \"t1\"}",
+      "key": "task1:agent",
+      "expect_request": {
+        "key": "task1:agent",
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "tool_use_id": "t1"
+      },
+      "decision": {
+        "behavior": "allow"
+      },
+      "expect_output": {
+        "continue": true,
+        "hookSpecificOutput": {
+          "hookEventName": "PermissionRequest",
+          "decision": {
+            "behavior": "allow"
+          }
+        }
+      }
+    }
+  ]
+}
