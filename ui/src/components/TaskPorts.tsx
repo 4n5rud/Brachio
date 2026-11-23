@@ -6,26 +6,7 @@ import { ActionRow, InspectorSection } from "./InspectorSection";
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
-
-const MAX_PORTS = 16;
-const validPort = (port: number) => Number.isInteger(port) && port >= 1 && port <= 65535;
-
-function loadPorts(key: string): PortEntry[] {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
-    if (!Array.isArray(stored)) return [];
-    return stored.filter((item): item is PortEntry =>
-      item !== null && typeof item === "object" && validPort(item.port) && typeof item.secure === "boolean")
-      .slice(0, MAX_PORTS);
-  } catch {
-    return [];
-  }
-}
-
-export interface PortEntry {
-  port: number;
-  secure: boolean;
-}
+import { MAX_PORTS, loadPorts, portsKey, validPort, type PortEntry } from "../lib/task-ports";
 
 /** Ports opened from this task, the one Brachio assigned, and the field to add another. */
 export function PortsPanel(props: {
@@ -87,7 +68,7 @@ export function PortsPanel(props: {
 }
 
 export function TaskPorts(props: { taskId: string }) {
-  const key = `brachio.localPorts.${props.taskId}`;
+  const key = portsKey(props.taskId);
   const [ports, setPorts] = createSignal(loadPorts(key));
   const [input, setInput] = createSignal("");
   const [secure, setSecure] = createSignal(false);

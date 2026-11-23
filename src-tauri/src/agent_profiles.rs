@@ -96,6 +96,29 @@ pub(crate) fn launch_additions(
     }))
 }
 
+/// The profile name of each of the given tasks that has one, so a comparison can show what ran.
+fn profiles_of(
+    connection: &Connection,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut found = std::collections::HashMap::new();
+    for id in ids {
+        if let Some(name) = task_profile(connection, id).map_err(|e| e.to_string())? {
+            found.insert(id.clone(), name);
+        }
+    }
+    Ok(found)
+}
+
+/// The profile each of the tasks was created with; tasks without one are left out.
+#[tauri::command]
+pub fn task_profiles(
+    database: State<'_, Database>,
+    ids: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    profiles_of(&*database.lock()?, &ids)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -182,5 +205,20 @@ args = [\"--yolo\"]
         assert!(launch_additions(&db, "t", &repo, AgentKind::Codex).is_err());
         std::fs::remove_file(dir.path().join("brachio.toml")).unwrap();
         assert!(launch_additions(&db, "t", &repo, AgentKind::Codex).is_err());
+    }
+
+    #[test]
+    fn profiles_are_reported_only_for_the_tasks_that_have_one() {
+        let db = brachio_store::open_in_memory().unwrap();
+        db.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', '/x', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms)
+             VALUES ('a', 'r', 'A', 'p', 'b1', '/w1', 'new', 0), ('b', 'r', 'B', 'p', 'b2', '/w2', 'new', 0);",
+        )
+        .unwrap();
+        brachio_store::set_task_profile(&db, "a", "fast").unwrap();
+        let found = profiles_of(&db, &["a".to_owned(), "b".to_owned()]).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found["a"], "fast");
     }
 }

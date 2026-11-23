@@ -18,6 +18,7 @@ import { registerShellCueRunner } from "../lib/cues";
 import { openInEditor } from "../lib/editor";
 import { noteRecentFile } from "../lib/recent-files";
 import { openExternalLink } from "../lib/pr-status";
+import { previewIfRegistered } from "../lib/local-preview";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
@@ -602,11 +603,13 @@ export function TerminalPane(props: {
     window.addEventListener("blur", releaseModifier);
     host.addEventListener("mousemove", trackModifier);
     const openLink = (link: ReturnType<typeof findTerminalLinks>[number]) => {
+      const taskId = session?.key?.split(":")[0];
       if (link.kind === "url") {
-        openExternalLink(link.url).catch((failure: unknown) => pushToast({ tone: "error", message: String(failure) }));
+        const external = () => openExternalLink(link.url).catch((failure: unknown) => pushToast({ tone: "error", message: String(failure) }));
+        if (!taskId) { void external(); return; }
+        previewIfRegistered(taskId, link.url).then((shown) => { if (!shown) return external(); }, external);
         return;
       }
-      const taskId = session?.key?.split(":")[0];
       const relative = session ? taskRelativePath(link.path, session.cwd) : undefined;
       if (!taskId || !relative) {
         pushToast({ tone: "error", message: t("terminal.linkOutside") });
