@@ -194,6 +194,7 @@ pub(crate) fn mail_summary(
     to_key: &str,
     body: &str,
     id: &str,
+    request_id: Option<&str>,
     now_ms: i64,
 ) -> Result<(), String> {
     let from = TaskRecord::get(connection, from_task_id).map_err(|e| e.to_string())?;
@@ -226,7 +227,7 @@ pub(crate) fn mail_summary(
             body,
             payload_json: None,
             reply_to: None,
-            request_id: None,
+            request_id,
             created_at_ms: now_ms,
         },
     )
@@ -242,6 +243,7 @@ pub fn task_handoff_send(
     from_task_id: String,
     to_key: String,
     body: String,
+    request_id: Option<String>,
 ) -> Result<(), String> {
     {
         let connection = database.lock()?;
@@ -251,6 +253,7 @@ pub fn task_handoff_send(
             &to_key,
             &body,
             &uuid::Uuid::new_v4().hyphenated().to_string(),
+            request_id.as_deref().filter(|id| !id.trim().is_empty()),
             crate::pr_status::now_ms(),
         )?;
     }
@@ -323,14 +326,25 @@ mod tests {
     #[test]
     fn mailing_needs_another_agent_tab_and_a_summary_within_the_cap() {
         let db = db();
-        assert!(mail_summary(&db, "a", "a:agent", "text", "m0", 1).is_err());
-        assert!(mail_summary(&db, "a", "b:agent", "  ", "m1", 1).is_err());
+        assert!(mail_summary(&db, "a", "a:agent", "text", "m0", None, 1).is_err());
+        assert!(mail_summary(&db, "a", "b:agent", "  ", "m1", None, 1).is_err());
         let too_long = "x".repeat(SUMMARY_MAX_BYTES + 1);
-        assert!(mail_summary(&db, "a", "b:agent", &too_long, "m2", 1).is_err());
-        mail_summary(&db, "a", "b:agent", "the summary", "m3", 1).unwrap();
+        assert!(mail_summary(&db, "a", "b:agent", &too_long, "m2", None, 1).is_err());
+        mail_summary(&db, "a", "b:agent", "the summary", "m3", None, 1).unwrap();
         let waiting = brachio_store::peek_inbox(&db, "b:agent", 10).unwrap();
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].kind, "handoff");
         assert_eq!(waiting[0].body, "the summary");
+    }
+
+    #[test]
+    fn sending_the_same_request_twice_leaves_one_message() {
+        let db = db();
+        mail_summary(&db, "a", "b:agent", "the summary", "m1", Some("req"), 1).unwrap();
+        mail_summary(&db, "a", "b:agent", "the summary", "m2", Some("req"), 2).unwrap();
+        assert_eq!(
+            brachio_store::peek_inbox(&db, "b:agent", 10).unwrap().len(),
+            1
+        );
     }
 }

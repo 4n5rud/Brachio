@@ -24,6 +24,7 @@ mod project_cues;
 mod prompt_history;
 mod qa_run;
 mod quit;
+mod request_receipts;
 mod resource_usage;
 mod runtime_client;
 mod runtime_terminals;
@@ -607,5 +608,6 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(workspace::Database(Mutex::new(connection)));
     app.manage(workspace::TaskWorktreeLocks::default());
+    app.manage(workspace::TaskCreateReceipts::default());
     Ok(())
 }
