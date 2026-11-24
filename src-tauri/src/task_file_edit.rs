@@ -192,6 +192,72 @@ pub fn write_editable(
     Ok(version_of(&content, modified_ms(&file)))
 }
 
+/// What a re-check found for an open file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileCheckStatus {
+    Unchanged,
+    Changed,
+    Missing,
+}
+
+/// The result of re-checking a file against the version an editor last read.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCheck {
+    status: FileCheckStatus,
+    /// The file's current version; absent when it is missing.
+    version: Option<FileVersion>,
+}
+
+/// Tells whether a file still has the version an editor last read.
+///
+/// Size and modified time are compared first; the content is read and hashed only when either
+/// differs. A file whose time changed but whose content did not is `Unchanged`, with the new time
+/// in `version` so the next check is cheap again.
+///
+/// # Errors
+/// Refuses a path outside the task, and a file over 2 MiB (`too_large`).
+pub fn check_editable(
+    root: &Path,
+    path: &str,
+    expected: &FileVersion,
+) -> Result<FileCheck, String> {
+    let file = match resolve_preview_path(root, path) {
+        Ok(file) => file,
+        Err(failure) => {
+            let plain = Path::new(path)
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)));
+            if plain && !path.is_empty() && !root.join(path).exists() {
+                return Ok(FileCheck {
+                    status: FileCheckStatus::Missing,
+                    version: None,
+                });
+            }
+            return Err(failure);
+        }
+    };
+    let size = fs::metadata(&file).map_err(to_text)?.len();
+    let modified = modified_ms(&file);
+    if size == expected.size && modified == expected.modified_ms {
+        return Ok(FileCheck {
+            status: FileCheckStatus::Unchanged,
+            version: Some(expected.clone()),
+        });
+    }
+    let version = version_of(&read_limited(&file)?, modified);
+    let status = if version.hash == expected.hash {
+        FileCheckStatus::Unchanged
+    } else {
+        FileCheckStatus::Changed
+    };
+    Ok(FileCheck {
+        status,
+        version: Some(version),
+    })
+}
+
 /// Reads a task's text file for the editor.
 #[tauri::command]
 pub async fn task_file_read(
@@ -203,6 +269,22 @@ pub async fn task_file_read(
     tauri::async_runtime::spawn_blocking(move || read_editable(&task.worktree_path, &path))
         .await
         .map_err(to_text)?
+}
+
+/// Re-checks an open file against the version its tab last read.
+#[tauri::command]
+pub async fn task_file_check(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+    expected: FileVersion,
+) -> Result<FileCheck, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        check_editable(&task.worktree_path, &path, &expected)
+    })
+    .await
+    .map_err(to_text)?
 }
 
 /// Saves the editor's text over a task's file, unless the file changed since it was read.
@@ -239,6 +321,50 @@ mod tests {
         let folder = tempfile::tempdir().expect("folder");
         fs::write(folder.path().join(name), bytes).expect("file");
         folder
+    }
+
+    fn set_modified(file: &Path, time: std::time::SystemTime) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(file)
+            .expect("open")
+            .set_modified(time)
+            .expect("set time");
+    }
+
+    #[test]
+    fn a_check_hashes_only_when_the_size_or_time_differ_and_reports_what_changed() {
+        let folder = folder_with("a.txt", b"aaaa");
+        let file = folder.path().join("a.txt");
+        let read = read_editable(folder.path(), "a.txt").expect("read");
+        let then = fs::metadata(&file).expect("meta").modified().expect("time");
+
+        // Same size and time, different bytes: only a hash would notice, so none is taken.
+        fs::write(&file, b"bbbb").expect("edit");
+        set_modified(&file, then);
+        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Unchanged);
+
+        // A new time with the same bytes is unchanged, and hands back the new time.
+        fs::write(&file, b"aaaa").expect("restore");
+        set_modified(&file, then + std::time::Duration::from_secs(5));
+        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Unchanged);
+        assert_ne!(
+            check.version.expect("version").modified_ms,
+            read.version.modified_ms
+        );
+
+        // Different bytes with a different time are a change.
+        fs::write(&file, b"cccc").expect("edit");
+        set_modified(&file, then + std::time::Duration::from_secs(9));
+        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Changed);
+
+        fs::remove_file(&file).expect("remove");
+        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Missing);
+        assert!(check_editable(folder.path(), "../a.txt", &read.version).is_err());
     }
 
     fn code(error: &str) -> &str {
