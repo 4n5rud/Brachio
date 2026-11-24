@@ -1,4 +1,5 @@
 import { IconButton } from "./ui/IconButton";
+import { visibleInterval } from "../lib/visible-interval";
 import { AttachButton } from "./AttachButton";
 import { TabClose } from "./TabClose";
 import { terminalExcerpt } from "../lib/attachments";
@@ -346,8 +347,7 @@ export function TaskView(props: {
     }).catch(() => queueHolds.delete(key));
   };
   onMount(() => {
-    const timer = setInterval(() => setQueueTick((tick) => tick + 1), 1500);
-    onCleanup(() => clearInterval(timer));
+    onCleanup(visibleInterval(() => setQueueTick((tick) => tick + 1), 1500));
   });
   createEffect(() => {
     queueTick();

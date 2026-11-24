@@ -75,7 +75,8 @@ pub struct QaResultRecord {
 }
 
 /// Stores a run and, when Brachio verified it, attaches it to the task's handoffs of the same
-/// commit. A handoff of any other commit and the agent's `reported_tests` are left alone.
+/// commit that still awaits review. A handoff of any other commit or one already decided, and
+/// the agent's `reported_tests`, are left alone. Runs a handoff points to are never pruned.
 ///
 /// # Errors
 /// Fails when the database does, for instance for an unknown task.
@@ -108,7 +109,9 @@ pub fn save_qa_result(
     let id = transaction.last_insert_rowid();
     transaction.execute(
         "DELETE FROM qa_results WHERE task_id = ?1
-         AND id NOT IN (SELECT id FROM qa_results WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2)",
+         AND id NOT IN (SELECT id FROM qa_results WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2)
+         AND id NOT IN (SELECT verified_qa_result_id FROM task_handoffs
+                        WHERE verified_qa_result_id IS NOT NULL)",
         params![result.task_id, MAX_QA_RESULTS_PER_TASK],
     )?;
     record_activity(
@@ -121,7 +124,7 @@ pub fn save_qa_result(
     if result.verified_by_brachio {
         transaction.execute(
             "UPDATE task_handoffs SET verified_qa_result_id = ?1
-             WHERE task_id = ?2 AND commit_sha = ?3",
+             WHERE task_id = ?2 AND commit_sha = ?3 AND review IS NULL",
             params![id, result.task_id, result.commit_sha],
         )?;
     }
@@ -330,6 +333,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(oldest, "run 3");
+    }
+
+    #[test]
+    fn a_run_attached_to_a_handoff_survives_later_runs() {
+        let mut db = db();
+        handoff(&db, "h-a", SHA_A);
+        let attached = save_qa_result(&mut db, &run(SHA_A, "attached")).unwrap();
+        for index in 0..MAX_QA_RESULTS_PER_TASK + 3 {
+            save_qa_result(&mut db, &run(SHA_B, &format!("run {index}"))).unwrap();
+        }
+        let handoffs = Handoff::for_task(&db, "t").unwrap();
+        assert_eq!(handoffs[0].verified_qa_result_id, Some(attached));
+        assert!(qa_result_by_id(&db, attached).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_new_run_does_not_repoint_a_handoff_that_was_already_decided() {
+        let mut db = db();
+        handoff(&db, "h-a", SHA_A);
+        let first = save_qa_result(&mut db, &run(SHA_A, "first")).unwrap();
+        db.execute(
+            "UPDATE task_handoffs SET review = 'approved', reviewed_at_ms = 2 WHERE id = 'h-a'",
+            [],
+        )
+        .unwrap();
+        save_qa_result(&mut db, &run(SHA_A, "second")).unwrap();
+        let handoffs = Handoff::for_task(&db, "t").unwrap();
+        assert_eq!(handoffs[0].verified_qa_result_id, Some(first));
     }
 
     #[test]

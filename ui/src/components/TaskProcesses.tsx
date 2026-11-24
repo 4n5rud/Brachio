@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { visibleInterval } from "../lib/visible-interval";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { t } from "../i18n";
 import { createRunawayTracker, type ProcessSample } from "../lib/runaway";
@@ -36,8 +37,7 @@ export function TaskProcesses(props: { taskId: string }) {
   };
   onMount(() => {
     void read();
-    const timer = setInterval(() => void read(), POLL_MS);
-    onCleanup(() => clearInterval(timer));
+    onCleanup(visibleInterval(() => void read(), POLL_MS));
   });
   const kill = async (process: TaskProcess) => {
     const agreed = await confirmDialog({

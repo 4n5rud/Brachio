@@ -216,13 +216,36 @@ fn move_folder(from: &Path, to: &Path) -> Result<(), String> {
     if fs::rename(from, to).is_ok() {
         return Ok(());
     }
-    let copied = copy_folder(from, to);
-    if let Err(error) = copied {
+    copy_then_remove(from, to, |path| fs::remove_dir_all(path))
+}
+
+/// Copies `from` to `to`, then removes `from`. When either step fails, `from` is left whole
+/// and `to` is removed, so a retry starts clean.
+fn copy_then_remove(
+    from: &Path,
+    to: &Path,
+    remove: impl Fn(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    if let Err(error) = copy_folder(from, to) {
         let _ = fs::remove_dir_all(to);
         return Err(format!("could not move {}: {error}", from.display()));
     }
-    fs::remove_dir_all(from)
-        .map_err(|error| format!("could not remove {}: {error}", from.display()))
+    if let Err(error) = remove(from) {
+        // Removing may have deleted part of the source; the copy has every file, so put them back.
+        let restored = copy_folder(to, from);
+        if restored.is_ok() {
+            let _ = fs::remove_dir_all(to);
+        }
+        return Err(match restored {
+            Ok(()) => format!("could not remove {}: {error}", from.display()),
+            Err(restore_error) => format!(
+                "could not remove {}: {error}; the full copy is kept at {} ({restore_error})",
+                from.display(),
+                to.display()
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn copy_folder(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -230,13 +253,32 @@ fn copy_folder(from: &Path, to: &Path) -> std::io::Result<()> {
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            copy_link(&entry.path(), &target)?;
+        } else if kind.is_dir() {
             copy_folder(&entry.path(), &target)?;
         } else {
             fs::copy(entry.path(), target)?;
         }
     }
     Ok(())
+}
+
+/// Recreates a symbolic link instead of following it.
+fn copy_link(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.symlink_metadata().is_ok() {
+        return Ok(());
+    }
+    let destination = fs::read_link(from)?;
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(destination, to);
+    #[cfg(windows)]
+    return if from.is_dir() {
+        std::os::windows::fs::symlink_dir(destination, to)
+    } else {
+        std::os::windows::fs::symlink_file(destination, to)
+    };
 }
 
 /// Moves the scratch folder of project `repo_id` to `parent/name`, runs `git init` there and
@@ -462,6 +504,28 @@ mod tests {
 
     fn repo_of(database: &Database, task: &CreatedTask) -> RepoRecord {
         RepoRecord::get(&database.lock().unwrap(), &task.task.repo_id).unwrap()
+    }
+
+    #[test]
+    fn a_failed_removal_after_copying_leaves_the_source_whole_and_the_target_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let from = root.path().join("from");
+        fs::create_dir_all(from.join("sub")).unwrap();
+        fs::write(from.join("a.txt"), "a").unwrap();
+        fs::write(from.join("sub").join("b.txt"), "b").unwrap();
+        let to = root.path().join("to");
+        let partly_removing = |path: &Path| {
+            fs::remove_file(path.join("a.txt"))?;
+            Err(std::io::Error::other("locked"))
+        };
+        let error = copy_then_remove(&from, &to, partly_removing).unwrap_err();
+        assert!(error.contains("could not remove"), "{error}");
+        assert_eq!(fs::read_to_string(from.join("a.txt")).unwrap(), "a");
+        assert_eq!(
+            fs::read_to_string(from.join("sub").join("b.txt")).unwrap(),
+            "b"
+        );
+        assert!(!to.exists());
     }
 
     #[test]

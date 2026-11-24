@@ -1,4 +1,5 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { visibleInterval } from "../lib/visible-interval";
 import { t } from "../i18n";
 import { useAsyncAction } from "../lib/async-action";
 import {
@@ -59,8 +60,7 @@ export function PullRequestStatus(props: { taskId: string }) {
 
   onMount(() => {
     void refresh(false);
-    const clock = setInterval(() => setNow(Date.now()), 30_000);
-    onCleanup(() => clearInterval(clock));
+    onCleanup(visibleInterval(() => setNow(Date.now()), 30_000));
   });
 
   return (

@@ -64,7 +64,10 @@ impl Installed {
         let prompt = prompt.filter(|text| !text.trim().is_empty());
         let (mut launch, delivery) = match prompt {
             None => (self.kind.interactive(), PromptDelivery::None),
-            Some(text) if is_batch_file(&self.path) && !is_safe_for_cmd(text) => {
+            Some(text)
+                if text.len() > MAX_ARGUMENT_PROMPT_BYTES
+                    || (is_batch_file(&self.path) && !is_safe_for_cmd(text)) =>
+            {
                 (self.kind.interactive(), PromptDelivery::TypeIn)
             }
             Some(text) => (
@@ -80,6 +83,10 @@ impl Installed {
         Ok((self.resolve(&launch)?, delivery))
     }
 }
+
+/// Longest first prompt passed as a command-line argument. Longer ones are typed in, which stays
+/// under the runtime's request limit and the Windows command-line limit.
+const MAX_ARGUMENT_PROMPT_BYTES: usize = 16 * 1024;
 
 /// How the first prompt reaches the agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -365,6 +372,12 @@ mod tests {
 
         assert_eq!(plain, PromptDelivery::Argument);
         assert_eq!(risky, PromptDelivery::TypeIn);
+
+        let (long_command, long) = installed
+            .resolve_interactive(Some(&"a".repeat(20 * 1024)), None, vec![])
+            .expect("resolve");
+        assert_eq!(long, PromptDelivery::TypeIn);
+        assert!(long_command.args.iter().all(|arg| arg.len() < 1024));
         assert_eq!(command.env[0].1, "\"C:/npm/claude.cmd\"");
     }
 

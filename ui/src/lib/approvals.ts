@@ -62,6 +62,10 @@ export function partitionHeld(held: readonly ApprovalQuestion[], admit: (questio
 
 export const pendingApprovals = () => invoke<ApprovalQuestion[]>("pending_approvals");
 
+/** Whether the host still waits on this question; false when it cannot be asked. */
+export const isStillPending = (id: number) =>
+  pendingApprovals().then((open) => open.some((question) => question.id === id), () => false);
+
 /** Calls back for every question that opens or closes. Returns a function that stops listening, even before the subscriptions resolve. */
 export function watchApprovals(
   onAsked: (question: ApprovalQuestion) => void,

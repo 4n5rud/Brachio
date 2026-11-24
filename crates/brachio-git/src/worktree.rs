@@ -110,19 +110,29 @@ pub fn unsaved_work(git: &Git, path: &Path, branch: &str) -> Result<UnsavedWork,
         )?;
     }
     let reference = format!("refs/heads/{branch}");
-    // Commits another branch or a remote also holds survive the deletion, so they are not counted.
-    let exclude = format!("--exclude={branch}");
-    let unpushed = git.run(&[
-        "rev-list",
-        "--count",
-        &reference,
-        "--not",
-        "--remotes",
-        &exclude,
-        "--branches",
-    ])?;
-    let unpushed_commits = parse_count(&unpushed).map_err(GitError::UnexpectedOutput)?;
-    let head = git.run(&["rev-parse", "--verify", &reference])?;
+    // A branch deleted outside Brachio holds nothing to lose.
+    let branch_exists = git
+        .run(&["rev-parse", "--verify", "--quiet", &reference])
+        .is_ok();
+    let (unpushed_commits, head) = if branch_exists {
+        // Commits another branch or a remote also holds survive the deletion, so they are not counted.
+        let exclude = format!("--exclude={branch}");
+        let unpushed = git.run(&[
+            "rev-list",
+            "--count",
+            &reference,
+            "--not",
+            "--remotes",
+            &exclude,
+            "--branches",
+        ])?;
+        (
+            parse_count(&unpushed).map_err(GitError::UnexpectedOutput)?,
+            git.run(&["rev-parse", "--verify", &reference])?,
+        )
+    } else {
+        (0, String::new())
+    };
     let uncommitted_files = count(status.entries);
     let ignored_entries = count(ignored.entries);
     // Entries are summed rather than sorted because they are streamed, so their order is free.
@@ -356,7 +366,8 @@ impl Fnv1a {
 }
 
 /// Removes the worktree and its branch whatever they hold. The caller must have shown
-/// `unsaved_work` to the user first. A worktree folder that is already gone is pruned instead.
+/// `unsaved_work` to the user first. A worktree folder that is already gone is pruned instead,
+/// and a branch that is already gone is skipped.
 ///
 /// # Errors
 /// Fails when git refuses, for example when the branch is checked out somewhere else.
@@ -365,6 +376,13 @@ pub fn discard_worktree(git: &Git, path: &Path, branch: &str) -> Result<(), GitE
         git.run(&["worktree", "remove", "--force", &path.to_string_lossy()])?;
     } else {
         git.run(&["worktree", "prune"])?;
+    }
+    let reference = format!("refs/heads/{branch}");
+    if git
+        .run(&["rev-parse", "--verify", "--quiet", &reference])
+        .is_err()
+    {
+        return Ok(());
     }
     git.run(&["branch", "-D", branch]).map(|_| ())
 }

@@ -2,10 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
+use brachio_core::task_graph::TaskState;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
 use crate::database::StoreError;
+use crate::orchestration_record::load_graph;
+use crate::orchestration_schedule::scheduler_enabled;
 use crate::task_activity_record::record_activity;
 
 /// A task as stored.
@@ -77,6 +80,16 @@ pub enum ChildInsertError {
     /// The parent is itself a child, and children cannot have children.
     #[error("the parent task is itself a child task")]
     ParentIsChild,
+    /// The parent's scheduler is off, so a task could not wait for another.
+    #[error(
+        "\"Start automatically\" is off for the parent task, so the child cannot wait for others"
+    )]
+    SchedulerOff,
+    /// A task to wait for is not an open sibling, or can no longer finish.
+    #[error(
+        "{0} is no longer an open task that can finish, so a task waiting for it would never run"
+    )]
+    PredecessorUnavailable(String),
     /// The database failed.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -170,6 +183,7 @@ impl TaskRecord {
         if open >= max_open_children {
             return Err(ChildInsertError::LimitReached);
         }
+        check_predecessors(&transaction, parent_id, after)?;
         let record = Self::insert(&transaction, task)?;
         record_activity(
             &transaction,
@@ -408,6 +422,44 @@ impl TaskRecord {
     }
 }
 
+/// Repeats, inside the insert transaction, the checks made when the child was requested:
+/// the request may have waited minutes for the user's answer.
+fn check_predecessors(
+    connection: &Connection,
+    parent_id: &str,
+    after: &[String],
+) -> Result<(), ChildInsertError> {
+    if after.is_empty() {
+        return Ok(());
+    }
+    if !scheduler_enabled(connection, parent_id).map_err(|e| StoreError::Invalid(e.to_string()))? {
+        return Err(ChildInsertError::SchedulerOff);
+    }
+    let graph =
+        load_graph(connection, parent_id).map_err(|e| StoreError::Invalid(e.to_string()))?;
+    for id in after {
+        let open: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1 AND parent_task_id = ?2
+                               AND archived_at_ms IS NULL)",
+                [id.as_str(), parent_id],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::from)?;
+        let finishable = open
+            && graph.state(id).is_ok_and(|state| {
+                !matches!(
+                    state,
+                    TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
+                )
+            });
+        if !finishable {
+            return Err(ChildInsertError::PredecessorUnavailable(id.clone()));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,6 +638,56 @@ mod tests {
         let mut connection = lead_with_children(4);
         TaskRecord::archive(&connection, "c0", 5).expect("archive");
         assert!(TaskRecord::insert_child(&mut connection, &child("n1", "lead"), 4).is_ok());
+    }
+
+    fn waiting_child(
+        connection: &mut Connection,
+        id: &str,
+        after: &str,
+    ) -> Result<(), ChildInsertError> {
+        TaskRecord::insert_child_after(connection, &child(id, "lead"), 4, &[after.to_owned()])
+            .map(|_| ())
+    }
+
+    #[test]
+    fn a_child_cannot_wait_once_the_scheduler_is_off() {
+        let mut connection = lead_with_children(1);
+        let refused = waiting_child(&mut connection, "n1", "c0");
+        assert!(matches!(refused, Err(ChildInsertError::SchedulerOff)));
+        assert!(TaskRecord::get(&connection, "n1").is_err());
+    }
+
+    #[test]
+    fn a_child_cannot_wait_for_a_failed_or_archived_task() {
+        let mut connection = lead_with_children(2);
+        crate::orchestration_schedule::set_scheduler_enabled(&connection, "lead", true)
+            .expect("enable");
+        connection
+            .execute(
+                "INSERT INTO task_orchestration (task_id, state, updated_at_ms) VALUES ('c0', 'failed', 0)",
+                [],
+            )
+            .expect("fail c0");
+        TaskRecord::archive(&connection, "c1", 5).expect("archive");
+        let failed = waiting_child(&mut connection, "n1", "c0");
+        assert!(matches!(
+            failed,
+            Err(ChildInsertError::PredecessorUnavailable(_))
+        ));
+        let archived = waiting_child(&mut connection, "n2", "c1");
+        assert!(matches!(
+            archived,
+            Err(ChildInsertError::PredecessorUnavailable(_))
+        ));
+        assert!(TaskRecord::get(&connection, "n1").is_err());
+    }
+
+    #[test]
+    fn a_child_can_wait_for_an_open_task_while_the_scheduler_is_on() {
+        let mut connection = lead_with_children(1);
+        crate::orchestration_schedule::set_scheduler_enabled(&connection, "lead", true)
+            .expect("enable");
+        assert!(waiting_child(&mut connection, "n1", "c0").is_ok());
     }
 
     #[test]

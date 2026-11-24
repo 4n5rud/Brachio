@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { visibleInterval } from "../lib/visible-interval";
 import { For, Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { t } from "../i18n";
 import { agentUsageRefreshing, agentUsageUpdatedAt, agentUsages, refreshAgentUsage, startAgentUsagePolling } from "../lib/agent-usage";
@@ -124,10 +125,10 @@ export function StatusBar(props: { sessions: number; onAgentSettings: () => void
         () => setUsageUnavailable(true),
       );
     refresh();
-    const timer = window.setInterval(refresh, REFRESH_MS);
-    const clock = window.setInterval(() => setNow(Date.now() / 1000), CLOCK_MS);
+    const stopRefresh = visibleInterval(refresh, REFRESH_MS);
+    const stopClock = visibleInterval(() => setNow(Date.now() / 1000), CLOCK_MS);
     const stopUsage = startAgentUsagePolling();
-    onCleanup(() => { window.clearInterval(timer); window.clearInterval(clock); stopUsage(); });
+    onCleanup(() => { stopRefresh(); stopClock(); stopUsage(); });
   });
   const memoryTitle = () => {
     const current = usage();

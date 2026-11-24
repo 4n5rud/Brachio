@@ -153,6 +153,25 @@ fn deleting_a_task_reports_and_then_discards_unsaved_work() {
 }
 
 #[test]
+fn a_task_whose_worktree_and_branch_were_deleted_outside_brachio_can_be_discarded() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = init_repo(repo.path());
+    let tree = trees.path().join("g");
+    add(&git, "brachio/g-7", &tree);
+    run(
+        &git,
+        &["worktree", "remove", "--force", &tree.to_string_lossy()],
+    );
+    run(&git, &["branch", "-D", "brachio/g-7"]);
+
+    let work = brachio_git::unsaved_work(&git, &tree, "brachio/g-7").expect("count unsaved work");
+    assert_eq!(work.uncommitted_files, 0);
+    assert_eq!(work.unpushed_commits, 0);
+    brachio_git::discard_worktree(&git, &tree, "brachio/g-7").expect("discard");
+}
+
+#[test]
 fn the_fingerprint_changes_when_work_appears_after_the_preview() {
     let repo = temp_dir();
     let trees = temp_dir();

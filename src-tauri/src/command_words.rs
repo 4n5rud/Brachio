@@ -118,7 +118,6 @@ const SUBCOMMANDS: [(&str, &[&str]); 6] = [
             "show",
             "add",
             "commit",
-            "fetch",
             "blame",
             "ls-files",
             "rev-parse",
@@ -139,16 +138,86 @@ const RUN_SCRIPTS: [&str; 4] = ["test", "build", "lint", "typecheck"];
 
 /// `gh` commands a rule may cover, by group and action.
 const GH_ACTIONS: [(&str, &[&str]); 4] = [
-    (
-        "pr",
-        &[
-            "view", "list", "diff", "checks", "status", "create", "merge", "comment",
-        ],
-    ),
-    ("issue", &["view", "list", "create", "comment"]),
+    ("pr", &["view", "list", "diff", "checks", "status", "merge"]),
+    ("issue", &["view", "list"]),
     ("run", &["view", "list", "watch"]),
     ("repo", &["view"]),
 ];
+
+/// Options that make a listed subcommand run another program, write a file wherever it is told,
+/// read another project's build script, or post a local file. A rule never covers a command that
+/// carries one of them, so it still asks. Long options are matched by name, and by any
+/// abbreviation of at least three characters because the tools accept those.
+const RISKY_LONG: [(&str, &[&str]); 6] = [
+    (
+        "git",
+        &[
+            "--upload-pack",
+            "--receive-pack",
+            "--exec",
+            "--exec-path",
+            "--output",
+            "--ext-diff",
+            "--textconv",
+            "--config-env",
+            "--config",
+        ],
+    ),
+    (
+        "cargo",
+        &[
+            "--config",
+            "--manifest-path",
+            "--target-dir",
+            "--artifact-dir",
+            "--out-dir",
+        ],
+    ),
+    ("gh", &["--body-file", "--repo", "--template"]),
+    (
+        "pnpm",
+        &[
+            "--script-shell",
+            "--userconfig",
+            "--config",
+            "--dir",
+            "--prefix",
+        ],
+    ),
+    (
+        "npm",
+        &[
+            "--script-shell",
+            "--userconfig",
+            "--globalconfig",
+            "--prefix",
+        ],
+    ),
+    ("yarn", &["--script-shell", "--cwd", "--use-yarnrc"]),
+];
+
+/// Short options with the same effect, also when the value follows without a space (`-Zx`).
+const RISKY_SHORT: [(&str, &[&str]); 3] =
+    [("git", &["-c"]), ("cargo", &["-Z"]), ("gh", &["-F", "-R"])];
+
+fn has_risky_option(program: &str, args: &[String]) -> bool {
+    let long = RISKY_LONG.iter().find(|(name, _)| *name == program);
+    let short = RISKY_SHORT.iter().find(|(name, _)| *name == program);
+    args.iter().any(|word| {
+        if let Some(flag) = word.strip_prefix("--") {
+            let name = flag.split('=').next().unwrap_or(flag);
+            return !name.is_empty()
+                && long.is_some_and(|(_, risky)| {
+                    risky.iter().any(|option| {
+                        let option = &option[2..];
+                        name == option || (name.len() >= 3 && option.starts_with(name))
+                    })
+                });
+        }
+        word.starts_with('-')
+            && short.is_some_and(|(_, risky)| risky.iter().any(|option| word.starts_with(option)))
+    })
+}
 
 fn plain_word(word: &str) -> bool {
     !word.is_empty()
@@ -164,7 +233,7 @@ fn plain_word(word: &str) -> bool {
 pub fn offered_prefix(words: &[String]) -> Option<Vec<String>> {
     let program = words.first()?.as_str();
     // A path (`./x`, `/usr/bin/x`) can name any file; only bare program names are matched.
-    if program.contains('/') {
+    if program.contains('/') || has_risky_option(program, &words[1..]) {
         return None;
     }
     if SELF_CONTAINED.contains(&program) {
@@ -190,7 +259,10 @@ pub fn offered_prefix(words: &[String]) -> Option<Vec<String>> {
 /// Whether a command's words start with the rule's words, each word whole.
 #[must_use]
 pub fn prefix_matches(prefix: &[String], words: &[String]) -> bool {
-    !prefix.is_empty() && words.len() >= prefix.len() && words[..prefix.len()] == *prefix
+    !prefix.is_empty()
+        && words.len() >= prefix.len()
+        && words[..prefix.len()] == *prefix
+        && !has_risky_option(&words[0], &words[prefix.len()..])
 }
 
 #[cfg(test)]
@@ -341,6 +413,20 @@ mod tests {
             "./gh pr merge 1",
             "/usr/bin/gh pr merge 1",
             "GH pr merge 1",
+            "git fetch origin",
+            "git fetch --upload-pack='sh -c x' .",
+            "git diff --output=/tmp/x",
+            "git log --output /tmp/x",
+            "git show --ext-diff HEAD",
+            "cargo build --config target.x.runner=y",
+            "cargo test --manifest-path ../other/Cargo.toml",
+            "cargo check -Zunstable-options",
+            "gh pr create --body-file key.pem --repo other/repo",
+            "gh pr comment 1 --body-file key.pem",
+            "gh issue create --title t",
+            "gh issue comment 1 -F key.pem",
+            "gh pr merge 1 --repo other/repo",
+            "gh pr view 1 -R other/repo",
         ] {
             let parsed = simple_words(command);
             let offered = parsed.as_deref().and_then(offered_prefix);
@@ -364,6 +450,52 @@ mod tests {
         assert!(!prefix_matches(
             &strings(&["git", "status"]),
             &words("git -c x=y status")
+        ));
+    }
+
+    #[test]
+    fn a_rule_never_covers_an_option_that_runs_writes_or_posts() {
+        for (rule, command) in [
+            (&["git", "diff"][..], "git diff --output=/tmp/x"),
+            (&["git", "diff"], "git diff --out=/tmp/x"),
+            (&["git", "log"], "git log --output /tmp/x"),
+            (&["git", "show"], "git show --output=x HEAD"),
+            (&["git", "status"], "git status --upload-pack=x"),
+            (&["git", "fetch"], "git fetch --upload-pack='sh -c x' ."),
+            (&["git", "log"], "git log --ext-diff"),
+            (
+                &["cargo", "build"],
+                "cargo build --config 'target.x.runner=\"y\"'",
+            ),
+            (
+                &["cargo", "test"],
+                "cargo test --config=build.rustc-wrapper=y",
+            ),
+            (&["cargo", "check"], "cargo check -Zunstable-options"),
+            (
+                &["cargo", "clippy"],
+                "cargo clippy --manifest-path ../x/Cargo.toml",
+            ),
+            (&["cargo", "doc"], "cargo doc --target-dir /tmp/t"),
+            (
+                &["gh", "pr", "merge"],
+                "gh pr merge 1 --body-file key --repo o/r",
+            ),
+            (&["gh", "pr", "view"], "gh pr view 1 -R o/r"),
+            (&["gh", "issue", "view"], "gh issue view 1 -F key"),
+        ] {
+            assert!(
+                !prefix_matches(&strings(rule), &words(command)),
+                "{command:?} must still ask"
+            );
+        }
+        assert!(prefix_matches(
+            &strings(&["cargo", "test"]),
+            &words("cargo test -p brachio-store -- --nocapture")
+        ));
+        assert!(prefix_matches(
+            &strings(&["git", "log"]),
+            &words("git log --oneline -n 5")
         ));
     }
 

@@ -1,4 +1,5 @@
 import { holdMinimum } from "./async-action";
+import { visibleInterval } from "./visible-interval";
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import type { AgentKind } from "./tasks";
@@ -67,7 +68,6 @@ const [usages, setUsages] = createSignal<readonly AgentUsage[]>([]);
 const [refreshing, setRefreshing] = createSignal(false);
 const [updatedAt, setUpdatedAt] = createSignal<number>();
 let signedIn: AgentKind[] | undefined;
-let polling: number | undefined;
 
 export { refreshing as agentUsageRefreshing, updatedAt as agentUsageUpdatedAt, usages as agentUsages };
 
@@ -135,6 +135,5 @@ const CORE_ORDER: AgentKind[] = (Object.keys(CORE_AGENT) as AgentKind[]);
 /** Starts the one-minute refresh; returns the function that stops it. */
 export function startAgentUsagePolling(): () => void {
   void refreshAgentUsage();
-  polling = window.setInterval(() => void refreshAgentUsage(), POLL_MS);
-  return () => window.clearInterval(polling);
+  return visibleInterval(() => void refreshAgentUsage(), POLL_MS);
 }

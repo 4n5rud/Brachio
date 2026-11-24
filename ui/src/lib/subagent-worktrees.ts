@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { visibleInterval } from "./visible-interval";
 import { createSignal } from "solid-js";
 
 /** A git worktree a subagent made inside a task's folder, under `.claude/worktrees/`. */
@@ -81,13 +82,13 @@ export function watchSubagentWorktrees(ids: () => readonly string[]): { refresh:
     }
   };
   const refresh = () => void read();
-  const timer = window.setInterval(refresh, POLL_MS);
+  const stopPolling = visibleInterval(refresh, POLL_MS);
   window.addEventListener("focus", refresh);
   return {
     refresh,
     stop: () => {
       stopped = true;
-      window.clearInterval(timer);
+      stopPolling();
       window.removeEventListener("focus", refresh);
     },
   };

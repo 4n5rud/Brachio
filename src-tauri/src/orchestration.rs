@@ -242,16 +242,31 @@ fn clean_text(label: &str, text: &str, max_chars: usize) -> Result<String, Strin
     Ok(text.to_owned())
 }
 
-/// Records the handoff of the asking child: the app, not the agent, reads the commit, the base
-/// and the changed files from the child's worktree.
-pub fn handoff_request(
-    connection: &mut Connection,
+/// A handoff request that passed its checks, before the worktree is read.
+pub struct PreparedHandoff {
+    child: TaskRecord,
+    lead_branch: String,
+    summary: String,
+    tests: Vec<String>,
+}
+
+impl PreparedHandoff {
+    pub fn worktree(&self) -> &Path {
+        &self.child.worktree_path
+    }
+
+    pub fn lead_branch(&self) -> &str {
+        &self.lead_branch
+    }
+}
+
+/// Checks who is asking and what they sent, using the database only.
+pub fn prepare_handoff(
+    connection: &Connection,
     key: &str,
     summary: &str,
     tests: &[String],
-    now_ms: i64,
-    handoff_id: &str,
-) -> Result<MailResponse, String> {
+) -> Result<PreparedHandoff, String> {
     let child = agent_owner(connection, key)?;
     let lead_id = child
         .parent_task_id
@@ -272,17 +287,37 @@ pub fn handoff_request(
         .iter()
         .map(|test| clean_text("A test name", test, MAX_TEST_CHARS))
         .collect::<Result<Vec<_>, _>>()?;
-    let snapshot = read_commit(&child.worktree_path, &lead.branch)?;
+    Ok(PreparedHandoff {
+        child,
+        lead_branch: lead.branch,
+        summary,
+        tests,
+    })
+}
+
+/// Reads the child's commit with Git, which can be slow, so the caller holds no database lock.
+pub fn read_handoff_commit(prepared: &PreparedHandoff) -> Result<CommitSnapshot, String> {
+    read_commit(prepared.worktree(), prepared.lead_branch())
+}
+
+/// Saves a prepared handoff with the commit read for it.
+pub fn save_handoff(
+    connection: &mut Connection,
+    prepared: &PreparedHandoff,
+    snapshot: CommitSnapshot,
+    now_ms: i64,
+    handoff_id: &str,
+) -> Result<MailResponse, String> {
     submit_handoff(
         connection,
         &NewHandoff {
             id: handoff_id,
-            task_id: &child.id,
+            task_id: &prepared.child.id,
             commit_sha: &snapshot.head,
             base_sha: &snapshot.base,
-            summary: &summary,
+            summary: &prepared.summary,
             changed_paths: &snapshot.changed,
-            reported_tests: &tests,
+            reported_tests: &prepared.tests,
             source: HandoffSource::ReportedByAgent,
             created_at_ms: now_ms,
         },
@@ -294,7 +329,22 @@ pub fn handoff_request(
     })
 }
 
-struct CommitSnapshot {
+/// Records the handoff of the asking child: the app, not the agent, reads the commit, the base
+/// and the changed files from the child's worktree.
+pub fn handoff_request(
+    connection: &mut Connection,
+    key: &str,
+    summary: &str,
+    tests: &[String],
+    now_ms: i64,
+    handoff_id: &str,
+) -> Result<MailResponse, String> {
+    let prepared = prepare_handoff(connection, key, summary, tests)?;
+    let snapshot = read_handoff_commit(&prepared)?;
+    save_handoff(connection, &prepared, snapshot, now_ms, handoff_id)
+}
+
+pub struct CommitSnapshot {
     head: String,
     base: String,
     changed: Vec<String>,
