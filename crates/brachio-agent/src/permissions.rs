@@ -7,6 +7,8 @@
 //! deny = ["WebFetch", "Write:.env", "Edit:infra/"]   # a tool, or a tool and a project path
 //! ```
 //!
+//! `Edit` also covers `MultiEdit` and `NotebookEdit`; every other tool name matches only itself.
+//!
 //! Anything not listed is asked, so a missing or empty section changes nothing.
 
 use std::fs;
@@ -20,6 +22,13 @@ const CONFIG_FILE: &str = "brachio.toml";
 
 /// Tools that can be listed under `allow`: they only read.
 pub const READ_ONLY_TOOLS: [&str; 5] = ["Read", "Glob", "Grep", "LS", "NotebookRead"];
+
+/// Tools that change a file the way `Edit` does, so a rule for `Edit` covers them too.
+const EDIT_FAMILY: [&str; 3] = ["Edit", "MultiEdit", "NotebookEdit"];
+
+fn rule_covers(rule_tool: &str, tool: &str) -> bool {
+    rule_tool == "*" || rule_tool == tool || (rule_tool == "Edit" && EDIT_FAMILY.contains(&tool))
+}
 
 /// The input fields that carry a file path in an agent's tool request.
 const PATH_FIELDS: [&str; 3] = ["file_path", "path", "notebook_path"];
@@ -125,7 +134,7 @@ impl PermissionPolicy {
     pub fn decide(&self, tool: &str, input: &Value, root: &Path) -> PolicyDecision {
         let paths = request_paths(input, root);
         for rule in &self.deny {
-            if rule.tool != "*" && rule.tool != tool {
+            if !rule_covers(&rule.tool, tool) {
                 continue;
             }
             let hit = match &rule.path {
@@ -300,6 +309,27 @@ mod tests {
         }
         let missing = tempfile::tempdir().unwrap();
         assert!(read_policy(missing.path()).unwrap().asks_for_everything());
+    }
+
+    #[test]
+    fn an_edit_rule_covers_multi_edit_and_notebook_edit_but_not_write() {
+        let policy = PermissionPolicy::parse(
+            "[permissions]
+deny = [\"Edit:infra/\"]",
+        )
+        .unwrap();
+        let input =
+            json!({"file_path": abs("infra/main.tf"), "notebook_path": abs("infra/n.ipynb")});
+        for tool in ["Edit", "MultiEdit", "NotebookEdit"] {
+            assert!(
+                matches!(
+                    policy.decide(tool, &input, root()),
+                    PolicyDecision::Deny { .. }
+                ),
+                "{tool}"
+            );
+        }
+        assert_eq!(policy.decide("Write", &input, root()), PolicyDecision::Ask);
     }
 
     #[test]
