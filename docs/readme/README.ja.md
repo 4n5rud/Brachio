@@ -48,8 +48,8 @@ Brachio は MIT ライセンスで、あなたのマシン上で動きます。�
 
 | プラットフォーム | インストーラー |
 |---|---|
-| Windows 10/11 (x64) | [Brachio_0.1.0_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64-setup.exe) · [.msi](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_x64_en-US.msi) |
-| macOS (Apple silicon、実験的) | [Brachio_0.1.0_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.1.0/Brachio_0.1.0_aarch64.dmg) |
+| Windows 10/11 (x64) | [Brachio_0.2.0-rc.2_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.2/Brachio_0.2.0-rc.2_x64-setup.exe) |
+| macOS (Apple silicon、実験的) | [Brachio_0.2.0-rc.2_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.2/Brachio_0.2.0-rc.2_aarch64.dmg) |
 
 すべてのバージョンとリリースノートは [リリースページ](https://github.com/4n5rud/Brachio/releases) にあります。各リリースの `SHA256SUMS.txt` に SHA-256 値があります。
 
