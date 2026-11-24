@@ -239,8 +239,8 @@ fn unix_shells(
         found.push(Shell {
             id: name.clone(),
             name,
+            args: brachio_pty::login_shell_arguments(&program),
             program,
-            args: Vec::new(),
         });
     }
     dedupe(found)
