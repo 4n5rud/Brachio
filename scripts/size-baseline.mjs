@@ -1,7 +1,8 @@
 // Prints the dependency counts that docs/windows-memory-benchmark.md records as a baseline.
 // It only reports: a failed measurement prints "n/a" and the exit code stays 0.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 
 const TARGETS = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin"];
 
@@ -44,10 +45,27 @@ function pnpmLockCount() {
   }
 }
 
+// Sizes of the built UI scripts; run `pnpm --dir ui build` first.
+function bundleRows() {
+  try {
+    const dir = "ui/dist/assets";
+    const kb = (n) => (n / 1000).toFixed(2);
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".js"))
+      .map((name) => {
+        const bytes = readFileSync(`${dir}/${name}`);
+        return [`UI script ${name.replace(/-[\w-]{8}\.js$/, ".js")} (min / gzip, kB)`, `${kb(bytes.length)} / ${kb(gzipSync(bytes).length)}`];
+      });
+  } catch {
+    return [["UI scripts (min / gzip, kB)", "n/a"]];
+  }
+}
+
 const rows = [
   ...TARGETS.map((target) => [`Rust crates in the app's normal and build graph (${target})`, crateCount(target)]),
   ["Packages in Cargo.lock", cargoLockCount()],
   ["Packages in ui/pnpm-lock.yaml", pnpmLockCount()],
+  ...bundleRows(),
 ];
 
 console.log("| Measure | Value |\n| --- | --- |");
