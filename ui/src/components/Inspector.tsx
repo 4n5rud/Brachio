@@ -16,6 +16,8 @@ import { FileRow } from "./FileRow";
 import { InspectorNote } from "./InspectorNote";
 import { InspectorSection } from "./InspectorSection";
 import { TaskFiles } from "./TaskFiles";
+import { TaskPorts } from "./TaskPorts";
+import { TaskProcesses } from "./TaskProcesses";
 import { TaskOrchestration } from "./TaskOrchestration";
 import { TaskActivityList } from "./TaskActivityList";
 import { TaskAlwaysAllow } from "./TaskAlwaysAllow";
@@ -106,7 +108,11 @@ export function Inspector(props: {
           <Show when={props.task.worktreePath && props.task.id} keyed
             fallback={<InspectorSection title={t("files.title")}><InspectorNote>{t("files.empty")}</InspectorNote></InspectorSection>}>
             {(id) => (
-              <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
+              <div class="inspector-changes">
+                <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
+                <TaskPorts taskId={id} />
+                <TaskProcesses taskId={id} />
+              </div>
             )}
           </Show>
         </Match>
