@@ -34,6 +34,26 @@ pub async fn await_outcome<T>(
     }
 }
 
+/// Replace a result that would not fit one response with a refusal, so the client gets a reply
+/// it can act on instead of a closed connection.
+#[must_use]
+pub fn fit_response(instance: &str, result: ResponseResult) -> ResponseResult {
+    // Room for the version and instance fields around the result.
+    let envelope = instance.len() as u64 + 64;
+    match serde_json::to_vec(&result) {
+        Ok(body) if body.len() as u64 + envelope <= MAX_RESPONSE => result,
+        Ok(body) => ResponseResult::Error {
+            error: format!(
+                "reply of {} bytes exceeds the {MAX_RESPONSE} byte limit",
+                body.len()
+            ),
+        },
+        Err(error) => ResponseResult::Error {
+            error: format!("reply could not be encoded: {error}"),
+        },
+    }
+}
+
 /// One thing a client asks a runtime to do.
 #[derive(Subcommand, Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -467,6 +487,56 @@ mod tests {
             serde_json::from_str(r#"{"oldest_version":1,"current_version":4,"draining":false}"#)
                 .expect("runtime info without pid parses");
         assert_eq!(info.pid, 0);
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn recovered(ansi: String) -> ResponseResult {
+        ResponseResult::Recovered {
+            lost: LostInfo {
+                key: "key".into(),
+                cwd: PathBuf::new(),
+                former_instance: "old".into(),
+                former_pid: 1,
+                exited: false,
+                exit_code: None,
+                output_bytes: 0,
+                saved_at_ms: 0,
+            },
+            screen: ScreenSnapshot {
+                ansi,
+                cursor: (0, 0),
+                rows: 50,
+                cols: 200,
+                alternate_screen: false,
+                resume_offset: Some(0),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn an_oversized_screen_becomes_a_refusal_that_can_be_sent() {
+        let big = fit_response("instance", recovered("x".repeat(MAX_RESPONSE as usize)));
+        assert!(matches!(big, ResponseResult::Error { .. }));
+        let mut out = Vec::new();
+        let response = Response {
+            version: 7,
+            instance: "instance",
+            result: big,
+        };
+        write_message(&mut out, &response, MAX_RESPONSE)
+            .await
+            .expect("a refusal fits one response");
+    }
+
+    #[test]
+    fn a_screen_near_the_limit_is_sent_whole() {
+        let size = MAX_RESPONSE as usize - 1024;
+        let result = fit_response("instance", recovered("x".repeat(size)));
+        assert!(matches!(result, ResponseResult::Recovered { .. }));
     }
 }
 
