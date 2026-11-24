@@ -5,6 +5,8 @@
 
 mod exit_watch;
 mod output_batcher;
+#[cfg(windows)]
+mod process_job;
 mod pty_session;
 mod session_manager;
 mod terminal_reply;

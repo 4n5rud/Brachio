@@ -118,6 +118,9 @@ pub struct PtySession {
     /// that thread only, never a caller, the session lock or the output reader.
     input: SyncSender<QueuedInput>,
     input_budget: Arc<InputBudget>,
+    /// Holds the child's descendants so a stop ends them too.
+    #[cfg(windows)]
+    tree: Option<crate::process_job::ProcessTree>,
 }
 
 impl PtySession {
@@ -146,6 +149,12 @@ impl PtySession {
             .slave
             .spawn_command(command)
             .context("spawn program in pty")?;
+        #[cfg(windows)]
+        let tree = child.as_raw_handle().and_then(|handle| {
+            crate::process_job::ProcessTree::adopt(handle as isize)
+                .map_err(|error| tracing::warn!("terminal program stays outside a job: {error}"))
+                .ok()
+        });
         let writer = pair.master.take_writer().context("take pty writer")?;
         let (input, queued) = mpsc::sync_channel(QUEUED_WRITES);
         thread::Builder::new()
@@ -157,6 +166,8 @@ impl PtySession {
             child,
             input,
             input_budget: Arc::default(),
+            #[cfg(windows)]
+            tree,
         })
     }
 
@@ -209,6 +220,13 @@ impl PtySession {
     /// # Errors
     /// Fails when the child cannot be signalled.
     pub fn kill(&mut self) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(tree) = self.tree.take() {
+            tree.kill();
+            // The job already ended the child; this only reaps it.
+            let _ = self.child.kill();
+            return Ok(());
+        }
         self.child.kill().context("kill child")
     }
 }
@@ -383,5 +401,66 @@ mod input_tests {
         drop(receiver);
         assert_eq!(budget.bytes.load(Ordering::Relaxed), 0);
         assert_eq!(budget.writes.load(Ordering::Relaxed), 0);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tree_tests {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    fn powershell(script: &str) -> String {
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .expect("run powershell");
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    fn wait_for(mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if done() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        false
+    }
+
+    #[test]
+    fn stopping_a_terminal_ends_the_programs_it_started() {
+        let mut session = PtySession::spawn(&SpawnSpec {
+            program: "cmd.exe".into(),
+            args: vec!["/c".into(), "ping -n 120 127.0.0.1".into()],
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        })
+        .expect("spawn cmd");
+        let parent = session.process_id().expect("cmd pid");
+        // ConPTY holds the program back until its cursor query is answered.
+        let mut reader = session.take_reader().expect("reader");
+        session.write_input(b"[1;1R").expect("answer cursor query");
+        thread::spawn(move || {
+            let mut buffer = [0_u8; 4096];
+            while reader.read(&mut buffer).is_ok_and(|read| read > 0) {}
+        });
+        let mut grandchild = String::new();
+        let found = wait_for(|| {
+            grandchild = powershell(&format!(
+                "(Get-CimInstance Win32_Process -Filter 'ParentProcessId={parent}' | Where-Object Name -eq PING.EXE | Select-Object -First 1).ProcessId"
+            ));
+            !grandchild.is_empty()
+        });
+        assert!(found, "no ping under {parent}: {}", powershell(&format!("Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -eq {parent} -or $_.ParentProcessId -eq {parent} }} | ForEach-Object {{ $_.Name + ' ' + $_.ProcessId + ' ' + $_.CommandLine }}")));
+        session.kill().expect("stop");
+        assert!(wait_for(|| powershell(&format!(
+            "(Get-Process -Id {grandchild} -ErrorAction SilentlyContinue).Id"
+        ))
+        .is_empty()));
     }
 }
