@@ -118,7 +118,7 @@ allow = ["Read", "Grep", "Glob"]                  # read-only tools only, inside
 deny = ["WebFetch", "Write:.env", "Edit:infra/"]  # a tool, or a tool and a project path; deny wins
 ```
 
-A rule that decides is recorded in the task's Activity, and Settings shows each project's rules. If the section is not valid, nothing is applied and every request is asked.
+A `deny` entry for a tool that changes files (`Edit`, `Write`, `MultiEdit` or `NotebookEdit`) covers all four. A rule that decides is recorded in the task's Activity, and Settings shows each project's rules. If the section is not valid, nothing is applied and every request is asked.
 
 ## Current scope and limitations
 

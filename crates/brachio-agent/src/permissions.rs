@@ -7,6 +7,9 @@
 //! deny = ["WebFetch", "Write:.env", "Edit:infra/"]   # a tool, or a tool and a project path
 //! ```
 //!
+//! A `deny` entry for a tool that changes files (`Edit`, `Write`, `MultiEdit` or `NotebookEdit`)
+//! covers all four, so `Edit:infra/` also refuses a `MultiEdit` or `NotebookEdit` of a file there.
+//!
 //! Anything not listed is asked, so a missing or empty section changes nothing.
 
 use std::fs;
@@ -20,6 +23,17 @@ const CONFIG_FILE: &str = "brachio.toml";
 
 /// Tools that can be listed under `allow`: they only read.
 pub const READ_ONLY_TOOLS: [&str; 5] = ["Read", "Glob", "Grep", "LS", "NotebookRead"];
+
+/// Tools that change a file. A `deny` entry naming one of them covers the others too: the person
+/// means "do not change files there", not one way of doing it.
+const FILE_CHANGING_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// Whether a `deny` entry for `rule_tool` applies to a request by `tool`.
+fn rule_covers(rule_tool: &str, tool: &str) -> bool {
+    rule_tool == "*"
+        || rule_tool == tool
+        || (FILE_CHANGING_TOOLS.contains(&rule_tool) && FILE_CHANGING_TOOLS.contains(&tool))
+}
 
 /// The input fields that carry a file path in an agent's tool request.
 const PATH_FIELDS: [&str; 3] = ["file_path", "path", "notebook_path"];
@@ -125,7 +139,7 @@ impl PermissionPolicy {
     pub fn decide(&self, tool: &str, input: &Value, root: &Path) -> PolicyDecision {
         let paths = request_paths(input, root);
         for rule in &self.deny {
-            if rule.tool != "*" && rule.tool != tool {
+            if !rule_covers(&rule.tool, tool) {
                 continue;
             }
             let hit = match &rule.path {
@@ -366,5 +380,50 @@ mod tests {
         ] {
             assert!(PermissionPolicy::parse(text).is_err(), "{text}");
         }
+    }
+
+    #[test]
+    fn a_deny_rule_for_one_file_changing_tool_covers_the_others() {
+        let policy =
+            PermissionPolicy::parse("[permissions]\ndeny = [\"Edit:infra/\", \"Write:.env\"]")
+                .unwrap();
+        let denied = |tool: &str, field: &str, path: &str| {
+            matches!(
+                policy.decide(tool, &json!({ field: abs(path) }), root()),
+                PolicyDecision::Deny { .. }
+            )
+        };
+        for tool in ["Edit", "Write", "MultiEdit"] {
+            assert!(
+                denied(tool, "file_path", "infra/main.tf"),
+                "{tool} under infra/"
+            );
+            assert!(denied(tool, "file_path", ".env"), "{tool} on .env");
+        }
+        assert!(denied("NotebookEdit", "notebook_path", "infra/plan.ipynb"));
+        assert!(
+            !denied("MultiEdit", "file_path", "src/main.rs"),
+            "other paths are not covered"
+        );
+        assert!(!denied("NotebookEdit", "notebook_path", "docs/a.ipynb"));
+        assert!(
+            !denied("Read", "file_path", "infra/main.tf"),
+            "reading is not changing"
+        );
+        assert!(
+            !denied("Grep", "path", "infra/"),
+            "searching is not changing"
+        );
+    }
+
+    #[test]
+    fn a_deny_rule_for_a_non_file_tool_still_covers_only_that_tool() {
+        let policy =
+            PermissionPolicy::parse("[permissions]\ndeny = [\"WebFetch\", \"Bash\"]").unwrap();
+        let decide = |tool: &str| policy.decide(tool, &json!({}), root());
+        assert!(matches!(decide("WebFetch"), PolicyDecision::Deny { .. }));
+        assert!(matches!(decide("Bash"), PolicyDecision::Deny { .. }));
+        assert_eq!(decide("Edit"), PolicyDecision::Ask);
+        assert_eq!(decide("WebSearch"), PolicyDecision::Ask);
     }
 }
