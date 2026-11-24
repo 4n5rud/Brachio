@@ -593,6 +593,14 @@ impl ChildTasks for NoChildTasks {
     }
 }
 
+/// Why in-app approval is off for this run, when it is.
+pub struct ApprovalOff(pub Option<String>);
+
+#[tauri::command]
+pub fn approval_unavailable(off: tauri::State<'_, ApprovalOff>) -> Option<String> {
+    off.0.clone()
+}
+
 /// The questions still open, so a reloaded interface can show them again.
 #[tauri::command]
 pub fn pending_approvals(approvals: tauri::State<'_, Arc<Approvals>>) -> Vec<Question> {

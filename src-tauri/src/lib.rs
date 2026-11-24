@@ -359,6 +359,7 @@ pub fn run() {
             hook_socket::always_allow_list,
             hook_socket::always_allow_revoke,
             hook_socket::pending_approvals,
+            hook_socket::approval_unavailable,
             mailbox::mailbox_unread,
             mailbox::mailbox_inbox,
             mailbox::mailbox_dismiss,
@@ -460,10 +461,9 @@ pub fn run() {
 fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = runtime_client::hooks_endpoint();
     let hooks_folder = app.path().app_data_dir()?.join("hooks");
-    app.manage(hook_setup::HookSetup::prepare(
-        &hooks_folder,
-        endpoint.clone(),
-    ));
+    let hook = hook_setup::HookSetup::prepare(&hooks_folder, endpoint.clone());
+    // Without a token anything on this machine could answer for the user, so approval stays off.
+    let token = brachio_runtime::hook_token::issue(&endpoint);
 
     let knows = app.handle().clone();
     let notify = app.handle().clone();
@@ -476,10 +476,19 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
     );
-    match brachio_runtime::hook_token::issue(&endpoint) {
-        Ok(token) => approvals.require_token(token),
-        Err(error) => tracing::warn!(%error, "the hook socket does not ask for a token"),
-    }
+    let token = match token {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::warn!(%error, "in-app approval is off: no hook token");
+            app.manage(hook.without_approval());
+            app.manage(hook_socket::ApprovalOff(Some(error.to_string())));
+            app.manage(approvals);
+            return Ok(());
+        }
+    };
+    approvals.require_token(token);
+    app.manage(hook);
+    app.manage(hook_socket::ApprovalOff(None));
     let policy_app = app.handle().clone();
     approvals.set_policy(move |key, tool, input| {
         project_permissions::answer(&policy_app, key, tool, input)

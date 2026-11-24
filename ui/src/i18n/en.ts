@@ -671,6 +671,7 @@ export const en = {
   "settings.prioritySortHint": "Inside each project: waiting, then finished and not yet seen, then working, then the rest.",
   "settings.keepAwake": "Keep the computer awake",
   "settings.keepAwakeHint": "While any agent is working. It can sleep again once they stop.",
+  "approvals.off": "In-app approval is off because the security token could not be saved. Agents will ask in their own terminal.",
   "settings.keepAwakeFailed": "Could not keep the computer awake.",
   "settings.keepAwakeUnavailable": "Not supported here: no power inhibitor answered on this system.",
   "settings.notifications": "Desktop notifications",

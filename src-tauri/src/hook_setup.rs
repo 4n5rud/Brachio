@@ -62,6 +62,12 @@ impl HookSetup {
         }
     }
 
+    /// Stops giving agents the hook, so they ask in their own terminal.
+    pub fn without_approval(mut self) -> Self {
+        self.settings = None;
+        self
+    }
+
     /// What an agent needs to use `brachio send` and `brachio check`: where the app listens, who
     /// the agent is, and the helper on its `PATH`. Empty when the helper is not installed.
     pub fn mail_environment(&self, key: &str) -> Vec<(String, String)> {
@@ -257,6 +263,21 @@ mod tests {
                 skill.lines().count()
             );
         }
+    }
+
+    #[test]
+    fn without_approval_gives_claude_no_hook() {
+        let setup = HookSetup {
+            endpoint: "endpoint".to_owned(),
+            settings: Some(Path::new("settings.json").to_path_buf()),
+            helper_folder: None,
+            plugin: None,
+            codex_instructions: None,
+        };
+        assert!(!setup.environment("task:agent").is_empty());
+        let off = setup.without_approval();
+        assert!(off.environment("task:agent").is_empty());
+        assert!(off.claude_arguments().is_empty());
     }
 
     #[test]

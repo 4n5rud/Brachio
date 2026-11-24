@@ -5,7 +5,7 @@ import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
-import { answerApproval, answerApprovalAlways, isStillPending, partitionHeld, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
+import { answerApproval, answerApprovalAlways, approvalUnavailable, isStillPending, partitionHeld, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
 import { SystemCheckHost, openSystemCheck } from "./components/SystemCheckDialog";
@@ -1382,6 +1382,9 @@ export function App() {
       const reloadProjects = () => { load().catch(report); };
       window.addEventListener(PROJECTS_CHANGED, reloadProjects);
       onCleanup(() => window.removeEventListener(PROJECTS_CHANGED, reloadProjects));
+      approvalUnavailable()
+        .then((reason) => { if (reason) pushToast({ tone: "error", message: t("approvals.off") }); })
+        .catch(report);
       const stopApprovals = watchApprovals(
         (question) => {
           if (!admitQuestion(question)) setHeldQuestions((waiting) => [...waiting, question]);
