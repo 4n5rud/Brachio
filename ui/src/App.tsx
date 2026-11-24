@@ -1,11 +1,11 @@
-import { Show, batch, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, batch, createEffect, createMemo, createResource, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
-import { answerApproval, answerApprovalAlways, approvalUnavailable, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
+import { answerApproval, answerApprovalAlways, approvalUnavailable, partitionHeld, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
 import { SystemCheckHost, openSystemCheck } from "./components/SystemCheckDialog";
@@ -26,6 +26,7 @@ import { openInEditor } from "./lib/editor";
 import { noteRecentFile, recentFiles } from "./lib/recent-files";
 import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
+import { wantSettingsSection } from "./lib/settings-scroll";
 import { clearDraftProblem, noteDraftProblem, takeDraftProblem } from "./lib/draft-problem";
 import { attachImages, attachPastedImage, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
@@ -497,6 +498,27 @@ export function App() {
   const createdThisRun = new Set<string>();
   const shouldResume = (taskId: string) => !createdThisRun.has(taskId);
   // Questions that agents' hooks have asked and the user has not answered.
+  // Questions whose task or agent tab is not known yet; shown once it is.
+  const [heldQuestions, setHeldQuestions] = createSignal<readonly ApprovalQuestion[]>([]);
+  const admitQuestion = (question: ApprovalQuestion) => {
+    const id = taskIdOf(question.key);
+    const task = findTask(id);
+    if (!task || !activeAgentKey(id, question.key)) return false;
+    const status = live().get(id)?.get(question.key)?.status;
+    if (status?.state !== "blocked" || status.reason !== "permission") {
+      recordActivity(task, question.key, "notify.permission", null, Date.now());
+    }
+    setQuestions((open) => open.some((existing) => existing.id === question.id) ? open : [...open, question]);
+    return true;
+  };
+  createEffect(() => {
+    tasks();
+    secondaryKeys();
+    const waiting = heldQuestions();
+    if (waiting.length === 0) return;
+    const { admitted, rest } = untrack(() => partitionHeld(waiting, admitQuestion));
+    if (admitted) setHeldQuestions(rest);
+  });
   const answer = async (id: number, allow: boolean, always = false, prefix = false) => {
     const pending = questions().find((question) => question.id === id);
     if (!pending || !activeAgentKey(taskIdOf(pending.key), pending.key)) return;
@@ -1363,14 +1385,7 @@ export function App() {
         .catch(report);
       const stopApprovals = watchApprovals(
         (question) => {
-          const id = taskIdOf(question.key);
-          const task = findTask(id);
-          if (!task || !activeAgentKey(id, question.key)) return;
-          const status = live().get(id)?.get(question.key)?.status;
-          if (status?.state !== "blocked" || status.reason !== "permission") {
-            recordActivity(task, question.key, "notify.permission", null, Date.now());
-          }
-          setQuestions((open) => [...open, question]);
+          if (!admitQuestion(question)) setHeldQuestions((waiting) => [...waiting, question]);
         },
         (id) => {
           const answered = questions().find((question) => question.id === id);
@@ -1382,6 +1397,7 @@ export function App() {
           }
           if (answered && elsewhere) setClosedElsewhere((keys) => [...keys.filter((key) => key !== answered.key), answered.key]);
           setQuestions((open) => open.filter((question) => question.id !== id));
+          setHeldQuestions((waiting) => waiting.filter((question) => question.id !== id));
         },
         report,
         (id) => { hungUp.add(id); },
@@ -1644,7 +1660,8 @@ export function App() {
         </Show>
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
-      <StatusBar tokenRows={tokenRows()} sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
+      <StatusBar tokenRows={tokenRows()} sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")}
+        onUsageStats={() => { wantSettingsSection("analytics"); openSettings("agents"); }} />
       <Show when={renamingTask()} keyed>
         {(id) => (
           <RenameDialog title={t("rename.task")} value={findTask(id)?.title ?? ""} maxLength={200}

@@ -111,7 +111,7 @@ export function StatusBarView(props: {
 }
 
 /** Bottom bar. Memory and CPU cover the app and every process it started, plus the terminal runtime. */
-export function StatusBar(props: { sessions: number; onAgentSettings: () => void; tokenRows?: readonly { id: string; title: string }[] }) {
+export function StatusBar(props: { sessions: number; onAgentSettings: () => void; onUsageStats: () => void; tokenRows?: readonly { id: string; title: string }[] }) {
   const [usage, setUsage] = createSignal<ResourceUsage | null>(null);
   const [usageUnavailable, setUsageUnavailable] = createSignal(false);
   const [now, setNow] = createSignal(Date.now() / 1000);
@@ -148,7 +148,7 @@ export function StatusBar(props: { sessions: number; onAgentSettings: () => void
       usage={
         <UsageStatus usages={agentUsages()} now={now()} refreshing={agentUsageRefreshing()} updatedAt={agentUsageUpdatedAt()}
           onRefresh={() => void refreshAgentUsage(true)} onAccounts={props.onAgentSettings}
-          onDetails={agentUsages().some((entry) => entry.agent === "claude") ? () => void invoke("open_claude_usage") : undefined} />
+          onDetails={props.onUsageStats} />
       }
     />
   );

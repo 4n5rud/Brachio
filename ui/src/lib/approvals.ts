@@ -54,6 +54,12 @@ export const revokeAlwaysAllow = (taskId: string, ruleId: number) =>
 /** Why in-app approval is off for this run, or null when it is on. */
 export const approvalUnavailable = () => invoke<string | null>("approval_unavailable");
 
+/** Splits held questions into those `admit` accepted and those still waiting. */
+export function partitionHeld(held: readonly ApprovalQuestion[], admit: (question: ApprovalQuestion) => boolean) {
+  const rest = held.filter((question) => !admit(question));
+  return { admitted: rest.length !== held.length, rest };
+}
+
 export const pendingApprovals = () => invoke<ApprovalQuestion[]>("pending_approvals");
 
 /** Calls back for every question that opens or closes. Returns a function that stops listening, even before the subscriptions resolve. */

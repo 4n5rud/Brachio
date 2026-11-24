@@ -818,6 +818,16 @@ mod tests {
     }
 
     #[test]
+    fn a_task_with_waiting_dependents_is_reported_until_they_are_released() {
+        let mut db = db_with_tasks(&["a", "b"]);
+        add_dependency(&mut db, "b", "a").unwrap();
+        assert!(crate::task_record::TaskRecord::has_waiting_dependents(&db, "a").unwrap());
+        assert!(!crate::task_record::TaskRecord::has_waiting_dependents(&db, "b").unwrap());
+        apply_transition(&mut db, "b", TaskState::Cancelled, 1).unwrap();
+        assert!(!crate::task_record::TaskRecord::has_waiting_dependents(&db, "a").unwrap());
+    }
+
+    #[test]
     fn a_handoff_moves_to_review_and_only_approval_completes() {
         let mut db = db_with_tasks(&["a"]);
         mark_running(&mut db, "a", 1).unwrap();

@@ -921,7 +921,7 @@ export const ko: Messages = {
   "usage.nearlyUsed": "거의 소진",
   "usage.unavailable": "사용량 확인 불가",
   "usage.unavailableNote": "에이전트를 한 번 실행해 로그인을 갱신한 뒤 새로 고치세요.",
-  "usage.details": "사용량 세부 정보 및 기록",
+  "usage.details": "사용량 통계",
   "usage.manage": "계정 관리…",
   "usage.agentAccount": "{agent} 계정 설정",
   "usage.unitDay": "{n}일",
