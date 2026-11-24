@@ -345,6 +345,7 @@ pub fn run() {
             task_activity::task_activity_record,
             task_tabs::task_open_tabs,
             task_tabs::task_add_tab,
+            task_tabs::task_tab_target,
             task_tabs::task_close_tab,
             task_tabs::task_rename_tab,
             workspace::task_rename,

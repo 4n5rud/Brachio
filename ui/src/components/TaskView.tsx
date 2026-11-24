@@ -217,12 +217,15 @@ export function TaskView(props: {
   const openTab = async (spec: TabSpec, target?: string) => {
     const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
-    const tab: TaskTab = { id: crypto.randomUUID(), kind: spec.kind, shell: spec.shell, target: target ?? null };
+    const tabId = crypto.randomUUID();
     setTabsSaving(true);
     setTabError("");
     try {
-      await invoke("task_add_tab", { taskId: id, tabId: tab.id, kind: tab.kind, shell: tab.shell, target: target ?? null });
+      // The target is kept as the backend stored it, so a later lookup and a restart agree.
+      const stored = await invoke<string | null>("task_add_tab",
+        { taskId: id, tabId, kind: spec.kind, shell: spec.shell, target: target ?? null });
       if (disposed) return;
+      const tab: TaskTab = { id: tabId, kind: spec.kind, shell: spec.shell, target: stored ?? null };
       setTabsByTask((current) => new Map(current).set(id, [...tabsOf(id), tab]));
       // The shortcut reopens a terminal kind; a file or page is always opened from where it is listed.
       if (!isContentKind(spec.kind)) {
@@ -266,22 +269,35 @@ export function TaskView(props: {
     cancelLabel: t("tab.unsavedKeep"),
   });
   // Shows a file or page in a tab: the tab that already shows it, else a new one. At the limit the
-  // tab left longest closes first, after asking when it has unsaved edits.
+  // tab left longest closes first, after asking when it has unsaved edits. The target is checked
+  // and written the stored way before anything closes, so a refused one costs no tab.
   const openContent = async (request: ContentTabRequest) => {
     const id = props.task.id;
-    if (request.taskId !== id || !props.task.worktreePath || !tabsReady()) return;
-    const open = findContentTab(tabsOf(id), request.kind, request.target);
+    const stillHere = () => !disposed && props.task.id === id && tabsReady() && !tabsSaving();
+    if (request.taskId !== id || !props.task.worktreePath || !stillHere()) return;
+    let target: string;
+    try {
+      target = await invoke<string>("task_tab_target", { kind: request.kind, target: request.target });
+    } catch (failure) {
+      setTabError(String(failure));
+      return;
+    }
+    if (!stillHere()) return;
+    const open = findContentTab(tabsOf(id), request.kind, target);
     if (open) {
       selectTab(id, open);
       return;
     }
-    const evict = tabToEvict(tabsOf(id), request.kind, lastUsed, selectedTab(id)?.id);
-    if (evict) {
+    // Restored tabs can be over the limit, so close until there is room.
+    for (;;) {
+      const evict = tabToEvict(tabsOf(id), request.kind, lastUsed, selectedTab(id)?.id);
+      if (!evict) break;
       if (dirtyTabs().has(evict.id) && !(await confirmUnsaved(evict))) return;
+      if (!stillHere()) return;
       await closeTab(evict, true);
-      if (tabsOf(id).some((tab) => tab.id === evict.id)) return;
+      if (!stillHere() || tabsOf(id).some((tab) => tab.id === evict.id)) return;
     }
-    await openTab({ kind: request.kind, shell: null }, request.target);
+    await openTab({ kind: request.kind, shell: null }, target);
   };
   onCleanup(onContentTabRequest((request) => void openContent(request)));
   const [tabActions, setTabActions] = createSignal<{ anchor: HTMLElement; tab: TaskTab }>();
@@ -630,10 +646,11 @@ export function TaskView(props: {
           {(current) => (
             <Menu anchor={current().anchor} label={t("tabMenu.label")} onClose={() => setTabActions(undefined)}>
               <MenuItem onSelect={() => { setTabActions(undefined); setRenamingTab(current().tab); }}>{t("tabMenu.rename")}</MenuItem>
-              {/* Two tabs editing one file would each keep their own unsaved text, so a file tab has no copy. */}
-              <Show when={current().tab.kind !== "file"}>
+              {/* A file or page is shown once per task: two tabs editing one file would each keep their own
+                  unsaved text, and a copy would skip the tab limit. Terminal tabs copy their kind and shell. */}
+              <Show when={!isContentKind(current().tab.kind)}>
                 <MenuItem disabled={!tabsReady() || tabsSaving()}
-                  onSelect={() => { setTabActions(undefined); void openTab({ kind: current().tab.kind, shell: current().tab.shell }, current().tab.target ?? undefined); }}>
+                  onSelect={() => { setTabActions(undefined); void openTab({ kind: current().tab.kind, shell: current().tab.shell }); }}>
                   {t("tabMenu.duplicate")}
                 </MenuItem>
               </Show>

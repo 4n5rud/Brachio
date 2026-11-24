@@ -13,7 +13,11 @@ export interface ContentTabRequest {
 
 const CONTENT_EVENT = "brachio-open-content-tab";
 
-/** Asks the task's window to show a file or page in a tab, selecting the tab that already shows it. */
+/**
+ * Asks the task's window to show a file or page in a tab, selecting the tab that already shows it.
+ * Only the task on screen answers: a caller selects the task first. A request that arrives while
+ * a tab is being added or closed is dropped, as a second click on the same row would be.
+ */
 export const requestContentTab = (request: ContentTabRequest) =>
   window.dispatchEvent(new CustomEvent<ContentTabRequest>(CONTENT_EVENT, { detail: request }));
 
