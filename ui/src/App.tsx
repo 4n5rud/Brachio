@@ -26,6 +26,7 @@ import { openInEditor } from "./lib/editor";
 import { noteRecentFile, recentFiles } from "./lib/recent-files";
 import { revealInTree } from "./lib/file-reveal";
 import { quoteShellPaths } from "./lib/shell-quote";
+import { wantSettingsSection } from "./lib/settings-scroll";
 import { clearDraftProblem, noteDraftProblem, takeDraftProblem } from "./lib/draft-problem";
 import { attachImages, attachPastedImage, fileReferences, isImagePath, MAX_ATTACHED_FILES, MAX_ATTACHED_IMAGES } from "./lib/attachments";
 import { Inspector } from "./components/Inspector";
@@ -1656,7 +1657,8 @@ export function App() {
         </Show>
       </main>
       <Show when={folderOverWindow()}><DropVeil /></Show>
-      <StatusBar tokenRows={tokenRows()} sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")} />
+      <StatusBar tokenRows={tokenRows()} sessions={inTauri ? openIds().length : tasks().length} onAgentSettings={() => openSettings("agents")}
+        onUsageStats={() => { wantSettingsSection("analytics"); openSettings("agents"); }} />
       <Show when={renamingTask()} keyed>
         {(id) => (
           <RenameDialog title={t("rename.task")} value={findTask(id)?.title ?? ""} maxLength={200}
