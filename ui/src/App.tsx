@@ -639,31 +639,34 @@ export function App() {
     if (prepared && !prepared.userTyped) await prepared.insert();
   };
 
-  // The backend refuses while any task, archived or not, is left; the words say which kind.
+  // Removing a project takes its tasks, archived ones too, out of the list and stops their
+  // terminals. Worktree folders and branches stay on disk.
   const removeProject = async (id: string) => {
     const repo = repos().find((item) => item.id === id);
     if (!repo) return;
     const name = repo.name;
-    if (tasks().some((task) => task.repoId === id)) {
-      pushToast({ tone: "error", message: t("project.removeHasTasks").replace("{name}", () => name) });
-      return;
-    }
+    const owned = [...tasks(), ...archived()].filter((task) => task.repoId === id).length;
     const agreed = await confirmDialog({
       title: t("project.removeTitle").replace("{name}", () => name),
-      body: t("project.removeBody"),
+      body: owned === 0 ? t("project.removeBody") : t("project.removeWithTasksBody").replace("{count}", String(owned)),
       confirmLabel: t("project.remove"),
     });
     if (!agreed) return;
     try {
       await removeRepo(id);
-      setRepos((list) => list.filter((item) => item.id !== id));
     } catch (failure) {
       const text = String(failure);
       pushToast({
         tone: "error",
-        message: text.includes("still has") ? t("project.removeHasArchived").replace("{name}", () => name) : `${t("project.removeFailed")} ${text}`,
+        message: text.includes("waited on elsewhere:") ? t("project.removeWaitedOn").replace("{name}", () => name) : `${t("project.removeFailed")} ${text}`,
       });
+      return;
     }
+    batch(() => {
+      for (const task of tasks().filter((item) => item.repoId === id)) hideArchived(task);
+      setArchived((items) => items.filter((item) => item.repoId !== id));
+      setRepos((list) => list.filter((item) => item.id !== id));
+    });
   };
 
   const reportDraftProblem = () => {

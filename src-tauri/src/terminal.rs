@@ -57,6 +57,24 @@ impl SessionKeys {
         found.sort();
         Ok(found)
     }
+
+    /// Kills the task's in-app terminals. One that already ended is skipped.
+    pub fn kill_for_task(&self, manager: &SessionManager, task_id: &str) {
+        let prefix = format!("{task_id}:");
+        let ids: Vec<SessionId> = match self.0.lock() {
+            Ok(keys) => keys
+                .iter()
+                .filter(|(_, key)| key.starts_with(&prefix))
+                .map(|(id, _)| *id)
+                .collect(),
+            Err(_) => return,
+        };
+        for id in ids {
+            if let Err(error) = manager.kill(id) {
+                tracing::debug!(%error, "an in-app terminal had already ended");
+            }
+        }
+    }
 }
 
 /// What to run in a new terminal.

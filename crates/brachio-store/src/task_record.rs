@@ -288,6 +288,42 @@ impl TaskRecord {
         Ok(u64::try_from(count).unwrap_or(0))
     }
 
+    /// Deletes every task of a repository, archived or not. A task elsewhere whose parent was one
+    /// of them loses that parent rather than blocking the delete.
+    ///
+    /// # Errors
+    /// Fails when the update or the delete fails.
+    pub fn delete_for_repo(connection: &Connection, repo_id: &str) -> Result<usize, StoreError> {
+        connection.execute(
+            "UPDATE tasks SET parent_task_id = NULL
+             WHERE parent_task_id IN (SELECT id FROM tasks WHERE repo_id = ?1)",
+            [repo_id],
+        )?;
+        Ok(connection.execute("DELETE FROM tasks WHERE repo_id = ?1", [repo_id])?)
+    }
+
+    /// Returns whether a task in another repository is still queued or blocked behind a task of
+    /// this one. Removing the repository would drop that edge and let the task start unapproved.
+    ///
+    /// # Errors
+    /// Fails if SQLite cannot query the dependency records.
+    pub fn repo_has_outside_waiters(
+        connection: &Connection,
+        repo_id: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(connection.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM task_dependencies d
+                 JOIN tasks target ON target.id = d.depends_on
+                 JOIN tasks waiting ON waiting.id = d.task_id
+                 LEFT JOIN task_orchestration o ON o.task_id = d.task_id
+                 WHERE target.repo_id = ?1 AND waiting.repo_id <> ?1
+                   AND COALESCE(o.state, 'queued') IN ('queued', 'blocked'))",
+            [repo_id],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Ids of the tasks, archived or not, in a repository.
     ///
     /// # Errors
@@ -494,6 +530,72 @@ mod tests {
             compare_group: None,
             created_at_ms,
         }
+    }
+
+    fn add_second_repo(connection: &Connection) {
+        let repo = NewRepo {
+            id: "r2",
+            name: "other",
+            path: Path::new("/src/other"),
+            default_branch: "main",
+            added_at_ms: 0,
+            is_git: true,
+        };
+        RepoRecord::insert(connection, &repo).expect("insert r2");
+    }
+
+    #[test]
+    fn deleting_a_repos_tasks_takes_children_and_archived_tasks_too() {
+        let connection = connection_with_repo();
+        add_second_repo(&connection);
+        TaskRecord::insert(&connection, &sample("lead", 1)).expect("insert lead");
+        let child = NewTask {
+            parent_task_id: Some("lead"),
+            ..sample("child", 2)
+        };
+        TaskRecord::insert(&connection, &child).expect("insert child");
+        TaskRecord::insert(&connection, &sample("old", 3)).expect("insert old");
+        TaskRecord::archive(&connection, "old", 4).expect("archive old");
+        let elsewhere = NewTask {
+            repo_id: "r2",
+            parent_task_id: Some("lead"),
+            ..sample("elsewhere", 5)
+        };
+        TaskRecord::insert(&connection, &elsewhere).expect("insert elsewhere");
+
+        let deleted = TaskRecord::delete_for_repo(&connection, "r1").expect("delete");
+
+        assert_eq!(deleted, 3);
+        assert_eq!(
+            TaskRecord::count_for_repo(&connection, "r1").expect("count"),
+            0
+        );
+        let kept = TaskRecord::get(&connection, "elsewhere").expect("other repo's task stays");
+        assert_eq!(kept.parent_task_id, None);
+        RepoRecord::delete(&connection, "r1").expect("the repo can go now");
+    }
+
+    #[test]
+    fn a_task_in_another_repo_waiting_on_this_one_is_noticed() {
+        let connection = connection_with_repo();
+        add_second_repo(&connection);
+        TaskRecord::insert(&connection, &sample("here", 1)).expect("insert here");
+        let waiting = NewTask {
+            repo_id: "r2",
+            ..sample("waiting", 2)
+        };
+        TaskRecord::insert(&connection, &waiting).expect("insert waiting");
+        assert!(!TaskRecord::repo_has_outside_waiters(&connection, "r1").expect("check"));
+
+        connection
+            .execute(
+                "INSERT INTO task_dependencies (task_id, depends_on) VALUES ('waiting', 'here')",
+                [],
+            )
+            .expect("add edge");
+
+        assert!(TaskRecord::repo_has_outside_waiters(&connection, "r1").expect("check"));
+        assert!(!TaskRecord::repo_has_outside_waiters(&connection, "r2").expect("check"));
     }
 
     #[test]
