@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { visibleInterval } from "./visible-interval";
 import { createSignal } from "solid-js";
 import { t } from "../i18n";
 
@@ -49,6 +50,6 @@ export function watchTokenUsage(ids: () => readonly string[]): () => void {
     }
   };
   const first = window.setTimeout(() => void read(), 0);
-  const timer = window.setInterval(() => void read(), POLL_MS);
-  return () => { stopped = true; window.clearTimeout(first); window.clearInterval(timer); };
+  const stopPolling = visibleInterval(() => void read(), POLL_MS);
+  return () => { stopped = true; window.clearTimeout(first); stopPolling(); };
 }
