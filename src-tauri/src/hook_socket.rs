@@ -140,7 +140,7 @@ pub struct Approvals {
     next: AtomicU64,
     knows: Box<dyn Fn(&str) -> bool + Send + Sync>,
     notify: Box<dyn Fn(Notice) + Send + Sync>,
-    mail: Box<dyn Fn(MailRequest) -> MailResponse + Send + Sync>,
+    mail: Arc<dyn Fn(MailRequest) -> MailResponse + Send + Sync>,
     delivered: Delivered,
     children: Box<dyn ChildTasks>,
     /// When set, a connection must open with this token or it is dropped unanswered.
@@ -198,7 +198,7 @@ impl Approvals {
             next: AtomicU64::new(1),
             knows: Box::new(knows),
             notify: Box::new(notify),
-            mail: Box::new(mail),
+            mail: Arc::new(mail),
             children: Box::new(children),
             token: OnceLock::new(),
             policy: OnceLock::new(),
@@ -411,7 +411,15 @@ impl Approvals {
                         _ = reader.fill_buf() => return Ok(()),
                     }
                 }
-                other => (self.mail)(other),
+                other => {
+                    // Mail handling takes the database lock and may run Git.
+                    let mail = Arc::clone(&self.mail);
+                    tauri::async_runtime::spawn_blocking(move || mail(other))
+                        .await
+                        .unwrap_or_else(|error| MailResponse::Error {
+                            message: format!("The request could not be handled: {error}"),
+                        })
+                }
             };
             write_message(reader.get_mut(), &response, MAX_RESPONSE).await?;
             if let (true, MailResponse::Messages { messages, .. }) = (consuming, &response) {

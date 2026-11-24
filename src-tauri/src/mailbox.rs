@@ -434,18 +434,26 @@ pub fn mark_delivered(app: &AppHandle, ids: &[String]) {
 /// unread counts changed.
 pub fn serve(app: &AppHandle, request: MailRequest) -> MailResponse {
     let database = app.state::<Database>();
-    let Ok(mut connection) = database.lock() else {
-        return MailResponse::Error {
-            message: "Brachio's database is busy; try again.".to_owned(),
-        };
+    let now_ms = crate::pr_status::now_ms();
+    let new_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let (response, changed) = match request {
+        MailRequest::Handoff {
+            key,
+            summary,
+            tests,
+        } => (
+            handoff(&database, &key, &summary, &tests, now_ms, &new_id),
+            false,
+        ),
+        request => {
+            let Ok(mut connection) = database.lock() else {
+                return MailResponse::Error {
+                    message: "Brachio's database is busy; try again.".to_owned(),
+                };
+            };
+            handle(&mut connection, request, now_ms, &new_id)
+        }
     };
-    let (response, changed) = handle(
-        &mut connection,
-        request,
-        crate::pr_status::now_ms(),
-        &uuid::Uuid::new_v4().hyphenated().to_string(),
-    );
-    drop(connection);
     if matches!(response, MailResponse::HandedOff { .. }) {
         if let Err(error) = app.emit(crate::orchestration::CHANGED_EVENT, ()) {
             tracing::debug!(%error, "could not tell the window about a handoff");
@@ -458,6 +466,27 @@ pub fn serve(app: &AppHandle, request: MailRequest) -> MailResponse {
         }
     }
     response
+}
+
+/// Reads the child's commit between two short database locks, so Git never runs under one.
+fn handoff(
+    database: &Database,
+    key: &str,
+    summary: &str,
+    tests: &[String],
+    now_ms: i64,
+    new_id: &str,
+) -> MailResponse {
+    let outcome = (|| {
+        let prepared = {
+            let connection = database.lock()?;
+            crate::orchestration::prepare_handoff(&connection, key, summary, tests)?
+        };
+        let snapshot = crate::orchestration::read_handoff_commit(&prepared)?;
+        let mut connection = database.lock()?;
+        crate::orchestration::save_handoff(&mut connection, &prepared, snapshot, now_ms, new_id)
+    })();
+    outcome.unwrap_or_else(|message| MailResponse::Error { message })
 }
 
 #[cfg(test)]
