@@ -93,3 +93,31 @@ Dependency counts at the commit that added this section, from `node scripts/size
 The crate count is the unique crates `cargo tree --locked -p brachio-app -e normal,build` lists for the target, including the app and workspace crates and excluding dev dependencies. A pull request that adds a dependency or a periodic job should state these figures before and after. The "Version files agree" job in CI prints the same table in its summary on every run. It only reports and never fails the check.
 
 Not recorded yet: the app process's working set and private bytes just started, with one task and one agent tab open, and with ten tasks open, on Windows and macOS, and the release binary size. They need the procedure above on an installed release build, and no bound for the app process exists yet.
+
+## Tab area budget
+
+Applies to every pull request that adds code or a view to the task tab area: file tabs and browser tabs.
+
+### Baseline
+
+Taken from a fresh `pnpm --dir ui build` at the commit that added this section, and printed by `node scripts/size-baseline.mjs` after a build. Sizes are minified bytes and gzip, in kB of 1,000 bytes.
+
+| Measure | Value |
+| --- | --- |
+| Main UI script (`index.js`) | 973.44 kB, 275.42 gzip |
+| Lazy chunks | none |
+
+An editor with the markdown language bundled by itself measures about 616 kB, 211 kB gzip. Grammars for other languages add more, and load one by one.
+
+### Budget
+
+- The editor and its language grammars are lazy chunks, loaded by a dynamic `import()` when the first file tab opens. Nothing from the editor is in the main script.
+- The main script grows by no more than 25 kB minified (about 8 kB gzip) for the whole tab area, not per pull request. That covers the tab kinds, the file tab shell and the strings.
+- The editor core with the markdown language stays under 700 kB minified (about 240 kB gzip). Each further language grammar is its own chunk and loads only for a file of that language.
+- The Windows setup grows by no more than 1 MiB for file tabs. Browser tabs use the system web view and add no engine to the installer.
+- The app's memory with one open file tab, once the editor has loaded, grows by no more than 40 MiB working set over the same app with none open. Each further file tab adds no more than 3 MiB for a source file under 1 MiB, and closing every file tab returns within 10 MiB of the start. A browser tab's budget is set after the native web view decision.
+- A pull request states the main script and lazy chunk sizes, minified and gzip, before and after, and the figures that apply to it from the lists above.
+
+### Not measured yet
+
+The memory figures above are proposed limits, not measurements. They need an installed release build, the procedure in this page with 0, 1 and 5 file tabs and 0, 1 and 3 browser tabs, and the setup size of a build that contains the editor. Until then the build sizes above are the only enforced numbers. Replace each proposed limit with the measured result and its margin when those runs are done.
