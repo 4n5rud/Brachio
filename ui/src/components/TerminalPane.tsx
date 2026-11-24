@@ -588,7 +588,11 @@ export function TerminalPane(props: {
         const image = pastedImage(event.clipboardData);
         if (image && props.onPasteImage) {
           void props.onPasteImage(image).then(
-            (done) => { if (!done) pushToast({ tone: "error", message: t("diff.notReady") }); },
+            (done) => {
+              if (done) return;
+              const problem = takeDraftProblem();
+              if (problem) pushToast({ tone: "error", message: problem });
+            },
             (failure: unknown) => pushToast({ tone: "error", message: String(failure) }),
           );
         }
