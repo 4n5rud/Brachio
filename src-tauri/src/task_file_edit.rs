@@ -7,7 +7,6 @@
 //! inside the task's folder, by the same check the file preview uses.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use brachio_store::TaskRecord;
@@ -123,10 +122,25 @@ pub fn read_editable(root: &Path, path: &str) -> Result<EditableFile, String> {
     })
 }
 
+/// Why a save stopped, as the message the interface shows.
+struct SaveFailure(String);
+
+impl From<std::io::Error> for SaveFailure {
+    fn from(error: std::io::Error) -> Self {
+        Self(to_text(error))
+    }
+}
+
+impl From<String> for SaveFailure {
+    fn from(message: String) -> Self {
+        Self(message)
+    }
+}
+
 /// Writes `text` over a file that still has the content the editor read.
 ///
 /// The new content goes to a temporary file in the same folder and replaces the old one in a
-/// single rename, so a crash never leaves half a file.
+/// single rename (`brachio_fs::write_atomic_checked`), so a crash never leaves half a file.
 ///
 /// # Errors
 /// Refuses, with a code, a path outside the task, text over 2 MiB (`too_large`), text holding a
@@ -167,35 +181,14 @@ pub fn write_editable(
     if version_of(&current, 0).hash != expected.hash {
         return Err(conflict());
     }
-    let name = file
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .ok_or_else(|| "Choose a regular file inside the task's worktree.".to_owned())?;
-    let folder = file
-        .parent()
-        .ok_or_else(|| "Choose a regular file inside the task's worktree.".to_owned())?;
-    let temp = folder.join(format!(".{name}.brachio-{}.tmp", std::process::id()));
-    let written = (|| -> Result<(), String> {
-        let mut out = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .map_err(to_text)?;
-        out.write_all(&content).map_err(to_text)?;
-        out.sync_all().map_err(to_text)?;
-        drop(out);
-        let permissions = fs::metadata(&file).map_err(to_text)?.permissions();
-        fs::set_permissions(&temp, permissions).map_err(to_text)?;
-        // The file may have changed while the temporary one was written.
+    brachio_fs::write_atomic_checked(&file, &content, || -> Result<(), SaveFailure> {
+        // The file may have changed while the new content was written.
         if version_of(&read_limited(&file)?, 0).hash != expected.hash {
-            return Err(conflict());
+            return Err(SaveFailure(conflict()));
         }
-        fs::rename(&temp, &file).map_err(to_text)
-    })();
-    if let Err(error) = written {
-        let _ = fs::remove_file(&temp);
-        return Err(error);
-    }
+        Ok(())
+    })
+    .map_err(|failure| failure.0)?;
     Ok(version_of(&content, modified_ms(&file)))
 }
 
@@ -459,5 +452,42 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o750);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_save_succeeds_while_another_process_briefly_holds_the_file_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let folder = folder_with(
+            "a.txt", b"one
+",
+        );
+        let read = read_editable(folder.path(), "a.txt").expect("read");
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(folder.path().join("a.txt"))
+            .expect("hold");
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            drop(held);
+        });
+        write_editable(
+            folder.path(),
+            "a.txt",
+            "two
+",
+            &read.version,
+            LineEnding::Lf,
+            false,
+        )
+        .expect("write");
+        release.join().expect("release");
+        assert_eq!(
+            fs::read(folder.path().join("a.txt")).expect("read"),
+            b"two
+"
+        );
     }
 }

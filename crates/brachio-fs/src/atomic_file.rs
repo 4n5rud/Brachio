@@ -23,6 +23,30 @@ const REPLACE_ATTEMPTS: u32 = 5;
 /// Fails when the scratch file cannot be written or the rename fails. The target is left as it was
 /// and the scratch file is removed.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_scratch_then_replace(path, bytes, false, || Ok(()))
+}
+
+/// Like [`write_atomic`], for a file someone else owns: the new file keeps the permissions of the
+/// one it replaces, and `before_replace` runs right before the rename. When it fails nothing is
+/// replaced, the scratch file is removed and its error is returned.
+///
+/// # Errors
+///
+/// Fails like [`write_atomic`], or with the error `before_replace` returned.
+pub fn write_atomic_checked<E: From<io::Error>>(
+    path: &Path,
+    bytes: &[u8],
+    before_replace: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    write_scratch_then_replace(path, bytes, true, before_replace)
+}
+
+fn write_scratch_then_replace<E: From<io::Error>>(
+    path: &Path,
+    bytes: &[u8],
+    keep_permissions: bool,
+    before_replace: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
     let directory = path
         .parent()
         .filter(|dir| !dir.as_os_str().is_empty())
@@ -31,7 +55,18 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let counter = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
     let scratch = directory.join(format!(".{name}.{}-{counter}.tmp", std::process::id()));
 
-    let result = write_scratch(&scratch, bytes).and_then(|()| replace(&scratch, path));
+    let result = (|| -> Result<(), E> {
+        write_scratch(&scratch, bytes)?;
+        if keep_permissions {
+            match fs::metadata(path) {
+                Ok(existing) => fs::set_permissions(&scratch, existing.permissions())?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        before_replace()?;
+        Ok(replace(&scratch, path)?)
+    })();
     if result.is_err() {
         let _ = fs::remove_file(&scratch);
         return result;
@@ -190,6 +225,56 @@ mod tests {
         fs::write(dir.path().join(".state.json.1-0.tmp"), b"{incomplete").expect("leftover");
         write_atomic(&path, b"better").expect("write again");
         assert_eq!(fs::read(&path).expect("read"), b"better");
+    }
+
+    #[test]
+    fn a_failing_check_keeps_the_target_and_removes_the_scratch_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("a.txt");
+        fs::write(&path, b"old").expect("write");
+        let result: Result<(), io::Error> =
+            write_atomic_checked(&path, b"new", || Err(io::Error::other("changed")));
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).expect("read"), b"old");
+        assert_eq!(entries(dir.path()), ["a.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_checked_write_keeps_the_permissions_of_the_file_it_replaces() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("a.txt");
+        fs::write(&path, b"old").expect("write");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("set");
+        write_atomic_checked::<io::Error>(&path, b"new", || Ok(())).expect("write");
+        assert_eq!(fs::read(&path).expect("read"), b"new");
+        let mode = fs::metadata(&path).expect("meta").permissions().mode();
+        assert_eq!(mode & 0o777, 0o640);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_target_another_process_briefly_holds_open_is_still_replaced() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("a.txt");
+        fs::write(&path, b"old").expect("write");
+        // Without FILE_SHARE_DELETE a rename over the file is refused while it is open.
+        let held = File::options()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .expect("hold");
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(held);
+        });
+        write_atomic_checked::<io::Error>(&path, b"new", || Ok(())).expect("write");
+        release.join().expect("release");
+        assert_eq!(fs::read(&path).expect("read"), b"new");
     }
 
     fn parse_number(bytes: &[u8]) -> Option<u32> {
