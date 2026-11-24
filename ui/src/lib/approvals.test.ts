@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listen } from "@tauri-apps/api/event";
-import { taskIdOf, watchApprovals } from "./approvals";
+import { isStillPending, taskIdOf, watchApprovals } from "./approvals";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -63,5 +63,18 @@ describe("watchApprovals", () => {
     await vi.waitFor(() => expect(onAsked).toHaveBeenCalledWith({ id: 7, key: "t:agent", review: "Bash" }));
     expect(invoke).toHaveBeenCalledWith("pending_approvals");
     expect(onAsked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isStillPending", () => {
+  it("is true only while the host lists the question", async () => {
+    vi.mocked(invoke).mockResolvedValue([{ id: 7 }]);
+    expect(await isStillPending(7)).toBe(true);
+    expect(await isStillPending(8)).toBe(false);
+  });
+
+  it("is false when the host cannot be asked", async () => {
+    vi.mocked(invoke).mockRejectedValue(new Error("ipc"));
+    expect(await isStillPending(7)).toBe(false);
   });
 });

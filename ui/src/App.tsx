@@ -5,7 +5,7 @@ import { open as openFolder } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Board } from "./components/Board";
-import { answerApproval, answerApprovalAlways, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
+import { answerApproval, answerApprovalAlways, isStillPending, taskIdOf, watchApprovals, type ApprovalQuestion } from "./lib/approvals";
 import { ConfirmHost, confirmDialog } from "./components/ui/ConfirmDialog";
 import { QuitConfirmHost, askQuit } from "./components/QuitConfirmDialog";
 import { SystemCheckHost, openSystemCheck } from "./components/SystemCheckDialog";
@@ -506,6 +506,8 @@ export function App() {
       else await answerApproval(id, allow);
     } catch (failure) {
       report(failure);
+      // Keep the request answerable while the host still waits on it.
+      if (await isStillPending(id)) setQuestions((open) => open.some((question) => question.id === id) ? open : [...open, pending]);
     }
   };
   // Questions the hook dropped before the user answered here: answered in the terminal, or the agent gave up.
