@@ -48,8 +48,8 @@ Brachio runs on your machine under the MIT license. It uses your existing Claude
 
 | Platform | Installer |
 |---|---|
-| Windows 10/11 (x64) | [Brachio_0.2.0-rc.2_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.2/Brachio_0.2.0-rc.2_x64-setup.exe) |
-| macOS (Apple silicon, experimental) | [Brachio_0.2.0-rc.2_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.2/Brachio_0.2.0-rc.2_aarch64.dmg) |
+| Windows 10/11 (x64) | [Brachio_0.2.0-rc.3_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.3/Brachio_0.2.0-rc.3_x64-setup.exe) |
+| macOS (Apple silicon, experimental) | [Brachio_0.2.0-rc.3_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.3/Brachio_0.2.0-rc.3_aarch64.dmg) |
 
 All versions and release notes are on the [releases page](https://github.com/4n5rud/Brachio/releases). Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
 

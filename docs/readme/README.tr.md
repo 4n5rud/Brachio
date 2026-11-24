@@ -48,8 +48,8 @@ Brachio kendi makinenizde, MIT lisansıyla çalışır. Mevcut Claude Code veya 
 
 | Platform | Yükleyici |
 |---|---|
-| Windows 10/11 (x64) | [Brachio_0.2.0-rc.2_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.2/Brachio_0.2.0-rc.2_x64-setup.exe) |
-| macOS (Apple silicon, deneysel) | [Brachio_0.2.0-rc.2_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.2/Brachio_0.2.0-rc.2_aarch64.dmg) |
+| Windows 10/11 (x64) | [Brachio_0.2.0-rc.3_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.3/Brachio_0.2.0-rc.3_x64-setup.exe) |
+| macOS (Apple silicon, deneysel) | [Brachio_0.2.0-rc.3_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.3/Brachio_0.2.0-rc.3_aarch64.dmg) |
 
 Tüm sürümler ve sürüm notları [sürümler sayfasında](https://github.com/4n5rud/Brachio/releases). Her sürüm, SHA-256 değerlerini `SHA256SUMS.txt` içinde listeler.
 
