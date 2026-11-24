@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listen } from "@tauri-apps/api/event";
-import { taskIdOf, watchApprovals } from "./approvals";
+import { partitionHeld, taskIdOf, watchApprovals, type ApprovalQuestion } from "./approvals";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -63,5 +63,20 @@ describe("watchApprovals", () => {
     await vi.waitFor(() => expect(onAsked).toHaveBeenCalledWith({ id: 7, key: "t:agent", review: "Bash" }));
     expect(invoke).toHaveBeenCalledWith("pending_approvals");
     expect(onAsked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("partitionHeld", () => {
+  const question = (id: number, key: string) => ({ id, key } as ApprovalQuestion);
+
+  it("keeps questions the task view cannot show yet and admits the rest", () => {
+    const held = [question(1, "t1:agent"), question(2, "t1:tab2")];
+    const result = partitionHeld(held, (q) => q.key === "t1:agent");
+    expect(result.admitted).toBe(true);
+    expect(result.rest.map((q) => q.id)).toEqual([2]);
+  });
+
+  it("reports nothing admitted when no question matches", () => {
+    expect(partitionHeld([question(3, "t9:agent")], () => false).admitted).toBe(false);
   });
 });

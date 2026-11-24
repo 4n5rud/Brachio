@@ -511,8 +511,7 @@ async fn create_task_unprofiled(
         let started = database.lock().and_then(|mut c| {
             brachio_store::mark_running(&mut c, &task.id, now_ms()).map_err(to_text)
         });
-        started
-            .map_err(|error| format!("The task was created but could not be started: {error}"))?;
+        started.map_err(|error| format!("The task was created but could not be started: {error}"))?;
     }
     let setup_copy_error = brachio_git::copy_setup_files(&repo.path, &path, &setup)
         .err()
@@ -1074,6 +1073,12 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
     }
     if TaskRecord::has_children(&connection, id).map_err(to_text)? {
         return Err("Delete the child tasks before deleting their parent.".to_owned());
+    }
+    if TaskRecord::has_waiting_dependents(&connection, id).map_err(to_text)? {
+        return Err(
+            "Other tasks are waiting for this one. Release or cancel them before deleting it."
+                .to_owned(),
+        );
     }
     let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
     Ok((task, repo))
