@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { diagnosticReport, markFirstRunSeen, runSystemCheck, type CheckId, type CheckState } from "../lib/system-check";
+import { settled } from "../lib/settled";
 import { pushToast } from "../lib/toasts";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
@@ -19,10 +20,10 @@ const HINT: Record<CheckId, MessageKey> = {
 };
 
 function SystemCheckDialog(props: { onClose: () => void }) {
-  const [items, { refetch }] = createResource(runSystemCheck);
+  const [items, { refetch }] = createResource(() => settled(runSystemCheck()));
   const [copied, setCopied] = createSignal(false);
   const copyReport = async () => {
-    const list = items();
+    const list = items()?.data;
     if (!list) return;
     try {
       await navigator.clipboard.writeText(diagnosticReport(list, navigator.platform));
@@ -36,7 +37,7 @@ function SystemCheckDialog(props: { onClose: () => void }) {
     <Dialog title={t("check.title")} size="sheet" onClose={props.onClose}
       footer={
         <>
-          <Button variant="ghost" disabled={!items()} onClick={() => void copyReport()}>
+          <Button variant="ghost" disabled={!items()?.data} onClick={() => void copyReport()}>
             {copied() ? t("check.copied") : t("check.diagnose")}
           </Button>
           <Button onClick={() => { setCopied(false); void refetch(); }} loading={items.loading}
@@ -45,9 +46,9 @@ function SystemCheckDialog(props: { onClose: () => void }) {
         </>
       }>
       <p class="check-intro">{t("check.intro")}</p>
-      <Show when={items.error}><p class="check-intro" role="alert">{t("check.failed")}</p></Show>
+      <Show when={items()?.error}><p class="check-intro" role="alert">{t("check.failed")}</p></Show>
       <ul class="check-list">
-        <For each={items()}>{(item) => (
+        <For each={items()?.data ?? []}>{(item) => (
           <li class="check-item">
             <StatusGlyph tone={TONE[item.state]} />
             <span class="check-label">{t(LABEL[item.id])}{item.detail ? ` ${item.detail}` : ""}</span>

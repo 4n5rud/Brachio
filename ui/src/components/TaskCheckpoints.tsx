@@ -1,5 +1,6 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { settled } from "../lib/settled";
 import { checkpointRevision, listCheckpoints, readCheckpointDiff, restoreCheckpoint, type Checkpoint } from "../lib/checkpoints";
 import { formatAge } from "../lib/time";
 import { pushToast } from "../lib/toasts";
@@ -30,14 +31,14 @@ export function TaskCheckpoints(props: {
 }) {
   const [points, { refetch }] = createResource(
     () => [props.taskId, checkpointRevision()] as const,
-    ([id]) => listCheckpoints(id),
+    ([id]) => settled(listCheckpoints(id)),
   );
   const [selected, setSelected] = createSignal<number>();
   const [diff] = createResource(
     () => { const number = selected(); return number === undefined ? undefined : ([props.taskId, number, checkpointRevision()] as const); },
-    ([id, number]) => readCheckpointDiff(id, number),
+    ([id, number]) => settled(readCheckpointDiff(id, number)),
   );
-  const newestFirst = () => [...(points() ?? [])].reverse();
+  const newestFirst = () => [...(points()?.data ?? [])].reverse();
 
   const restore = async (point: Checkpoint) => {
     const ok = await confirmDialog({
@@ -59,22 +60,23 @@ export function TaskCheckpoints(props: {
   return (
     <InspectorSection title={t("checkpoints.title")}
       end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={points.loading} onClick={() => void refetch()} />}>
-      <Show when={points.error}><InspectorNote tone="error">{String(points.error)}</InspectorNote></Show>
-      <Show when={!points.loading && !points.error && newestFirst().length === 0}>
+      <Show when={points()?.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+      <Show when={!points.loading && !points()?.error && newestFirst().length === 0}>
         <InspectorNote>{t("checkpoints.empty")}</InspectorNote>
       </Show>
       <For each={newestFirst()}>{(point) => (
         <FileRow path={formatAge(point.createdAtMs, props.now)}
           label={`#${point.number} ${kindLabel(point.kind)}`}
-          additions={point.number === points()?.[0]?.number ? undefined : point.additions}
-          deletions={point.number === points()?.[0]?.number ? undefined : point.deletions}
+          additions={point.number === points()?.data?.[0]?.number ? undefined : point.additions}
+          deletions={point.number === points()?.data?.[0]?.number ? undefined : point.deletions}
           selected={selected() === point.number}
           onSelect={() => setSelected(selected() === point.number ? undefined : point.number)}
           actionLabel={t("checkpoints.restore")} actionDisabled={props.working}
           onAction={() => void restore(point)} />
       )}</For>
       <Show when={props.working && newestFirst().length > 0}><InspectorNote>{t("checkpoints.working")}</InspectorNote></Show>
-      <Show when={selected() !== undefined && diff()}>
+      <Show when={selected() !== undefined && diff()?.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+      <Show when={selected() !== undefined && diff()?.data}>
         {(data) => (
           <>
             <Show when={data().baseNumber === null}><InspectorNote>{t("checkpoints.oldest")}</InspectorNote></Show>

@@ -1,5 +1,6 @@
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import { t } from "../i18n";
+import { settled } from "../lib/settled";
 import { commitGraph, listCommits, readCommitDiff, type GraphRow } from "../lib/commit-history";
 import { diffFiles } from "../lib/diff";
 import { formatAge } from "../lib/time";
@@ -49,24 +50,24 @@ export function TaskCommits(props: {
   onSplit: (split: boolean) => void;
   onDraft: (text: string) => Promise<boolean>;
 }) {
-  const [commits, { refetch }] = createResource(() => props.taskId, listCommits);
+  const [commits, { refetch }] = createResource(() => props.taskId, (id) => settled(listCommits(id)));
   const [selected, setSelected] = createSignal<string>();
   const [diff] = createResource(
     () => { const hash = selected(); return hash === undefined ? undefined : ([props.taskId, hash] as const); },
-    ([id, hash]) => readCommitDiff(id, hash),
+    ([id, hash]) => settled(readCommitDiff(id, hash)),
   );
-  const graph = createMemo(() => commitGraph(commits() ?? []));
+  const graph = createMemo(() => commitGraph(commits()?.data ?? []));
   const width = createMemo(() => Math.max(1, ...graph().map((row) => Math.max(row.before.length, row.after.length, row.column + 1))));
-  const files = createMemo(() => diffFiles(diff()?.patch ?? ""));
+  const files = createMemo(() => diffFiles(diff()?.data?.patch ?? ""));
 
   return (
     <InspectorSection title={t("commits.title")}
       end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={commits.loading} onClick={() => void refetch()} />}>
-      <Show when={commits.error}><InspectorNote tone="error">{String(commits.error)}</InspectorNote></Show>
-      <Show when={!commits.loading && !commits.error && (commits() ?? []).length === 0}>
+      <Show when={commits()?.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+      <Show when={!commits.loading && !commits()?.error && (commits()?.data ?? []).length === 0}>
         <InspectorNote>{t("commits.empty")}</InspectorNote>
       </Show>
-      <For each={commits() ?? []}>{(commit, index) => (
+      <For each={commits()?.data ?? []}>{(commit, index) => (
         <button type="button" class="commit-row" data-current={selected() === commit.hash || undefined}
           aria-pressed={selected() === commit.hash} title={`${commit.hash.slice(0, 7)} ${commit.author}`}
           onClick={() => setSelected(selected() === commit.hash ? undefined : commit.hash)}>
@@ -76,8 +77,8 @@ export function TaskCommits(props: {
           <span class="commit-age">{formatAge(commit.committedAtMs, props.now)}</span>
         </button>
       )}</For>
-      <Show when={selected() !== undefined && diff.error}><InspectorNote tone="error">{String(diff.error)}</InspectorNote></Show>
-      <Show when={selected() !== undefined && diff()}>
+      <Show when={selected() !== undefined && diff()?.error}>{(error) => <InspectorNote tone="error">{error()}</InspectorNote>}</Show>
+      <Show when={selected() !== undefined && diff()?.data}>
         {(data) => (
           <>
             <Show when={files().length === 0}><InspectorNote>{t("commits.noFiles")}</InspectorNote></Show>
