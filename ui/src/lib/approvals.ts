@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 
 /** A permission question an agent is waiting on, as the app reports it. */
 export interface ApprovalQuestion {
@@ -52,6 +53,16 @@ export const revokeAlwaysAllow = (taskId: string, ruleId: number) =>
   invoke<boolean>("always_allow_revoke", { taskId, ruleId });
 
 export const pendingApprovals = () => invoke<ApprovalQuestion[]>("pending_approvals");
+
+/** Why in-app approvals are off, or null when they are on: the approval token could not be written, or the endpoint could not be taken. */
+export const approvalsOffReason = () => invoke<string | null>("approvals_off");
+
+/** The sentence telling the person that agents now ask in their own terminal, or undefined when approvals are on. */
+export function approvalsOffMessage(reason: string | null): string | undefined {
+  if (reason === "token") return t("approval.offToken");
+  if (reason === "socket") return t("approval.offSocket");
+  return undefined;
+}
 
 /** Calls back for every question that opens or closes. Returns a function that stops listening, even before the subscriptions resolve. */
 export function watchApprovals(

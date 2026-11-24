@@ -279,6 +279,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(brachio_power::KeepAwake::start())
+        .manage(Arc::new(hook_socket::ApprovalsOff::default()))
         .plugin(tauri_plugin_notification::init())
         .manage(terminal::Terminals(
             Arc::new(SessionManager::default()),
@@ -357,6 +358,7 @@ pub fn run() {
             hook_socket::always_allow_list,
             hook_socket::always_allow_revoke,
             hook_socket::pending_approvals,
+            hook_socket::approvals_off,
             mailbox::mailbox_unread,
             mailbox::mailbox_inbox,
             mailbox::mailbox_dismiss,
@@ -476,19 +478,37 @@ fn start_approvals(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         move |ids| mailbox::mark_delivered(&delivered_app, ids),
         child_task_request::AppChildTasks(app.handle().clone()),
     );
-    match brachio_runtime::hook_token::issue(&endpoint) {
-        Ok(token) => approvals.require_token(token),
-        Err(error) => tracing::warn!(%error, "the hook socket does not ask for a token"),
-    }
+    let off = app
+        .state::<Arc<hook_socket::ApprovalsOff>>()
+        .inner()
+        .clone();
+    let serving = match hook_socket::token_or_off(brachio_runtime::hook_token::issue(&endpoint)) {
+        Ok(token) => {
+            approvals.require_token(token);
+            true
+        }
+        Err(reason) => {
+            // Without a token to check, the socket is not served at all: agents ask in their own terminal.
+            tracing::error!("in-app approval is off: the hook token could not be written");
+            off.set(reason);
+            false
+        }
+    };
     let policy_app = app.handle().clone();
     approvals.set_policy(move |key, tool, input| {
         project_permissions::answer(&policy_app, key, tool, input)
     });
     app.manage(Arc::clone(&approvals));
+    if !serving {
+        return Ok(());
+    }
     tauri::async_runtime::spawn(async move {
         match brachio_runtime::transport::listen(&endpoint) {
             Ok(listener) => approvals.serve(listener).await,
-            Err(error) => tracing::warn!(%error, "in-app approval is off"),
+            Err(error) => {
+                tracing::warn!(%error, "in-app approval is off");
+                off.set("socket");
+            }
         }
     });
     Ok(())

@@ -66,6 +66,37 @@ async fn acknowledged(reader: &mut BufReader<Stream>, ids: &[String]) -> bool {
     acked == expected
 }
 
+/// Why in-app approvals are off, when they are. Agents then ask in their own terminal, so nothing
+/// is approved without the person; this lets the window say so.
+#[derive(Default)]
+pub struct ApprovalsOff(Mutex<Option<&'static str>>);
+
+impl ApprovalsOff {
+    /// Records the reason: `"token"` (the token file could not be written) or `"socket"` (the
+    /// endpoint could not be taken).
+    pub fn set(&self, reason: &'static str) {
+        if let Ok(mut current) = self.0.lock() {
+            *current = Some(reason);
+        }
+    }
+
+    pub fn get(&self) -> Option<&'static str> {
+        self.0.lock().ok().and_then(|current| *current)
+    }
+}
+
+/// The token the hook socket will check, or `"token"` when it could not be issued. The socket is
+/// served only with a token: a failed issue must not leave it answering connections unchecked.
+pub fn token_or_off<E>(issued: Result<String, E>) -> Result<String, &'static str> {
+    issued.map_err(|_| "token")
+}
+
+/// Why in-app approvals are off, or nothing when they are on.
+#[tauri::command]
+pub fn approvals_off(state: tauri::State<'_, Arc<ApprovalsOff>>) -> Option<&'static str> {
+    state.get()
+}
+
 /// Who raised a question. Only a tool request can be remembered with "always allow".
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -647,7 +678,7 @@ mod tests {
     use brachio_runtime::wire::{write_message, MAX_MESSAGE};
     use serde_json::json;
 
-    use super::{Approvals, BufReader, Notice, Stream};
+    use super::{token_or_off, Approvals, ApprovalsOff, BufReader, Notice, Stream};
     use crate::child_task_request::{ChildRequest, ChildTask, ChildTasks, CreateFuture};
 
     fn request(key: &str) -> ApprovalRequest {
@@ -1408,5 +1439,18 @@ mod tests {
             );
             assert!(created.lock().expect("lock").is_empty());
         });
+    }
+
+    #[test]
+    fn a_failed_token_turns_in_app_approval_off_and_says_why() {
+        assert_eq!(
+            token_or_off::<()>(Ok("secret".to_owned())),
+            Ok("secret".to_owned())
+        );
+        assert_eq!(token_or_off(Err("disk full")), Err("token"));
+        let off = ApprovalsOff::default();
+        assert_eq!(off.get(), None);
+        off.set("token");
+        assert_eq!(off.get(), Some("token"));
     }
 }
