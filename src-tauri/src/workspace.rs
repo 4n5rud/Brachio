@@ -511,9 +511,8 @@ async fn create_task_unprofiled(
         let started = database.lock().and_then(|mut c| {
             brachio_store::mark_running(&mut c, &task.id, now_ms()).map_err(to_text)
         });
-        if let Err(error) = started {
-            tracing::warn!(%error, "could not record that the child task started");
-        }
+        started
+            .map_err(|error| format!("The task was created but could not be started: {error}"))?;
     }
     let setup_copy_error = brachio_git::copy_setup_files(&repo.path, &path, &setup)
         .err()

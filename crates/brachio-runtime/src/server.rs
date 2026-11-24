@@ -10,7 +10,7 @@ use brachio_runtime::endpoint::{self, Liveness};
 use brachio_runtime::protocol;
 use brachio_runtime::transport;
 use brachio_runtime::wire::{
-    accepted, await_outcome, read_message, write_message, Action, Request, Response,
+    accepted, await_outcome, fit_response, read_message, write_message, Action, Request, Response,
     ResponseResult, StatusInfo, IO_TIMEOUT, MAX_MESSAGE, MAX_RESPONSE,
 };
 use interprocess::local_socket::tokio::prelude::*;
@@ -189,7 +189,7 @@ pub(crate) async fn send_response(
     result: Result<ResponseResult>,
 ) -> Result<()> {
     let result = match result {
-        Ok(result) => result,
+        Ok(result) => fit_response(instance, result),
         Err(error) => ResponseResult::Error {
             error: format!("{error:#}"),
         },
