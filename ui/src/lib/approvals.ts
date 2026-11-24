@@ -51,6 +51,12 @@ export const listAlwaysAllow = (taskId: string) => invoke<AlwaysAllowRule[]>("al
 export const revokeAlwaysAllow = (taskId: string, ruleId: number) =>
   invoke<boolean>("always_allow_revoke", { taskId, ruleId });
 
+/** Splits held questions into those `admit` accepted and those still waiting. */
+export function partitionHeld(held: readonly ApprovalQuestion[], admit: (question: ApprovalQuestion) => boolean) {
+  const rest = held.filter((question) => !admit(question));
+  return { admitted: rest.length !== held.length, rest };
+}
+
 export const pendingApprovals = () => invoke<ApprovalQuestion[]>("pending_approvals");
 
 /** Calls back for every question that opens or closes. Returns a function that stops listening, even before the subscriptions resolve. */
