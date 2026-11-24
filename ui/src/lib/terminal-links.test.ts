@@ -23,6 +23,13 @@ describe("findTerminalLinks", () => {
   });
 });
 
+describe("links the backend can open", () => {
+  it("keeps a sign-in address with & whole and stops at characters the backend refuses", () => {
+    const [link] = findTerminalLinks("open https://x.com/authorize?response_type=code&client_id=a|b");
+    expect(link).toMatchObject({ kind: "url", url: "https://x.com/authorize?response_type=code&client_id=a" });
+  });
+});
+
 describe("taskRelativePath", () => {
   it("accepts relative and in-task absolute paths", () => {
     expect(taskRelativePath("./src/a.ts", "/home/me/proj")).toBe("src/a.ts");

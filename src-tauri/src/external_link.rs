@@ -1,13 +1,14 @@
 //! Opens an address from the interface in the system browser.
 
-/// Characters a link may contain. Anything a shell treats specially (`&`, `|`, `^`, quotes,
-/// spaces, backticks) is left out, so an address can never be read as more than one argument.
+/// Characters a link may contain. The address is handed to the browser launcher as one argument,
+/// so `&` and friends are safe; `|`, `^`, quotes, spaces, backticks and angle brackets stay out.
+/// The terminal link pattern in the interface uses the same set.
 fn is_safe(url: &str) -> bool {
     url.len() <= 2_048
-        && url.starts_with("https://")
-        && url
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || "/:._-?=#%~+".contains(character))
+        && (url.starts_with("https://") || url.starts_with("http://"))
+        && url.chars().all(|character| {
+            character.is_ascii_alphanumeric() || "/:._-?=#%~+&@,;!()*[]$".contains(character)
+        })
 }
 
 /// Opens an `https` address in the default browser. Used for links the interface shows, such as
@@ -15,7 +16,7 @@ fn is_safe(url: &str) -> bool {
 #[tauri::command]
 pub async fn open_external_link(url: String) -> Result<(), String> {
     if !is_safe(&url) {
-        return Err("Only plain https addresses can be opened.".to_owned());
+        return Err("Only plain http and https addresses can be opened.".to_owned());
     }
     open_in_browser(url).await
 }
@@ -63,10 +64,13 @@ mod tests {
             "https://github.com/4n5rud/Brachio/actions/runs/44337487778/job/1"
         ));
         assert!(is_safe("https://github.com/o/r/pull/7?x=1#issuecomment-2"));
+        assert!(is_safe(
+            "https://example.com/oauth/authorize?response_type=code&client_id=a"
+        ));
+        assert!(is_safe("http://example.com"));
         for refused in [
-            "http://github.com/o/r",
+            "ftp://github.com/o/r",
             "file:///C:/Windows/System32/calc.exe",
-            "https://github.com/o/r&calc",
             "https://github.com/o/r | calc",
             "https://github.com/o/r\"",
             "https://github.com/o/r^",
