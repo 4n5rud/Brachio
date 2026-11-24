@@ -11,8 +11,9 @@ use tauri::{Manager, State};
 
 use crate::workspace::Database;
 
-/// Most bytes read by one scan; a larger backlog is finished by scanning again.
-const SCAN_BYTE_BUDGET: u64 = 256 * 1024 * 1024;
+/// Most bytes read by one scan call. A larger backlog is finished by scanning again, so the page
+/// can show what is read so far instead of waiting for all of it.
+const SCAN_BYTE_BUDGET: u64 = 32 * 1024 * 1024;
 const LIST_SIZE: usize = 8;
 
 /// Keeps two scans from running at once.
@@ -214,8 +215,29 @@ fn top(map: HashMap<String, (String, Tokens)>) -> Vec<ShareRow> {
 /// Aggregates for the charts. `daily` covers `daily_since_day` on (so totals for today, the week and
 /// the month can be added up); the lists cover `since_day` on and the chosen provider.
 #[tauri::command]
-pub fn usage_report(
-    database: State<'_, Database>,
+pub async fn usage_report(
+    app: tauri::AppHandle,
+    provider: Option<String>,
+    since_day: String,
+    daily_since_day: String,
+    limits_since_ms: i64,
+) -> Result<UsageReport, String> {
+    // A synchronous command would run on the main thread and wait behind a scan's writes.
+    tauri::async_runtime::spawn_blocking(move || {
+        build_report(
+            &app.state::<Database>(),
+            provider,
+            since_day,
+            daily_since_day,
+            limits_since_ms,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn build_report(
+    database: &Database,
     provider: Option<String>,
     since_day: String,
     daily_since_day: String,
