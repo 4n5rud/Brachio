@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Result};
 use brachio_core::status::AgentState;
 use brachio_pty::SessionId;
 use brachio_runtime::client::{Client, ClientError, Following};
-use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo};
+use brachio_runtime::wire::{Action, Reply, ResponseResult, StatusInfo, MAX_MESSAGE};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -242,8 +242,9 @@ impl RuntimeTerminals {
                             instance: hello.instance,
                             operation_id: Uuid::new_v4().to_string(),
                         };
-                        save_pending_launch(&record)?;
                         let action = launch_action(&key, launch, &record);
+                        ensure_request_fits(&action)?;
+                        save_pending_launch(&record)?;
                         let result = match client.call(action).await {
                             Ok(result) => result,
                             Err(ClientError::Refused(message)) => {
@@ -356,13 +357,18 @@ impl RuntimeTerminals {
     /// Sends input to an attached terminal. `None` when `id` is not runtime-hosted.
     pub async fn write(&self, id: SessionId, data: String) -> Option<Result<()>> {
         let (client, key) = self.target(id).await?;
-        Some(
-            client
-                .call(Action::Write { key, text: data })
+        for text in input_chunks(&data) {
+            if let Err(error) = client
+                .call(Action::Write {
+                    key: key.clone(),
+                    text: text.to_owned(),
+                })
                 .await
-                .map(|_| ())
-                .map_err(Into::into),
-        )
+            {
+                return Some(Err(error.into()));
+            }
+        }
+        Some(Ok(()))
     }
 
     /// Resizes an attached terminal. `None` when `id` is not runtime-hosted.
@@ -572,6 +578,38 @@ async fn locate(current: &Client, key: &str) -> Result<(Client, Option<Reply>), 
         }
     }
     Ok((current.clone(), None))
+}
+
+/// Longest text sent in one write request; a typed-in first prompt can be far larger.
+const WRITE_CHUNK_BYTES: usize = 16 * 1024;
+
+/// Split input at character boundaries so each piece fits one runtime request.
+fn input_chunks(data: &str) -> impl Iterator<Item = &str> {
+    let mut rest = data;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let mut end = rest.len().min(WRITE_CHUNK_BYTES);
+        while !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        let (chunk, tail) = rest.split_at(end);
+        rest = tail;
+        Some(chunk)
+    })
+}
+
+/// Refuse a request the runtime would reject before any pending record is saved for it.
+fn ensure_request_fits(action: &Action) -> Result<()> {
+    // Room for the version field and the line ending around the action.
+    let size = serde_json::to_vec(action)?.len() as u64 + 64;
+    if size > MAX_MESSAGE {
+        bail!(
+            "The launch command is too large for the terminal runtime ({size} bytes, limit {MAX_MESSAGE}). Shorten the first prompt."
+        );
+    }
+    Ok(())
 }
 
 fn launch_action(key: &str, launch: Launch, pending: &PendingLaunch) -> Action {
@@ -1075,6 +1113,35 @@ mod tests {
 #[cfg(test)]
 mod pending_launch_tests {
     use super::*;
+
+    fn launch_with_argument(arg: String) -> Action {
+        Action::LaunchOnce {
+            instance: "instance".into(),
+            operation_id: "operation".into(),
+            key: "key".into(),
+            cwd: PathBuf::from("/work"),
+            program: "claude".into(),
+            args: vec![arg],
+            env: Vec::new(),
+            rows: 24,
+            cols: 80,
+        }
+    }
+
+    #[test]
+    fn a_launch_over_the_runtime_request_limit_is_refused_before_it_is_recorded() {
+        assert!(ensure_request_fits(&launch_with_argument("x".repeat(70 * 1024))).is_err());
+        assert!(ensure_request_fits(&launch_with_argument("x".repeat(1024))).is_ok());
+    }
+
+    #[test]
+    fn typed_input_is_split_without_breaking_characters() {
+        let text = "한".repeat(20_000);
+        let chunks: Vec<&str> = input_chunks(&text).collect();
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= WRITE_CHUNK_BYTES));
+        assert_eq!(chunks.concat(), text);
+    }
 
     #[test]
     fn pending_record_survives_reopen_and_contains_no_command_data() {
