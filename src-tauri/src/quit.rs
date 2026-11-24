@@ -11,7 +11,7 @@ use crate::workspace::Database;
 
 /// Stops the programs behind these terminal keys in the current runtime and any older one still up.
 /// A key nothing hosts is skipped, and one failure never stops the rest.
-async fn stop_keys(keys: &[String]) {
+pub(crate) async fn stop_keys(keys: &[String]) {
     if !runtime_client::enabled() {
         return;
     }

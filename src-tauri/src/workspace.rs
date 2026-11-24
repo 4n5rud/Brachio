@@ -302,15 +302,67 @@ pub(crate) async fn lock_open_git_task(
 
 const NOT_GIT: &str = "This project is a plain folder, so this needs git, which it does not use.";
 
-/// Removes a repository from Brachio. Files on disk are not touched.
+/// Removes a repository from Brachio with its tasks, archived or not, after stopping their
+/// terminals. Worktree folders, branches and every other file on disk are not touched, so nothing
+/// the person wrote is lost.
 #[tauri::command]
-pub fn repo_remove(database: State<'_, Database>, id: String) -> Result<(), String> {
-    let connection = database.lock()?;
-    let tasks = TaskRecord::count_for_repo(&connection, &id).map_err(to_text)?;
-    if tasks > 0 {
-        return Err(format!("the repository still has {tasks} tasks"));
+pub async fn repo_remove(
+    database: State<'_, Database>,
+    worktrees: State<'_, TaskWorktreeLocks>,
+    terminals: State<'_, RuntimeTerminals>,
+    in_app: State<'_, Terminals>,
+    id: String,
+) -> Result<(), String> {
+    let _guard = worktrees.acquire(&id).await?;
+    let task_ids = {
+        let connection = database.lock()?;
+        if TaskRecord::repo_has_outside_waiters(&connection, &id).map_err(to_text)? {
+            return Err(format!(
+                "{OUTSIDE_WAITERS_PREFIX} A task in another project is waiting for one of this project's tasks. Release or cancel it, then remove the project."
+            ));
+        }
+        TaskRecord::ids_for_repo(&connection, &id).map_err(to_text)?
+    };
+    for task_id in &task_ids {
+        stop_task_terminals(&database, &terminals, &in_app, task_id).await?;
+        crate::task_checkpoints::forget_for_task(&database, task_id);
     }
-    RepoRecord::delete(&connection, &id).map_err(to_text)
+    {
+        let mut connection = database.lock()?;
+        let transaction = connection.transaction().map_err(to_text)?;
+        for task_id in TaskRecord::ids_for_repo(&transaction, &id).map_err(to_text)? {
+            brachio_store::forget_task_messages(&transaction, &task_id).map_err(to_text)?;
+        }
+        TaskRecord::delete_for_repo(&transaction, &id).map_err(to_text)?;
+        RepoRecord::delete(&transaction, &id).map_err(to_text)?;
+        transaction.commit().map_err(to_text)?;
+    }
+    for task_id in &task_ids {
+        crate::runtime_terminals::forget_task_screens(task_id).await;
+    }
+    Ok(())
+}
+
+/// Stable start of the refusal, so the UI can recognise it.
+const OUTSIDE_WAITERS_PREFIX: &str = "waited on elsewhere:";
+
+/// Stops every terminal of a task, in the runtime and in the app. Refuses when it cannot even tell
+/// which ones run, so a project is never dropped while its programs keep going unseen.
+async fn stop_task_terminals(
+    database: &Database,
+    terminals: &RuntimeTerminals,
+    in_app: &Terminals,
+    task_id: &str,
+) -> Result<(), String> {
+    let live = live_task_terminals(database, terminals, in_app, task_id)
+        .await
+        .map_err(|_| "could not verify which of the project's terminals are running".to_owned())?;
+    if live.is_empty() {
+        return Ok(());
+    }
+    crate::quit::stop_keys(&live).await;
+    in_app.1.kill_for_task(&in_app.0, task_id);
+    Ok(())
 }
 
 /// Lists tasks that are not archived, newest first.
