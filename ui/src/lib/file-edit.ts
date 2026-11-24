@@ -30,7 +30,7 @@ const CODES: readonly FileEditProblem[] = ["too_large", "not_text", "mixed_endin
 
 /** Splits a refusal of the form `<code>: <sentence>` into its code and sentence; anything else is `other`. */
 export function fileEditProblem(failure: unknown): { problem: FileEditProblem; message: string } {
-  const text = String(failure);
+  const text = failure instanceof Error ? failure.message : String(failure);
   const colon = text.indexOf(": ");
   const code = colon > 0 ? text.slice(0, colon) : "";
   const known = CODES.find((candidate) => candidate === code);
