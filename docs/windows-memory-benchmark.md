@@ -1,6 +1,6 @@
 # Memory benchmark methodology
 
-This page describes how to measure Brachio's memory use on Windows. No results are published yet: the numbers will be added here, with their methodology and environment, after the runs are done. Until then, make no performance claims from this page.
+This page describes how to measure Brachio's memory use on Windows, and records the size and dependency baseline. App memory results are not published yet: they will be added here, with their methodology and environment, after the runs are done. Until then, make no memory claims from this page.
 
 Use a release build on a single Windows machine and start the sampler from a separate PowerShell window. Use one disposable repository and the same app build, terminal runtime mode, agent versions and configuration, task fixture, window size, scrollback settings, and warm-up for every run. Record the Windows build, CPU and logical processor count, RAM, app commit and build type, WebView2 version, runtime mode, and enabled agent tool versions.
 
@@ -69,3 +69,27 @@ cargo test -p brachio-runtime --test memory_bound -- --ignored --nocapture
 ```
 
 It is ignored by default, so `cargo test --workspace` skips it. The `Memory bound` workflow runs it on `windows-latest` for pull requests that touch the runtime or the workflow, on a weekly schedule and on demand. The job does not block other checks: it is not a required check and its failure does not fail the workflow. The output is a CSV of the measured and bound values per session count. Make it blocking only after several runs show that its noise is well below the bounds.
+
+## Size and dependency baseline
+
+Installer sizes are the release assets as published. A MiB is 1,048,576 bytes.
+
+| Asset | 0.1.0 | 0.2.0-rc.2 |
+| --- | --- | --- |
+| Windows setup (`x64-setup.exe`) | 8.02 MiB | 8.76 MiB |
+| Windows `.msi` | 10.79 MiB | not published |
+| macOS disk image (`aarch64.dmg`) | 9.23 MiB | 10.00 MiB |
+| macOS `app.tar.gz` | 9.16 MiB | 9.92 MiB |
+
+Dependency counts at the commit that added this section, from `node scripts/size-baseline.mjs`:
+
+| Measure | Value |
+| --- | --- |
+| Rust crates in the app's normal and build graph, Windows (`x86_64-pc-windows-msvc`) | 342 |
+| Rust crates in the app's normal and build graph, macOS (`aarch64-apple-darwin`) | 340 |
+| Packages in `Cargo.lock` | 605 |
+| Packages in `ui/pnpm-lock.yaml` | 351 |
+
+The crate count is the unique crates `cargo tree --locked -p brachio-app -e normal,build` lists for the target, including the app and workspace crates and excluding dev dependencies. A pull request that adds a dependency or a periodic job should state these figures before and after. The "Version files agree" job in CI prints the same table in its summary on every run. It only reports and never fails the check.
+
+Not recorded yet: the app process's working set and private bytes just started, with one task and one agent tab open, and with ten tasks open, on Windows and macOS, and the release binary size. They need the procedure above on an installed release build, and no bound for the app process exists yet.
