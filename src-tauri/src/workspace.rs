@@ -1076,6 +1076,12 @@ fn archived_task(database: &Database, id: &str) -> Result<(TaskRecord, RepoRecor
     if TaskRecord::has_children(&connection, id).map_err(to_text)? {
         return Err("Delete the child tasks before deleting their parent.".to_owned());
     }
+    if TaskRecord::has_waiting_dependents(&connection, id).map_err(to_text)? {
+        return Err(
+            "Other tasks are waiting for this one. Release or cancel them before deleting it."
+                .to_owned(),
+        );
+    }
     let repo = RepoRecord::get(&connection, &task.repo_id).map_err(to_text)?;
     Ok((task, repo))
 }
