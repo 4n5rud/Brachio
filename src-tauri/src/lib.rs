@@ -404,6 +404,7 @@ pub fn run() {
             workspace::task_files,
             task_attachments::task_attach_images,
             task_file_edit::task_file_read,
+            task_file_edit::task_file_check,
             task_file_edit::task_file_write,
             task_attachments::task_attach_pasted_image,
             task_file_ops::task_move_path,

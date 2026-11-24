@@ -42,3 +42,13 @@ export const readEditableFile = (id: string, path: string) => invoke<EditableFil
 /** Saves over the file read as `expected`; rejects with a `conflict` problem when the file changed since. */
 export const writeEditableFile = (id: string, path: string, text: string, expected: FileVersion, lineEnding: LineEnding, bom: boolean) =>
   invoke<FileVersion>("task_file_write", { id, path, text, expected, lineEnding, bom });
+
+export interface FileCheck {
+  status: "unchanged" | "changed" | "missing";
+  /** The file's current version; absent when it is missing. */
+  version?: FileVersion;
+}
+
+/** Compares the file with the version a tab last read; the backend hashes only when size or time differ. */
+export const checkEditableFile = (id: string, path: string, expected: FileVersion) =>
+  invoke<FileCheck>("task_file_check", { id, path, expected });

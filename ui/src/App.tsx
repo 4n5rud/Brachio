@@ -82,6 +82,7 @@ import { clampPanelWidth, loadInspectorWidth, loadSidebarWidth, saveInspectorWid
 import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen } from "./lib/panel-visibility";
 import { statusTone, type AgentState } from "./lib/status";
 import { recordTurnBoundary, turnActive } from "./lib/checkpoints";
+import { openFileWatch } from "./lib/open-file-watch";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
 import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
 import { sendShellInput } from "./lib/shell-input";
@@ -727,6 +728,7 @@ export function App() {
     const taskActive = () => [...(live().get(taskId)?.values() ?? [])].some((report) => turnActive(report.status));
     const wasActive = taskActive();
     setLive((map) => new Map(map).set(taskId, new Map(map.get(taskId)).set(sessionKey, { status, message, at })));
+    if (inTauri) openFileWatch.recheck(taskId);
     if (inTauri && wasActive !== taskActive()) void recordTurnBoundary(taskId, taskActive());
     if (inTauri && previous.state !== status.state && TIMELINE_STATES.has(status.state)) {
       recordTaskActivity(taskId, "agent_status", status.state, at).catch(report);
