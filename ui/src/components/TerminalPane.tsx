@@ -21,6 +21,7 @@ import { openExternalLink } from "../lib/pr-status";
 import { previewIfRegistered } from "../lib/local-preview";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
+import { releaseTerminal } from "../lib/terminal-release";
 import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { takeDraftProblem, type DraftProblem } from "../lib/draft-problem";
 import { bracketedPaste, isCopyKey, isNativePasteKey, pastedImage, pasteText, terminalClipboardText } from "../lib/terminal-paste";
@@ -377,7 +378,7 @@ export function TerminalPane(props: {
           // handle in that case would stop the live PTY instead of letting it reattach.
           if (streamEnded) return;
           if (disposed || launch !== generation) {
-            void opened.close().catch(() => {});
+            releaseTerminal(opened, props.leave, props.onStatus);
             return;
           }
           handle = opened;
@@ -768,11 +769,7 @@ export function TerminalPane(props: {
       input.dispose();
       resized.dispose();
       stopWebgl();
-      const leaving = handle;
-      const report = props.onStatus;
-      if (props.leave === "park" && report) void leaving?.park(report).catch(() => leaving.close());
-      else if (props.leave === "park" || props.leave === "detach") void leaving?.detach().catch(() => leaving.close());
-      else void leaving?.close();
+      releaseTerminal(handle, props.leave, props.onStatus);
       term.dispose();
     });
   });
