@@ -644,6 +644,8 @@ export const ko: Messages = {
   "settings.dark": "다크",
   "settings.language": "언어",
   "ports.title": "로컬 포트",
+  "ports.empty": "이 작업에 지정되거나 추가된 포트가 없습니다.",
+  "inspector.running": "실행 중",
   "preview.title": "미리보기",
   "preview.openBrowser": "브라우저에서 열기",
   "preview.hint": "화면이 비어 있으면 서버가 다른 앱 안에 표시되는 것을 막고 있을 수 있습니다.",

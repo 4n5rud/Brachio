@@ -626,6 +626,8 @@ export const en = {
   "settings.dark": "Dark",
   "settings.language": "Language",
   "ports.title": "Local ports",
+  "ports.empty": "No ports are assigned or added for this task.",
+  "inspector.running": "Running",
   "preview.title": "Preview",
   "preview.openBrowser": "Open in browser",
   "preview.hint": "If the page stays blank, the server may not allow being shown inside another app.",

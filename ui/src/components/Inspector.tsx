@@ -34,7 +34,7 @@ import { discardTaskFile, discardTaskHunk } from "../lib/workspace";
 /** How often the open Activity tab reloads, since the core records events the interface never sees. */
 const ACTIVITY_REFRESH_MS = 5_000;
 
-type Pane = "changes" | "files" | "tasks" | "activity";
+type Pane = "changes" | "files" | "running" | "tasks" | "activity";
 
 /** Right column: a compact summary of the selected task. */
 export function Inspector(props: {
@@ -95,6 +95,7 @@ export function Inspector(props: {
   const tabs = (): IconTab<Pane>[] => [
     ...(isGit() ? [{ value: "changes" as const, label: t("inspector.changes"), icon: "diff" as const }] : []),
     { value: "files", label: t("files.title"), icon: "folder" as const },
+    { value: "running", label: t("inspector.running"), icon: "terminal" as const },
     ...(isLead() ? [{ value: "tasks" as const, label: t("inspector.tasks"), icon: "list" as const }] : []),
     { value: "activity", label: t("inspector.activity"), icon: "activity" as const },
   ];
@@ -108,13 +109,21 @@ export function Inspector(props: {
           <Show when={props.task.worktreePath && props.task.id} keyed
             fallback={<InspectorSection title={t("files.title")}><InspectorNote>{t("files.empty")}</InspectorNote></InspectorSection>}>
             {(id) => (
-              <div class="inspector-changes">
-                <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
-                <TaskPorts taskId={id} />
-                <TaskProcesses taskId={id} />
-              </div>
+              <TaskFiles taskId={id} root={props.task.worktreePath} onInsert={(path) => void props.onDraft(id, `@${path} `)} />
             )}
           </Show>
+        </Match>
+        <Match when={pane() === "running"}>
+          <div class="inspector-changes">
+            <Show when={props.task.id} keyed>
+              {(id) => (
+                <>
+                  <TaskPorts taskId={id} />
+                  <TaskProcesses taskId={id} />
+                </>
+              )}
+            </Show>
+          </div>
         </Match>
         <Match when={pane() === "changes"}>
           <div class="inspector-changes">
