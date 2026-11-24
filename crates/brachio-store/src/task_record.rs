@@ -372,6 +372,23 @@ impl TaskRecord {
         )?)
     }
 
+    /// Returns whether another task is still queued or blocked behind this one.
+    ///
+    /// Deleting the task would drop the dependency edge and let those tasks start unapproved.
+    ///
+    /// # Errors
+    /// Fails if SQLite cannot query the dependency records.
+    pub fn has_waiting_dependents(connection: &Connection, id: &str) -> Result<bool, StoreError> {
+        Ok(connection.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM task_dependencies d
+                 LEFT JOIN task_orchestration o ON o.task_id = d.task_id
+                 WHERE d.depends_on = ?1 AND COALESCE(o.state, 'queued') IN ('queued', 'blocked'))",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
         let worktree_path: String = row.get(4)?;
         Ok(Self {
