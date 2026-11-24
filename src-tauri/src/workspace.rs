@@ -887,7 +887,7 @@ pub async fn task_file_media(
     .map_err(to_text)?
 }
 
-fn resolve_preview_path(worktree: &Path, path: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_preview_path(worktree: &Path, path: &str) -> Result<PathBuf, String> {
     use std::path::Component;
 
     let relative = Path::new(path);

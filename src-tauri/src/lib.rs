@@ -40,6 +40,7 @@ mod task_attachments;
 mod task_checkpoints;
 mod task_commits;
 mod task_file_actions;
+mod task_file_edit;
 mod task_file_ops;
 mod task_folder;
 mod task_overlaps;
@@ -401,6 +402,8 @@ pub fn run() {
             workspace::task_file_preview,
             workspace::task_file_media,
             task_attachments::task_attach_images,
+            task_file_edit::task_file_read,
+            task_file_edit::task_file_write,
             task_attachments::task_attach_pasted_image,
             task_file_ops::task_move_path,
             task_file_ops::task_copy_conflicts,
