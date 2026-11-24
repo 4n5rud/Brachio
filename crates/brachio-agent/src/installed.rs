@@ -373,11 +373,11 @@ mod tests {
         assert_eq!(plain, PromptDelivery::Argument);
         assert_eq!(risky, PromptDelivery::TypeIn);
 
-        let (command, long) = installed
+        let (long_command, long) = installed
             .resolve_interactive(Some(&"a".repeat(20 * 1024)), None, vec![])
             .expect("resolve");
         assert_eq!(long, PromptDelivery::TypeIn);
-        assert!(command.args.iter().all(|arg| arg.len() < 1024));
+        assert!(long_command.args.iter().all(|arg| arg.len() < 1024));
         assert_eq!(command.env[0].1, "\"C:/npm/claude.cmd\"");
     }
 
