@@ -1,4 +1,5 @@
-import { For, Show, createResource, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
+import { createGuardedResource } from "../lib/guarded-resource";
 import { t } from "../i18n";
 import { checkpointRevision, listCheckpoints, readCheckpointDiff, restoreCheckpoint, type Checkpoint } from "../lib/checkpoints";
 import { formatAge } from "../lib/time";
@@ -28,12 +29,12 @@ export function TaskCheckpoints(props: {
   onSplit: (split: boolean) => void;
   onDraft: (text: string) => Promise<boolean>;
 }) {
-  const [points, { refetch }] = createResource(
+  const [points, { refetch, error: pointsError }] = createGuardedResource(
     () => [props.taskId, checkpointRevision()] as const,
     ([id]) => listCheckpoints(id),
   );
   const [selected, setSelected] = createSignal<number>();
-  const [diff] = createResource(
+  const [diff, { error: diffError }] = createGuardedResource(
     () => { const number = selected(); return number === undefined ? undefined : ([props.taskId, number, checkpointRevision()] as const); },
     ([id, number]) => readCheckpointDiff(id, number),
   );
@@ -59,8 +60,8 @@ export function TaskCheckpoints(props: {
   return (
     <InspectorSection title={t("checkpoints.title")}
       end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={points.loading} onClick={() => void refetch()} />}>
-      <Show when={points.error}><InspectorNote tone="error">{String(points.error)}</InspectorNote></Show>
-      <Show when={!points.loading && !points.error && newestFirst().length === 0}>
+      <Show when={pointsError()}><InspectorNote tone="error">{pointsError()}</InspectorNote></Show>
+      <Show when={!points.loading && !pointsError() && newestFirst().length === 0}>
         <InspectorNote>{t("checkpoints.empty")}</InspectorNote>
       </Show>
       <For each={newestFirst()}>{(point) => (
@@ -74,6 +75,7 @@ export function TaskCheckpoints(props: {
           onAction={() => void restore(point)} />
       )}</For>
       <Show when={props.working && newestFirst().length > 0}><InspectorNote>{t("checkpoints.working")}</InspectorNote></Show>
+      <Show when={selected() !== undefined && diffError()}><InspectorNote tone="error">{diffError()}</InspectorNote></Show>
       <Show when={selected() !== undefined && diff()}>
         {(data) => (
           <>

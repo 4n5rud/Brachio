@@ -1,7 +1,8 @@
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { t } from "../i18n";
 import { commitGraph, listCommits, readCommitDiff, type GraphRow } from "../lib/commit-history";
 import { diffFiles } from "../lib/diff";
+import { createGuardedResource } from "../lib/guarded-resource";
 import { formatAge } from "../lib/time";
 import { DiffReview } from "./DiffReview";
 import { FileRow } from "./FileRow";
@@ -49,9 +50,9 @@ export function TaskCommits(props: {
   onSplit: (split: boolean) => void;
   onDraft: (text: string) => Promise<boolean>;
 }) {
-  const [commits, { refetch }] = createResource(() => props.taskId, listCommits);
+  const [commits, { refetch, error: commitsError }] = createGuardedResource(() => props.taskId, listCommits);
   const [selected, setSelected] = createSignal<string>();
-  const [diff] = createResource(
+  const [diff, { error: diffError }] = createGuardedResource(
     () => { const hash = selected(); return hash === undefined ? undefined : ([props.taskId, hash] as const); },
     ([id, hash]) => readCommitDiff(id, hash),
   );
@@ -62,8 +63,8 @@ export function TaskCommits(props: {
   return (
     <InspectorSection title={t("commits.title")}
       end={<IconButton size="sm" icon="refresh" label={t("inspector.refresh")} busy={commits.loading} onClick={() => void refetch()} />}>
-      <Show when={commits.error}><InspectorNote tone="error">{String(commits.error)}</InspectorNote></Show>
-      <Show when={!commits.loading && !commits.error && (commits() ?? []).length === 0}>
+      <Show when={commitsError()}><InspectorNote tone="error">{commitsError()}</InspectorNote></Show>
+      <Show when={!commits.loading && !commitsError() && (commits() ?? []).length === 0}>
         <InspectorNote>{t("commits.empty")}</InspectorNote>
       </Show>
       <For each={commits() ?? []}>{(commit, index) => (
@@ -76,7 +77,7 @@ export function TaskCommits(props: {
           <span class="commit-age">{formatAge(commit.committedAtMs, props.now)}</span>
         </button>
       )}</For>
-      <Show when={selected() !== undefined && diff.error}><InspectorNote tone="error">{String(diff.error)}</InspectorNote></Show>
+      <Show when={selected() !== undefined && diffError()}><InspectorNote tone="error">{diffError()}</InspectorNote></Show>
       <Show when={selected() !== undefined && diff()}>
         {(data) => (
           <>
