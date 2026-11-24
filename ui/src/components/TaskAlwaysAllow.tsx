@@ -1,4 +1,5 @@
 import { For, Show, createResource, onCleanup } from "solid-js";
+import { visibleInterval } from "../lib/visible-interval";
 import { t } from "../i18n";
 import { listAlwaysAllow, revokeAlwaysAllow, type AlwaysAllowRule } from "../lib/approvals";
 import { Button } from "./ui/Button";
@@ -40,8 +41,7 @@ export function TaskAlwaysAllow(props: { taskId: string }) {
     () => props.taskId,
     (id) => listAlwaysAllow(id).catch(() => []),
   );
-  const timer = setInterval(() => void refetch(), REFRESH_MS);
-  onCleanup(() => clearInterval(timer));
+  onCleanup(visibleInterval(() => void refetch(), REFRESH_MS));
   const revoke = async (rule: AlwaysAllowRule) => {
     try {
       await revokeAlwaysAllow(props.taskId, rule.id);

@@ -1,4 +1,5 @@
 import { IconTabs, type IconTab } from "./ui/IconTabs";
+import { visibleInterval } from "../lib/visible-interval";
 import { For, Match, Show, Switch, createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
 import { t } from "../i18n";
 import { useAsyncAction } from "../lib/async-action";
@@ -80,8 +81,7 @@ export function Inspector(props: {
   );
   createEffect(() => {
     if (pane() !== "activity") return;
-    const timer = setInterval(() => void refetchHistory(), ACTIVITY_REFRESH_MS);
-    onCleanup(() => clearInterval(timer));
+    onCleanup(visibleInterval(() => void refetchHistory(), ACTIVITY_REFRESH_MS));
   });
   const currentChanges = () => changes()?.id === props.task.id ? changes() : undefined;
   createEffect(() => props.onWide?.(pane() === "changes" && split() && !!currentChanges()?.data?.patch));

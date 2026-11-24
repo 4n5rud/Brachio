@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { visibleInterval } from "./visible-interval";
 import { loadPrStatus, nextRefreshDelay, type PrStatusReport } from "./pr-status";
 
 /** How often the scheduler looks for a task that is due. One lookup runs at a time. */
@@ -88,7 +89,7 @@ export function pickDue(ids: readonly string[], dueAt: ReadonlyMap<string, numbe
  */
 export function watchPrStatuses(ids: () => readonly string[]): () => void {
   const dueAt = new Map<string, number>();
-  const timer = setInterval(() => {
+  const stop = visibleInterval(() => {
     const current = ids();
     const keep = new Set(current);
     for (const id of dueAt.keys()) if (!keep.has(id)) dueAt.delete(id);
@@ -103,5 +104,5 @@ export function watchPrStatuses(ids: () => readonly string[]): () => void {
       dueAt.set(id, delay === null ? Number.POSITIVE_INFINITY : Date.now() + delay);
     });
   }, TICK_MS);
-  return () => clearInterval(timer);
+  return stop;
 }
