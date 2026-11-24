@@ -399,8 +399,6 @@ pub fn run() {
             workspace::task_delete_preview,
             workspace::task_delete,
             workspace::task_files,
-            workspace::task_file_preview,
-            workspace::task_file_media,
             task_attachments::task_attach_images,
             task_file_edit::task_file_read,
             task_file_edit::task_file_write,

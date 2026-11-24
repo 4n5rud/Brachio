@@ -52,6 +52,9 @@ export function PortsPanel(props: {
             onClick={() => props.onRemove(entry)}>{t("ports.remove")}</Button>
         </ActionRow>
       )}</For>
+      <Show when={!props.assigned && !props.assigning && !props.assignError && props.ports.length === 0}>
+        <InspectorNote>{t("ports.empty")}</InspectorNote>
+      </Show>
       <Show when={props.ports.length < MAX_PORTS}>
         <form class="insp-form" onSubmit={(event) => { event.preventDefault(); props.onAdd(); }}>
           <div class="port-add">
