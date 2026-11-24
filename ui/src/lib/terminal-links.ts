@@ -2,7 +2,8 @@ export type TerminalLink =
   | { kind: "url"; start: number; end: number; url: string }
   | { kind: "file"; start: number; end: number; path: string; line: number; column?: number };
 
-const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gu;
+// Keep in sync with the characters `external_link.rs` accepts.
+const URL_PATTERN = /https?:\/\/[A-Za-z0-9/:._\-?=#%~+&@,;!()*[\]$]+/gu;
 // A path with an extension, then :line and an optional :column. A leading slash, dot or word
 // character before it means it is part of something longer (a URL, a host:port), so it is skipped.
 const FILE_PATTERN = /(?<![\w/\\.@:-])((?:[A-Za-z]:[\\/])?(?:[\w@.+-]+[\\/])*[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}):(\d{1,7})(?::(\d{1,5}))?/gu;
