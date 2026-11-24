@@ -101,6 +101,27 @@ export const loadProviders = () => invoke<UsageProviderInfo[]>("usage_providers"
 /** Reads the logs that grew; `reset` forgets everything and reads all of them again. */
 export const scanUsage = (reset: boolean) => invoke<ScanReport>("usage_scan", { reset });
 
+const MAX_SCAN_PASSES = 64;
+
+/**
+ * Scans in passes while a backlog remains, calling `onPass` after each so the page can show the
+ * totals read so far. Stops when a pass reads nothing new, so it cannot loop forever.
+ */
+export async function scanInPasses(
+  scan: (reset: boolean) => Promise<ScanReport>,
+  onPass: (report: ScanReport) => unknown,
+  reset: boolean,
+  stopped: () => boolean = () => false,
+): Promise<ScanReport> {
+  let report = await scan(reset);
+  await onPass(report);
+  for (let pass = 1; pass < MAX_SCAN_PASSES && report.truncated && report.bytesRead > 0 && !stopped(); pass += 1) {
+    report = await scan(false);
+    await onPass(report);
+  }
+  return report;
+}
+
 export function loadReport(provider: string | undefined, range: Range, now = Date.now()): Promise<UsageReport> {
   const today = utcDay(now);
   return invoke<UsageReport>("usage_report", {

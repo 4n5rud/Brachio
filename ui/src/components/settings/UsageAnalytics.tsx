@@ -1,8 +1,8 @@
-import { Show, createResource, createSignal, onMount } from "solid-js";
+import { Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { locale, t } from "../../i18n";
 import { takeSettingsSection } from "../../lib/settings-scroll";
 import {
-  RANGES, compact, daysEndingAt, loadProviders, loadReport, perDay, scanUsage, sumSince, total, utcDay,
+  RANGES, compact, daysEndingAt, loadProviders, loadReport, perDay, scanInPasses, scanUsage, sumSince, total, utcDay,
   type LimitSnapshot, type Range, type ScanReport, type UsageProviderInfo,
 } from "../../lib/usage-analytics";
 import { AgentIcon } from "../AgentIcon";
@@ -66,8 +66,10 @@ export function UsageAnalytics() {
     setScanning(true);
     setFailure("");
     try {
-      setScan(await scanUsage(reset));
-      await refetch();
+      await scanInPasses(scanUsage, async (pass) => {
+        setScan(pass);
+        await refetch();
+      }, reset, () => disposed);
     } catch (error) {
       setFailure(String(error));
     } finally {
@@ -75,6 +77,8 @@ export function UsageAnalytics() {
     }
   };
   let section: HTMLElement | undefined;
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
   onMount(() => {
     void runScan(false);
     if (takeSettingsSection("analytics")) requestAnimationFrame(() => section?.scrollIntoView({ block: "start" }));
@@ -105,7 +109,7 @@ export function UsageAnalytics() {
           options={RANGES.map((days) => ({ value: String(days), label: t("analytics.days").replace("{n}", String(days)) }))} />
       </div>
       <Show when={failure()}><p class="form-error" role="alert">{failure()}</p></Show>
-      <Show when={scan()?.truncated}><p class="form-hint">{t("analytics.truncated")}</p></Show>
+      <Show when={scan()?.truncated && !scanning()}><p class="form-hint">{t("analytics.truncated")}</p></Show>
       <Show when={report()} fallback={<p class="form-hint">{t("analytics.loading")}</p>}>
         {(data) => (
           <Show when={data().daily.length > 0} fallback={<p class="form-hint">{t("analytics.empty")}</p>}>
