@@ -1,4 +1,5 @@
-import { For, Show, createResource, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
+import { createGuardedResource } from "../lib/guarded-resource";
 import { t, type MessageKey } from "../i18n";
 import { diagnosticReport, markFirstRunSeen, runSystemCheck, type CheckId, type CheckState } from "../lib/system-check";
 import { pushToast } from "../lib/toasts";
@@ -19,7 +20,7 @@ const HINT: Record<CheckId, MessageKey> = {
 };
 
 function SystemCheckDialog(props: { onClose: () => void }) {
-  const [items, { refetch }] = createResource(runSystemCheck);
+  const [items, { refetch, error: checkError }] = createGuardedResource(() => true, () => runSystemCheck());
   const [copied, setCopied] = createSignal(false);
   const copyReport = async () => {
     const list = items();
@@ -45,7 +46,7 @@ function SystemCheckDialog(props: { onClose: () => void }) {
         </>
       }>
       <p class="check-intro">{t("check.intro")}</p>
-      <Show when={items.error}><p class="check-intro" role="alert">{t("check.failed")}</p></Show>
+      <Show when={checkError()}><p class="check-intro" role="alert">{t("check.failed")}</p></Show>
       <ul class="check-list">
         <For each={items()}>{(item) => (
           <li class="check-item">
