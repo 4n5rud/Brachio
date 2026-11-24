@@ -690,6 +690,7 @@ export const ko: Messages = {
   "settings.prioritySortHint": "프로젝트 안에서 대기, 확인 전 완료, 작업 중, 나머지 순으로 보여 줍니다.",
   "settings.keepAwake": "컴퓨터 절전 막기",
   "settings.keepAwakeHint": "에이전트가 일하는 동안만 막고, 모두 멈추면 다시 잠들 수 있습니다.",
+  "approvals.off": "보안 토큰을 저장하지 못해 앱 안 승인이 꺼졌습니다. 에이전트가 자체 터미널에서 묻습니다.",
   "settings.keepAwakeFailed": "절전 방지 설정 실패",
   "settings.keepAwakeUnavailable": "이 환경에서는 쓸 수 없습니다. 절전 방지 서비스가 응답하지 않습니다.",
   "settings.notifications": "데스크톱 알림",

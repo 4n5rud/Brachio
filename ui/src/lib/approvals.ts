@@ -51,6 +51,9 @@ export const listAlwaysAllow = (taskId: string) => invoke<AlwaysAllowRule[]>("al
 export const revokeAlwaysAllow = (taskId: string, ruleId: number) =>
   invoke<boolean>("always_allow_revoke", { taskId, ruleId });
 
+/** Why in-app approval is off for this run, or null when it is on. */
+export const approvalUnavailable = () => invoke<string | null>("approval_unavailable");
+
 export const pendingApprovals = () => invoke<ApprovalQuestion[]>("pending_approvals");
 
 /** Calls back for every question that opens or closes. Returns a function that stops listening, even before the subscriptions resolve. */
