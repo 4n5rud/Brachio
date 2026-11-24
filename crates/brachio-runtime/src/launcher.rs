@@ -180,7 +180,8 @@ pub(crate) fn shell_command() -> (String, Vec<String>) {
 #[cfg(unix)]
 pub(crate) fn shell_command() -> (String, Vec<String>) {
     let program = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
-    (program, Vec::new())
+    let args = brachio_pty::login_shell_arguments(std::path::Path::new(&program));
+    (program, args)
 }
 
 #[cfg(test)]

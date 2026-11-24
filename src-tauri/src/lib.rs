@@ -18,6 +18,7 @@ mod hook_socket;
 mod issue_report;
 mod keep_awake;
 mod log_file;
+mod login_environment;
 mod mailbox;
 mod orchestration;
 mod pending_worktrees;
@@ -269,6 +270,7 @@ fn log_file_path() -> Option<std::path::PathBuf> {
 /// Panics if the Tauri runtime fails to start, which leaves nothing to show.
 pub fn run() {
     init_logging();
+    login_environment::import_login_path();
     tauri::Builder::default()
         // A second launch would open the same database and start agents the first knows nothing of.
         .plugin(tauri_plugin_single_instance::init(

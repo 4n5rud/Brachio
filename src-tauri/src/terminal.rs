@@ -533,11 +533,14 @@ fn shell_command(requested: Option<&str>) -> ResolvedCommand {
             args: shell.args,
             env: Vec::new(),
         },
-        None => ResolvedCommand {
-            program: default_shell(),
-            args: Vec::new(),
-            env: Vec::new(),
-        },
+        None => {
+            let program = default_shell();
+            ResolvedCommand {
+                args: brachio_pty::login_shell_arguments(&program),
+                program,
+                env: Vec::new(),
+            }
+        }
     }
 }
 
