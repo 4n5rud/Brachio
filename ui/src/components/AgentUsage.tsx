@@ -100,7 +100,7 @@ export function UsagePanel(props: {
   updatedAt?: number;
   onRefresh: () => void;
   onAccounts: () => void;
-  /** Opens the provider usage page; offered while Claude Code is signed in. */
+  /** Opens Brachio's own usage statistics, which cover every agent. */
   onDetails?: () => void;
 }) {
   return (
@@ -144,7 +144,7 @@ export function UsagePanel(props: {
       <div class="usage-panel-foot">
         <Show when={props.onDetails}>
           <button type="button" class="menu-item" onClick={() => props.onDetails?.()}>
-            {t("usage.details")}<Icon name="external" class="icon-sm usage-chevron" />
+            {t("usage.details")}<Icon name="chevronRight" class="icon-sm usage-chevron" />
           </button>
         </Show>
         <button type="button" class="menu-item" onClick={() => props.onAccounts()}>{t("usage.manage")}</button>

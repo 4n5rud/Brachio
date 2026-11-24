@@ -1,5 +1,6 @@
 import { Show, createResource, createSignal, onMount } from "solid-js";
 import { locale, t } from "../../i18n";
+import { takeSettingsSection } from "../../lib/settings-scroll";
 import {
   RANGES, compact, daysEndingAt, loadProviders, loadReport, perDay, scanUsage, sumSince, total, utcDay,
   type LimitSnapshot, type Range, type ScanReport, type UsageProviderInfo,
@@ -73,7 +74,11 @@ export function UsageAnalytics() {
       setScanning(false);
     }
   };
-  onMount(() => void runScan(false));
+  let section: HTMLElement | undefined;
+  onMount(() => {
+    void runScan(false);
+    if (takeSettingsSection("analytics")) requestAnimationFrame(() => section?.scrollIntoView({ block: "start" }));
+  });
 
   const today = () => utcDay(Date.now());
   const days = () => daysEndingAt(today(), range());
@@ -87,7 +92,7 @@ export function UsageAnalytics() {
     rows.map((row) => ({ key: row.key, name: row.name, value: total(row) }));
 
   return (
-    <section class="analytics" aria-labelledby="analytics-title">
+    <section class="analytics" aria-labelledby="analytics-title" ref={section}>
       <div class="analytics-head">
         <h3 id="analytics-title">{t("analytics.title")}</h3>
         <Button size="sm" variant="ghost" loading={scanning()} loadingLabel={t("analytics.scanning")}

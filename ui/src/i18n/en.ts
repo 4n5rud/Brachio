@@ -902,7 +902,7 @@ export const en = {
   "usage.nearlyUsed": "Nearly used up",
   "usage.unavailable": "Usage unknown",
   "usage.unavailableNote": "Open the agent once to renew its sign-in, then refresh.",
-  "usage.details": "Usage details and history",
+  "usage.details": "Usage statistics",
   "usage.manage": "Manage accounts…",
   "usage.agentAccount": "{agent} account settings",
   "usage.unitDay": "{n}d",
