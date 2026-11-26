@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createResource, createSignal, type JSX } from "solid-js";
 import { locale, t } from "../../i18n";
+import { cachedAgentReading, invalidateAgentReadings, readAgentReading } from "../../lib/agent-readings";
+import { refreshAgentUsage } from "../../lib/agent-usage";
 import { useAsyncAction } from "../../lib/async-action";
-import { detectAgents, type InstalledAgent } from "../../lib/terminal";
+import { type InstalledAgent } from "../../lib/terminal";
 import { Button } from "../ui/Button";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { Notice } from "../ui/Notice";
@@ -43,27 +45,28 @@ function usageRow(window: QuotaWindow): UsageRow {
 /** Reads one agent's account, and Codex usage, from the vendor CLI. */
 function AgentAccount(props: { agent: InstalledAgent }) {
   const kind = props.agent.kind;
-  const [account, { refetch }] = createResource(async (): Promise<AccountState> => {
+  const asAccount = (status: AuthStatus): AccountState => status.signedIn
+    ? { state: "signedIn", account: status.account } : { state: "signedOut" };
+  const lastAccount = cachedAgentReading<AuthStatus>("agent_auth_status", { kind });
+  const [account, { refetch }] = createResource(async (_, info): Promise<AccountState> => {
     if (kind === "grok") return { state: "ownTerminal" };
     try {
-      const status = await invoke<AuthStatus>("agent_auth_status", { kind });
-      return status.signedIn ? { state: "signedIn", account: status.account } : { state: "signedOut" };
+      return asAccount(await readAgentReading<AuthStatus>("agent_auth_status", { kind }, info.refetching === true));
     } catch (error) {
       return { state: "error", message: String(error) };
     }
-  });
-  const [usage, { refetch: refetchUsage }] = createResource(
-    () => kind === "codex" && account()?.state === "signedIn",
-    async (wanted): Promise<UsageRow[] | undefined> => {
-      if (!wanted) return undefined;
-      try {
-        const quota = await invoke<CodexQuota>("codex_usage");
-        return [quota.primary, quota.secondary].filter((entry): entry is QuotaWindow => entry !== null).map(usageRow);
-      } catch {
-        return undefined;
-      }
-    },
-  );
+  }, { initialValue: lastAccount ? asAccount(lastAccount) : undefined });
+  const toRows = (quota: CodexQuota) => [quota.primary, quota.secondary]
+    .filter((entry): entry is QuotaWindow => entry !== null).map(usageRow);
+  const lastQuota = cachedAgentReading<CodexQuota>("codex_usage");
+  const [usage, { refetch: refetchUsage }] = createResource(async (_, info): Promise<UsageRow[] | undefined> => {
+    if (kind !== "codex") return undefined;
+    try {
+      return toRows(await readAgentReading<CodexQuota>("codex_usage", {}, info.refetching === true));
+    } catch {
+      return undefined;
+    }
+  }, { initialValue: lastQuota ? toRows(lastQuota) : undefined });
   const [busy, setBusy] = createSignal(false);
   const [signingIn, setSigningIn] = createSignal(false);
   const [error, setError] = createSignal("");
@@ -80,7 +83,7 @@ function AgentAccount(props: { agent: InstalledAgent }) {
       setBusy(false);
     }
   };
-  const reload = useAsyncAction(async () => { await Promise.all([refetch(), kind === "codex" ? refetchUsage() : undefined]); });
+  const reload = useAsyncAction(async () => { await Promise.all([refetch(true), kind === "codex" ? refetchUsage(true) : undefined]); });
   const changeAuth = (signIn: boolean) => run(async () => {
     if (!signIn && !(await confirmDialog({
       title: t("settings.agentSignOutTitle"),
@@ -88,18 +91,20 @@ function AgentAccount(props: { agent: InstalledAgent }) {
       confirmLabel: t("settings.agentSignOut"),
       tone: "danger",
     }))) return;
+    invalidateAgentReadings();
     setSigningIn(signIn);
     try {
       await invoke<boolean>("codex_auth_action", { action: signIn ? "sign_in" : "sign_out" });
     } finally {
       setSigningIn(false);
-      await refetch();
+      invalidateAgentReadings();
+      await Promise.all([refetch(true), refetchUsage(true), refreshAgentUsage(true)]);
     }
   });
   return (
     <AgentCard kind={kind} version={props.agent.version} path={props.agent.path}
-      account={account.loading || reload.pending() ? { state: "checking" } : account() ?? { state: "checking" }}
-      signingIn={signingIn()} busy={busy()} usage={usage.loading ? undefined : usage()} error={error()}
+      account={account() ?? { state: "checking" }}
+      signingIn={signingIn()} busy={busy()} usage={account()?.state === "signedIn" ? usage() : undefined} error={error()}
       onRefresh={() => void reload.run()}
       onSignIn={() => void changeAuth(true)} onSignOut={() => void changeAuth(false)}
       onCancelSignIn={() => void invoke("codex_auth_cancel").catch((failure) => setError(String(failure)))}
@@ -133,7 +138,9 @@ export function AgentList(props: {
 
 /** The local agent programs and their account controls. */
 export function AgentSettings() {
-  const [agents, { refetch }] = createResource(detectAgents);
+  const [agents, { refetch }] = createResource((_, info) =>
+    readAgentReading<InstalledAgent[]>("agents_detect", {}, info.refetching === true),
+    { initialValue: cachedAgentReading<InstalledAgent[]>("agents_detect") });
   return (
     <>
       <SettingRow label={t("settings.agentLimit")} hint={t("settings.agentLimitHint")}>
@@ -141,7 +148,7 @@ export function AgentSettings() {
           value={agentLimit() === 0 ? "" : String(agentLimit())} onChange={(event) => updateAgentLimit(event.currentTarget.value)} />
       </SettingRow>
       <AgentList agents={agents.error ? [] : agents()} error={agents.error ? String(agents.error) : undefined}
-        onRefresh={() => void refetch()} card={(agent) => <AgentAccount agent={agent} />} />
+        onRefresh={() => void refetch(true)} card={(agent) => <AgentAccount agent={agent} />} />
     </>
   );
 }

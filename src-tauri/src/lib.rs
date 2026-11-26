@@ -294,6 +294,7 @@ pub fn run() {
         .manage(task_overlaps::ChangedPathCache::default())
         .manage(task_checkpoints::TurnTracker::default())
         .manage(agent_accounts::SignInRun::default())
+        .manage(agent_accounts::AgentReadings::default())
         .manage(claude_usage::ClaudeUsageCache::default())
         .manage(Arc::new(qa_run::QaResults::default()))
         .manage(resource_usage::ResourceMonitor::default())
