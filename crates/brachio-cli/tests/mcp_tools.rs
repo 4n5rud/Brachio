@@ -4,7 +4,7 @@ use brachio_runtime::mailbox::{MailRequest, MailResponse};
 use brachio_runtime::transport;
 use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 use serde_json::{json, Value};
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -64,13 +64,23 @@ async fn mcp(endpoint: Option<&str>, calls: &[Value]) -> Vec<Value> {
     let mut child = command.spawn().expect("run brachio mcp");
     let mut stdin = child.stdin.take().expect("stdin");
     stdin.write_all(input.as_bytes()).await.expect("write");
+    // Keep input open until every call is answered: calls not started when input ends are
+    // dropped.
+    let expected = 1 + calls.iter().filter(|call| call.get("id").is_some()).count();
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
+    let mut replies = Vec::new();
+    while replies.len() < expected {
+        let Some(line) = lines.next_line().await.expect("read reply") else {
+            break;
+        };
+        replies.push(serde_json::from_str::<Value>(&line).expect("JSON reply"));
+    }
     drop(stdin);
-    let output = child.wait_with_output().await.expect("finish");
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .skip(1)
-        .map(|line| serde_json::from_str(line).expect("JSON reply"))
-        .collect()
+    while let Some(line) = lines.next_line().await.expect("read reply") {
+        replies.push(serde_json::from_str(&line).expect("JSON reply"));
+    }
+    assert!(child.wait().await.expect("finish").success());
+    replies.split_off(1)
 }
 
 fn tool(id: u32, name: &str, arguments: &Value) -> Value {

@@ -153,7 +153,7 @@ fn tools() -> Value {
         },
         {
             "name":"spawn_task",
-            "description":"Ask the user to start a child task with its own worktree and branch. The user must approve first; this call waits for their answer (up to 5 minutes) and fails if they refuse. At most 4 open children, one level deep.",
+            "description":"Ask the user to start a child task with its own worktree and branch. The user must approve first; this call waits for their answer (up to 5 minutes) and fails if they refuse. Cancelling the call does not withdraw a request the user already approved: the child may still be created, and list_child_tasks shows it. At most 4 open children, one level deep.",
             "inputSchema":{
                 "type":"object",
                 "properties":{
@@ -395,6 +395,8 @@ impl Session {
 struct InFlight {
     waiting: HashSet<Value>,
     cancelled: HashSet<Value>,
+    /// Input ended or replies can no longer be written: no further call may start.
+    closed: bool,
 }
 
 fn lock(in_flight: &Mutex<InFlight>) -> MutexGuard<'_, InFlight> {
@@ -404,35 +406,59 @@ fn lock(in_flight: &Mutex<InFlight>) -> MutexGuard<'_, InFlight> {
 /// Serve MCP requests until EOF, calling tools through the caller's existing identity and
 /// approval flow. Stdout is reserved for protocol messages.
 ///
+/// # Errors
+/// Returns an I/O error if stdin or stdout fails.
+pub fn serve(
+    input: impl BufRead,
+    output: impl Write + Send,
+    backend: impl Backend + Send,
+) -> io::Result<()> {
+    serve_with(input, move || output, backend)
+}
+
+/// [`serve`], with the output made on the thread that writes the replies, so it may hold a lock
+/// such as [`io::StdoutLock`] for as long as the server runs.
+///
 /// Reading and answering control messages (`ping`, `initialize`, `tools/list`, cancellation)
 /// never waits for a tool call: tool calls run one at a time on their own thread, in the order
 /// they arrived. `notifications/cancelled` for a call that has not started removes it, so the
 /// backend is never asked. A call that is already running is not interrupted, because the
 /// backend may be waiting for the user's approval and an approved effect cannot be undone; its
-/// result is dropped instead of sent, as MCP asks. At EOF, calls already received still run
-/// before this returns.
+/// result is dropped instead of sent, as MCP asks.
+///
+/// When input ends, or a reply cannot be written, calls that have not started are dropped, so
+/// no further approval is asked for when nobody can read the result. Only the call already
+/// running is waited for.
 ///
 /// # Errors
 /// Returns an I/O error if stdin or stdout fails.
-pub fn serve(
-    mut input: impl BufRead,
-    output: impl Write + Send,
+pub fn serve_with<W: Write>(
+    input: impl BufRead,
+    make_output: impl FnOnce() -> W + Send,
     mut backend: impl Backend + Send,
 ) -> io::Result<()> {
     let in_flight = Mutex::new(InFlight::default());
     let (replies, outbox) = mpsc::channel::<Value>();
     let (jobs, queue) = mpsc::channel::<(Value, Tool)>();
     thread::scope(|scope| {
-        let writer = scope.spawn(move || write_replies(output, &outbox));
-        let tool_replies = replies.clone();
+        let mut input = input;
         let in_flight = &in_flight;
+        let writer = scope.spawn(move || write_replies(make_output(), &outbox, in_flight));
+        let tool_replies = replies.clone();
         scope.spawn(move || {
             for (id, tool) in queue {
-                if lock(in_flight).cancelled.remove(&id) {
-                    lock(in_flight).waiting.remove(&id);
-                    continue;
+                {
+                    let mut state = lock(in_flight);
+                    let cancelled = state.cancelled.remove(&id);
+                    if state.closed || cancelled {
+                        state.waiting.remove(&id);
+                        continue;
+                    }
                 }
-                let outcome = tool.run(&mut backend);
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    tool.run(&mut backend)
+                }))
+                .unwrap_or_else(|_| Err("The tool failed unexpectedly.".to_owned()));
                 let dropped = {
                     let mut state = lock(in_flight);
                     state.waiting.remove(&id);
@@ -444,6 +470,9 @@ pub fn serve(
             }
         });
         let read = read_requests(&mut input, &replies, &jobs, in_flight);
+        lock(in_flight).closed = true;
+        // Nothing more is read; let go of the input now rather than after the running call.
+        drop(input);
         drop(jobs);
         drop(replies);
         let written = writer
@@ -483,7 +512,11 @@ fn read_requests(
         let open = match step {
             Step::Reply(reply) => replies.send(reply).is_ok(),
             Step::Call(id, tool) => {
-                lock(in_flight).waiting.insert(id.clone());
+                let mut state = lock(in_flight);
+                if state.closed {
+                    return Ok(());
+                }
+                state.waiting.insert(id.clone());
                 jobs.send((id, tool)).is_ok()
             }
             Step::Cancel(id) => {
@@ -501,9 +534,17 @@ fn read_requests(
     }
 }
 
-fn write_replies(mut output: impl Write, outbox: &mpsc::Receiver<Value>) -> io::Result<()> {
+/// Writes replies until every sender is gone. On a write failure, no further call may start.
+fn write_replies(
+    mut output: impl Write,
+    outbox: &mpsc::Receiver<Value>,
+    in_flight: &Mutex<InFlight>,
+) -> io::Result<()> {
     for reply in outbox {
-        write_response(&mut output, &reply)?;
+        if let Err(failure) = write_response(&mut output, &reply) {
+            lock(in_flight).closed = true;
+            return Err(failure);
+        }
     }
     Ok(())
 }
@@ -540,6 +581,7 @@ mod tests {
         }
         fn request_review(&mut self, request: ReviewRequest) -> Result<Value, String> {
             self.calls.push(format!("review {}", request.subject));
+            assert_ne!(request.subject, "panic", "the backend failed");
             Ok(json!({}))
         }
         fn raise_decision_gate(&mut self, request: DecisionGate) -> Result<Value, String> {
@@ -555,16 +597,28 @@ mod tests {
         "\n",
     );
 
-    fn run(requests: &str) -> (Vec<Value>, Recorder) {
-        let input = format!("{HANDSHAKE}{requests}");
-        let mut output = Vec::new();
+    /// Sends the handshake and `requests`, keeps the input open until `expected` replies after
+    /// the handshake arrived, then ends it. Calls not started at EOF are dropped, as a client
+    /// that closed its input cannot read them.
+    fn run(requests: &str, expected: usize) -> (Vec<Value>, Recorder) {
         let mut recorder = Recorder::default();
-        serve(input.as_bytes(), &mut output, &mut recorder).expect("serve");
-        let replies = output
-            .lines()
-            .map(|line| serde_json::from_str(&line.expect("read reply")).expect("JSON reply"))
-            .collect::<Vec<Value>>();
-        (replies[1..].to_vec(), recorder)
+        let (send_line, lines) = mpsc::channel();
+        let (sink, replies) = mpsc::channel();
+        let mut received = Vec::new();
+        let backend = &mut recorder;
+        std::thread::scope(|scope| {
+            let server = scope.spawn(move || serve(Pipe::new(lines), Replies::new(sink), backend));
+            send_line
+                .send(format!("{HANDSHAKE}{requests}").into_bytes())
+                .expect("send");
+            for _ in 0..=expected {
+                received.push(replies.recv_timeout(PATIENCE).expect("reply"));
+            }
+            drop(send_line);
+            server.join().expect("server thread").expect("serve");
+        });
+        received.extend(replies.try_iter());
+        (received[1..].to_vec(), recorder)
     }
 
     impl Backend for &mut Recorder {
@@ -594,7 +648,10 @@ mod tests {
 
     #[test]
     fn lists_exactly_the_served_tools_without_run_qa() {
-        let (replies, _) = run(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+        let (replies, _) = run(
+            concat!(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, "\n"),
+            1,
+        );
         let names: Vec<&str> = replies[0]["result"]["tools"]
             .as_array()
             .expect("tools")
@@ -637,7 +694,7 @@ mod tests {
             call(10, "request_review", &json!({"subject":" "})),
         ]
         .concat();
-        let (replies, recorder) = run(&requests);
+        let (replies, recorder) = run(&requests, 9);
         assert_eq!(replies.len(), 9);
         assert!(replies.iter().all(|reply| reply["error"]["code"] == -32602));
         assert!(recorder.calls.is_empty());
@@ -652,7 +709,7 @@ mod tests {
             call(5, "request_review", &json!({"subject":"Ready"})),
         ]
         .concat();
-        let (replies, recorder) = run(&requests);
+        let (replies, recorder) = run(&requests, 4);
         assert_eq!(
             recorder.calls,
             ["list", "spawn Docs", "result 5", "review Ready"]
@@ -681,6 +738,27 @@ mod tests {
         lines: mpsc::Receiver<Vec<u8>>,
         buffer: Vec<u8>,
         at: usize,
+        /// Told when the server lets go of its input.
+        closed: Option<mpsc::Sender<()>>,
+    }
+
+    impl Pipe {
+        fn new(lines: mpsc::Receiver<Vec<u8>>) -> Self {
+            Self {
+                lines,
+                buffer: Vec::new(),
+                at: 0,
+                closed: None,
+            }
+        }
+    }
+
+    impl Drop for Pipe {
+        fn drop(&mut self) {
+            if let Some(closed) = &self.closed {
+                let _ = closed.send(());
+            }
+        }
     }
 
     impl Read for Pipe {
@@ -715,15 +793,42 @@ mod tests {
     struct Replies {
         sink: mpsc::Sender<Value>,
         pending: Vec<u8>,
+        /// Replies written before every further write fails, as a closed pipe does.
+        working_replies: usize,
+        /// Told when the server lets go of its output.
+        closed: Option<mpsc::Sender<()>>,
+    }
+
+    impl Replies {
+        fn new(sink: mpsc::Sender<Value>) -> Self {
+            Self {
+                sink,
+                pending: Vec::new(),
+                working_replies: usize::MAX,
+                closed: None,
+            }
+        }
+    }
+
+    impl Drop for Replies {
+        fn drop(&mut self) {
+            if let Some(closed) = &self.closed {
+                let _ = closed.send(());
+            }
+        }
     }
 
     impl Write for Replies {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.working_replies == 0 {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
             self.pending.extend_from_slice(bytes);
             while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
                 let line: Vec<u8> = self.pending.drain(..=end).collect();
                 let reply = serde_json::from_slice(&line).map_err(io::Error::other)?;
                 let _ = self.sink.send(reply);
+                self.working_replies -= 1;
             }
             Ok(bytes.len())
         }
@@ -792,18 +897,8 @@ mod tests {
             release,
             calls: calls.clone(),
         };
-        let server = std::thread::spawn(move || {
-            let input = Pipe {
-                lines,
-                buffer: Vec::new(),
-                at: 0,
-            };
-            let output = Replies {
-                sink,
-                pending: Vec::new(),
-            };
-            serve(input, output, backend)
-        });
+        let server =
+            std::thread::spawn(move || serve(Pipe::new(lines), Replies::new(sink), backend));
         let send = |text: String| send_line.send(text.into_bytes()).expect("send line");
         let ping = |id: u32| format!("{}\n", json!({"jsonrpc":"2.0","id":id,"method":"ping"}));
         let cancel = |id: u32| {
@@ -859,9 +954,153 @@ mod tests {
             call(3, "list_child_tasks", &json!({})),
         ]
         .concat();
-        let (replies, recorder) = run(&requests);
+        let (replies, recorder) = run(&requests, 2);
         let ids: Vec<&Value> = replies.iter().map(|reply| &reply["id"]).collect();
         assert_eq!(ids, [&json!(2), &json!(3)]);
         assert_eq!(recorder.calls, ["list", "list"]);
+    }
+
+    struct Harness {
+        send_line: mpsc::Sender<Vec<u8>>,
+        replies: mpsc::Receiver<Value>,
+        backend_started: mpsc::Receiver<()>,
+        release_backend: mpsc::Sender<()>,
+        calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        server: std::thread::JoinHandle<io::Result<()>>,
+    }
+
+    /// Serves a blocking backend; `input_closed` and `output_closed` hear when the server lets
+    /// go of its input and output, and `working_replies` replies are written before output fails.
+    fn harness(
+        working_replies: usize,
+        input_closed: mpsc::Sender<()>,
+        output_closed: mpsc::Sender<()>,
+    ) -> Harness {
+        let (send_line, lines) = mpsc::channel::<Vec<u8>>();
+        let (sink, replies) = mpsc::channel();
+        let (started, backend_started) = mpsc::channel();
+        let (release_backend, release) = mpsc::channel();
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let backend = Blocking {
+            started,
+            release,
+            calls: calls.clone(),
+        };
+        let server = std::thread::spawn(move || {
+            let mut input = Pipe::new(lines);
+            input.closed = Some(input_closed);
+            let mut output = Replies::new(sink);
+            output.working_replies = working_replies;
+            output.closed = Some(output_closed);
+            serve(input, output, backend)
+        });
+        Harness {
+            send_line,
+            replies,
+            backend_started,
+            release_backend,
+            calls,
+            server,
+        }
+    }
+
+    impl Harness {
+        fn send(&self, text: &str) {
+            self.send_line
+                .send(text.as_bytes().to_vec())
+                .expect("send line");
+        }
+    }
+
+    fn spawn_call(id: u32) -> String {
+        call(id, "spawn_task", &json!({"title":"Docs","prompt":"Write"}))
+    }
+
+    #[test]
+    fn calls_not_started_when_input_ends_are_dropped_and_the_running_one_finishes() {
+        let (input_closed, input_gone) = mpsc::channel();
+        let (output_closed, _output_gone) = mpsc::channel();
+        let test = harness(usize::MAX, input_closed, output_closed);
+        test.send(HANDSHAKE);
+        reply_to(&test.replies, 1);
+        test.send(&spawn_call(2));
+        test.backend_started
+            .recv_timeout(PATIENCE)
+            .expect("the tool call reached the backend");
+        test.send(&spawn_call(3));
+        test.send(&call(4, "list_child_tasks", &json!({})));
+        test.send(&format!(
+            "{}\n",
+            json!({"jsonrpc":"2.0","id":5,"method":"ping"})
+        ));
+        reply_to(&test.replies, 5);
+
+        let Harness {
+            send_line,
+            replies,
+            release_backend,
+            calls,
+            server,
+            ..
+        } = test;
+        drop(send_line);
+        input_gone
+            .recv_timeout(PATIENCE)
+            .expect("the server let go of its input");
+        drop(release_backend);
+        server.join().expect("server thread").expect("serve");
+
+        assert_eq!(
+            reply_to(&replies, 2)["result"]["content"][0]["text"],
+            r#"{"key":"child"}"#
+        );
+        assert!(replies.try_recv().is_err(), "a dropped call was answered");
+        assert_eq!(*calls.lock().expect("calls"), ["spawn Docs"]);
+    }
+
+    #[test]
+    fn no_call_starts_after_a_reply_cannot_be_written() {
+        let (input_closed, _input_gone) = mpsc::channel();
+        let (output_closed, output_gone) = mpsc::channel();
+        // The initialize reply is written; the next write fails, as when stdout was closed.
+        let Harness {
+            send_line,
+            replies,
+            release_backend,
+            calls,
+            server,
+            ..
+        } = harness(1, input_closed, output_closed);
+        drop(release_backend);
+        send_line.send(HANDSHAKE.as_bytes().to_vec()).expect("send");
+        reply_to(&replies, 1);
+        send_line
+            .send(format!("{}\n", json!({"jsonrpc":"2.0","id":2,"method":"ping"})).into_bytes())
+            .expect("send");
+        output_gone
+            .recv_timeout(PATIENCE)
+            .expect("the failed output was let go");
+
+        // Nobody can read the answer, so the call must not ask the user for approval.
+        let _ = send_line.send(spawn_call(3).into_bytes());
+        let _ = send_line.send(call(4, "list_child_tasks", &json!({})).into_bytes());
+        drop(send_line);
+        let served = server.join().expect("server thread");
+        assert!(served.is_err(), "a failed write is an error");
+        assert!(calls.lock().expect("calls").is_empty());
+    }
+
+    #[test]
+    fn a_backend_that_panics_answers_with_a_tool_error_and_the_server_goes_on() {
+        let requests = [
+            call(2, "request_review", &json!({"subject":"panic"})),
+            call(3, "list_child_tasks", &json!({})),
+        ]
+        .concat();
+        let (replies, recorder) = run(&requests, 2);
+        assert_eq!(replies[0]["id"], 2);
+        assert_eq!(replies[0]["result"]["isError"], true);
+        assert_eq!(replies[1]["id"], 3);
+        assert_eq!(recorder.calls, ["review panic", "list"]);
     }
 }

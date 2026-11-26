@@ -95,9 +95,9 @@ fn main() -> Result<()> {
         Command::Skills { command } => skills::run(command),
         Command::Notify { event } => bail!("notify is not implemented yet (event {event}); M1"),
         Command::Mcp => {
-            brachio_mcp::serve(
+            brachio_mcp::serve_with(
                 std::io::stdin().lock(),
-                std::io::stdout(),
+                || std::io::stdout().lock(),
                 mcp_tools::McpTools,
             )?;
             Ok(())

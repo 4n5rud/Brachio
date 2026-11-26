@@ -3,7 +3,7 @@
 use brachio_runtime::mailbox::{MailMessage, MailRequest, MailResponse};
 use brachio_runtime::transport;
 use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -465,12 +465,21 @@ async fn mcp_lists_child_status_using_the_cli_terminal_identity() {
         .write_all(requests.as_bytes())
         .await
         .expect("send MCP requests");
+    // Keep input open until the call is answered: calls not started when input ends are dropped.
+    let mut replies = BufReader::new(process.stdout.take().expect("stdout")).lines();
+    let last: serde_json::Value = loop {
+        let line = replies
+            .next_line()
+            .await
+            .expect("read MCP reply")
+            .expect("tool response");
+        let reply: serde_json::Value = serde_json::from_str(&line).expect("JSON response");
+        if reply["id"] == 2 {
+            break reply;
+        }
+    };
     drop(input);
-    let output = process.wait_with_output().await.expect("MCP response");
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).expect("UTF-8 protocol");
-    let last: serde_json::Value =
-        serde_json::from_str(stdout.lines().last().expect("tool response")).expect("JSON response");
+    assert!(process.wait().await.expect("MCP exit").success());
     assert_eq!(last["result"]["content"][0]["text"], "[]");
     let observed = request.await.expect("receive socket request");
     assert!(matches!(observed, MailRequest::ListTasks { key } if key == "task1:agent"));
