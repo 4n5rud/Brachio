@@ -17,6 +17,32 @@ export const TAB_LIMITS: Readonly<Record<ContentSurface, number>> = { file: 8, b
 export const findContentTab = (tabs: readonly TaskTab[], kind: TabKind, target: string): TaskTab | undefined =>
   tabs.find((tab) => tab.kind === kind && tab.target === target);
 
+/** What showing a file or page does to a task's tabs. */
+export type ContentOpenPlan =
+  /** A tab already shows it; `keep` turns that temporary tab into a kept one. */
+  | { action: "select"; tab: TaskTab; keep: boolean }
+  /** The temporary tab, untouched since it opened, gives its place to the new target. */
+  | { action: "replace"; tab: TaskTab }
+  | { action: "open" };
+
+/**
+ * Decides how a request opens. A single click asks for a `temporary` tab: it reuses the task's
+ * temporary tab of the same kind, which the next single click replaces, unless that tab holds
+ * unsaved edits. A double click (not `temporary`) opens a tab that stays, or keeps the one shown.
+ */
+export function planContentOpen(
+  tabs: readonly TaskTab[],
+  kind: TabKind,
+  target: string,
+  options: { temporary: boolean; temporaryId: string | undefined; dirty: ReadonlySet<string> },
+): ContentOpenPlan {
+  const open = findContentTab(tabs, kind, target);
+  if (open) return { action: "select", tab: open, keep: !options.temporary && open.id === options.temporaryId };
+  if (!options.temporary) return { action: "open" };
+  const temporary = tabs.find((tab) => tab.id === options.temporaryId && tab.kind === kind);
+  return temporary && !options.dirty.has(temporary.id) ? { action: "replace", tab: temporary } : { action: "open" };
+}
+
 /**
  * The tab to close before one more tab of `kind` opens: the least recently used tab of the same
  * surface that is not shown. `undefined` when there is room, or when every such tab is shown.

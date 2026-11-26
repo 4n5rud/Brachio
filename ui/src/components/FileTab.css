@@ -1,0 +1,38 @@
+/* A task's file in the code editor: notices on top, the editor, a one-line status at the bottom. */
+.file-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-term-bg);
+}
+.file-editor {
+  flex: 1;
+  min-height: 0;
+}
+.file-editor .cm-editor {
+  height: 100%;
+}
+.file-tab-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--size-statusbar);
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+  color: var(--color-text-3);
+  font: var(--text-meta);
+  white-space: nowrap;
+}
+.file-tab-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-tab-status {
+  margin-left: auto;
+  color: var(--color-text-2);
+  font: var(--text-caption);
+}

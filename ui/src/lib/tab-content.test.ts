@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { TAB_LIMITS, findContentTab, forgetTabState, isContentKind, saveTabState, tabState, tabToEvict } from "./tab-content";
+import { TAB_LIMITS, findContentTab, forgetTabState, isContentKind, planContentOpen, saveTabState, tabState, tabToEvict } from "./tab-content";
 import type { TaskTab } from "./task-tabs";
 
 const file = (id: string, target = `${id}.ts`): TaskTab => ({ id, kind: "file", shell: null, target });
@@ -63,4 +63,48 @@ test("a hidden tab's state is kept by key until the tab closes", () => {
   expect(tabState("t:file-1")).toEqual({ cursor: 4 });
   forgetTabState("t:file-1");
   expect(tabState("t:file-1")).toBeUndefined();
+});
+
+describe("temporary file tabs", () => {
+  const none = new Set<string>();
+
+  test("a single click replaces the temporary tab the last single click opened", () => {
+    const tabs = [file("a", "src/a.ts"), file("t", "src/t.ts")];
+    const plan = planContentOpen(tabs, "file", "src/b.ts", { temporary: true, temporaryId: "t", dirty: none });
+    expect(plan).toEqual({ action: "replace", tab: tabs[1] });
+  });
+
+  test("a single click opens a new tab when there is no temporary one", () => {
+    const tabs = [file("a", "src/a.ts")];
+    expect(planContentOpen(tabs, "file", "src/b.ts", { temporary: true, temporaryId: undefined, dirty: none }))
+      .toEqual({ action: "open" });
+  });
+
+  test("a temporary tab with unsaved edits is never replaced", () => {
+    const tabs = [file("t", "src/t.ts")];
+    expect(planContentOpen(tabs, "file", "src/b.ts", { temporary: true, temporaryId: "t", dirty: new Set(["t"]) }))
+      .toEqual({ action: "open" });
+  });
+
+  test("a double click opens a tab that stays, and never replaces the temporary one", () => {
+    const tabs = [file("t", "src/t.ts")];
+    expect(planContentOpen(tabs, "file", "src/b.ts", { temporary: false, temporaryId: "t", dirty: none }))
+      .toEqual({ action: "open" });
+  });
+
+  test("a file already open is selected; a double click on it keeps its temporary tab", () => {
+    const tabs = [file("a", "src/a.ts"), file("t", "src/t.ts")];
+    expect(planContentOpen(tabs, "file", "src/t.ts", { temporary: true, temporaryId: "t", dirty: none }))
+      .toEqual({ action: "select", tab: tabs[1], keep: false });
+    expect(planContentOpen(tabs, "file", "src/t.ts", { temporary: false, temporaryId: "t", dirty: none }))
+      .toEqual({ action: "select", tab: tabs[1], keep: true });
+    expect(planContentOpen(tabs, "file", "src/a.ts", { temporary: false, temporaryId: "t", dirty: none }))
+      .toEqual({ action: "select", tab: tabs[0], keep: false });
+  });
+
+  test("a temporary tab of another kind is left alone", () => {
+    const tabs = [browser("t")];
+    expect(planContentOpen(tabs, "file", "src/b.ts", { temporary: true, temporaryId: "t", dirty: none }))
+      .toEqual({ action: "open" });
+  });
 });
