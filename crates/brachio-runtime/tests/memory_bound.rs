@@ -3,7 +3,7 @@
 //! It starts a real runtime with 1, 5 and 10 shell sessions that have each printed enough to
 //! fill part of their output history, reads every session the way the app does, and compares the
 //! working set of the runtime's process tree and of this process with the bounds in
-//! `docs/windows-memory-benchmark.md`. It is ignored by default; run it with
+//! `docs/memory-benchmark.md`. It is ignored by default; run it with
 //! `cargo test -p brachio-runtime --test memory_bound -- --ignored --nocapture`.
 //!
 //! This process stands in for the app side: it holds the client library and the output pages the
