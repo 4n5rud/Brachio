@@ -1,7 +1,7 @@
 //! Durable extra tabs of a task: agent and shell terminals, and the browser and file tabs that
 //! point at an address or a file. Any number of each can be open at once.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -184,27 +184,48 @@ pub fn task_tab_names(connection: &Connection) -> Result<HashMap<String, String>
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Places a task's open tabs in the given order. Tabs left out keep sorting after them.
+/// Places a task's open tabs in the given order. Tabs left out follow them in their earlier order.
 ///
 /// # Errors
-/// Fails with `NotFound` when a tab is not open on the task, and changes nothing.
+/// Fails with `NotFound` when a tab is not open on the task, or `Invalid` when a tab is listed
+/// twice, and changes nothing.
 pub fn reorder_task_tabs(
     connection: &mut Connection,
     task_id: &str,
     tab_ids: &[String],
 ) -> Result<(), StoreError> {
     let transaction = connection.transaction()?;
-    for (position, tab_id) in tab_ids.iter().enumerate() {
-        let changed = transaction.execute(
-            "UPDATE task_tabs SET sort_order = ?3 WHERE task_id = ?1 AND tab_id = ?2",
-            params![task_id, tab_id, i64::try_from(position).unwrap_or(i64::MAX)],
+    // Every row, including kinds this build cannot show, so none is left with a stale position.
+    let current: Vec<String> = {
+        let mut statement = transaction.prepare(
+            "SELECT tab_id FROM task_tabs WHERE task_id = ?1
+             ORDER BY sort_order IS NULL, sort_order, rowid",
         )?;
-        if changed == 0 {
+        let rows = statement.query_map([task_id], |row| row.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut listed = HashSet::new();
+    for tab_id in tab_ids {
+        if !current.contains(tab_id) {
             return Err(StoreError::NotFound {
                 table: "task_tabs",
                 id: tab_id.clone(),
             });
         }
+        if !listed.insert(tab_id.as_str()) {
+            return Err(StoreError::Invalid(format!(
+                "The tab {tab_id} is listed more than once."
+            )));
+        }
+    }
+    let left_out = current
+        .iter()
+        .filter(|tab_id| !listed.contains(tab_id.as_str()));
+    for (position, tab_id) in tab_ids.iter().chain(left_out).enumerate() {
+        transaction.execute(
+            "UPDATE task_tabs SET sort_order = ?3 WHERE task_id = ?1 AND tab_id = ?2",
+            params![task_id, tab_id, i64::try_from(position).unwrap_or(i64::MAX)],
+        )?;
     }
     transaction.commit()?;
     Ok(())
@@ -311,8 +332,8 @@ mod tests {
 
     use super::{
         add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
-        rename_task_tab, retired_secondary_tabs, task_tab, task_tab_names, task_tabs, TabKind,
-        TaskTab,
+        rename_task_tab, reorder_task_tabs, retired_secondary_tabs, task_tab, task_tab_names,
+        task_tabs, TabKind, TaskTab,
     };
     use crate::database::open_in_memory;
     use crate::{NewRepo, NewTask, RepoRecord, TaskRecord};
@@ -377,6 +398,45 @@ mod tests {
         assert!(retired_secondary_tabs(&connection, "t1")
             .expect("list")
             .is_empty());
+    }
+
+    fn open_ids(connection: &rusqlite::Connection) -> Vec<String> {
+        task_tabs(connection, "t1")
+            .expect("list")
+            .into_iter()
+            .map(|tab| tab.tab_id)
+            .collect()
+    }
+
+    fn ids(names: &[&str]) -> Vec<String> {
+        names.iter().map(|&name| name.to_owned()).collect()
+    }
+
+    fn connection_with_ordered_tabs() -> rusqlite::Connection {
+        let mut connection = connection_with_task();
+        for id in ["a", "b", "c"] {
+            add_task_tab(&connection, "t1", &tab(id, TabKind::Shell)).expect("tab");
+        }
+        reorder_task_tabs(&mut connection, "t1", &ids(&["a", "b", "c"])).expect("order");
+        connection
+    }
+
+    #[test]
+    fn tabs_left_out_of_a_reorder_follow_in_their_earlier_order() {
+        let mut connection = connection_with_ordered_tabs();
+        reorder_task_tabs(&mut connection, "t1", &ids(&["c"])).expect("partial");
+        assert_eq!(open_ids(&connection), ["c", "a", "b"]);
+        reorder_task_tabs(&mut connection, "t1", &ids(&["b", "c"])).expect("partial");
+        assert_eq!(open_ids(&connection), ["b", "c", "a"]);
+    }
+
+    #[test]
+    fn a_reorder_with_a_repeated_or_unknown_tab_changes_nothing() {
+        let mut connection = connection_with_ordered_tabs();
+        assert!(reorder_task_tabs(&mut connection, "t1", &ids(&["c", "a", "c"])).is_err());
+        assert_eq!(open_ids(&connection), ["a", "b", "c"]);
+        assert!(reorder_task_tabs(&mut connection, "t1", &ids(&["c", "gone"])).is_err());
+        assert_eq!(open_ids(&connection), ["a", "b", "c"]);
     }
 
     #[test]
