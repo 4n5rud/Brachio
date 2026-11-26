@@ -2,7 +2,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
 import type { ColorTheme, ThemeMode } from "../../lib/theme";
-import { isMac } from "../../lib/shortcut";
+import { isMac, shortcutKeys } from "../../lib/shortcut";
 import { prioritySortEnabled, updatePrioritySort } from "../../lib/sidebar-sort";
 import { keepAwakeEnabled, keepAwakeStatus, keepAwakeSupported, updateKeepAwake } from "../../lib/keep-awake";
 import { AlertSoundSettings } from "./AlertSoundSettings";
@@ -19,6 +19,7 @@ import { ArchiveGrid } from "../ArchiveGrid";
 import { sidebarRowParts, updateSidebarRowParts } from "../../lib/sidebar-rows";
 import { ThemePicker } from "../ui/ThemePicker";
 import { Toggle } from "../ui/Toggle";
+import { editorAutosaveEnabled, setEditorAutosaveEnabled } from "../../lib/editor-settings";
 import { resumeLastTaskEnabled, updateResumeLastTask } from "../../lib/lazy-resume";
 import { AgentSettings } from "./AgentSettings";
 import { ScratchFolders } from "./ScratchFolders";
@@ -185,6 +186,8 @@ export function SettingsPanel(props: {
             </Show>
             <Toggle checked={quitConfirmEnabled()} label={t("settings.confirmQuit")} hint={t("settings.confirmQuitHint")}
               onChange={setQuitConfirmEnabled} />
+            <Toggle checked={editorAutosaveEnabled()} label={t("settings.editorAutosave")} hint={t("settings.editorAutosaveHint").replace("{save}", () => shortcutKeys("saveFile"))}
+              onChange={setEditorAutosaveEnabled} />
             <Show when={"__TAURI_INTERNALS__" in window}>
               <Toggle checked={autoArchiveMergedEnabled()} label={t("settings.autoArchiveMerged")} hint={t("settings.autoArchiveMergedHint")}
                 onChange={setAutoArchiveMergedEnabled} />

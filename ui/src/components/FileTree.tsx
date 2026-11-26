@@ -34,7 +34,7 @@ function build(paths: readonly string[]): Node {
 const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const parentOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
-export type FileAction = "open" | "reveal" | "copyPath" | "copyRelative" | "rename" | "newFile" | "newFolder" | "trash";
+export type FileAction = "open" | "mention" | "reveal" | "copyPath" | "copyRelative" | "rename" | "newFile" | "newFolder" | "trash";
 
 /** How long a dragged item must rest on a closed folder before it opens. */
 const HOVER_OPEN_MS = 600;
@@ -54,7 +54,10 @@ export function FileTree(props: {
   query: string;
   treeKey: string;
   selected: string;
+  /** A single click on a file. */
   onSelect: (path: string) => void;
+  /** A double click or Enter on a file; without it they act as a single click. */
+  onOpen?: (path: string) => void;
   limit: number;
   /** Moves an item into a folder ("" is the root); the caller reports failures. */
   onMove?: (from: string, toDir: string) => void;
@@ -182,7 +185,7 @@ export function FileTree(props: {
         if (row.kind === "dir" && row.open) toggle(row.path, false); else if (parent() >= 0) go(parent());
         break;
       case "Enter": case " ":
-        if (row.kind === "dir") toggle(row.path); else props.onSelect(row.path);
+        if (row.kind === "dir") toggle(row.path); else (props.onOpen ?? props.onSelect)(row.path);
         break;
       default: return;
     }
@@ -196,7 +199,7 @@ export function FileTree(props: {
         <For each={props.paths.slice(0, props.limit)}>{(file) => (
           <li>
             <button type="button" class="tree-row" data-current={file === props.selected || undefined} title={file}
-              onClick={() => props.onSelect(file)}>
+              onClick={() => props.onSelect(file)} onDblClick={() => props.onOpen?.(file)}>
               <Icon name="file" class="icon tree-icon" />
               <span class="tree-name"><Highlight text={baseName(file)} query={props.query} />
                 <Show when={file.includes("/")}>
@@ -220,7 +223,8 @@ export function FileTree(props: {
             onFocus={() => setFocus(row.path)}
             onPointerDown={(event) => beginDrag(event, row)}
             onContextMenu={(event) => { event.preventDefault(); setMenu({ row, anchor: event.currentTarget }); }}
-            onClick={() => (row.kind === "dir" ? toggle(row.path) : props.onSelect(row.path))}>
+            onClick={() => (row.kind === "dir" ? toggle(row.path) : props.onSelect(row.path))}
+            onDblClick={() => { if (row.kind === "file") props.onOpen?.(row.path); }}>
             <Show when={row.kind === "dir"} fallback={<span class="tree-chevron" />}>
               <Icon name={row.open ? "chevronDown" : "chevronRight"} class="icon tree-chevron" />
             </Show>
@@ -233,6 +237,7 @@ export function FileTree(props: {
         {(current) => (
           <Menu anchor={current().anchor} label={t("files.menu")} onClose={() => setMenu(undefined)}>
             <Show when={current().row.kind === "file" && props.onAction}>
+              <MenuItem onSelect={() => act("mention")}>{t("files.mention")}</MenuItem>
               <MenuItem onSelect={() => act("open")}>{t("files.openEditor")}</MenuItem>
             </Show>
             <Show when={props.onAction}>
