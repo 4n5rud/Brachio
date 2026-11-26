@@ -77,6 +77,18 @@
   background: transparent;
   box-shadow: none;
 }
+/* A temporary file tab: the next single click in the file list replaces it. */
+.tab-item[data-temporary] > .tab {
+  font-style: italic;
+}
+/* Unsaved edits in a file tab. */
+.tab-unsaved {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .tab-close {
   display: inline-grid;
   flex: none;

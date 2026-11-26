@@ -1,3 +1,4 @@
+import { unsavedTabs } from "./lib/editor-settings";
 import { Show, batch, createEffect, createMemo, createResource, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -752,6 +753,13 @@ export function App() {
   };
   /** Quits, asking first when agents are running. The runtime keeps hosted terminals across a quit. */
   const requestQuit = async () => {
+    if (unsavedTabs().size > 0 && !await confirmDialog({
+      title: t("editor.quitTitle"),
+      body: t("editor.quitBody"),
+      confirmLabel: t("editor.quitConfirm"),
+      cancelLabel: t("tab.unsavedKeep"),
+      tone: "danger",
+    })) return;
     const keys = runningAgentKeys(live());
     if (!quitConfirmEnabled() || keys.length === 0) {
       await invoke("app_quit", { stop: [] });
@@ -1345,7 +1353,7 @@ export function App() {
       const quitListener = listen("quit-requested", () => void requestQuit().catch(report));
       onCleanup(() => { void quitListener.then((unlisten) => unlisten(), () => {}); });
       const closeListener = getCurrentWindow().onCloseRequested(async (event) => {
-        if (!quitConfirmEnabled() || runningAgentKeys(live()).length === 0) return;
+        if (unsavedTabs().size === 0 && (!quitConfirmEnabled() || runningAgentKeys(live()).length === 0)) return;
         event.preventDefault();
         await requestQuit();
       });

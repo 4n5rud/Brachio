@@ -9,6 +9,8 @@ export interface ContentTabRequest {
   taskId: string;
   kind: "file" | "browser";
   target: string;
+  /** A single click: the tab is replaced by the next single click until it is kept or edited. */
+  temporary?: boolean;
 }
 
 const CONTENT_EVENT = "brachio-open-content-tab";

@@ -38,6 +38,8 @@ export function registerTabSurface(surface: ContentSurface, load: SurfaceLoader)
   };
 }
 
+registerTabSurface("file", () => import("./FileTab").then(({ FileTab }) => FileTab));
+
 const loaded = new Map<SurfaceLoader, Promise<Component<TabSurfaceProps>>>();
 const loadOnce = (load: SurfaceLoader) => {
   let pending = loaded.get(load);

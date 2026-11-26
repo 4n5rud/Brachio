@@ -1,3 +1,4 @@
+import { editorAutosaveEnabled, setEditorAutosaveEnabled } from "../../lib/editor-settings";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { locale, setLocale, t } from "../../i18n";
 import type { TaskRow } from "../../lib/tasks";
@@ -173,6 +174,8 @@ export function SettingsPanel(props: {
           <Match when={page() === "general"}>
             <SettingsGroup>
             <LanguageRow />
+            <Toggle checked={editorAutosaveEnabled()} label={t("editor.autosave")} hint={t("editor.autosaveHint")}
+              onChange={setEditorAutosaveEnabled} />
             <Toggle checked={props.notifications} label={t("settings.notifications")} hint={t("settings.notificationsHint")}
               onChange={props.onNotifications} />
             <Toggle checked={prioritySortEnabled()} label={t("settings.prioritySort")} hint={t("settings.prioritySortHint")}
