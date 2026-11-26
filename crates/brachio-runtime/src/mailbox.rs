@@ -12,6 +12,8 @@ use tokio::io::BufReader;
 
 use crate::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 
+pub use brachio_core::mail::MAX_BODY_BYTES;
+
 /// How long a command waits for the app to answer.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long `brachio task create` waits: the user is asked first and may take a while.

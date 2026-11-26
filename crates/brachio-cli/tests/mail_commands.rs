@@ -1,6 +1,6 @@
 //! Runs the real `brachio send` and `brachio check` against a stand-in for the app.
 
-use brachio_runtime::mailbox::{MailMessage, MailRequest, MailResponse};
+use brachio_runtime::mailbox::{MailMessage, MailRequest, MailResponse, MAX_BODY_BYTES};
 use brachio_runtime::transport;
 use brachio_runtime::wire::{read_message, write_message, MAX_MESSAGE, MAX_RESPONSE};
 use tokio::io::{AsyncWriteExt, BufReader};
@@ -130,8 +130,8 @@ async fn send_puts_the_sender_the_receiver_and_the_text_in_one_request() {
     );
 }
 
-#[tokio::test]
-async fn send_refuses_a_body_from_standard_input_that_is_too_large_to_send() {
+/// Runs `brachio send --body -` with `body` on standard input; returns stderr and the exit code.
+async fn send_from_stdin(endpoint: &str, body: Vec<u8>) -> (String, i32) {
     use tokio::io::AsyncWriteExt as _;
     let mut child = Command::new(BRACHIO)
         .args([
@@ -143,7 +143,7 @@ async fn send_refuses_a_body_from_standard_input_that_is_too_large_to_send() {
             "--body",
             "-",
         ])
-        .env("BRACHIO_HOOK_ENDPOINT", name())
+        .env("BRACHIO_HOOK_ENDPOINT", endpoint)
         .env("BRACHIO_TERMINAL_KEY", "task1:agent")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -152,18 +152,46 @@ async fn send_refuses_a_body_from_standard_input_that_is_too_large_to_send() {
         .expect("start brachio");
     let mut stdin = child.stdin.take().expect("stdin");
     let writer = tokio::spawn(async move {
-        // The command stops reading early, so a failed write is expected here.
-        let huge = vec![b'x'; usize::try_from(MAX_MESSAGE).expect("fits") * 16];
-        let _ = stdin.write_all(&huge).await;
+        // The command may stop reading early, so a failed write is expected here.
+        let _ = stdin.write_all(&body).await;
     });
     let output = child.wait_with_output().await.expect("finish");
     writer.await.expect("writer task");
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success());
-    assert!(
-        error.contains(&format!("larger than {MAX_MESSAGE} bytes")),
-        "{error}"
+    (
+        String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+#[tokio::test]
+async fn send_accepts_a_body_from_standard_input_at_exactly_the_body_limit() {
+    let endpoint = name();
+    let served = app(
+        &endpoint,
+        MailResponse::Sent {
+            id: "m1".into(),
+            thread_id: "m1".into(),
+            to: "task2:agent".into(),
+            duplicate: false,
+        },
     );
+    let (error, code) = send_from_stdin(&endpoint, vec![b'x'; MAX_BODY_BYTES]).await;
+    assert_eq!(code, 0, "{error}");
+    let MailRequest::Send(sent) = served.await.expect("app task") else {
+        panic!("expected a send request");
+    };
+    assert_eq!(sent.body.len(), MAX_BODY_BYTES);
+}
+
+#[tokio::test]
+async fn send_refuses_a_body_from_standard_input_over_the_body_limit_before_connecting() {
+    let expected = format!("larger than {MAX_BODY_BYTES} bytes");
+    // No app listens on this endpoint: a refusal naming the size proves nothing was sent.
+    for size in [MAX_BODY_BYTES + 1, MAX_BODY_BYTES * 128] {
+        let (error, code) = send_from_stdin(&name(), vec![b'x'; size]).await;
+        assert_ne!(code, 0);
+        assert!(error.contains(&expected), "{size} bytes: {error}");
+    }
 }
 
 #[tokio::test]

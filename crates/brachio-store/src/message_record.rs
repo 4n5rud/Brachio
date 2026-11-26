@@ -7,8 +7,7 @@ use serde::Serialize;
 use crate::task_activity_record::record_for_key;
 use crate::StoreError;
 
-/// Longest body, in bytes. Anything bigger belongs in a file the message points to.
-pub const MAX_BODY_BYTES: usize = 8 * 1024;
+pub use brachio_core::mail::MAX_BODY_BYTES;
 
 /// Longest subject, in characters.
 pub const MAX_SUBJECT_CHARS: usize = 200;

@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use brachio_runtime::approval::{ENDPOINT_VARIABLE, KEY_VARIABLE};
-use brachio_runtime::mailbox::{self, MailMessage, MailRequest, MailResponse, SendMail};
-use brachio_runtime::wire::MAX_MESSAGE;
+use brachio_runtime::mailbox::{
+    self, MailMessage, MailRequest, MailResponse, SendMail, MAX_BODY_BYTES,
+};
 use clap::Args;
 
 const PREVIEW_CHARS: usize = 200;
@@ -163,7 +164,7 @@ fn send_message(
 ) -> Result<()> {
     let (endpoint, from) = endpoint_and_key()?;
     let body = if args.body == "-" {
-        read_body(std::io::stdin().lock(), MAX_MESSAGE)?
+        read_body(std::io::stdin().lock(), MAX_BODY_BYTES)?
     } else {
         args.body
     };
@@ -189,14 +190,14 @@ fn send_message(
     Ok(())
 }
 
-/// Reads a body from `input`, stopping after `limit` bytes: a larger body could not be sent in
-/// one request anyway, so the rest is never buffered.
-fn read_body(input: impl Read, limit: u64) -> Result<String> {
+/// Reads a body from `input`, stopping one byte past `limit`: the app refuses a larger body,
+/// so the rest is never buffered and Brachio is not contacted.
+fn read_body(input: impl Read, limit: usize) -> Result<String> {
     let mut bytes = Vec::new();
     input
-        .take(limit.saturating_add(1))
+        .take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1))
         .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > limit {
+    if bytes.len() > limit {
         bail!(
             "The body from standard input is larger than {limit} bytes. Put the details in a file and send its path."
         );
