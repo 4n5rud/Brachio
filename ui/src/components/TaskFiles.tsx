@@ -3,6 +3,7 @@ import { NameDialog } from "./NameDialog";
 import { copyPath } from "./ui/PathLink";
 import { openInEditor } from "../lib/editor";
 import { noteRecentFile } from "../lib/recent-files";
+import { requestContentTab } from "../lib/tab-request";
 import { revealPath } from "../lib/workspace";
 import type { FileAction } from "./FileTree";
 import { IconButton } from "./ui/IconButton";
@@ -33,6 +34,7 @@ export function FilesPanel(props: {
   treeKey?: string;
   selected: string;
   onSelect: (path: string) => void;
+  onOpen?: (path: string) => void;
   onRefresh: () => void;
   onMove?: (from: string, toDir: string) => void;
   onTerminalDrop?: (path: string, terminal: TerminalDrop) => void;
@@ -49,7 +51,7 @@ export function FilesPanel(props: {
           <InspectorNote>{t("files.empty")}</InspectorNote>
         </Show>
         <FileTree paths={props.matches} query={props.filter.trim()} treeKey={props.treeKey ?? ""}
-          selected={props.selected} onSelect={props.onSelect} limit={RESULT_LIMIT}
+          selected={props.selected} onSelect={props.onSelect} onOpen={props.onOpen} limit={RESULT_LIMIT}
           onMove={props.onMove} onTerminalDrop={props.onTerminalDrop} onAction={props.onAction} />
         <Show when={props.filter.trim() && props.matches.length > RESULT_LIMIT}><InspectorNote>{t("files.more")}</InspectorNote></Show>
       </InspectorSection>
@@ -57,7 +59,10 @@ export function FilesPanel(props: {
   );
 }
 
-/** Lists the task's files; choosing one adds @path to the agent prompt. */
+/**
+ * Lists the task's files. A click shows a file in a temporary tab, a double click keeps the tab,
+ * and the menu adds @path to the agent prompt.
+ */
 export function TaskFiles(props: { taskId: string; /** The task folder on disk, for copy and show-in-folder. */ root?: string; onInsert: (path: string) => void }) {
   const [naming, setNaming] = createSignal<{ kind: "rename" | "newFile" | "newFolder"; path: string }>();
   const [filter, setFilter] = createSignal("");
@@ -74,9 +79,10 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
     return (files()?.paths ?? []).filter((file) => file.toLowerCase().includes(query));
   });
 
-  const choose = (file: string) => {
+  const choose = (file: string, keep = false) => {
     setPath(file);
-    props.onInsert(file);
+    noteRecentFile(props.taskId, file);
+    requestContentTab({ taskId: props.taskId, kind: "file", target: file, temporary: !keep });
   };
 
   const failed = (title: string, failure: unknown) =>
@@ -147,13 +153,15 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
       const made = await createTaskEntry(props.taskId, dir, name, folder);
       await refetch();
       pushToast({ tone: "success", message: t(folder ? "files.folderCreated" : "files.created").replace("{path}", () => made) });
-      if (!folder) choose(made);
+      if (!folder) choose(made, true);
     } catch (failure) {
       failed(t("files.createFailed"), failure);
     }
   };
   const onAction = async (action: FileAction, target: string, kind: "file" | "dir") => {
-    if (action === "open") {
+    if (action === "mention") {
+      props.onInsert(target);
+    } else if (action === "open") {
       noteRecentFile(props.taskId, target);
       await openInEditor(props.taskId, target).catch((failure) => failed(t("files.openFailed"), failure));
     } else if (action === "reveal") {
@@ -192,7 +200,8 @@ export function TaskFiles(props: { taskId: string; /** The task folder on disk, 
   return (
     <>
     <FilesPanel filter={filter()} onFilter={setFilter} loading={files.loading || reload.pending()} error={files()?.error}
-      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={choose} onRefresh={() => void reload.run()}
+      treeKey={props.taskId} matches={matches()} selected={path()} onSelect={(file) => choose(file)}
+      onOpen={(file) => choose(file, true)} onRefresh={() => void reload.run()}
       onMove={(from, toDir) => void move(from, toDir)} onTerminalDrop={(file, terminal) => void dropOnTerminal(file, terminal)}
       onAction={(action, target, kind) => void onAction(action, target, kind)} />
     <Show when={naming()}>

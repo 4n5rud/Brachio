@@ -9,14 +9,16 @@ export interface ContentTabRequest {
   taskId: string;
   kind: "file" | "browser";
   target: string;
+  /** A single click: the tab is replaced by the next single click until it is kept or edited. */
+  temporary?: boolean;
 }
 
 const CONTENT_EVENT = "brachio-open-content-tab";
 
 /**
  * Asks the task's window to show a file or page in a tab, selecting the tab that already shows it.
- * Only the task on screen answers: a caller selects the task first. A request that arrives while
- * a tab is being added or closed is dropped, as a second click on the same row would be.
+ * Only the task on screen answers: a caller selects the task first. Requests run one at a time:
+ * of those that arrive while one runs, only the latest runs next.
  */
 export const requestContentTab = (request: ContentTabRequest) =>
   window.dispatchEvent(new CustomEvent<ContentTabRequest>(CONTENT_EVENT, { detail: request }));

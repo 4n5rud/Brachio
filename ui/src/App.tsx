@@ -14,6 +14,11 @@ import { alertSoundKind, playAlertSound } from "./lib/alert-sound";
 import { archiveIfMerged, autoArchiveMergedEnabled, mergedTasksToArchive } from "./lib/auto-archive";
 import { prReport } from "./lib/pr-status-store";
 import { quitConfirmEnabled, runningAgentKeys, setQuitConfirmEnabled } from "./lib/quit-confirm";
+import { confirmQuitUnsaved, unsavedTabs } from "./lib/editor-settings";
+import { registerTabSurface } from "./components/TabSurface";
+
+// The code editor and its dependencies load the first time a file tab is shown.
+registerTabSurface("file", () => import("./components/FileTab").then((module) => module.FileTab));
 import { EmptyRepo } from "./components/EmptyRepo";
 import { Button } from "./components/ui/Button";
 import { EmptyState } from "./components/ui/EmptyState";
@@ -748,6 +753,12 @@ export function App() {
   };
   /** Quits, asking first when agents are running. The runtime keeps hosted terminals across a quit. */
   const requestQuit = async () => {
+    const goAhead = await confirmQuitUnsaved((count) => confirmDialog({
+      title: t("quit.unsavedTitle"),
+      body: t("quit.unsavedBody").replace("{count}", String(count)),
+      confirmLabel: t("quit.unsavedConfirm"),
+    }));
+    if (!goAhead) return;
     const keys = runningAgentKeys(live());
     if (!quitConfirmEnabled() || keys.length === 0) {
       await invoke("app_quit", { stop: [] });
@@ -1333,7 +1344,8 @@ export function App() {
       const quitListener = listen("quit-requested", () => void requestQuit().catch(report));
       onCleanup(() => { void quitListener.then((unlisten) => unlisten(), () => {}); });
       const closeListener = getCurrentWindow().onCloseRequested(async (event) => {
-        if (!quitConfirmEnabled() || runningAgentKeys(live()).length === 0) return;
+        const asks = unsavedTabs().size > 0 || (quitConfirmEnabled() && runningAgentKeys(live()).length > 0);
+        if (!asks) return;
         event.preventDefault();
         await requestQuit();
       });

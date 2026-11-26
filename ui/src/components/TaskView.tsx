@@ -37,7 +37,8 @@ import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, type TabSp
   type TaskTab } from "../lib/task-tabs";
 import { agentOfKind, agentOfTab, hasTerminal, isAgentTab, isTabKind, type AgentTabKind } from "../lib/tab-kinds";
 import { TabContentHost } from "./TabSurface";
-import { findContentTab, forgetTabState, isContentKind, tabToEvict } from "../lib/tab-content";
+import { forgetTabState, isContentKind, planContentOpen, tabToEvict } from "../lib/tab-content";
+import { markUnsaved } from "../lib/editor-settings";
 import { confirmDialog } from "./ui/ConfirmDialog";
 import { RenameDialog } from "./RenameDialog";
 import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
@@ -173,6 +174,25 @@ export function TaskView(props: {
     if (dirty) next.add(tabId); else next.delete(tabId);
     return next;
   });
+  // Each task's temporary file tab: a single click opened it and the next single click replaces it.
+  // Only this run knows it; a tab restored at start is always kept.
+  const [temporaryTabs, setTemporaryTabs] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const isTemporary = (id: string, tab: TaskTab) => temporaryTabs().get(id) === tab.id;
+  const setTemporary = (id: string, tabId: string | undefined) => setTemporaryTabs((current) => {
+    if (current.get(id) === tabId) return current;
+    const next = new Map(current);
+    if (tabId) next.set(id, tabId); else next.delete(id);
+    return next;
+  });
+  /** A double click or an edit keeps a temporary tab. */
+  const keepTab = (id: string, tab: TaskTab) => {
+    if (isTemporary(id, tab)) setTemporary(id, undefined);
+  };
+  const onContentDirty = (id: string, tab: TaskTab, dirty: boolean) => {
+    setTabDirty(tab.id, dirty);
+    markUnsaved(tabKey(id, tab), dirty);
+    if (dirty) keepTab(id, tab);
+  };
   const selectedTab = (id: string): TaskTab | undefined => {
     const wanted = selectedSecondary().get(id);
     return tabsOf(id).find((tab) => tab.id === wanted);
@@ -216,9 +236,9 @@ export function TaskView(props: {
     const first = agentTabs(id)[0];
     selectTab(id, extra ? first : undefined);
   };
-  const openTab = async (spec: TabSpec, target?: string) => {
+  const openTab = async (spec: TabSpec, target?: string): Promise<TaskTab | undefined> => {
     const id = props.task.id;
-    if (!tabsReady() || tabsSaving()) return;
+    if (!tabsReady() || tabsSaving()) return undefined;
     const tabId = crypto.randomUUID();
     setTabsSaving(true);
     setTabError("");
@@ -226,7 +246,7 @@ export function TaskView(props: {
       // The target is kept as the backend stored it, so a later lookup and a restart agree.
       const stored = await invoke<string | null>("task_add_tab",
         { taskId: id, tabId, kind: spec.kind, shell: spec.shell, target: target ?? null });
-      if (disposed) return;
+      if (disposed) return undefined;
       const tab: TaskTab = { id: tabId, kind: spec.kind, shell: spec.shell, target: stored ?? null };
       setTabsByTask((current) => new Map(current).set(id, [...tabsOf(id), tab]));
       // The shortcut reopens a terminal kind; a file or page is always opened from where it is listed.
@@ -235,8 +255,10 @@ export function TaskView(props: {
         saveRecentSpec(spec);
       }
       selectTab(id, tab);
+      return tab;
     } catch (failure) {
       setTabError(String(failure));
+      return undefined;
     } finally {
       setTabsSaving(false);
     }
@@ -255,6 +277,8 @@ export function TaskView(props: {
       setTabsByTask((current) => new Map(current).set(id, tabsOf(id).filter((other) => other.id !== tab.id)));
       forgetTabState(tabKey(id, tab));
       setTabDirty(tab.id, false);
+      markUnsaved(tabKey(id, tab), false);
+      if (isTemporary(id, tab)) setTemporary(id, undefined);
       lastUsed.delete(tab.id);
       props.onSecondaryClosed?.(id, tabKey(id, tab));
       if (wasSelected) selectTab(id, undefined);
@@ -270,6 +294,15 @@ export function TaskView(props: {
     confirmLabel: t("tab.unsavedClose"),
     cancelLabel: t("tab.unsavedKeep"),
   });
+  const reorderTabs = (ids: readonly string[]) => {
+    const id = props.task.id;
+    const before = tabsOf(id);
+    setTabsByTask((current) => new Map(current).set(id, placeInOrder(before, ids)));
+    invoke("task_reorder_tabs", { taskId: id, tabIds: ids }).catch((failure) => {
+      setTabsByTask((current) => new Map(current).set(id, before));
+      setTabError(String(failure));
+    });
+  };
   // Shows a file or page in a tab: the tab that already shows it, else a new one. At the limit the
   // tab left longest closes first, after asking when it has unsaved edits. The target is checked
   // and written the stored way before anything closes, so a refused one costs no tab.
@@ -285,9 +318,25 @@ export function TaskView(props: {
       return;
     }
     if (!stillHere()) return;
-    const open = findContentTab(tabsOf(id), request.kind, target);
-    if (open) {
-      selectTab(id, open);
+    const temporary = request.temporary === true;
+    const plan = planContentOpen(tabsOf(id), request.kind, target,
+      { temporary, temporaryId: temporaryTabs().get(id), dirty: dirtyTabs() });
+    if (plan.action === "select") {
+      selectTab(id, plan.tab);
+      if (plan.keep) keepTab(id, plan.tab);
+      return;
+    }
+    if (plan.action === "replace") {
+      // The new tab takes the replaced one's place in the strip.
+      const at = tabsOf(id).findIndex((tab) => tab.id === plan.tab.id);
+      await closeTab(plan.tab, true);
+      if (!stillHere() || tabsOf(id).some((tab) => tab.id === plan.tab.id)) return;
+      const opened = await openTab({ kind: request.kind, shell: null }, target);
+      if (!opened) return;
+      setTemporary(id, opened.id);
+      const ids = tabsOf(id).map((tab) => tab.id).filter((tabId) => tabId !== opened.id);
+      ids.splice(Math.min(at, ids.length), 0, opened.id);
+      if (ids.some((tabId, index) => tabsOf(id)[index]?.id !== tabId)) reorderTabs(ids);
       return;
     }
     // Restored tabs can be over the limit, so close until there is room.
@@ -299,9 +348,29 @@ export function TaskView(props: {
       await closeTab(evict, true);
       if (!stillHere() || tabsOf(id).some((tab) => tab.id === evict.id)) return;
     }
-    await openTab({ kind: request.kind, shell: null }, target);
+    const opened = await openTab({ kind: request.kind, shell: null }, target);
+    if (opened && temporary) setTemporary(id, opened.id);
   };
-  onCleanup(onContentTabRequest((request) => void openContent(request)));
+  // One request at a time; the latest one that arrives meanwhile runs next, so the double click
+  // that follows a single click still keeps the tab the single click is opening.
+  let contentBusy = false;
+  let queuedContent: ContentTabRequest | undefined;
+  const requestContent = async (request: ContentTabRequest) => {
+    if (contentBusy) {
+      queuedContent = request;
+      return;
+    }
+    contentBusy = true;
+    try {
+      await openContent(request);
+    } finally {
+      contentBusy = false;
+    }
+    const next = queuedContent;
+    queuedContent = undefined;
+    if (next && !disposed) await requestContent(next);
+  };
+  onCleanup(onContentTabRequest((request) => void requestContent(request)));
   const [tabActions, setTabActions] = createSignal<{ anchor: HTMLElement; tab: TaskTab }>();
   const [renamingTab, setRenamingTab] = createSignal<TaskTab>();
   const renameTab = (tab: TaskTab, name: string) => {
@@ -327,15 +396,7 @@ export function TaskView(props: {
     container: () => tabRow,
     scroller: () => tabRow,
     label: (tabId) => labels().get(tabId) ?? "",
-    onReorder: (ids) => {
-      const id = props.task.id;
-      const before = tabsOf(id);
-      setTabsByTask((current) => new Map(current).set(id, placeInOrder(before, ids)));
-      invoke("task_reorder_tabs", { taskId: id, tabIds: ids }).catch((failure) => {
-        setTabsByTask((current) => new Map(current).set(id, before));
-        setTabError(String(failure));
-      });
-    },
+    onReorder: (ids) => reorderTabs(ids),
   });
   const quickSpec = (): TabSpec => recentSpec() ?? { kind: "shell", shell: null };
   onCleanup(onNewTabRequest((id) => {
@@ -573,10 +634,13 @@ export function TaskView(props: {
           {(tab) => (
             <div class="tab-item" role="presentation"
               data-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
+              data-temporary={isTemporary(props.task.id, tab) || undefined}
               {...tabReorder.item(tab.id)}>
               <button class="tab" role="tab" type="button" aria-haspopup="menu"
                 aria-selected={layout() !== "shell" && isTabSelected(props.task.id, tab)}
+                title={isTemporary(props.task.id, tab) ? t("tab.temporaryHint") : undefined}
                 onClick={() => { selectTab(props.task.id, tab); }}
+                onDblClick={() => keepTab(props.task.id, tab)}
                 onContextMenu={(event) => { event.preventDefault(); setTabActions({ anchor: event.currentTarget, tab }); }}>
                 <Show when={agentOfTab(tab)} fallback={
                   <Show when={tab.kind === "shell"} fallback={<Icon name={tab.kind === "browser" ? "globe" : "file"} class="icon-sm" />}>
@@ -592,6 +656,9 @@ export function TaskView(props: {
                 {labels().get(tab.id)}
                 <Show when={isAgentTab(tab)}>
                   <MailboxBadge count={props.unreadForTab?.(tabKey(props.task.id, tab)) ?? 0} />
+                </Show>
+                <Show when={dirtyTabs().has(tab.id)}>
+                  <span class="tab-unsaved" role="img" aria-label={t("tab.unsaved")} title={t("tab.unsaved")} />
                 </Show>
               </button>
               <TabClose disabled={tabsSaving()} onClose={() => void closeTab(tab)} />
@@ -862,7 +929,7 @@ export function TaskView(props: {
                             <div class="terminal-cell" hidden={!tabSelected()}>
                               <TabContentHost taskId={id} root={cwd} tab={tab} tabKey={key} name={labels().get(tab.id)}
                                 shown={selected() && mode() !== "shell" && tabSelected()} theme={props.theme}
-                                onDirty={(dirty) => setTabDirty(tab.id, dirty)} />
+                                onDirty={(dirty) => onContentDirty(id, tab, dirty)} />
                             </div>
                           );
                         }
