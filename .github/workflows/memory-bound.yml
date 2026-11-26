@@ -26,9 +26,9 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install the toolchain pinned in rust-toolchain.toml
         run: rustup show
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Measure the runtime with 1, 5 and 10 sessions
         run: cargo test -p brachio-runtime --test memory_bound --locked -- --ignored --nocapture
