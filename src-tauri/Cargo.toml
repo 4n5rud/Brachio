@@ -26,7 +26,7 @@ brachio-runtime.workspace = true
 brachio-store.workspace = true
 brachio-qa.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-clipboard-manager = "=2.3.3"
+tauri-plugin-clipboard-manager = "=2.5.0"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
