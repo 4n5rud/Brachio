@@ -164,6 +164,7 @@ pub async fn agents_detect() -> Vec<Installed> {
 #[tauri::command]
 pub async fn terminal_codex_conversations(
     database: State<'_, Database>,
+    accounts: State<'_, crate::agent_account_env::AccountsFolder>,
     hosted: State<'_, RuntimeTerminals>,
     key: String,
 ) -> CommandResult<Vec<brachio_agent::CodexConversation>> {
@@ -178,8 +179,18 @@ pub async fn terminal_codex_conversations(
     {
         return Ok(Vec::new());
     }
+    let environment = crate::agent_account_env::launch_environment(
+        &*database.lock()?,
+        &accounts.0,
+        &owner.task.id,
+        AgentKind::Codex,
+    )?;
+    let home = environment
+        .iter()
+        .find(|(name, _)| name == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value));
     tauri::async_runtime::spawn_blocking(move || {
-        brachio_agent::codex_conversations(&owner.task.worktree_path)
+        account_codex_conversations(home.as_deref(), &owner.task.worktree_path)
             .into_iter()
             .filter(|candidate| uuid::Uuid::parse_str(&candidate.id).is_ok())
             .collect()
@@ -224,6 +235,7 @@ pub async fn terminal_open(
     hosted: State<'_, RuntimeTerminals>,
     database: State<'_, Database>,
     hook: State<'_, HookSetup>,
+    accounts: State<'_, crate::agent_account_env::AccountsFolder>,
     mut request: OpenRequest,
     on_event: Channel<InvokeResponseBody>,
 ) -> CommandResult<Opened> {
@@ -267,6 +279,19 @@ pub async fn terminal_open(
             Err(error) => tracing::warn!(%error, "could not assign a development port"),
         }
     }
+    let account_environment = match request.agent {
+        Some(kind) => crate::agent_account_env::launch_environment(
+            &*database.lock()?,
+            &accounts.0,
+            &owner.task.id,
+            kind,
+        )?,
+        None => Vec::new(),
+    };
+    let codex_home = account_environment
+        .iter()
+        .find(|(name, _)| name == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value));
     let mut options = Vec::new();
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
         if !hook.environment(key).is_empty() {
@@ -298,7 +323,7 @@ pub async fn terminal_open(
     let (command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => {
             let (prepared, returned_request) = tauri::async_runtime::spawn_blocking(move || {
-                let result = agent_command(kind, &request, options);
+                let result = agent_command(kind, &request, options, codex_home.as_deref());
                 (result, request)
             })
             .await
@@ -313,6 +338,8 @@ pub async fn terminal_open(
         ),
     };
     environment.extend(command.env);
+    // A task's saved account remains authoritative after profile and adapter additions.
+    environment.extend(account_environment);
     if let Some(key) = request.key.clone() {
         let launch = Launch {
             cwd: request.cwd.clone(),
@@ -447,24 +474,21 @@ fn agent_command(
     kind: AgentKind,
     request: &OpenRequest,
     mut options: Vec<String>,
+    codex_home: Option<&Path>,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let installed = installed(kind)?;
+    let conversations = |cwd: &Path| account_codex_conversations(codex_home, cwd);
     let from_project = kind == AgentKind::Codex
         && request.codex_conversation_id.is_none()
         && request.session_id.as_deref().is_some_and(|chosen| {
-            codex_conversation_allowed(
-                chosen,
-                request,
-                Some(chosen),
-                &brachio_agent::codex_conversations,
-            )
+            codex_conversation_allowed(chosen, request, Some(chosen), &conversations)
         });
     let earlier = if let Some(chosen) = &request.codex_conversation_id {
         if !codex_conversation_allowed(
             chosen,
             request,
             request.session_id.as_deref(),
-            &brachio_agent::codex_conversations,
+            &conversations,
         ) {
             return Err(
                 "The chosen Codex conversation is no longer available for this worktree."
@@ -508,6 +532,16 @@ fn agent_command(
         .resolve_interactive(request.prompt.as_deref(), session_id, options)
         .map_err(|error| error.to_string())?;
     Ok((command, delivery, false))
+}
+
+fn account_codex_conversations(
+    home: Option<&Path>,
+    cwd: &Path,
+) -> Vec<brachio_agent::CodexConversation> {
+    match home {
+        Some(home) => brachio_agent::codex_conversations_in(home, cwd),
+        None => brachio_agent::codex_conversations(cwd),
+    }
 }
 
 /// Whether Codex may resume `chosen` in this launch: a conversation recorded for the worktree,

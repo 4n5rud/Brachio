@@ -48,6 +48,7 @@ export interface CreateTaskRequest {
   compareGroup?: string | null;
   /** A profile from the repository's `brachio.toml`, applied whenever the agent starts. */
   profile?: string | null;
+  accountId?: string | null;
 }
 
 export const listRepos = () => invoke<RepoRecord[]>("repo_list");
