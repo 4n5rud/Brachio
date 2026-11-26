@@ -1,5 +1,6 @@
 //! App shell: window, tray, IPC commands. Domain logic stays in the crates.
 
+mod agent_account_env;
 mod agent_accounts;
 mod agent_profiles;
 mod always_allow;
@@ -388,6 +389,11 @@ pub fn run() {
             workspace::repo_branches,
             workspace::repo_remove,
             workspace::folder_source_repos,
+            agent_accounts::agent_accounts_list,
+            agent_accounts::agent_account_add,
+            agent_accounts::agent_account_rename,
+            agent_accounts::agent_account_remove,
+            agent_accounts::agent_account_set_default,
             agent_accounts::agent_auth_status,
             agent_accounts::codex_auth_action,
             agent_accounts::codex_auth_cancel,
@@ -657,6 +663,9 @@ fn open_database(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let folder = app.path().app_data_dir()?;
     fs::create_dir_all(&folder)?;
     let connection = brachio_store::open(&folder.join("brachio.db"))?;
+    app.manage(agent_account_env::AccountsFolder(
+        folder.join("agent-accounts"),
+    ));
     const READ_MAIL_KEPT_MS: i64 = 7 * 24 * 60 * 60 * 1000;
     let cutoff = pr_status::now_ms() - READ_MAIL_KEPT_MS;
     if let Err(error) = brachio_store::expire_read_messages(&connection, cutoff) {

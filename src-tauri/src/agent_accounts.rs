@@ -14,6 +14,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::agent_account_env::{account_environment, config_variable, AccountsFolder};
+use crate::workspace::{new_id, now_ms, Database};
+
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const QUOTA_TIMEOUT: Duration = Duration::from_secs(15);
@@ -30,7 +33,11 @@ fn resolved_cli(kind: AgentKind, args: &[&str]) -> Result<ResolvedCommand, Strin
     ResolvedCommand::new(&executable, &args).map_err(|error| error.to_string())
 }
 
-fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
+fn cli(
+    kind: AgentKind,
+    args: &[&str],
+    environment: &[(String, String)],
+) -> Result<Command, String> {
     let resolved = resolved_cli(kind, args)?;
     let mut command = Command::new(resolved.program);
     #[cfg(windows)]
@@ -38,8 +45,130 @@ fn cli(kind: AgentKind, args: &[&str]) -> Result<Command, String> {
     command
         .args(resolved.args)
         .envs(resolved.env)
+        .envs(environment.iter().cloned())
         .kill_on_drop(true);
     Ok(command)
+}
+
+/// One registered login in the account picker.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountChoice {
+    id: Option<String>,
+    name: String,
+    is_default: bool,
+}
+
+fn account_agent(kind: AgentKind) -> Result<&'static str, String> {
+    config_variable(kind)
+        .map(|_| kind.spec().id)
+        .ok_or_else(|| "Grok signs in from its own terminal.".to_owned())
+}
+
+fn get_account(
+    db: &rusqlite::Connection,
+    kind: AgentKind,
+    id: &str,
+) -> Result<brachio_store::AgentAccount, String> {
+    let agent = account_agent(kind)?;
+    let account = brachio_store::agent_account(db, id).map_err(|error| error.to_string())?;
+    if account.agent != agent {
+        return Err("The account belongs to another agent.".to_owned());
+    }
+    Ok(account)
+}
+
+fn selected_environment(
+    database: &Database,
+    folder: &AccountsFolder,
+    kind: AgentKind,
+    account_id: Option<&str>,
+) -> Result<Vec<(String, String)>, String> {
+    let Some(id) = account_id else {
+        return Ok(Vec::new());
+    };
+    let account = get_account(&*database.lock()?, kind, id)?;
+    account_environment(&folder.0, kind, &account)
+}
+
+/// Lists the built-in login and the extra accounts for an agent.
+#[tauri::command]
+pub fn agent_accounts_list(
+    agent: AgentKind,
+    database: State<'_, Database>,
+) -> Result<Vec<AccountChoice>, String> {
+    let accounts = brachio_store::agent_accounts(&*database.lock()?, account_agent(agent)?)
+        .map_err(|error| error.to_string())?;
+    let builtin = AccountChoice {
+        id: None,
+        name: "Built-in".to_owned(),
+        is_default: !accounts.iter().any(|account| account.is_default),
+    };
+    Ok(std::iter::once(builtin)
+        .chain(accounts.into_iter().map(|account| AccountChoice {
+            id: Some(account.id),
+            name: account.name,
+            is_default: account.is_default,
+        }))
+        .collect())
+}
+
+/// Registers an extra login with its own CLI configuration.
+#[tauri::command]
+pub fn agent_account_add(
+    agent: AgentKind,
+    name: String,
+    database: State<'_, Database>,
+) -> Result<(), String> {
+    brachio_store::add_agent_account(
+        &*database.lock()?,
+        &new_id(),
+        account_agent(agent)?,
+        &name,
+        now_ms(),
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+/// Changes an extra account’s display name.
+#[tauri::command]
+pub fn agent_account_rename(
+    agent: AgentKind,
+    account_id: String,
+    name: String,
+    database: State<'_, Database>,
+) -> Result<(), String> {
+    let db = database.lock()?;
+    get_account(&db, agent, &account_id)?;
+    brachio_store::rename_agent_account(&db, &account_id, &name).map_err(|error| error.to_string())
+}
+
+/// Removes an extra account from Brachio.
+#[tauri::command]
+pub fn agent_account_remove(
+    agent: AgentKind,
+    account_id: String,
+    database: State<'_, Database>,
+) -> Result<(), String> {
+    let db = database.lock()?;
+    get_account(&db, agent, &account_id)?;
+    brachio_store::remove_agent_account(&db, &account_id).map_err(|error| error.to_string())
+}
+
+/// Changes which login new tasks use by default.
+#[tauri::command]
+pub fn agent_account_set_default(
+    agent: AgentKind,
+    account_id: Option<String>,
+    database: State<'_, Database>,
+) -> Result<(), String> {
+    brachio_store::set_default_agent_account(
+        &*database.lock()?,
+        account_agent(agent)?,
+        account_id.as_deref(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// Only account metadata intended for display is returned.
@@ -52,7 +181,13 @@ pub struct AgentAuthStatus {
 
 /// Reads sign-in status through the installed CLI.
 #[tauri::command]
-pub async fn agent_auth_status(kind: AgentKind) -> Result<AgentAuthStatus, String> {
+pub async fn agent_auth_status(
+    kind: AgentKind,
+    account_id: Option<String>,
+    database: State<'_, Database>,
+    folder: State<'_, AccountsFolder>,
+) -> Result<AgentAuthStatus, String> {
+    let environment = selected_environment(&database, &folder, kind, account_id.as_deref())?;
     let args: &[&str] = match kind {
         AgentKind::Codex => &["login", "status"],
         AgentKind::ClaudeCode => &["auth", "status", "--json"],
@@ -60,7 +195,7 @@ pub async fn agent_auth_status(kind: AgentKind) -> Result<AgentAuthStatus, Strin
     };
     let output = timeout(
         STATUS_TIMEOUT,
-        cli(kind, args)?
+        cli(kind, args, &environment)?
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output(),
@@ -145,14 +280,31 @@ impl SignInRun {
 #[tauri::command]
 pub async fn codex_auth_action(
     action: CodexAuthAction,
+    kind: Option<AgentKind>,
+    account_id: Option<String>,
+    database: State<'_, Database>,
+    folder: State<'_, AccountsFolder>,
     run: State<'_, SignInRun>,
 ) -> Result<bool, String> {
+    let kind = kind.unwrap_or(AgentKind::Codex);
+    account_agent(kind)?;
+    let environment = selected_environment(&database, &folder, kind, account_id.as_deref())?;
     if matches!(action, CodexAuthAction::SignIn) {
-        return codex_sign_in(&run).await;
+        let args: &[&str] = if kind == AgentKind::ClaudeCode {
+            &["auth", "login"]
+        } else {
+            &["login"]
+        };
+        return agent_sign_in(kind, args, environment, &run).await;
     }
+    let args: &[&str] = if kind == AgentKind::ClaudeCode {
+        &["auth", "logout"]
+    } else {
+        &["logout"]
+    };
     let status = timeout(
         STATUS_TIMEOUT,
-        cli(AgentKind::Codex, &["logout"])?
+        cli(kind, args, &environment)?
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -168,12 +320,20 @@ pub async fn codex_auth_action(
     }
 }
 
-/// `codex login` runs as a child of the app inside its own process tree, so cancelling can stop
+/// The vendor login CLI runs inside its own process tree, so cancelling can stop
 /// the CLI and anything it started.
-async fn codex_sign_in(run: &SignInRun) -> Result<bool, String> {
-    let resolved = resolved_cli(AgentKind::Codex, &["login"])?;
+async fn agent_sign_in(
+    kind: AgentKind,
+    args: &[&str],
+    environment: Vec<(String, String)>,
+    run: &SignInRun,
+) -> Result<bool, String> {
+    let resolved = resolved_cli(kind, args)?;
     let mut command = std::process::Command::new(resolved.program);
-    command.args(resolved.args).envs(resolved.env);
+    command
+        .args(resolved.args)
+        .envs(resolved.env)
+        .envs(environment);
     // A Windows console lets the user also see the CLI's fallback instructions.
     if !cfg!(windows) {
         command
@@ -227,15 +387,21 @@ pub struct CodexQuota {
 
 /// Reads usage through the local Codex app-server protocol, without a model request.
 #[tauri::command]
-pub async fn codex_usage() -> Result<CodexQuota, String> {
-    timeout(QUOTA_TIMEOUT, read_codex_usage())
+pub async fn codex_usage(
+    account_id: Option<String>,
+    database: State<'_, Database>,
+    folder: State<'_, AccountsFolder>,
+) -> Result<CodexQuota, String> {
+    let environment =
+        selected_environment(&database, &folder, AgentKind::Codex, account_id.as_deref())?;
+    timeout(QUOTA_TIMEOUT, read_codex_usage(&environment))
         .await
         .map_err(|_| "Codex usage lookup timed out.".to_owned())?
 }
 
-async fn read_codex_usage() -> Result<CodexQuota, String> {
+async fn read_codex_usage(environment: &[(String, String)]) -> Result<CodexQuota, String> {
     let unavailable = || "Codex did not return usage for this login.".to_owned();
-    let mut child = cli(AgentKind::Codex, &["app-server"])?
+    let mut child = cli(AgentKind::Codex, &["app-server"], environment)?
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

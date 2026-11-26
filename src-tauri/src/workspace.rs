@@ -68,6 +68,9 @@ pub struct CreateTaskRequest {
     pub prompt: String,
     /// Agent to run in the task.
     pub agent: AgentKind,
+    /// Extra account, built-in sentinel, or the agent default when omitted.
+    #[serde(default)]
+    pub account_id: Option<String>,
     /// Commit-ish to branch from. Defaults to the repository's default branch.
     pub base: Option<String>,
     /// A Codex conversation recorded for the project folder that the new task continues.
@@ -463,6 +466,14 @@ async fn create_task_unprofiled(
         };
         (repo, parent_branch)
     };
+    let account_id = crate::agent_account_env::resolve_choice(
+        &*database.lock()?,
+        request.agent,
+        request.account_id.as_deref(),
+    )?;
+    if account_id.is_some() && request.codex_conversation_id.is_some() {
+        return Err("Choose a new conversation when using a separate account.".to_owned());
+    }
     check_project_conversation(&repo.path, &request).await?;
     if !repo.is_git {
         return create_folder_task(database, &repo, &request);
@@ -516,21 +527,31 @@ async fn create_task_unprofiled(
     let mut refused = false;
     let saved = database.lock().and_then(|mut connection| {
         if let (Some(max), Some(_)) = (request.max_open_children, task.parent_task_id) {
-            return TaskRecord::insert_child_after(&mut connection, &task, max, &request.after)
-                .map_err(|error| {
-                    refused = !matches!(error, ChildInsertError::Store(_));
-                    match error {
-                        ChildInsertError::LimitReached => {
-                            format!(
-                                "This task already has {max} open child tasks. Archive one first."
-                            )
-                        }
-                        other => other.to_string(),
+            return TaskRecord::insert_child_after_with_account(
+                &mut connection,
+                &task,
+                max,
+                &request.after,
+                account_id.as_deref(),
+            )
+            .map_err(|error| {
+                refused = !matches!(error, ChildInsertError::Store(_));
+                match error {
+                    ChildInsertError::LimitReached => {
+                        format!("This task already has {max} open child tasks. Archive one first.")
                     }
-                });
+                    other => other.to_string(),
+                }
+            });
         }
         let transaction = connection.transaction().map_err(to_text)?;
         let record = TaskRecord::insert(&transaction, &task).map_err(to_text)?;
+        save_task_account(
+            &transaction,
+            &record.id,
+            request.agent,
+            account_id.as_deref(),
+        )?;
         transaction.commit().map_err(to_text)?;
         Ok(record)
     });
@@ -659,12 +680,42 @@ pub(crate) fn create_folder_task(
         compare_group: None,
         created_at_ms: now_ms(),
     };
-    let record = TaskRecord::insert(&*database.lock()?, &task).map_err(to_text)?;
+    let mut connection = database.lock()?;
+    let transaction = connection.transaction().map_err(to_text)?;
+    let account_id = crate::agent_account_env::resolve_choice(
+        &transaction,
+        request.agent,
+        request.account_id.as_deref(),
+    )?;
+    if account_id.is_some() && request.codex_conversation_id.is_some() {
+        return Err("Choose a new conversation when using a separate account.".to_owned());
+    }
+    let record = TaskRecord::insert(&transaction, &task).map_err(to_text)?;
+    save_task_account(
+        &transaction,
+        &record.id,
+        request.agent,
+        account_id.as_deref(),
+    )?;
+    transaction.commit().map_err(to_text)?;
     Ok(CreatedTask {
         task: record,
         setup_commands: Vec::new(),
         setup_copy_error: None,
     })
+}
+
+fn save_task_account(
+    connection: &rusqlite::Connection,
+    task_id: &str,
+    kind: AgentKind,
+    account_id: Option<&str>,
+) -> Result<(), String> {
+    if let Some(id) = account_id {
+        crate::agent_account_env::resolve_choice(connection, kind, Some(id))?;
+        brachio_store::set_task_agent_account(connection, task_id, id).map_err(to_text)?;
+    }
+    Ok(())
 }
 
 /// Retries only missing setup files, preserving any files already present.
@@ -1326,6 +1377,7 @@ mod folder_project_tests {
             title: "Notes".to_owned(),
             prompt: String::new(),
             agent: AgentKind::ClaudeCode,
+            account_id: None,
             base: Some("main".to_owned()),
             codex_conversation_id: None,
             compare_group: None,
@@ -1342,6 +1394,57 @@ mod folder_project_tests {
         assert_ne!(
             other.task.id, created.task.id,
             "several tasks may share the folder"
+        );
+    }
+
+    #[test]
+    fn folder_tasks_remember_the_default_account_and_explicit_builtin_choice() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let database = database();
+        let project = add_project(&database, folder.path(), false).expect("add folder");
+        {
+            let connection = database.lock().expect("lock");
+            brachio_store::add_agent_account(&connection, "work", "codex", "Work", 1)
+                .expect("account");
+            brachio_store::set_default_agent_account(&connection, "codex", Some("work"))
+                .expect("default");
+        }
+        let mut request = CreateTaskRequest {
+            repo_id: project.id.clone(),
+            parent_task_id: None,
+            title: "Notes".to_owned(),
+            prompt: String::new(),
+            agent: AgentKind::Codex,
+            account_id: None,
+            base: None,
+            codex_conversation_id: None,
+            compare_group: None,
+            profile: None,
+            max_open_children: None,
+            scheduled: false,
+            after: Vec::new(),
+        };
+        let created = create_folder_task(&database, &project, &request).expect("default task");
+        assert_eq!(
+            brachio_store::task_agent_account(&database.lock().expect("lock"), &created.task.id)
+                .expect("saved account")
+                .as_deref(),
+            Some("work"),
+        );
+        request.account_id = Some("builtin".to_owned());
+        let builtin = create_folder_task(&database, &project, &request).expect("builtin task");
+        assert_eq!(
+            brachio_store::task_agent_account(&database.lock().expect("lock"), &builtin.task.id)
+                .expect("builtin account"),
+            None,
+        );
+        request.account_id = Some("missing".to_owned());
+        assert!(create_folder_task(&database, &project, &request).is_err());
+        assert_eq!(
+            brachio_store::TaskRecord::list_open(&database.lock().expect("lock"))
+                .expect("tasks")
+                .len(),
+            2,
         );
     }
 
@@ -1758,6 +1861,7 @@ mod agent_child_limit_tests {
             title: title.to_owned(),
             prompt: String::new(),
             agent: AgentKind::ClaudeCode,
+            account_id: None,
             base: None,
             codex_conversation_id: None,
             compare_group: None,
@@ -2249,6 +2353,7 @@ mod git_task_deletion_tests {
                 title: "Work".to_owned(),
                 prompt: String::new(),
                 agent: AgentKind::ClaudeCode,
+                account_id: None,
                 base: None,
                 codex_conversation_id: None,
                 compare_group: None,

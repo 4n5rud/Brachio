@@ -1,5 +1,6 @@
 //! SQLite storage. One writer connection in WAL mode.
 
+mod agent_account_record;
 mod child_report;
 mod database;
 mod decision_gate_record;
@@ -19,6 +20,11 @@ mod task_record;
 mod task_tabs;
 mod usage_record;
 
+pub use agent_account_record::{
+    add_agent_account, agent_account, agent_accounts, default_agent_account, remove_agent_account,
+    rename_agent_account, set_default_agent_account, set_task_agent_account, task_agent_account,
+    AgentAccount, MAX_ACCOUNTS_PER_AGENT, MAX_ACCOUNT_NAME_CHARS,
+};
 pub use child_report::{child_reports, ChildReport};
 pub use database::{open, open_in_memory, StoreError};
 pub use decision_gate_record::{

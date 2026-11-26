@@ -32,9 +32,13 @@ pub struct CodexConversation {
 /// Finds the most recent Codex conversations in `cwd` without selecting one.
 #[must_use]
 pub fn codex_conversations(cwd: &Path) -> Vec<CodexConversation> {
-    codex_home().map_or_else(Vec::new, |home| {
-        conversations_in(&home.join("sessions"), cwd, MAX_CANDIDATES)
-    })
+    codex_home().map_or_else(Vec::new, |home| codex_conversations_in(&home, cwd))
+}
+
+/// Finds conversations for a selected Codex configuration folder.
+#[must_use]
+pub fn codex_conversations_in(home: &Path, cwd: &Path) -> Vec<CodexConversation> {
+    conversations_in(&home.join("sessions"), cwd, MAX_CANDIDATES)
 }
 
 /// The id of the newest Codex conversation started in `cwd`, if any.
@@ -246,6 +250,30 @@ mod tests {
             cwd = serde_json::to_string(&cwd.to_string_lossy()).expect("quote cwd"),
         );
         fs::write(folder.join(name), format!("{line}\n{{}}\n")).expect("write rollout");
+    }
+
+    #[test]
+    fn a_selected_account_only_lists_its_own_conversations() {
+        let first = tempfile::tempdir().expect("first account");
+        let second = tempfile::tempdir().expect("second account");
+        let task = tempfile::tempdir().expect("task");
+        write_rollout(
+            &first.path().join("sessions"),
+            "2026/11/17",
+            "rollout-first.jsonl",
+            task.path(),
+            "",
+        );
+        write_rollout(
+            &second.path().join("sessions"),
+            "2026/11/17",
+            "rollout-second.jsonl",
+            task.path(),
+            "",
+        );
+        let listed = codex_conversations_in(first.path(), task.path());
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "first");
     }
 
     #[test]

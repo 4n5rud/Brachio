@@ -226,6 +226,7 @@ impl<R: Runtime> ChildTasks for AppChildTasks<R> {
                     title: request.title,
                     prompt: request.prompt,
                     agent,
+                    account_id: None,
                     base: request.base,
                     codex_conversation_id: None,
                     compare_group: None,
