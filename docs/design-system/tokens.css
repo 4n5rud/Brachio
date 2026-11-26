@@ -35,6 +35,17 @@
   --color-term-text: #d9d9e0; /* Default terminal foreground and tile preview text (12:1 or more). */
   --color-scrim: rgba(6,6,8,0.62); /* Backdrop behind dialogs and the new task sheet. */
   --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05); /* Only on layers above the app: dialogs, toasts, menus, the quick open palette. Panels never cast shadows. */
+  --color-syntax-keyword: #c6a0f6; /* Language keywords and Markdown headings. */
+  --color-syntax-string: #a6da95; /* Strings, regular expressions, characters and Markdown code spans. */
+  --color-syntax-number: #f5a97f; /* Numbers, booleans, null, atoms and units. */
+  --color-syntax-comment: #8b8d9c; /* Comments and documentation comments; italic, minimum 3:1 contrast. */
+  --color-syntax-type: #eed49f; /* Types, class names and namespaces. */
+  --color-syntax-function: #8aadf4; /* Function names, definitions and calls. */
+  --color-syntax-variable: #cad3f5; /* Variable names and definitions. */
+  --color-syntax-property: #8bd5ca; /* Properties, attributes and labels. */
+  --color-syntax-operator: #f5bde6; /* Operators and Markdown links. */
+  --color-syntax-punctuation: #b8c0e0; /* Punctuation, brackets, separators and metadata. */
+  --color-syntax-invalid: #ed8796; /* Invalid syntax; underlined to identify errors beyond color. */
 }
 [data-theme="mint-light"] {
   --color-canvas: #f1f1f4;
@@ -72,6 +83,17 @@
   --color-term-text: #2a2a31;
   --color-scrim: rgba(24,24,28,0.34);
   --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+  --color-syntax-keyword: #7137a8;
+  --color-syntax-string: #286328;
+  --color-syntax-number: #934719;
+  --color-syntax-comment: #777681;
+  --color-syntax-type: #795700;
+  --color-syntax-function: #235aa6;
+  --color-syntax-variable: #30364d;
+  --color-syntax-property: #12695e;
+  --color-syntax-operator: #98356e;
+  --color-syntax-punctuation: #4b526b;
+  --color-syntax-invalid: #ae243f;
 }
 [data-theme="lilac-dark"] {
   --color-canvas: #141320;
@@ -109,6 +131,17 @@
   --color-term-text: #dcd9ea;
   --color-scrim: rgba(6,6,8,0.62);
   --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05);
+  --color-syntax-keyword: #c6a0f6;
+  --color-syntax-string: #a6da95;
+  --color-syntax-number: #f5a97f;
+  --color-syntax-comment: #8b8d9c;
+  --color-syntax-type: #eed49f;
+  --color-syntax-function: #8aadf4;
+  --color-syntax-variable: #cad3f5;
+  --color-syntax-property: #8bd5ca;
+  --color-syntax-operator: #f5bde6;
+  --color-syntax-punctuation: #b8c0e0;
+  --color-syntax-invalid: #ed8796;
 }
 [data-theme="lilac-light"] {
   --color-canvas: #f2f1f8;
@@ -146,6 +179,17 @@
   --color-term-text: #2a2738;
   --color-scrim: rgba(24,24,28,0.34);
   --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+  --color-syntax-keyword: #7137a8;
+  --color-syntax-string: #286328;
+  --color-syntax-number: #934719;
+  --color-syntax-comment: #777681;
+  --color-syntax-type: #795700;
+  --color-syntax-function: #235aa6;
+  --color-syntax-variable: #30364d;
+  --color-syntax-property: #12695e;
+  --color-syntax-operator: #98356e;
+  --color-syntax-punctuation: #4b526b;
+  --color-syntax-invalid: #ae243f;
 }
 [data-theme="sand-dark"] {
   --color-canvas: #171512;
@@ -183,6 +227,17 @@
   --color-term-text: #e4ddd2;
   --color-scrim: rgba(6,6,8,0.62);
   --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05);
+  --color-syntax-keyword: #c6a0f6;
+  --color-syntax-string: #a6da95;
+  --color-syntax-number: #f5a97f;
+  --color-syntax-comment: #8b8d9c;
+  --color-syntax-type: #eed49f;
+  --color-syntax-function: #8aadf4;
+  --color-syntax-variable: #cad3f5;
+  --color-syntax-property: #8bd5ca;
+  --color-syntax-operator: #f5bde6;
+  --color-syntax-punctuation: #b8c0e0;
+  --color-syntax-invalid: #ed8796;
 }
 [data-theme="sand-light"] {
   --color-canvas: #f3efe8;
@@ -220,6 +275,17 @@
   --color-term-text: #332b22;
   --color-scrim: rgba(24,24,28,0.34);
   --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+  --color-syntax-keyword: #7137a8;
+  --color-syntax-string: #286328;
+  --color-syntax-number: #934719;
+  --color-syntax-comment: #777681;
+  --color-syntax-type: #795700;
+  --color-syntax-function: #235aa6;
+  --color-syntax-variable: #30364d;
+  --color-syntax-property: #12695e;
+  --color-syntax-operator: #98356e;
+  --color-syntax-punctuation: #4b526b;
+  --color-syntax-invalid: #ae243f;
 }
 [data-theme="contrast-dark"] {
   --color-canvas: #000000;
@@ -257,6 +323,17 @@
   --color-term-text: #f4f4f6;
   --color-scrim: rgba(6,6,8,0.62);
   --shadow-overlay: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.05);
+  --color-syntax-keyword: #c6a0f6;
+  --color-syntax-string: #a6da95;
+  --color-syntax-number: #f5a97f;
+  --color-syntax-comment: #8b8d9c;
+  --color-syntax-type: #eed49f;
+  --color-syntax-function: #8aadf4;
+  --color-syntax-variable: #cad3f5;
+  --color-syntax-property: #8bd5ca;
+  --color-syntax-operator: #f5bde6;
+  --color-syntax-punctuation: #b8c0e0;
+  --color-syntax-invalid: #ed8796;
 }
 [data-theme="contrast-light"] {
   --color-canvas: #ebebed;
@@ -294,6 +371,17 @@
   --color-term-text: #0a0a0c;
   --color-scrim: rgba(24,24,28,0.34);
   --shadow-overlay: 0 8px 24px rgba(24,24,28,0.10), 0 0 0 1px rgba(24,24,28,0.06);
+  --color-syntax-keyword: #7137a8;
+  --color-syntax-string: #286328;
+  --color-syntax-number: #934719;
+  --color-syntax-comment: #777681;
+  --color-syntax-type: #795700;
+  --color-syntax-function: #235aa6;
+  --color-syntax-variable: #30364d;
+  --color-syntax-property: #12695e;
+  --color-syntax-operator: #98356e;
+  --color-syntax-punctuation: #4b526b;
+  --color-syntax-invalid: #ae243f;
 }
 :root {
   --space-1: 4px; /* Icon to text in dense rows, group head bottom padding. */

@@ -43,6 +43,37 @@ These principles shape every screen. Where a rule and a token disagree, the toke
 - Status colors are for status only: working blue, needs you amber, ready green, error red, neutral grey. Red means an error or a destructive action, nothing else. `color-blocked-bg` and `color-error-bg` tint a notice row, never a whole card.
 - Don't tint cards or put icons in colored circles. Emphasis comes from a status edge, a glyph or a word.
 
+### Editor syntax colors
+
+The editor uses `color-syntax-*` tokens against `color-term-bg`. Each role has a light and dark palette shared across Mint, Lilac, Sand and Contrast, keeping code categories recognizable when switching themes. Every foreground is at least 4.5:1; italic comments are at least 3:1. Syntax colors are independent of UI accents and status colors.
+
+| Token suffix | CodeMirror role |
+| --- | --- |
+| `keyword` | Keywords and Markdown headings (600 weight) |
+| `string` | Strings, characters, regular expressions and Markdown code spans |
+| `number` | Numbers, booleans, null, atoms and units |
+| `comment` | Comments and documentation comments (italic) |
+| `type` | Types, classes and namespaces |
+| `function` | Function names, definitions and calls |
+| `variable` | Variables and variable definitions |
+| `property` | Properties, attributes and labels |
+| `operator` | Operators and Markdown links (underlined) |
+| `punctuation` | Punctuation, brackets, separators and metadata |
+| `invalid` | Invalid syntax (wavy underline) |
+
+Token values live in `tokens.json`; run `node scripts/sync-color-tokens.mjs` from the repository root to regenerate color declarations in both `tokens.css` and `ui/src/styles/tokens.css`. The generator preserves the app's additional `color-scheme` declarations. Run `pnpm --dir ui test src/lib/syntax-colors.test.ts` to check all 88 foreground/background pairs using WCAG sRGB relative luminance.
+
+| Theme | Lowest non-comment contrast | Comment contrast |
+| --- | ---: | ---: |
+| Mint dark | 7.44:1 | 5.59:1 |
+| Mint light | 6.28:1 | 4.29:1 |
+| Lilac dark | 7.49:1 | 5.63:1 |
+| Lilac light | 6.30:1 | 4.31:1 |
+| Sand dark | 7.46:1 | 5.60:1 |
+| Sand light | 6.33:1 | 4.33:1 |
+| Contrast dark | 8.51:1 | 6.39:1 |
+| Contrast light | 6.55:1 | 4.47:1 |
+
 ## Type
 - `sans` is Pretendard Variable, chosen for Korean and Latin in one face; `mono` is JetBrains Mono. Both ship inside the app.
 - Interface styles: `title` 18/600, `heading` 15/600, `body` 14/400, `label` 13/500, `caption` 12/400, `group-label` 12/600. Code styles: `meta` 12 mono, `terminal` 13 mono at 1.5.
