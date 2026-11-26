@@ -54,6 +54,10 @@ pub struct FileState {
     pub last_usage: TokenUsage,
     /// Codex: the cumulative total already counted.
     pub previous_total: TokenUsage,
+    /// The offset is inside a line longer than [`MAX_READ_BYTES`]; the rest of it up to its
+    /// newline is skipped. States saved before this field existed load as `false`.
+    #[serde(default)]
+    pub skipping: bool,
 }
 
 /// A source of session logs. The app lists providers; the rest of the code does not name them.
@@ -78,7 +82,8 @@ pub trait UsageProvider: Send + Sync {
 pub struct Scanned {
     /// New usage, one bucket per day.
     pub buckets: Vec<Bucket>,
-    /// Bytes read this time.
+    /// Bytes the saved offset moved forward this time, including skipped ones. Zero means
+    /// nothing changed and the state need not be saved.
     pub bytes: u64,
 }
 
@@ -140,8 +145,10 @@ fn is_empty(usage: TokenUsage) -> bool {
     usage == TokenUsage::default()
 }
 
-/// Reads the complete lines after `state.offset`, at most [`MAX_READ_BYTES`]. A shrunken file starts over.
-fn new_lines(path: &Path, state: &mut FileState) -> io::Result<Vec<u8>> {
+/// Reads the complete lines after `state.offset`, at most [`MAX_READ_BYTES`], and returns them with
+/// the number of bytes the offset moved. A line longer than one read is skipped through its newline,
+/// so the scan never stalls on it and never parses its tail. A shrunken file starts over.
+fn new_lines(path: &Path, state: &mut FileState) -> io::Result<(Vec<u8>, u64)> {
     let mut file = File::open(path)?;
     if file.metadata()?.len() < state.offset {
         *state = FileState::default();
@@ -149,15 +156,31 @@ fn new_lines(path: &Path, state: &mut FileState) -> io::Result<Vec<u8>> {
     file.seek(SeekFrom::Start(state.offset))?;
     let mut buffer = Vec::new();
     file.take(MAX_READ_BYTES as u64).read_to_end(&mut buffer)?;
-    let Some(end) = buffer.iter().rposition(|byte| *byte == b'\n') else {
-        if buffer.len() >= MAX_READ_BYTES {
-            state.offset += buffer.len() as u64;
-        }
-        return Ok(Vec::new());
+    let mut from = 0;
+    if state.skipping {
+        let Some(at) = buffer.iter().position(|byte| *byte == b'\n') else {
+            let skipped = buffer.len() as u64;
+            state.offset += skipped;
+            return Ok((Vec::new(), skipped));
+        };
+        from = at + 1;
+        state.skipping = false;
+    }
+    let Some(end) = buffer[from..].iter().rposition(|byte| *byte == b'\n') else {
+        let consumed = if from == 0 && buffer.len() >= MAX_READ_BYTES {
+            state.skipping = true;
+            buffer.len()
+        } else {
+            from
+        };
+        state.offset += consumed as u64;
+        return Ok((Vec::new(), consumed as u64));
     };
-    buffer.truncate(end + 1);
-    state.offset += buffer.len() as u64;
-    Ok(buffer)
+    let consumed = from + end + 1;
+    buffer.truncate(consumed);
+    buffer.drain(..from);
+    state.offset += consumed as u64;
+    Ok((buffer, consumed as u64))
 }
 
 fn has(line: &[u8], needle: &[u8]) -> bool {
@@ -184,7 +207,7 @@ fn finish(
 }
 
 fn scan_claude(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
-    let buffer = new_lines(&file.path, state)?;
+    let (buffer, consumed) = new_lines(&file.path, state)?;
     let mut days: BTreeMap<String, TokenUsage> = BTreeMap::new();
     for line in buffer.split(|byte| *byte == b'\n') {
         if line.len() > MAX_LINE_BYTES || !has(line, b"\"usage\"") {
@@ -227,11 +250,11 @@ fn scan_claude(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         slot.cache_read += added.cache_read;
         slot.cache_write += added.cache_write;
     }
-    Ok(finish(file, state, days, buffer.len() as u64))
+    Ok(finish(file, state, days, consumed))
 }
 
 fn scan_codex(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
-    let buffer = new_lines(&file.path, state)?;
+    let (buffer, consumed) = new_lines(&file.path, state)?;
     let mut days: BTreeMap<String, TokenUsage> = BTreeMap::new();
     for line in buffer.split(|byte| *byte == b'\n') {
         let meta = has(line, b"session_meta");
@@ -276,7 +299,7 @@ fn scan_codex(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         slot.cache_read += added.cache_read;
         slot.cache_write += added.cache_write;
     }
-    Ok(finish(file, state, days, buffer.len() as u64))
+    Ok(finish(file, state, days, consumed))
 }
 
 /// The first of `keys` that holds a count.
@@ -289,7 +312,7 @@ fn first_count(value: &Value, keys: &[&str]) -> u64 {
 /// Grok reports usage once per finished turn, so each record is added as it is, not differenced.
 /// `input_tokens` is the uncached input; reasoning tokens count as output.
 fn scan_grok(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
-    let buffer = new_lines(&file.path, state)?;
+    let (buffer, consumed) = new_lines(&file.path, state)?;
     let mut days: BTreeMap<String, TokenUsage> = BTreeMap::new();
     for line in buffer.split(|byte| *byte == b'\n') {
         if line.len() > MAX_LINE_BYTES || !has(line, b"turn_completed") {
@@ -349,7 +372,7 @@ fn scan_grok(file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         slot.cache_read += added.cache_read;
         slot.cache_write += added.cache_write;
     }
-    Ok(finish(file, state, days, buffer.len() as u64))
+    Ok(finish(file, state, days, consumed))
 }
 
 fn grok_session(path: &Path) -> Option<String> {
@@ -624,6 +647,54 @@ mod tests {
                 ("2026-11-02", 150, 20, "/work/b")
             ]
         );
+    }
+
+    #[test]
+    fn an_oversized_record_is_skipped_through_its_newline_and_later_usage_counts_once() {
+        let dir = tempfile::tempdir().expect("dir");
+        let file = file_in(dir.path());
+        // The part after the first read chunk is valid usage JSON; it must not be counted.
+        let oversized = format!(
+            "{}{}\n",
+            "x".repeat(MAX_READ_BYTES),
+            claude_line("ghost", "2026-11-01", 100)
+        );
+        write(&file.path, &oversized);
+        write(
+            &file.path,
+            &format!("{}\n", claude_line("m1", "2026-11-01", 7)),
+        );
+        let mut saved: Option<String> = None;
+        let mut output = 0;
+        for _ in 0..4 {
+            let mut state = saved
+                .as_deref()
+                .and_then(|text| serde_json::from_str::<FileState>(text).ok())
+                .unwrap_or_default();
+            let scanned = scan_claude(&file, &mut state).expect("scan");
+            output += scanned.buckets.iter().map(|b| b.usage.output).sum::<u64>();
+            // The app saves the state only when a scan reports progress.
+            if scanned.bytes > 0 {
+                saved = Some(serde_json::to_string(&state).expect("state"));
+            }
+        }
+        assert_eq!(output, 7);
+        let state: FileState =
+            serde_json::from_str(saved.as_deref().expect("saved")).expect("state");
+        assert_eq!(state.offset, fs::metadata(&file.path).expect("len").len());
+    }
+
+    #[test]
+    fn a_state_saved_before_skipping_existed_still_loads() {
+        let mut old = serde_json::to_value(FileState {
+            offset: 5,
+            ..FileState::default()
+        })
+        .expect("state");
+        old.as_object_mut().expect("object").remove("skipping");
+        let state: FileState = serde_json::from_value(old).expect("old state");
+        assert_eq!(state.offset, 5);
+        assert!(!state.skipping);
     }
 
     #[test]
