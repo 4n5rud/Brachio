@@ -180,11 +180,9 @@ mod tests {
     fn a_task_without_an_account_adds_nothing_and_a_removed_account_stops_the_launch() {
         let root = tempfile::tempdir().unwrap();
         let db = db();
-        assert!(
-            launch_environment(&db, root.path(), "t", AgentKind::Codex)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(launch_environment(&db, root.path(), "t", AgentKind::Codex)
+            .unwrap()
+            .is_empty());
         brachio_store::add_agent_account(&db, "x1", "codex", "Work", 1).unwrap();
         brachio_store::set_task_agent_account(&db, "t", "x1").unwrap();
         let env = launch_environment(&db, root.path(), "t", AgentKind::Codex).unwrap();

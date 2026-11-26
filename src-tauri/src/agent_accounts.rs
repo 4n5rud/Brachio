@@ -6,16 +6,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use brachio_agent::{AgentKind, ResolvedCommand, find_on_path};
+use brachio_agent::{find_on_path, AgentKind, ResolvedCommand};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::agent_account_env::{AccountsFolder, account_environment, config_variable};
-use crate::workspace::{Database, new_id, now_ms};
+use crate::agent_account_env::{account_environment, config_variable, AccountsFolder};
+use crate::workspace::{new_id, now_ms, Database};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
