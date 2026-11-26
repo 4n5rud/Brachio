@@ -97,7 +97,7 @@ fn main() -> Result<()> {
         Command::Mcp => {
             brachio_mcp::serve(
                 std::io::stdin().lock(),
-                std::io::stdout().lock(),
+                std::io::stdout(),
                 mcp_tools::McpTools,
             )?;
             Ok(())
