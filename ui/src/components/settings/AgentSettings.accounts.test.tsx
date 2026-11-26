@@ -23,8 +23,8 @@ test("switching an account reads that account's authentication and quota", async
       { id: null, name: "Built-in", isDefault: true },
       { id: "work", name: "Work", isDefault: false },
     ];
-    if (command === "agent_auth_status") return { signedIn: true, account: args?.accountId === "work" ? "work@example.com" : "personal@example.com" };
-    if (command === "codex_usage") return { primary: { usedPercent: args?.accountId === "work" ? 75 : 10, windowDurationMins: 300, resetsAt: null }, secondary: null };
+    if (command === "agent_auth_status") return { signedIn: true, account: null };
+    if (command === "codex_usage") return { account: args?.accountId === "work" ? "work@example.com" : "personal@example.com", primary: { usedPercent: args?.accountId === "work" ? 75 : 10, windowDurationMins: 300, resetsAt: null }, secondary: null };
     throw new Error(`Unexpected command ${command}`);
   });
   const root = document.createElement("div");
@@ -39,5 +39,5 @@ test("switching an account reads that account's authentication and quota", async
   await vi.waitFor(() => expect(root.textContent).toContain("work@example.com"));
   await vi.waitFor(() => expect(root.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("75"));
   expect(invoke).toHaveBeenCalledWith("agent_auth_status", { kind: "codex", accountId: "work" });
-  expect(invoke).toHaveBeenCalledWith("codex_usage", { accountId: "work" });
+  expect(invoke).toHaveBeenCalledWith("codex_usage", { accountId: "work", includeAccount: true });
 });

@@ -24,6 +24,7 @@ interface QuotaWindow {
 }
 
 interface CodexQuota {
+  account?: string;
   primary: QuotaWindow | null;
   secondary: QuotaWindow | null;
 }
@@ -56,16 +57,27 @@ function AgentAccount(props: { agent: InstalledAgent; savedAccount?: SavedAgentA
   });
   const [usage, { refetch: refetchUsage }] = createResource(
     () => kind === "codex" && account()?.state === "signedIn",
-    async (wanted): Promise<UsageRow[] | undefined> => {
+    async (wanted): Promise<CodexQuota | undefined> => {
       if (!wanted) return undefined;
       try {
-        const quota = await invoke<CodexQuota>("codex_usage", { accountId: accountId() });
-        return [quota.primary, quota.secondary].filter((entry): entry is QuotaWindow => entry !== null).map(usageRow);
+        return await invoke<CodexQuota>("codex_usage", { accountId: accountId(), includeAccount: true });
       } catch {
         return undefined;
       }
     },
   );
+  const visibleAccount = (): AccountState => {
+    if (account.loading || reload.pending()) return { state: "checking" };
+    const state = account();
+    return state?.state === "signedIn" && kind === "codex"
+      ? { ...state, account: usage()?.account ?? state.account }
+      : state ?? { state: "checking" };
+  };
+  const usageRows = () => {
+    const quota = usage();
+    return quota && [quota.primary, quota.secondary]
+      .filter((entry): entry is QuotaWindow => entry !== null).map(usageRow);
+  };
   const [busy, setBusy] = createSignal(false);
   const [signingIn, setSigningIn] = createSignal(false);
   const [error, setError] = createSignal("");
@@ -100,8 +112,8 @@ function AgentAccount(props: { agent: InstalledAgent; savedAccount?: SavedAgentA
   });
   return (
     <AgentCard kind={kind} version={props.agent.version} path={props.agent.path}
-      account={account.loading || reload.pending() ? { state: "checking" } : account() ?? { state: "checking" }}
-      signingIn={signingIn()} busy={busy()} usage={kind === "claude_code" && accountId() ? [] : usage.loading ? undefined : usage()} error={error()}
+      account={visibleAccount()}
+      signingIn={signingIn()} busy={busy()} usage={kind === "claude_code" && accountId() ? [] : usage.loading ? undefined : usageRows()} error={error()}
       usageUnavailable={kind === "claude_code" && accountId() ? t("settings.claudeAccountUsage") : undefined}
       onRefresh={() => void reload.run()}
       onSignIn={() => void changeAuth(true)} onSignOut={() => void changeAuth(false)}
