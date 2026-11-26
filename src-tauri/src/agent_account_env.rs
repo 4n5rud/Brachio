@@ -72,7 +72,12 @@ pub fn account_environment(
             "ANTHROPIC_AUTH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN",
         ],
-        AgentKind::Codex => &["OPENAI_API_KEY", "CODEX_API_KEY"],
+        AgentKind::Codex => &[
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY",
+            "CODEX_ACCESS_TOKEN",
+            "OPENAI_IDENTITY_TOKEN_FILE",
+        ],
         AgentKind::Grok => &[],
     };
     let mut environment = vec![(variable.to_owned(), folder.to_string_lossy().into_owned())];

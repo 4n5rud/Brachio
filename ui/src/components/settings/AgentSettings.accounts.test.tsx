@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render } from "solid-js/web";
 import { afterEach, expect, test, vi } from "vitest";
+import { t } from "../../i18n";
 import { AgentSettings } from "./AgentSettings";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -31,6 +32,8 @@ test("switching an account reads that account's authentication and quota", async
   dispose = render(() => <AgentSettings />, root);
   await vi.waitFor(() => expect(root.textContent).toContain("personal@example.com"));
   const select = root.querySelector("select")!;
+  expect(select.options[0]?.textContent).toContain(t("settings.accountBuiltin"));
+  expect(select.options[1]?.textContent).toContain(t("settings.accountIsolated"));
   select.value = "work";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await vi.waitFor(() => expect(root.textContent).toContain("work@example.com"));

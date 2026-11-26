@@ -388,6 +388,7 @@ pub fn run() {
             workspace::repo_remove,
             workspace::folder_source_repos,
             agent_accounts::agent_accounts_list,
+            agent_accounts::task_agent_account_info,
             agent_accounts::agent_account_add,
             agent_accounts::agent_account_rename,
             agent_accounts::agent_account_remove,

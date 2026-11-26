@@ -179,6 +179,64 @@ pub struct AgentAuthStatus {
     account: Option<String>,
 }
 
+/// The login pinned to a task, without credential or provider metadata.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAccountInfo {
+    agent: AgentKind,
+    name: Option<String>,
+    source: TaskAccountSource,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TaskAccountSource {
+    Shared,
+    Isolated,
+    Removed,
+}
+
+fn account_info(
+    db: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Option<TaskAccountInfo>, String> {
+    use brachio_store::{StoreError, TaskRecord};
+
+    let task = TaskRecord::get(db, task_id).map_err(|error| error.to_string())?;
+    let agent = match task.agent_kind.as_deref() {
+        Some("codex") => AgentKind::Codex,
+        Some("claude_code") => AgentKind::ClaudeCode,
+        _ => return Ok(None),
+    };
+    let (name, source) = if let Some(id) =
+        brachio_store::task_agent_account(db, task_id).map_err(|error| error.to_string())?
+    {
+        match brachio_store::agent_account(db, &id) {
+            Ok(account) if account.agent == agent.spec().id => {
+                (Some(account.name), TaskAccountSource::Isolated)
+            }
+            Ok(_) | Err(StoreError::NotFound { .. }) => (None, TaskAccountSource::Removed),
+            Err(error) => return Err(error.to_string()),
+        }
+    } else {
+        (None, TaskAccountSource::Shared)
+    };
+    Ok(Some(TaskAccountInfo {
+        agent,
+        name,
+        source,
+    }))
+}
+
+/// Reports the account a saved task uses.
+#[tauri::command]
+pub fn task_agent_account_info(
+    task_id: String,
+    database: State<'_, Database>,
+) -> Result<Option<TaskAccountInfo>, String> {
+    account_info(&*database.lock()?, &task_id)
+}
+
 /// Reads sign-in status through the installed CLI.
 #[tauri::command]
 pub async fn agent_auth_status(
@@ -188,6 +246,27 @@ pub async fn agent_auth_status(
     folder: State<'_, AccountsFolder>,
 ) -> Result<AgentAuthStatus, String> {
     let environment = selected_environment(&database, &folder, kind, account_id.as_deref())?;
+    read_auth_status(kind, &environment).await
+}
+
+/// Requires an authenticated isolated login before a new agent process starts.
+pub async fn check_isolated_login(
+    kind: Option<AgentKind>,
+    environment: &[(String, String)],
+) -> Result<(), String> {
+    let Some(kind) = kind.filter(|_| !environment.is_empty()) else {
+        return Ok(());
+    };
+    if matches!(read_auth_status(kind, environment).await, Ok(status) if status.signed_in) {
+        return Ok(());
+    }
+    Err("ISOLATED_LOGIN_REQUIRED: Sign in to this Brachio-only account in Settings > Agents, then retry.".to_owned())
+}
+
+async fn read_auth_status(
+    kind: AgentKind,
+    environment: &[(String, String)],
+) -> Result<AgentAuthStatus, String> {
     let args: &[&str] = match kind {
         AgentKind::Codex => &["login", "status"],
         AgentKind::ClaudeCode => &["auth", "status", "--json"],
@@ -195,7 +274,7 @@ pub async fn agent_auth_status(
     };
     let output = timeout(
         STATUS_TIMEOUT,
-        cli(kind, args, &environment)?
+        cli(kind, args, environment)?
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output(),
@@ -487,5 +566,35 @@ pub async fn open_claude_usage() -> Result<(), String> {
         Ok(())
     } else {
         Err("Could not open Claude usage in the default browser.".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_task_reports_its_saved_login_source_even_after_removal() {
+        let db = brachio_store::open_in_memory().expect("database");
+        db.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', '/x', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, agent_kind)
+             VALUES ('t', 'r', 'T', 'p', 'b', '/w', 'new', 0, 'codex');",
+        )
+        .expect("task");
+
+        let read = || {
+            account_info(&db, "t")
+                .expect("info")
+                .expect("Codex account")
+        };
+        assert!(matches!(read().source, TaskAccountSource::Shared));
+        brachio_store::add_agent_account(&db, "x", "codex", "Work", 1).expect("add account");
+        brachio_store::set_task_agent_account(&db, "t", "x").expect("set task account");
+        let info = read();
+        assert!(matches!(info.source, TaskAccountSource::Isolated));
+        assert_eq!(info.name.as_deref(), Some("Work"));
+        brachio_store::remove_agent_account(&db, "x").expect("remove account");
+        assert!(matches!(read().source, TaskAccountSource::Removed));
     }
 }

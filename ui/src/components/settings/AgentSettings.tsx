@@ -8,7 +8,7 @@ import { confirmDialog } from "../ui/ConfirmDialog";
 import { Notice } from "../ui/Notice";
 import { agentLimit, MAX_AGENT_LIMIT, updateAgentLimit } from "../../lib/agent-limit";
 import { Select, Input } from "../ui/Input";
-import { accountSelection, listAgentAccounts, type AgentAccount as SavedAgentAccount } from "../../lib/agent-accounts";
+import { accountLabel, accountSelection, listAgentAccounts, type AgentAccount as SavedAgentAccount } from "../../lib/agent-accounts";
 import { SettingRow } from "./SettingRow";
 import { AgentCard, type AccountState, type UsageRow } from "./AgentCard";
 
@@ -152,13 +152,14 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
       <Select label={t("settings.account")} value={selected()} disabled={busy()}
         onChange={(event) => { setSelected(event.currentTarget.value); setName(""); }}>
         <For each={accountChoices() ?? []}>{(account) =>
-          <option value={accountSelection(account)}>{account.id === null ? t("settings.accountBuiltin") : account.name}{account.isDefault ? ` · ${t("settings.accountDefault")}` : ""}</option>
+          <option value={accountSelection(account)}>{accountLabel(account)}{account.isDefault ? ` · ${t("settings.accountDefault")}` : ""}</option>
         }</For>
       </Select>
       <Show when={accounts.error}>
         <p class="form-error" role="alert">{String(accounts.error)}</p>
         <Button size="sm" onClick={() => void refetch()}>{t("settings.agentRefresh")}</Button>
       </Show>
+      <p class="form-hint">{t("settings.accountScopeHint")}</p>
       <Input label={t("settings.accountName")} value={name()} disabled={busy()}
         onInput={(event) => setName(event.currentTarget.value)} />
       <div class="agent-card-actions">

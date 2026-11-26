@@ -1,4 +1,4 @@
-import { accountSelection, listAgentAccounts } from "../lib/agent-accounts";
+import { accountLabel, accountSelection, listAgentAccounts } from "../lib/agent-accounts";
 import { Button } from "./ui/Button";
 import { For, Show, createEffect, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import { confirmDialog } from "./ui/ConfirmDialog";
@@ -351,8 +351,12 @@ export function NewTaskDialog(props: {
       </Show>
       <Show when={(accountChoices()?.length ?? 0) > 1}>
         <Select label={t("newTask.agentAccount").replace("{agent}", AGENT_NAME[agent()])} value={accountId()} onChange={(event) => setAccountId(event.currentTarget.value)}>
-          <For each={accountChoices() ?? []}>{(account) => <option value={accountSelection(account)}>{account.id === null ? t("settings.accountBuiltin") : account.name}</option>}</For>
+          <For each={accountChoices() ?? []}>{(account) => <option value={accountSelection(account)}>{accountLabel(account)}</option>}</For>
         </Select>
+      </Show>
+      <Show when={agent() !== "grok" && accountChoices()}>
+        <p class="form-hint">{accountLabel(accountChoices()?.find((account) => accountSelection(account) === accountId()) ?? { id: null, name: "" })}</p>
+        <p class="form-hint">{t("settings.accountQuotaHint")}</p>
       </Show>
       <Show when={profileChoices().length > 0}>
         <Select label={t("newTask.profile")} hint={t("newTask.profileHint")} value={profile()}
