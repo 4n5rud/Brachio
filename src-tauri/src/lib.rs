@@ -36,6 +36,7 @@ mod runtime_client;
 mod runtime_terminals;
 mod scratch_workspace;
 mod session_tokens;
+mod sha256;
 mod system_check;
 mod task_activity;
 mod task_attachments;
