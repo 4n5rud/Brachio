@@ -8,7 +8,7 @@ export const isContentKind = (kind: TabKind): boolean => surfaceOf(kind) !== "te
 
 /**
  * How many tabs of a surface one task keeps open. Opening one more closes the least recently used
- * hidden one. The numbers follow the tab area budget (docs/windows-memory-benchmark.md), which is
+ * hidden one. The numbers follow the tab area budget (docs/memory-benchmark.md), which is
  * measured with up to 5 file tabs and 3 browser tabs.
  */
 export const TAB_LIMITS: Readonly<Record<ContentSurface, number>> = { file: 8, browser: 3 };
