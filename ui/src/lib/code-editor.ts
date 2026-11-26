@@ -84,21 +84,22 @@ const phrases = () => Object.fromEntries(Object.entries(PHRASES).map(([phrase, k
 
 /** Syntax colours from the design tokens, so every theme and mode follows on its own. */
 const highlightStyle = HighlightStyle.define([
-  { tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword, tags.modifier, tags.definitionKeyword, tags.moduleKeyword],
-    color: "var(--color-accent-text)" },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment, tags.meta], color: "var(--color-text-3)", fontStyle: "italic" },
-  { tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character], color: "var(--color-text-2)" },
-  { tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], color: "var(--color-accent-text)" },
-  { tag: [tags.function(tags.definition(tags.variableName)), tags.definition(tags.typeName), tags.className, tags.typeName],
-    color: "var(--color-text)", fontWeight: "600" },
-  { tag: [tags.propertyName, tags.attributeName, tags.labelName], color: "var(--color-text)" },
-  { tag: tags.heading, fontWeight: "600", color: "var(--color-text)" },
+  { tag: tags.keyword, color: "var(--color-syntax-keyword)" },
+  { tag: tags.comment, color: "var(--color-syntax-comment)", fontStyle: "italic" },
+  { tag: [tags.string, tags.regexp, tags.character, tags.monospace], color: "var(--color-syntax-string)" },
+  { tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], color: "var(--color-syntax-number)" },
+  { tag: [tags.typeName, tags.className, tags.namespace], color: "var(--color-syntax-type)" },
+  { tag: tags.variableName, color: "var(--color-syntax-variable)" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--color-syntax-function)" },
+  { tag: [tags.propertyName, tags.attributeName, tags.labelName], color: "var(--color-syntax-property)" },
+  { tag: tags.operator, color: "var(--color-syntax-operator)" },
+  { tag: tags.heading, fontWeight: "600", color: "var(--color-syntax-keyword)" },
   { tag: tags.strong, fontWeight: "600" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
-  { tag: [tags.link, tags.url], color: "var(--color-accent-text)", textDecoration: "underline" },
-  { tag: [tags.processingInstruction, tags.punctuation, tags.bracket, tags.separator], color: "var(--color-text-2)" },
-  { tag: tags.invalid, color: "var(--color-status-error)" },
+  { tag: [tags.link, tags.url], color: "var(--color-syntax-operator)", textDecoration: "underline" },
+  { tag: [tags.processingInstruction, tags.meta, tags.punctuation], color: "var(--color-syntax-punctuation)" },
+  { tag: tags.invalid, color: "var(--color-syntax-invalid)", textDecoration: "underline wavy" },
 ]);
 
 const theme = EditorView.theme({
