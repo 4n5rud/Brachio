@@ -1,9 +1,9 @@
 import { holdMinimum } from "./async-action";
 import { visibleInterval } from "./visible-interval";
-import { invoke } from "@tauri-apps/api/core";
+import { agentReadingsGeneration, readAgentReading } from "./agent-readings";
 import { createSignal } from "solid-js";
 import type { AgentKind } from "./tasks";
-import { CORE_AGENT, detectAgents } from "./terminal";
+import { type InstalledAgent } from "./terminal";
 import { recordLimit } from "./usage-analytics";
 
 export interface UsageWindow {
@@ -67,54 +67,52 @@ export const nearlyUsed = (window: UsageWindow) => window.usedPercent >= NEARLY_
 const [usages, setUsages] = createSignal<readonly AgentUsage[]>([]);
 const [refreshing, setRefreshing] = createSignal(false);
 const [updatedAt, setUpdatedAt] = createSignal<number>();
-let signedIn: AgentKind[] | undefined;
 
 export { refreshing as agentUsageRefreshing, updatedAt as agentUsageUpdatedAt, usages as agentUsages };
-
-async function signedInAgents(): Promise<AgentKind[]> {
-  const found: AgentKind[] = [];
-  for (const installed of await detectAgents()) {
-    // Only Claude Code and Codex report plan usage.
-    if (installed.kind !== "claude_code" && installed.kind !== "codex") continue;
-    const agent = installed.kind === "codex" ? "codex" : "claude";
-    try {
-      const status = await invoke<{ signedIn: boolean }>("agent_auth_status", { kind: installed.kind });
-      if (status.signedIn) found.push(agent);
-    } catch {
-      // An agent whose account cannot be read is left out rather than shown as unknown.
-    }
-  }
-  return found;
-}
 
 async function readUsage(agent: AgentKind, force: boolean): Promise<AgentUsage> {
   try {
     if (agent === "claude") {
-      const quota = await invoke<ClaudeQuota>("claude_usage", { force });
+      const quota = await readAgentReading<ClaudeQuota>("claude_usage", {}, force);
       return { agent, state: "ok", plan: quota.plan, session: quota.session, weekly: quota.weekly };
     }
-    const quota = await invoke<CodexQuota>("codex_usage");
+    const quota = await readAgentReading<CodexQuota>("codex_usage", {}, force);
     return { agent, state: "ok", plan: quota.planType ?? null, ...codexWindows(quota) };
   } catch {
     return { agent, state: "unavailable" };
   }
 }
 
-/** Reads every signed-in agent. `force` re-reads sign-ins and skips the one-minute cache. */
-export async function refreshAgentUsage(force = false): Promise<void> {
-  if (refreshing()) return;
+/** Reads installed agents concurrently; account and quota commands share the view cache. */
+let activeRefresh: Promise<void> | undefined;
+
+export function refreshAgentUsage(force = false): Promise<void> {
+  if (activeRefresh) return force ? activeRefresh.then(() => refreshAgentUsage(true)) : activeRefresh;
+  activeRefresh = readInstalledUsage(force).finally(() => { activeRefresh = undefined; });
+  return activeRefresh;
+}
+
+async function readInstalledUsage(force: boolean): Promise<void> {
   setRefreshing(true);
+  const started = agentReadingsGeneration();
   const load = async () => {
-    if (force || signedIn === undefined) signedIn = await signedInAgents();
-    const read = await Promise.all(CORE_ORDER.filter((agent) => signedIn?.includes(agent)).map((agent) => readUsage(agent, force)));
-    setUsages(read);
-    recordLimitReadings(read);
+    const installed = await readAgentReading<InstalledAgent[]>("agents_detect", {}, force);
+    const read = await Promise.all(installed.filter((item) => item.kind !== "grok").map(async (item) => {
+      const agent: AgentKind = item.kind === "codex" ? "codex" : "claude";
+      const status = readAgentReading<{ signedIn: boolean }>("agent_auth_status", { kind: item.kind }, force).catch(() => null);
+      const [account, usage] = await Promise.all([status, readUsage(agent, force)]);
+      return account?.signedIn ? usage : null;
+    }));
+    if (started !== agentReadingsGeneration()) return;
+    const available = read.filter((item): item is AgentUsage => item !== null);
+    setUsages(available);
+    recordLimitReadings(available);
     setUpdatedAt(Date.now() / 1000);
   };
   try {
     await (force ? holdMinimum(load()) : load());
   } catch {
-    setUsages([]);
+    // Keep the last known readings when detection temporarily fails.
   } finally {
     setRefreshing(false);
   }
@@ -129,8 +127,6 @@ function recordLimitReadings(read: readonly AgentUsage[]): void {
     if (usage.weekly) void recordLimit(provider, "weekly", usage.weekly.usedPercent).catch(() => {});
   }
 }
-
-const CORE_ORDER: AgentKind[] = (Object.keys(CORE_AGENT) as AgentKind[]);
 
 /** Starts the one-minute refresh; returns the function that stops it. */
 export function startAgentUsagePolling(): () => void {
