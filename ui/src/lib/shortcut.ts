@@ -34,6 +34,7 @@ export const SHORTCUTS = {
   sidebar: { label: "settings.shortcutSidebar", group: "global", mac: "⌘B", other: "Ctrl+Shift+B" },
   inspector: { label: "settings.shortcutInspector", group: "global", mac: "⌘⌥B", other: "Ctrl+Shift+Alt+B" },
   submit: { label: "settings.shortcutCreate", group: "palette", mac: "⌘⏎", other: "Ctrl+⏎" },
+  saveFile: { label: "editor.save", group: "task", mac: "⌘S", other: "Ctrl+S" },
   allow: { label: "settings.shortcutAllow", group: "task", mac: "↵", other: "↵" },
   deny: { label: "settings.shortcutDeny", group: "task", mac: "Esc", other: "Esc" },
   close: { label: "settings.shortcutClose", group: "palette", mac: "Esc", other: "Esc" },

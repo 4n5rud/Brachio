@@ -43,6 +43,18 @@ export const readEditableFile = (id: string, path: string) => invoke<EditableFil
 export const writeEditableFile = (id: string, path: string, text: string, expected: FileVersion, lineEnding: LineEnding, bom: boolean) =>
   invoke<FileVersion>("task_file_write", { id, path, text, expected, lineEnding, bom });
 
+/** The start of a file the editor cannot edit, for a read-only view. */
+export interface FileHead {
+  /** Up to the edit limit as UTF-8, line ends as on disk, without a byte order mark. */
+  text: string;
+  /** The file is longer than `text`. */
+  truncated: boolean;
+  size: number;
+}
+
+/** Reads the start of a file too large to edit or with mixed line ends; rejects `not_text` for binary files. */
+export const readFileHead = (id: string, path: string) => invoke<FileHead>("task_file_read_head", { id, path });
+
 export interface FileCheck {
   status: "unchanged" | "changed" | "missing";
   /** The file's current version; absent when it is missing. */
