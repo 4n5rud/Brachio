@@ -159,6 +159,36 @@ pub fn launch_environment(
     account_environment(root, kind, &account)
 }
 
+/// The config folders of `agent`'s extra accounts that exist, for reading their session logs.
+/// Nothing is created or opened here. A folder that is a link elsewhere is left out, as a launch
+/// refuses it too.
+///
+/// # Errors
+/// Fails when the accounts cannot be listed.
+pub fn existing_account_folders(
+    connection: &Connection,
+    root: &Path,
+    agent: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let accounts =
+        brachio_store::agent_accounts(connection, agent).map_err(|error| error.to_string())?;
+    let Ok(canonical_root) = root.canonicalize() else {
+        return Ok(Vec::new());
+    };
+    Ok(accounts
+        .iter()
+        .filter_map(|account| {
+            let id = Path::new(&account.id);
+            if id.file_name() != Some(id.as_os_str()) {
+                return None;
+            }
+            let folder = root.join(id);
+            let actual = folder.canonicalize().ok()?;
+            (actual == canonical_root.join(id) && actual.is_dir()).then_some(folder)
+        })
+        .collect())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
