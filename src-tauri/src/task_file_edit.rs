@@ -19,6 +19,9 @@ use crate::workspace::{resolve_preview_path, Database};
 /// Largest file the editor opens or saves.
 const EDIT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const BOM: &[u8] = b"\xEF\xBB\xBF";
+/// Files up to this size are hashed on every re-check: two writes of the same length within one
+/// tick of the file system's clock leave size and time alike, and hashing this much is cheap.
+const ALWAYS_HASH_BYTES: u64 = 64 * 1024;
 
 /// The content a file had when it was read; `modified_ms` is for display, the hash decides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,9 +215,11 @@ pub struct FileCheck {
 
 /// Tells whether a file still has the version an editor last read.
 ///
-/// Size and modified time are compared first; the content is read and hashed only when either
-/// differs. A file whose time changed but whose content did not is `Unchanged`, with the new time
-/// in `version` so the next check is cheap again.
+/// Size and modified time are compared first. The content is read and hashed when either differs,
+/// when the file is at most 64 KiB, or when `verify` asks for it: a same-length edit within one
+/// tick of the file system's clock keeps both alike. Larger files are hashed only on `verify`, which
+/// the window sends now and then, so a check stays cheap. A file whose time changed but whose
+/// content did not is `Unchanged`, with the new time in `version` so the next check is cheap again.
 ///
 /// # Errors
 /// Refuses a path outside the task, and a file over 2 MiB (`too_large`).
@@ -222,6 +227,7 @@ pub fn check_editable(
     root: &Path,
     path: &str,
     expected: &FileVersion,
+    verify: bool,
 ) -> Result<FileCheck, String> {
     let file = match resolve_preview_path(root, path) {
         Ok(file) => file,
@@ -240,7 +246,11 @@ pub fn check_editable(
     };
     let size = fs::metadata(&file).map_err(to_text)?.len();
     let modified = modified_ms(&file);
-    if size == expected.size && modified == expected.modified_ms {
+    if size == expected.size
+        && modified == expected.modified_ms
+        && size > ALWAYS_HASH_BYTES
+        && !verify
+    {
         return Ok(FileCheck {
             status: FileCheckStatus::Unchanged,
             version: Some(expected.clone()),
@@ -271,17 +281,23 @@ pub async fn task_file_read(
         .map_err(to_text)?
 }
 
-/// Re-checks an open file against the version its tab last read.
+/// Re-checks an open file against the version its tab last read; `verify` always hashes it.
 #[tauri::command]
 pub async fn task_file_check(
     database: State<'_, Database>,
     id: String,
     path: String,
     expected: FileVersion,
+    verify: Option<bool>,
 ) -> Result<FileCheck, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
     tauri::async_runtime::spawn_blocking(move || {
-        check_editable(&task.worktree_path, &path, &expected)
+        check_editable(
+            &task.worktree_path,
+            &path,
+            &expected,
+            verify.unwrap_or(false),
+        )
     })
     .await
     .map_err(to_text)?
@@ -333,22 +349,24 @@ mod tests {
     }
 
     #[test]
-    fn a_check_hashes_only_when_the_size_or_time_differ_and_reports_what_changed() {
+    fn a_check_of_a_small_file_sees_a_same_size_same_time_edit_and_reports_what_changed() {
         let folder = folder_with("a.txt", b"aaaa");
         let file = folder.path().join("a.txt");
         let read = read_editable(folder.path(), "a.txt").expect("read");
         let then = fs::metadata(&file).expect("meta").modified().expect("time");
 
-        // Same size and time, different bytes: only a hash would notice, so none is taken.
+        // Same size and time, different bytes: a small file is hashed on every check, so it is seen.
         fs::write(&file, b"bbbb").expect("edit");
         set_modified(&file, then);
-        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
-        assert_eq!(check.status, FileCheckStatus::Unchanged);
+        let check = check_editable(folder.path(), "a.txt", &read.version, false).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Changed);
+        fs::write(&file, b"aaaa").expect("restore");
+        set_modified(&file, then);
 
         // A new time with the same bytes is unchanged, and hands back the new time.
         fs::write(&file, b"aaaa").expect("restore");
         set_modified(&file, then + std::time::Duration::from_secs(5));
-        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        let check = check_editable(folder.path(), "a.txt", &read.version, false).expect("check");
         assert_eq!(check.status, FileCheckStatus::Unchanged);
         assert_ne!(
             check.version.expect("version").modified_ms,
@@ -358,13 +376,31 @@ mod tests {
         // Different bytes with a different time are a change.
         fs::write(&file, b"cccc").expect("edit");
         set_modified(&file, then + std::time::Duration::from_secs(9));
-        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        let check = check_editable(folder.path(), "a.txt", &read.version, false).expect("check");
         assert_eq!(check.status, FileCheckStatus::Changed);
 
         fs::remove_file(&file).expect("remove");
-        let check = check_editable(folder.path(), "a.txt", &read.version).expect("check");
+        let check = check_editable(folder.path(), "a.txt", &read.version, false).expect("check");
         assert_eq!(check.status, FileCheckStatus::Missing);
-        assert!(check_editable(folder.path(), "../a.txt", &read.version).is_err());
+        assert!(check_editable(folder.path(), "../a.txt", &read.version, false).is_err());
+    }
+
+    #[test]
+    fn a_large_file_with_the_same_size_and_time_is_hashed_when_verify_asks() {
+        let size = usize::try_from(ALWAYS_HASH_BYTES).expect("size") + 1;
+        let folder = folder_with("big.txt", &vec![b'a'; size]);
+        let file = folder.path().join("big.txt");
+        let read = read_editable(folder.path(), "big.txt").expect("read");
+        let then = fs::metadata(&file).expect("meta").modified().expect("time");
+
+        fs::write(&file, vec![b'b'; size]).expect("edit");
+        set_modified(&file, then);
+        // A plain check of a large file compares only size and time, so it stays cheap.
+        let check = check_editable(folder.path(), "big.txt", &read.version, false).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Unchanged);
+        // The periodic verification hashes it and finds the edit.
+        let check = check_editable(folder.path(), "big.txt", &read.version, true).expect("check");
+        assert_eq!(check.status, FileCheckStatus::Changed);
     }
 
     fn code(error: &str) -> &str {
