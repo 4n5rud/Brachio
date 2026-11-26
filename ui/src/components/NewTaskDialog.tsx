@@ -357,7 +357,6 @@ export function NewTaskDialog(props: {
           <div class="create-failed" role="alert">
             <strong>{t("newTask.createFailed")}</strong>
             <pre class="create-log">{message()}</pre>
-            <p class="form-hint">{t("newTask.createFailedNote")}</p>
           </div>
         )}
       </Show>

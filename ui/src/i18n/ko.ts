@@ -974,7 +974,6 @@ export const ko: Messages = {
   "newTask.agentOwnTerminal": "{name}의 승인 요청은 Brachio가 아니라 해당 에이전트의 터미널에서 처리합니다.",
   "newTask.baseMissing": "목록에 없는 브랜치입니다: {name}. 목록에서 선택하세요.",
   "newTask.createFailed": "worktree 생성 실패",
-  "newTask.createFailedNote": "만들어진 것은 없습니다. 작업 이름을 바꿔 새 브랜치를 쓰거나 다시 시도하세요.",
   "newTask.retry": "다시 시도",
   "newTask.codexConversation": "Codex 대화 이어가기",
   "newTask.codexNewConversation": "새 대화로 시작",

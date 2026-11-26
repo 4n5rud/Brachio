@@ -41,6 +41,23 @@ fn temp_dir() -> tempfile::TempDir {
 }
 
 #[test]
+fn a_task_based_on_an_unborn_branch_requires_an_initial_commit() {
+    let repo = temp_dir();
+    let trees = temp_dir();
+    let git = Git::new(repo.path());
+    run(&git, &["init", "-q", "-b", "master"]);
+    let request = AddWorktree {
+        branch: "brachio/task".to_owned(),
+        path: trees.path().join("task"),
+        base: "master".to_owned(),
+    };
+
+    let error = brachio_git::add_worktree(&git, &request).expect_err("no initial commit");
+    assert!(error.to_string().contains("initial commit"), "{error}");
+    assert!(!request.path.exists());
+}
+
+#[test]
 fn parallel_worktrees_predict_conflict_then_clean_up() {
     let repo = temp_dir();
     let trees = temp_dir();

@@ -25,7 +25,8 @@ pub struct AddWorktree {
 /// unknown.
 pub fn add_worktree(git: &Git, request: &AddWorktree) -> Result<(), GitError> {
     let path = request.path.to_string_lossy();
-    git.run(&[
+    // Use stable Git diagnostics when identifying the invalid-reference failure below.
+    git.clone().with_env("LC_ALL", "C").run(&[
         "worktree",
         "add",
         "-b",
@@ -34,6 +35,33 @@ pub fn add_worktree(git: &Git, request: &AddWorktree) -> Result<(), GitError> {
         &request.base,
     ])
     .map(|_| ())
+    .map_err(|error| {
+        if matches!(&error, GitError::Failed { status: 128, stderr, .. } if stderr.contains("invalid reference:"))
+            && base_is_unborn(git, &request.base)
+        {
+            GitError::InitialCommitRequired {
+                path: git.repo().to_owned(),
+                branch: request.base.clone(),
+            }
+        } else {
+            error
+        }
+    })
+}
+
+fn base_is_unborn(git: &Git, base: &str) -> bool {
+    let Ok(head) = git.run(&["symbolic-ref", "--quiet", "HEAD"]) else {
+        return false;
+    };
+    let head = head.trim();
+    if base != "HEAD" && base != head && Some(base) != head.strip_prefix("refs/heads/") {
+        return false;
+    }
+    let reference = format!("{base}^{{commit}}");
+    matches!(
+        git.run(&["rev-parse", "--verify", "--quiet", &reference]),
+        Err(GitError::Failed { status: 1, .. })
+    )
 }
 
 /// Removes a worktree and then its branch. git's own checks protect unsaved
