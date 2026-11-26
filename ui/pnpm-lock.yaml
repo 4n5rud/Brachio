@@ -57,8 +57,8 @@ importers:
         specifier: ^2.1.1
         version: 2.12.5
       '@tauri-apps/plugin-clipboard-manager':
-        specifier: 2.3.3
-        version: 2.3.3
+        specifier: 2.5.0
+        version: 2.5.0
       '@tauri-apps/plugin-dialog':
         specifier: ^2.8.4
         version: 2.8.4
@@ -66,14 +66,14 @@ importers:
         specifier: ^2.8.1
         version: 2.8.1
       '@xterm/addon-fit':
-        specifier: ^0.10.0
-        version: 0.10.0(@xterm/xterm@5.5.0)
+        specifier: ^0.11.0
+        version: 0.11.0
       '@xterm/addon-search':
-        specifier: 0.15.0
-        version: 0.15.0(@xterm/xterm@5.5.0)
+        specifier: 0.16.0
+        version: 0.16.0
       '@xterm/addon-webgl':
-        specifier: ^0.18.0
-        version: 0.18.0(@xterm/xterm@5.5.0)
+        specifier: ^0.19.0
+        version: 0.19.0
       '@xterm/xterm':
         specifier: ^5.5.0
         version: 5.5.0
@@ -794,8 +794,8 @@ packages:
   '@tauri-apps/api@2.12.5':
     resolution: {integrity: sha512-G9QIMt5fzED+aS4QhVK3w1HWLKpLIwH/MnpCr9z1ugGEHnS2ORmqrLkc0uALOjRK4qXJy+4Yiw8LDl/KicC1Hg==}
 
-  '@tauri-apps/plugin-clipboard-manager@2.3.3':
-    resolution: {integrity: sha512-KnyoTs9gj1yEgDkSPUNjOIOHjJTr5wk8IWcYMOWxYTIJCip6QwlyPW8u2X+6bd6kHM4fAdZNpxoal0gy/TwJbg==}
+  '@tauri-apps/plugin-clipboard-manager@2.5.0':
+    resolution: {integrity: sha512-dibUy1nKURYDXRMvjNk4deAbTZ5jPQ8wCE4nolt5xniryWgXQ4sK2GkFXoXlHbRdPzfZptZj95BRLfalA7m/2Q==}
 
   '@tauri-apps/plugin-dialog@2.8.4':
     resolution: {integrity: sha512-+6ZOiXenOaxXwb8qCbBPdT2jX2cFPaVVHGIskrpmJLpmWj+qKRTD6X/z9x7hTdSQn7NedcoXCkWGej4a7dC4lw==}
@@ -919,20 +919,14 @@ packages:
   '@vitest/utils@4.1.12':
     resolution: {integrity: sha512-Q3awXrwOfEV+qc3WmO5ONyE0yO7Q1gQ9/oyHxGLZ/pl7N3NO/ZztqQwKLuwMkV+CA1JYSIeO3gkHnRDIo4AVaA==}
 
-  '@xterm/addon-fit@0.10.0':
-    resolution: {integrity: sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
+  '@xterm/addon-fit@0.11.0':
+    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
 
-  '@xterm/addon-search@0.15.0':
-    resolution: {integrity: sha512-ZBZKLQ+EuKE83CqCmSSz5y1tx+aNOCUaA7dm6emgOX+8J9H1FWXZyrKfzjwzV+V14TV3xToz1goIeRhXBS5qjg==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
+  '@xterm/addon-search@0.16.0':
+    resolution: {integrity: sha512-9OeuBFu0/uZJPu+9AHKY6g/w0Czyb/Ut0A5t79I4ULoU4IfU5BEpPFVGQxP4zTTMdfZEYkVIRYbHBX1xWwjeSA==}
 
-  '@xterm/addon-webgl@0.18.0':
-    resolution: {integrity: sha512-xCnfMBTI+/HKPdRnSOHaJDRqEpq2Ugy8LEj9GiY4J3zJObo3joylIFaMvzBwbYRg8zLtkO0KQaStCeSfoaI2/w==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
+  '@xterm/addon-webgl@0.19.0':
+    resolution: {integrity: sha512-b3fMOsyLVuCeNJWxolACEUED0vm7qC0cy4wRvf3oURSzDTYVQiGPhTnhWZwIHdvC48Y+oLhvYXnY4XDXPoJo6A==}
 
   '@xterm/xterm@5.5.0':
     resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
@@ -2510,7 +2504,7 @@ snapshots:
 
   '@tauri-apps/api@2.12.5': {}
 
-  '@tauri-apps/plugin-clipboard-manager@2.3.3':
+  '@tauri-apps/plugin-clipboard-manager@2.5.0':
     dependencies:
       '@tauri-apps/api': 2.12.5
 
@@ -2690,17 +2684,11 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
-  '@xterm/addon-fit@0.10.0(@xterm/xterm@5.5.0)':
-    dependencies:
-      '@xterm/xterm': 5.5.0
+  '@xterm/addon-fit@0.11.0': {}
 
-  '@xterm/addon-search@0.15.0(@xterm/xterm@5.5.0)':
-    dependencies:
-      '@xterm/xterm': 5.5.0
+  '@xterm/addon-search@0.16.0': {}
 
-  '@xterm/addon-webgl@0.18.0(@xterm/xterm@5.5.0)':
-    dependencies:
-      '@xterm/xterm': 5.5.0
+  '@xterm/addon-webgl@0.19.0': {}
 
   '@xterm/xterm@5.5.0': {}
 
