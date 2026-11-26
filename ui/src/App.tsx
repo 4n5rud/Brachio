@@ -83,6 +83,7 @@ import { loadInspectorOpen, loadSidebarOpen, saveInspectorOpen, saveSidebarOpen 
 import { statusTone, type AgentState } from "./lib/status";
 import { recordTurnBoundary, turnActive } from "./lib/checkpoints";
 import { openFileWatch } from "./lib/open-file-watch";
+import { clearQueuesAfter, clearTaskQueues, taskQueuedCount } from "./lib/prompt-queue";
 import { CORE_AGENT, shellKind } from "./lib/terminal";
 import { newSetupNonce, setupOutcome, wrapSetupCommands, type SetupOutcome, type SetupResult } from "./lib/setup-signal";
 import { sendShellInput } from "./lib/shell-input";
@@ -645,7 +646,8 @@ export function App() {
     const repo = repos().find((item) => item.id === id);
     if (!repo) return;
     const name = repo.name;
-    const owned = [...tasks(), ...archived()].filter((task) => task.repoId === id).length;
+    const ownedIds = [...tasks(), ...archived()].filter((task) => task.repoId === id).map((task) => task.id);
+    const owned = ownedIds.length;
     const agreed = await confirmDialog({
       title: t("project.removeTitle").replace("{name}", () => name),
       body: owned === 0 ? t("project.removeBody") : t("project.removeWithTasksBody").replace("{count}", String(owned)),
@@ -662,6 +664,8 @@ export function App() {
       });
       return;
     }
+    // The project's tasks are gone for good, so their queued prompts go too.
+    for (const taskId of ownedIds) clearTaskQueues(taskId);
     batch(() => {
       for (const task of tasks().filter((item) => item.repoId === id)) hideArchived(task);
       setArchived((items) => items.filter((item) => item.repoId !== id));
@@ -1197,7 +1201,13 @@ export function App() {
   };
 
   // Shows what would be lost, and deletes the worktree and branch only after the user agrees.
+  // Queued prompts go with a task deleted for good, and only once the deletion went through.
   const deleteArchived = async (task: TaskRow) => {
+    await clearQueuesAfter(() => deleteArchivedTask(task), () => clearTaskQueues(task.id));
+  };
+  /** True when the task was deleted; false when it was refused or cancelled. */
+  const deleteArchivedTask = async (task: TaskRow): Promise<boolean> => {
+    const queued = taskQueuedCount(task.id);
     const folderProject = repos().find((item) => item.id === task.repoId)?.isGit === false;
     const loss = await previewTaskDeletion(task.id);
     const block = deleteBlock(loss);
@@ -1211,13 +1221,14 @@ export function App() {
         blocked: true,
         tone: "danger",
       });
-      return;
+      return false;
     }
     // A folder is the user's own: only the task's entry goes, never the folder.
     const agreed = await confirmDialog(folderProject
       ? {
           title: t("task.deleteFolderTitle"),
           body: t("task.deleteFolderBody").replace("{path}", () => task.worktreePath ?? ""),
+          loss: queued > 0 ? [{ label: t("task.lossQueuedPrompts"), count: queued }] : undefined,
           confirmLabel: t("task.deleteConfirm"),
           tone: "danger",
         }
@@ -1235,12 +1246,13 @@ export function App() {
               plain: true,
             },
             { label: t("task.lossTerminals"), count: loss.runningTerminals },
+            ...(queued > 0 ? [{ label: t("task.lossQueuedPrompts"), count: queued }] : []),
           ],
           note: loss.ignoredEntries > 0 ? t("task.deleteIgnoredNote") : undefined,
           confirmLabel: t("task.deleteConfirm"),
           tone: "danger",
         });
-    if (!agreed) return;
+    if (!agreed) return false;
     for (;;) {
       try {
         await deleteTask(task.id, loss.fingerprint);
@@ -1249,8 +1261,7 @@ export function App() {
         const message = String(failure);
         if (message.includes("task changed:")) {
           report(message.replace(/^.*task changed:\s*/u, ""));
-          await deleteArchived(task);
-          return;
+          return deleteArchivedTask(task);
         }
         const busy = /file in use: (.*)$/u.exec(message);
         if (!await confirmDialog({
@@ -1261,10 +1272,11 @@ export function App() {
           body: busy ? t("task.deleteFileInUseBody") : t("task.deleteFailedBody"),
           confirmLabel: t("task.tryAgain"),
           tone: "danger",
-        })) return;
+        })) return false;
       }
     }
     setArchived((items) => items.filter((item) => item.id !== task.id));
+    return true;
   };
 
   const canCreate = () => inTauri && repo() !== undefined;
