@@ -198,6 +198,7 @@ impl RuntimeTerminals {
 
     /// Attach to the terminal for `key`, starting it when it does not exist. When the shell
     /// is gone but its last screen was kept, that screen is shown first.
+    /// A launch is prepared only after the runtime confirms it needs to start a new process.
     /// Returns `None` when the runtime is not used, so the caller can host it in the app.
     ///
     /// # Errors
@@ -205,7 +206,7 @@ impl RuntimeTerminals {
     pub async fn open(
         &self,
         key: String,
-        launch: Launch,
+        launch: impl Future<Output = Result<Launch>>,
         channel: Channel<InvokeResponseBody>,
         agent: bool,
     ) -> Result<Option<(SessionId, bool)>> {
@@ -230,6 +231,7 @@ impl RuntimeTerminals {
                 let record = match pending {
                     Some(record) => record,
                     None => {
+                        let launch = launch.await?;
                         let hello = client.call(Action::Hello).await?;
                         let ResponseResult::Hello { runtime } = hello.result else {
                             bail!("runtime did not provide its protocol version");

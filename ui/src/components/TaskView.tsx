@@ -18,6 +18,7 @@ import { ShellIcon } from "./BrandIcon";
 import { MailboxBadge } from "./MailboxBadge";
 import { ApprovalBar } from "./ApprovalBar";
 import { MailboxInbox } from "./MailboxInbox";
+import { TaskAccountLabel } from "./TaskAccountLabel";
 import { TaskHeader } from "./TaskHeader";
 import { StatusGlyph } from "./ui/StatusBadge";
 import { Notice } from "./ui/Notice";
@@ -98,6 +99,7 @@ export function TaskView(props: {
   hasSetupInput?: (taskId: string) => boolean;
   takeSetupInput?: (taskId: string) => string | undefined;
   onArchive?: () => void;
+  onAgentSettings?: () => void;
   onDraftOriginal?: (text: string) => Promise<boolean>;
   /** Files and images chosen in the picker; they go into the agent input as a draft. */
   onAttachPaths?: (paths: string[]) => Promise<boolean>;
@@ -547,6 +549,7 @@ export function TaskView(props: {
       <TaskHeader title={props.task.title} status={props.task.status}
         branch={props.task.branch} additions={props.task.additions} deletions={props.task.deletions}
         tokens={tokenUsage(props.task.id)}
+        account={<TaskAccountLabel taskId={props.task.id} onSettings={props.onAgentSettings} />}
         actions={<>
           <CueMenu taskId={props.task.id} repoId={props.task.repoId} />
           <Show when={props.task.worktreePath}>
@@ -816,6 +819,7 @@ export function TaskView(props: {
                         leave="park"
                         onHosted={(hosted) => noteHosted(id, hosted)}
                         onReport={props.onReportProblem}
+                        onAgentSettings={props.onAgentSettings}
                         onInsertPrompt={props.findTask(id)?.prompt
                           ? () => props.onDraftOriginal?.(props.findTask(id)?.prompt ?? "") ?? Promise.resolve(false)
                           : undefined}
@@ -883,6 +887,7 @@ export function TaskView(props: {
                                 leave="park"
                                 onHosted={(hosted) => noteHosted(id, hosted)}
                                 onReport={props.onReportProblem}
+                                onAgentSettings={props.onAgentSettings}
                                 theme={props.theme}
                                 onStatus={(status, message) => props.onStatus?.(id, key, status, message)}
                                 onPasteImage={props.onAttachPastedImage}

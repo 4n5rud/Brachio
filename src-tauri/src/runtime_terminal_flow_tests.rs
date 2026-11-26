@@ -223,10 +223,40 @@ async fn open_new(
     window: &Window,
 ) -> (brachio_pty::SessionId, bool) {
     terminals
-        .open(key.to_owned(), world.launch(), window.channel(), false)
+        .open(
+            key.to_owned(),
+            std::future::ready(Ok(world.launch())),
+            window.channel(),
+            false,
+        )
         .await
         .expect("open")
         .expect("the runtime is used")
+}
+
+#[tokio::test]
+async fn a_login_gate_refuses_new_processes_but_does_not_block_reattachment() {
+    let world = World::start().await;
+    let terminals = RuntimeTerminals::default();
+    let window = Window::default();
+    let key = "login1:agent";
+    let denied = || std::future::ready(Err(anyhow::anyhow!("sign in first")));
+    let refused = terminals
+        .open(key.to_owned(), denied(), window.channel(), true)
+        .await
+        .expect_err("a failed login check stops a new launch");
+    assert_eq!(refused.to_string(), "sign in first");
+    assert_eq!(world.pid_of(key).await, None);
+
+    let (id, attached) = open_new(&terminals, &world, key, &window).await;
+    assert!(!attached);
+    assert!(terminals.park(id).expect("terminal is hosted").is_ok());
+    let (_, attached) = terminals
+        .open(key.to_owned(), denied(), window.channel(), true)
+        .await
+        .expect("the login gate does not run on reattachment")
+        .expect("the runtime is used");
+    assert!(attached);
 }
 
 #[tokio::test]
@@ -367,7 +397,12 @@ async fn a_launch_the_new_runtime_cannot_account_for_stays_uncertain_until_the_u
     let expected = format!("BRACHIO_LAUNCH_UNCERTAIN:{}", record.operation_id);
     for _ in 0..2 {
         let refused = terminals
-            .open(key.to_owned(), world.launch(), window.channel(), false)
+            .open(
+                key.to_owned(),
+                std::future::ready(Ok(world.launch())),
+                window.channel(),
+                false,
+            )
             .await
             .expect_err("an unknown launch is not repeated");
         assert_eq!(refused.to_string(), expected);
@@ -409,7 +444,15 @@ async fn a_launch_the_runtime_finished_before_the_app_noticed_is_adopted_not_rep
         .expect("the runtime launches before the app is told");
     let pid = world.pid_of(key).await.expect("a hosted terminal");
 
-    open_new(&terminals, &world, key, &window).await;
+    terminals
+        .open(
+            key.to_owned(),
+            std::future::ready(Err(anyhow::anyhow!("saved account removed"))),
+            window.channel(),
+            false,
+        )
+        .await
+        .expect("pending launch is reconciled without preparing a new process");
     assert_eq!(world.pid_of(key).await, Some(pid), "no second program");
     window.shows_eventually(MARKER).await;
     assert!(
