@@ -1,14 +1,16 @@
 //! IPC for the usage analytics: scans the agents' local session logs into daily aggregates and
 //! reports them. No network, and no money is estimated.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use brachio_agent::{providers, FileState, UsageProvider};
+use brachio_agent::{providers, FileState, LogFile, UsageProvider};
 use brachio_store::{LimitSnapshot, TaskRecord, UsageRow};
 use serde::Serialize;
 use tauri::{Manager, State};
 
+use crate::agent_account_env::{existing_account_folders, AccountsFolder};
 use crate::workspace::Database;
 
 /// Most bytes read by one scan call. A larger backlog is finished by scanning again, so the page
@@ -121,12 +123,36 @@ pub fn usage_providers() -> Vec<ProviderInfo> {
         .collect()
 }
 
+/// The provider's logs: those of the login the CLI has on this computer, then those of each extra
+/// account. A log reached through two folders is listed once, under the path seen first, so the
+/// saved scan state of a log already scanned keeps its key.
+fn usage_log_files(provider: &dyn UsageProvider, account_folders: &[PathBuf]) -> Vec<LogFile> {
+    let mut seen = HashSet::new();
+    provider
+        .log_files()
+        .into_iter()
+        .chain(
+            account_folders
+                .iter()
+                .flat_map(|folder| provider.logs_under(folder)),
+        )
+        .filter(|file| {
+            seen.insert(
+                file.path
+                    .canonicalize()
+                    .unwrap_or_else(|_| file.path.clone()),
+            )
+        })
+        .collect()
+}
+
 fn scan_provider(
     provider: &dyn UsageProvider,
     database: &Database,
+    files: Vec<LogFile>,
     report: &mut ScanReport,
 ) -> Result<(), String> {
-    for file in provider.log_files() {
+    for file in files {
         report.files_total += 1;
         if report.bytes_read >= SCAN_BYTE_BUDGET {
             report.truncated = true;
@@ -187,9 +213,15 @@ pub async fn usage_scan(
             let mut connection = database.lock()?;
             brachio_store::usage_reset(&mut connection).map_err(|error| error.to_string())?;
         }
+        let accounts = app.state::<AccountsFolder>();
         let mut report = ScanReport::default();
         for provider in providers() {
-            scan_provider(provider.as_ref(), &database, &mut report)?;
+            let folders = {
+                let connection = database.lock()?;
+                existing_account_folders(&connection, &accounts.0, provider.id())?
+            };
+            let files = usage_log_files(provider.as_ref(), &folders);
+            scan_provider(provider.as_ref(), &database, files, &mut report)?;
         }
         Ok(report)
     })
@@ -338,4 +370,101 @@ pub fn usage_limit_snapshot(
     brachio_store::record_limit_snapshot(&connection, &provider, &window, now_ms(), used_percent)
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use brachio_agent::{claude_logs_in, ClaudeProvider, Scanned};
+    use std::path::Path;
+
+    /// Claude Code with its built-in login in a temporary folder instead of the real home.
+    struct Claude(PathBuf);
+
+    impl UsageProvider for Claude {
+        fn id(&self) -> &'static str {
+            "claude_code"
+        }
+        fn display_name(&self) -> &'static str {
+            "Claude Code"
+        }
+        fn icon(&self) -> &'static str {
+            "claude"
+        }
+        fn log_files(&self) -> Vec<LogFile> {
+            claude_logs_in(&self.0.join("projects"))
+        }
+        fn logs_under(&self, config_root: &Path) -> Vec<LogFile> {
+            ClaudeProvider.logs_under(config_root)
+        }
+        fn scan(&self, file: &LogFile, state: &mut FileState) -> std::io::Result<Scanned> {
+            ClaudeProvider.scan(file, state)
+        }
+    }
+
+    fn session_log(config: &Path, session: &str, output: u64) {
+        let folder = config.join("projects").join("p");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join(format!("{session}.jsonl")),
+            format!(
+                r#"{{"timestamp":"2026-11-01T10:00:00Z","cwd":"/work","message":{{"id":"{session}","usage":{{"input_tokens":0,"output_tokens":{output}}}}}}}"#
+            ) + "\n",
+        )
+        .unwrap();
+    }
+
+    fn total_output(database: &Database) -> u64 {
+        let connection = database.lock().unwrap();
+        brachio_store::usage_rows(&connection, Some("claude_code"), "2026-01-01")
+            .unwrap()
+            .iter()
+            .map(|row| row.output)
+            .sum()
+    }
+
+    #[test]
+    fn logs_of_every_extra_account_are_counted_once() {
+        let built_in = tempfile::tempdir().unwrap();
+        let accounts = tempfile::tempdir().unwrap();
+        session_log(built_in.path(), "home", 5);
+        session_log(&accounts.path().join("c1"), "work", 7);
+        session_log(&accounts.path().join("c2"), "side", 11);
+        // Sign-in files sit next to the logs; only session logs are listed.
+        std::fs::write(accounts.path().join("c1").join(".credentials.json"), "{}").unwrap();
+        session_log(&accounts.path().join("x1"), "codex", 1000);
+
+        let connection = brachio_store::open_in_memory().unwrap();
+        for (id, agent) in [
+            ("c1", "claude_code"),
+            ("c2", "claude_code"),
+            ("x1", "codex"),
+        ] {
+            brachio_store::add_agent_account(&connection, id, agent, id, 1).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            brachio_store::add_agent_account(&connection, "c3", "claude_code", "c3", 2).unwrap();
+            std::os::unix::fs::symlink(accounts.path().join("c1"), accounts.path().join("c3"))
+                .unwrap();
+        }
+        let database = Database(Mutex::new(connection));
+        let provider = Claude(built_in.path().to_path_buf());
+
+        for _ in 0..2 {
+            let mut folders = {
+                let connection = database.lock().unwrap();
+                existing_account_folders(&connection, accounts.path(), "claude_code").unwrap()
+            };
+            // The built-in folder reached again, as when the app runs with it as an account.
+            folders.push(built_in.path().to_path_buf());
+            let files = usage_log_files(&provider, &folders);
+            assert!(files
+                .iter()
+                .all(|file| file.path.extension().is_some_and(|ext| ext == "jsonl")));
+            scan_provider(&provider, &database, files, &mut ScanReport::default()).unwrap();
+        }
+        assert_eq!(total_output(&database), 5 + 7 + 11);
+    }
 }
