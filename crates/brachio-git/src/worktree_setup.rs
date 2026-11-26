@@ -102,7 +102,8 @@ pub fn read_setup(repo_root: &Path) -> Result<SetupConfig, SetupError> {
 ///
 /// # Errors
 /// Fails on an entry that is absolute or climbs out of the repository, which includes a path
-/// that leaves the repository through a link, or when a copy fails.
+/// that leaves the repository through a link, when an entry cannot be resolved for a reason other
+/// than not existing, or when a copy fails.
 pub fn copy_setup_files(
     repo_root: &Path,
     worktree: &Path,
@@ -142,8 +143,24 @@ fn copy_files(
             return Err(SetupError::UnsafePath(entry.clone()));
         }
         let source = root.join(entry);
-        let Ok(resolved) = fs::canonicalize(&source) else {
-            continue;
+        // Only a missing entry is skipped. Any other failure, such as a folder that cannot be
+        // read, would otherwise look like a successful setup without the file.
+        let resolved = match fs::canonicalize(&source) {
+            Ok(resolved) => resolved,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                continue;
+            }
+            Err(source_error) => {
+                return Err(SetupError::Io {
+                    path: source,
+                    source: source_error,
+                })
+            }
         };
         if !resolved.starts_with(&root) {
             return Err(SetupError::UnsafePath(entry.clone()));
@@ -334,6 +351,61 @@ mod tests {
         assert_eq!(
             fs::read_to_string(worktree.path().join("ui/.env.local")).expect("read copy"),
             "A=1\n"
+        );
+    }
+
+    #[test]
+    fn an_entry_under_a_file_counts_as_missing() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let worktree = tempfile::tempdir().expect("temp worktree");
+        fs::write(repo.path().join(".env"), "A=1\n").expect("write env");
+        let config = SetupConfig {
+            copy: vec![".env/inner".into(), "gone/.env".into()],
+            run: Vec::new(),
+        };
+        let copied = copy_setup_files(repo.path(), worktree.path(), &config).expect("copy");
+        assert!(copied.is_empty());
+    }
+
+    #[test]
+    fn an_entry_that_cannot_be_resolved_is_reported_instead_of_skipped() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let worktree = tempfile::tempdir().expect("temp worktree");
+        let config = SetupConfig {
+            copy: vec!["bad\0name".into()],
+            run: Vec::new(),
+        };
+        let error = copy_setup_files(repo.path(), worktree.path(), &config)
+            .expect_err("a malformed path is not a missing file");
+        assert!(matches!(error, SetupError::Io { .. }), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_in_an_unreadable_folder_is_reported_instead_of_skipped() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let repo = tempfile::tempdir().expect("temp repo");
+        let worktree = tempfile::tempdir().expect("temp worktree");
+        let locked = repo.path().join("locked");
+        fs::create_dir(&locked).expect("make folder");
+        fs::write(locked.join(".env"), "A=1\n").expect("write env");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock");
+        if fs::metadata(locked.join(".env")).is_ok() {
+            // Running with privileges that ignore folder permissions; nothing to check.
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).expect("unlock");
+            return;
+        }
+        let config = SetupConfig {
+            copy: vec!["locked/.env".into()],
+            run: Vec::new(),
+        };
+        let result = copy_setup_files(repo.path(), worktree.path(), &config);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).expect("unlock");
+        let error = result.expect_err("a permission error is not a missing file");
+        assert!(
+            matches!(&error, SetupError::Io { path, .. } if path.ends_with("locked/.env")),
+            "{error}"
         );
     }
 
