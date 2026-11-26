@@ -269,22 +269,24 @@ fn flush_until_done(
     let mut batcher = OutputBatcher::new(config);
     let wait = Duration::from_millis(config.max_delay_ms.max(1));
     loop {
-        let frame = match chunks.recv_timeout(wait) {
+        let (frame, stop) = match chunks.recv_timeout(wait) {
             Ok(chunk) => {
-                // Continuous output never times out, so the exit poll must also run here.
-                if should_stop() {
-                    break;
-                }
-                batcher
+                // The chunk is already dequeued, so it is batched before a stop is honoured.
+                let frame = batcher
                     .push(&chunk, now_ms())
-                    .or_else(|| batcher.tick(now_ms()))
+                    .or_else(|| batcher.tick(now_ms()));
+                // Continuous output never times out, so the exit poll must also run here.
+                (frame, should_stop())
             }
-            Err(RecvTimeoutError::Timeout) if should_stop() => break,
-            Err(RecvTimeoutError::Timeout) => batcher.tick(now_ms()),
-            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) if should_stop() => (None, true),
+            Err(RecvTimeoutError::Timeout) => (batcher.tick(now_ms()), false),
+            Err(RecvTimeoutError::Disconnected) => (None, true),
         };
         if let Some(frame) = frame {
             sink(PtyEvent::Output(frame));
+        }
+        if stop {
+            break;
         }
     }
     drain_remaining(chunks, &mut batcher, &now_ms, sink);
@@ -370,6 +372,28 @@ mod drain_tests {
         let mut batcher = OutputBatcher::new(BatchConfig::default());
         drain_remaining(&receiver, &mut batcher, &|| 0, &sink);
         assert_eq!(*received.lock().expect("lock"), expected);
+    }
+
+    #[test]
+    fn the_chunk_received_when_the_stop_request_arrives_is_still_sent() {
+        let (sender, receiver) = mpsc::channel();
+        for chunk in [b"first-".to_vec(), b"second-".to_vec(), b"third".to_vec()] {
+            sender.send(chunk).expect("queue chunk");
+        }
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let sink_received = Arc::clone(&received);
+        let sink: crate::EventSink = Arc::new(move |event| {
+            if let PtyEvent::Output(bytes) = event {
+                sink_received.lock().expect("lock").extend(bytes);
+            }
+        });
+        let mut polls = 0;
+        super::flush_until_done(&receiver, BatchConfig::default(), &sink, &mut || {
+            polls += 1;
+            polls >= 2
+        });
+        assert_eq!(*received.lock().expect("lock"), b"first-second-third");
+        drop(sender);
     }
 }
 
