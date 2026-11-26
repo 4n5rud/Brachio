@@ -44,6 +44,26 @@ Include the commands and results in your pull request, along with platforms or b
 
 Coding agents should also follow the [agent contribution guide](CONTRIBUTING-AGENTS.md).
 
+## Dependency checks
+
+The **Dependencies** workflow checks published security advisories against the lockfiles. It runs on pull requests that change dependencies, `deny.toml` or workflows, on `main`, and every Monday, because new advisories appear for dependencies that did not change.
+
+| What | Tool | Fails on |
+|---|---|---|
+| Rust crates in `Cargo.lock`, for the Windows and macOS builds | `cargo deny check advisories` | any vulnerability or unsoundness; an unmaintained crate the workspace depends on directly |
+| UI packages that ship in the app (`dependencies`) | `pnpm audit --prod` | moderate, high or critical |
+| UI build and test tools (`devDependencies`) | `pnpm audit --dev` | high or critical |
+| Advisory exceptions | `node scripts/check-advisory-exceptions.mjs` | an exception without an expiry date, or past it |
+
+When the check fails, update the dependency first (`cargo update -p <crate>`, or `pnpm --dir ui update <package>`). If no fixed version exists or the advisory does not affect Brachio, add an exception in the same pull request and explain it there:
+
+- Cargo: an entry in `ignore` in `deny.toml`, such as `{ id = "RUSTSEC-2026-0000", reason = "expires 2026-03-31: only reachable from code Brachio does not call, #123" }`.
+- UI: a line under `auditConfig.ignoreGhsas` in `ui/pnpm-workspace.yaml`, such as `- GHSA-xxxx-xxxx-xxxx # expires 2026-03-31: dev server only, #123`.
+
+Keep the expiry within 90 days. When it passes, CI fails until someone fixes the advisory or reviews and renews the exception.
+
+Dependabot opens grouped update pull requests every Monday for GitHub Actions, Cargo and the UI, after a new release is a week old. Workflows pin each action to a full commit SHA with the version as a comment; Dependabot updates both.
+
 ## Public documents
 
 Everything in this repository is public. `node scripts/check-public-docs.mjs` runs in CI and fails on:
