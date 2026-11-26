@@ -590,7 +590,7 @@ p {
   box-shadow: 0 0 0 1px var(--color-accent-text);
 }
 
-/* A tab whose surface is not built yet */
+/* A file or browser tab whose view is missing, loading or failed */
 .tab-surface-placeholder {
   display: grid;
   place-content: center;
@@ -602,4 +602,10 @@ p {
 }
 .tab-surface-placeholder strong {
   color: var(--color-text-2);
+}
+.tab-surface-placeholder code {
+  max-width: 60ch;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  text-align: center;
 }
