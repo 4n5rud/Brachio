@@ -1,10 +1,11 @@
 //! Native CLI authentication and read-only Codex quota reporting.
 
 use std::env;
+use std::future::Future;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use brachio_agent::{find_on_path, AgentKind, ResolvedCommand};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ use serde_json::{json, Value};
 use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::timeout;
 
 use crate::agent_account_env::{account_environment, config_variable, AccountsFolder};
@@ -20,6 +22,7 @@ use crate::workspace::{new_id, now_ms, Database};
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const QUOTA_TIMEOUT: Duration = Duration::from_secs(15);
+const CACHE_TTL: Duration = Duration::from_secs(60);
 const CODEX_ACCOUNT_TIMEOUT: Duration = Duration::from_millis(500);
 const PROTOCOL_LIMIT: u64 = 512 * 1024;
 #[cfg(windows)]
@@ -57,6 +60,58 @@ fn configured_cli(
         .envs(resolved.env)
         .envs(environment.iter().cloned());
     command
+}
+
+/// A completed read is shared with callers that arrived while it was running.
+struct CachedReading<T> {
+    completed_at: Instant,
+    result: Result<T, String>,
+}
+
+/// Serializes CLI reads and keeps the most recent answer.
+struct Cached<T>(AsyncMutex<Option<CachedReading<T>>>);
+
+impl<T> Default for Cached<T> {
+    fn default() -> Self {
+        Self(AsyncMutex::new(None))
+    }
+}
+
+impl<T: Clone> Cached<T> {
+    async fn get(
+        &self,
+        force: bool,
+        ttl: Duration,
+        read: impl Future<Output = Result<T, String>>,
+    ) -> Result<T, String> {
+        let requested_at = Instant::now();
+        let mut last = self.0.lock().await;
+        if let Some(reading) = last.as_ref() {
+            let finished_while_waiting = reading.completed_at > requested_at;
+            let fresh = !force && reading.result.is_ok() && reading.completed_at.elapsed() < ttl;
+            if finished_while_waiting || fresh {
+                return reading.result.clone();
+            }
+        }
+        let result = read.await;
+        *last = Some(CachedReading {
+            completed_at: Instant::now(),
+            result: result.clone(),
+        });
+        result
+    }
+
+    async fn clear(&self) {
+        *self.0.lock().await = None;
+    }
+}
+
+/// Recent sign-in and Codex usage readings, shared by the status bar and the settings tab.
+#[derive(Default)]
+pub struct AgentReadings {
+    codex_auth: Cached<AgentAuthStatus>,
+    claude_auth: Cached<AgentAuthStatus>,
+    codex_usage: Cached<CodexQuota>,
 }
 
 /// One registered login in the account picker.
@@ -181,7 +236,7 @@ pub fn agent_account_set_default(
 }
 
 /// Only account metadata intended for display is returned.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentAuthStatus {
     signed_in: bool,
@@ -251,11 +306,27 @@ pub fn task_agent_account_info(
 pub async fn agent_auth_status(
     kind: AgentKind,
     account_id: Option<String>,
+    force: Option<bool>,
+    readings: State<'_, AgentReadings>,
     database: State<'_, Database>,
     folder: State<'_, AccountsFolder>,
 ) -> Result<AgentAuthStatus, String> {
-    let environment = selected_environment(&database, &folder, kind, account_id.as_deref())?;
-    read_auth_status(kind, &environment).await
+    if account_id.is_some() {
+        let environment = selected_environment(&database, &folder, kind, account_id.as_deref())?;
+        return read_auth_status(kind, &environment).await;
+    }
+    let cache = match kind {
+        AgentKind::Codex => &readings.codex_auth,
+        AgentKind::ClaudeCode => &readings.claude_auth,
+        AgentKind::Grok => return Err("Grok signs in from its own terminal.".to_owned()),
+    };
+    cache
+        .get(
+            force.unwrap_or(false),
+            CACHE_TTL,
+            read_auth_status(kind, &[]),
+        )
+        .await
 }
 
 /// Requires an authenticated isolated login before a new agent process starts.
@@ -373,17 +444,31 @@ pub async fn codex_auth_action(
     database: State<'_, Database>,
     folder: State<'_, AccountsFolder>,
     run: State<'_, SignInRun>,
+    readings: State<'_, AgentReadings>,
 ) -> Result<bool, String> {
     let kind = kind.unwrap_or(AgentKind::Codex);
     account_agent(kind)?;
     let environment = selected_environment(&database, &folder, kind, account_id.as_deref())?;
+    let result = codex_auth_change(action, kind, environment, &run).await;
+    readings.codex_auth.clear().await;
+    readings.claude_auth.clear().await;
+    readings.codex_usage.clear().await;
+    result
+}
+
+async fn codex_auth_change(
+    action: CodexAuthAction,
+    kind: AgentKind,
+    environment: Vec<(String, String)>,
+    run: &SignInRun,
+) -> Result<bool, String> {
     if matches!(action, CodexAuthAction::SignIn) {
         let args: &[&str] = if kind == AgentKind::ClaudeCode {
             &["auth", "login"]
         } else {
             &["login"]
         };
-        return agent_sign_in(kind, args, environment, &run).await;
+        return agent_sign_in(kind, args, environment, run).await;
     }
     let args: &[&str] = if kind == AgentKind::ClaudeCode {
         &["auth", "logout"]
@@ -452,7 +537,7 @@ pub fn codex_auth_cancel(run: State<'_, SignInRun>) -> bool {
 }
 
 /// One quota window reported by the Codex app server.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct QuotaWindow {
     used_percent: f64,
@@ -461,7 +546,7 @@ pub struct QuotaWindow {
 }
 
 /// Usage windows for the active Codex account.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CodexQuota {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     account: Option<String>,
@@ -475,18 +560,31 @@ pub struct CodexQuota {
 #[tauri::command]
 pub async fn codex_usage(
     account_id: Option<String>,
+    force: Option<bool>,
+    readings: State<'_, AgentReadings>,
     include_account: Option<bool>,
     database: State<'_, Database>,
     folder: State<'_, AccountsFolder>,
 ) -> Result<CodexQuota, String> {
     let environment =
         selected_environment(&database, &folder, AgentKind::Codex, account_id.as_deref())?;
-    timeout(
-        QUOTA_TIMEOUT,
-        read_codex_usage(&environment, include_account.unwrap_or(false)),
-    )
-    .await
-    .map_err(|_| "Codex usage lookup timed out.".to_owned())?
+    let include_account = include_account.unwrap_or(false);
+    if account_id.is_some() || include_account {
+        return timeout(
+            QUOTA_TIMEOUT,
+            read_codex_usage(&environment, include_account),
+        )
+        .await
+        .map_err(|_| "Codex usage lookup timed out.".to_owned())?;
+    }
+    readings
+        .codex_usage
+        .get(force.unwrap_or(false), CACHE_TTL, async {
+            timeout(QUOTA_TIMEOUT, read_codex_usage(&environment, false))
+                .await
+                .map_err(|_| "Codex usage lookup timed out.".to_owned())?
+        })
+        .await
 }
 
 async fn read_codex_usage(
@@ -618,6 +716,151 @@ pub async fn open_claude_usage() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    async fn counted(reads: &AtomicUsize, answer: Result<u32, String>) -> Result<u32, String> {
+        reads.fetch_add(1, Ordering::SeqCst);
+        answer
+    }
+
+    #[tokio::test]
+    async fn a_fresh_reading_is_reused() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        assert_eq!(
+            cache.get(false, CACHE_TTL, counted(&reads, Ok(1))).await,
+            Ok(1)
+        );
+        assert_eq!(
+            cache.get(false, CACHE_TTL, counted(&reads, Ok(2))).await,
+            Ok(1)
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_expired_reading_is_read_again() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        cache
+            .get(false, Duration::ZERO, counted(&reads, Ok(1)))
+            .await
+            .expect("read succeeds");
+        let second = cache
+            .get(false, Duration::ZERO, counted(&reads, Ok(2)))
+            .await;
+        assert_eq!(second, Ok(2));
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn force_skips_the_cache_and_replaces_it() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        cache
+            .get(false, CACHE_TTL, counted(&reads, Ok(1)))
+            .await
+            .expect("read succeeds");
+        assert_eq!(
+            cache.get(true, CACHE_TTL, counted(&reads, Ok(2))).await,
+            Ok(2)
+        );
+        assert_eq!(
+            cache.get(false, CACHE_TTL, counted(&reads, Ok(3))).await,
+            Ok(2)
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn failures_are_not_kept() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        let failed = cache
+            .get(false, CACHE_TTL, counted(&reads, Err("no".into())))
+            .await;
+        assert_eq!(failed, Err("no".to_owned()));
+        assert_eq!(
+            cache.get(false, CACHE_TTL, counted(&reads, Ok(5))).await,
+            Ok(5)
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn clear_drops_the_reading() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        cache
+            .get(false, CACHE_TTL, counted(&reads, Ok(1)))
+            .await
+            .expect("read succeeds");
+        cache.clear().await;
+        assert_eq!(
+            cache.get(false, CACHE_TTL, counted(&reads, Ok(2))).await,
+            Ok(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn simultaneous_requests_share_one_read() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        let slow = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(7)
+        };
+        let (a, b, c) = tokio::join!(
+            cache.get(false, CACHE_TTL, slow()),
+            cache.get(false, CACHE_TTL, slow()),
+            cache.get(false, CACHE_TTL, slow()),
+        );
+        assert_eq!((a, b, c), (Ok(7), Ok(7), Ok(7)));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn simultaneous_forced_requests_share_one_read() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        let slow = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Ok(7)
+        };
+        let (a, b) = tokio::join!(
+            cache.get(true, CACHE_TTL, slow()),
+            cache.get(true, CACHE_TTL, slow()),
+        );
+        assert_eq!((a, b), (Ok(7), Ok(7)));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn simultaneous_failed_requests_share_one_read() {
+        let cache = Cached::<u32>::default();
+        let reads = AtomicUsize::new(0);
+        let slow = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Err("unavailable".to_owned())
+        };
+        let (a, b) = tokio::join!(
+            cache.get(false, CACHE_TTL, slow()),
+            cache.get(false, CACHE_TTL, slow()),
+        );
+        assert_eq!(
+            (a, b),
+            (Err("unavailable".to_owned()), Err("unavailable".to_owned()))
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            cache.get(false, CACHE_TTL, counted(&reads, Ok(9))).await,
+            Ok(9)
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
 
     #[cfg(unix)]
     #[test]

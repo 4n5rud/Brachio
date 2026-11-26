@@ -70,6 +70,13 @@ pub trait UsageProvider: Send + Sync {
     fn icon(&self) -> &'static str;
     /// The provider's logs, newest first, at most [`MAX_LOG_FILES`].
     fn log_files(&self) -> Vec<LogFile>;
+    /// The logs kept under one config folder of the CLI, such as an extra account's folder.
+    /// Only the session log folders are listed; sign-in and other files are not opened.
+    /// Providers without separate accounts list nothing.
+    fn logs_under(&self, config_root: &Path) -> Vec<LogFile> {
+        let _ = config_root;
+        Vec::new()
+    }
     /// Reads what was appended to `file` since `state` and returns it as buckets.
     ///
     /// # Errors
@@ -488,8 +495,10 @@ impl UsageProvider for ClaudeProvider {
         "claude"
     }
     fn log_files(&self) -> Vec<LogFile> {
-        home_dir("CLAUDE_CONFIG_DIR", ".claude")
-            .map_or_else(Vec::new, |dir| claude_logs_in(&dir.join("projects")))
+        home_dir("CLAUDE_CONFIG_DIR", ".claude").map_or_else(Vec::new, |dir| self.logs_under(&dir))
+    }
+    fn logs_under(&self, config_root: &Path) -> Vec<LogFile> {
+        claude_logs_in(&config_root.join("projects"))
     }
     fn scan(&self, file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         scan_claude(file, state)
@@ -507,8 +516,10 @@ impl UsageProvider for CodexProvider {
         "codex"
     }
     fn log_files(&self) -> Vec<LogFile> {
-        home_dir("CODEX_HOME", ".codex")
-            .map_or_else(Vec::new, |dir| codex_logs_in(&dir.join("sessions")))
+        home_dir("CODEX_HOME", ".codex").map_or_else(Vec::new, |dir| self.logs_under(&dir))
+    }
+    fn logs_under(&self, config_root: &Path) -> Vec<LogFile> {
+        codex_logs_in(&config_root.join("sessions"))
     }
     fn scan(&self, file: &LogFile, state: &mut FileState) -> io::Result<Scanned> {
         scan_codex(file, state)
@@ -708,6 +719,30 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].session, "abc");
         assert!(claude_logs_in(&projects.path().join("none")).is_empty());
+    }
+
+    #[test]
+    fn logs_under_a_config_folder_list_only_session_logs() {
+        let root = tempfile::tempdir().expect("dir");
+        let projects = root.path().join("projects").join("p");
+        fs::create_dir_all(&projects).expect("projects");
+        write(&projects.join("s1.jsonl"), "{}\n");
+        write(&root.path().join(".credentials.json"), "{}");
+        let sessions = root.path().join("sessions").join("2026");
+        fs::create_dir_all(&sessions).expect("sessions");
+        let rollout = "rollout-2026-11-01T00-00-00-0199a0b0-0000-7000-8000-000000000001.jsonl";
+        write(&sessions.join(rollout), "{}\n");
+        write(&root.path().join("auth.json"), "{}");
+        let claude: Vec<_> = ClaudeProvider
+            .logs_under(root.path())
+            .into_iter()
+            .map(|file| file.session)
+            .collect();
+        assert_eq!(claude, ["s1"]);
+        let codex = CodexProvider.logs_under(root.path());
+        assert_eq!(codex.len(), 1);
+        assert!(codex[0].path.ends_with(rollout));
+        assert!(GrokProvider.logs_under(root.path()).is_empty());
     }
 
     #[test]

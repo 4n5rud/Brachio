@@ -1,0 +1,55 @@
+# Weekly, grouped version updates. Each group arrives as one pull request that CI and the
+# Dependencies workflow check before a maintainer merges it. New releases wait a week first,
+# so a compromised or broken release has time to be pulled before it reaches a pull request.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      tauri:
+        patterns: ["@tauri-apps/*"]
+      ui-production:
+        dependency-type: production
+        update-types: [minor, patch]
+      ui-development:
+        dependency-type: development
+        update-types: [minor, patch]

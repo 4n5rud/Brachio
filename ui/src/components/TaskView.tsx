@@ -48,7 +48,9 @@ import { onContentTabRequest, onNewTabRequest, type ContentTabRequest } from "..
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
 import { PromptQueue } from "./PromptQueue";
-import { SEND_SETTLE_MS, autoSendOn, queueAction, queuedPrompts, removeQueuedPrompt, steerBlock } from "../lib/prompt-queue";
+import {
+  SEND_SETTLE_MS, autoSendOn, clearTabQueue, queueAction, queuedPrompts, removeQueuedPrompt, steerBlock,
+} from "../lib/prompt-queue";
 import { isMac } from "../lib/shortcut";
 import { clearSelectionRequest, fencedSelection, selectionRequest } from "../lib/selection-send";
 import { pushToast } from "../lib/toasts";
@@ -267,6 +269,8 @@ export function TaskView(props: {
     const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
     if (!asked && dirtyTabs().has(tab.id) && !(await confirmUnsaved(tab))) return;
+    const queued = queuedPrompts(tabKey(id, tab)).length;
+    if (!asked && queued > 0 && !(await confirmQueued(tab, queued))) return;
     if (tabsOf(id).length === 1 && props.confirmCloseLastTab && !(await props.confirmCloseLastTab(id))) return;
     setTabsSaving(true);
     setTabError("");
@@ -276,6 +280,8 @@ export function TaskView(props: {
       const wasSelected = isTabSelected(id, tab);
       setTabsByTask((current) => new Map(current).set(id, tabsOf(id).filter((other) => other.id !== tab.id)));
       forgetTabState(tabKey(id, tab));
+      // Only once the tab is really gone: a refused close keeps its queued prompts.
+      clearTabQueue(tabKey(id, tab));
       setTabDirty(tab.id, false);
       markUnsaved(tabKey(id, tab), false);
       if (isTemporary(id, tab)) setTemporary(id, undefined);
@@ -303,6 +309,14 @@ export function TaskView(props: {
       setTabError(String(failure));
     });
   };
+  const confirmQueued = (tab: TaskTab, count: number) => confirmDialog({
+    title: t("tab.queuedTitle").replace("{name}", () => labels().get(tab.id) ?? ""),
+    body: t("tab.queuedBody"),
+    loss: [{ label: t("task.lossQueuedPrompts"), count }],
+    confirmLabel: t("tab.queuedClose"),
+    cancelLabel: t("tab.unsavedKeep"),
+    tone: "danger",
+  });
   // Shows a file or page in a tab: the tab that already shows it, else a new one. At the limit the
   // tab left longest closes first, after asking when it has unsaved edits. The target is checked
   // and written the stored way before anything closes, so a refused one costs no tab.

@@ -131,6 +131,42 @@ async fn send_puts_the_sender_the_receiver_and_the_text_in_one_request() {
 }
 
 #[tokio::test]
+async fn send_refuses_a_body_from_standard_input_that_is_too_large_to_send() {
+    use tokio::io::AsyncWriteExt as _;
+    let mut child = Command::new(BRACHIO)
+        .args([
+            "send",
+            "--to",
+            "Write docs",
+            "--subject",
+            "Log",
+            "--body",
+            "-",
+        ])
+        .env("BRACHIO_HOOK_ENDPOINT", name())
+        .env("BRACHIO_TERMINAL_KEY", "task1:agent")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("start brachio");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let writer = tokio::spawn(async move {
+        // The command stops reading early, so a failed write is expected here.
+        let huge = vec![b'x'; usize::try_from(MAX_MESSAGE).expect("fits") * 16];
+        let _ = stdin.write_all(&huge).await;
+    });
+    let output = child.wait_with_output().await.expect("finish");
+    writer.await.expect("writer task");
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        error.contains(&format!("larger than {MAX_MESSAGE} bytes")),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn ask_and_reply_send_one_request_each() {
     for (args, expected_kind, expected_to, expected_parent) in [
         (

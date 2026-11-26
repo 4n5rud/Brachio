@@ -31,20 +31,54 @@ function load(): ReadonlyMap<string, TabQueue> {
 
 const [queues, setQueues] = createSignal<ReadonlyMap<string, TabQueue>>(load());
 
+const save = (next: ReadonlyMap<string, TabQueue>) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
+  } catch {
+    // The queue still works for this session.
+  }
+};
+
 const update = (key: string, change: (queue: TabQueue) => TabQueue) => {
   setQueues((all) => {
     const next = new Map(all);
     const queue = change(all.get(key) ?? { auto: false, items: [] });
     if (queue.items.length === 0 && !queue.auto) next.delete(key);
     else next.set(key, queue);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
-    } catch {
-      // The queue still works for this session.
-    }
+    save(next);
     return next;
   });
 };
+
+/** A task's queues: its first agent (`<task>:agent`) and every agent tab (`<task>:agent-<tab>`). */
+const ofTask = (taskId: string, key: string) => key.startsWith(`${taskId}:`);
+
+const discard = (drop: (key: string) => boolean) => {
+  setQueues((all) => {
+    if (![...all.keys()].some(drop)) return all;
+    const next = new Map([...all].filter(([key]) => !drop(key)));
+    save(next);
+    return next;
+  });
+};
+
+/** Forgets a closed tab's queue and its automatic-send setting. */
+export const clearTabQueue = (key: string) => discard((candidate) => candidate === key);
+/** Forgets every queue of a task that was deleted for good. An archived task keeps its queues. */
+export const clearTaskQueues = (taskId: string) => discard((key) => ofTask(taskId, key));
+/** How many prompts wait in all of a task's tabs. */
+export const taskQueuedCount = (taskId: string): number =>
+  [...queues()].reduce((sum, [key, queue]) => sum + (ofTask(taskId, key) ? queue.items.length : 0), 0);
+
+/**
+ * Runs a removal and then `clear`, only when the removal went through: a cancelled one (false) or a
+ * failed one (it throws) keeps the queued prompts.
+ */
+export async function clearQueuesAfter(removal: () => Promise<boolean>, clear: () => void): Promise<boolean> {
+  const removed = await removal();
+  if (removed) clear();
+  return removed;
+}
 
 export const queuedPrompts = (key: string): readonly QueuedPrompt[] => queues().get(key)?.items ?? [];
 export const autoSendOn = (key: string): boolean => queues().get(key)?.auto ?? false;

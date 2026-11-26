@@ -1,0 +1,23 @@
+# cargo-deny settings. CI runs only `cargo deny check advisories` against Cargo.lock
+# (.github/workflows/dependencies.yml). The policy is in .github/CONTRIBUTING.md#dependency-checks.
+
+[graph]
+# Only the platforms Brachio ships installers for (release.yml). Linux-only crates, such as the
+# GTK bindings under Tauri, are built in CI but never shipped, so they are left out.
+targets = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
+all-features = true
+
+[advisories]
+# A vulnerability or unsound advisory fails the check wherever it sits in the dependency tree.
+unsound = "all"
+# An unmaintained crate fails only when the workspace depends on it directly; deeper ones
+# (mostly under Tauri) are reported as warnings, because only their parents can replace them.
+unmaintained = "workspace"
+yanked = "warn"
+
+# Exceptions, one per line. The reason starts with an expiry date, then says why the advisory
+# does not affect Brachio or what blocks the fix, and links the tracking issue. CI fails once
+# the date has passed (scripts/check-advisory-exceptions.mjs), so someone reviews it again.
+#
+#   { id = "RUSTSEC-0000-0000", reason = "expires 2026-01-31: why it is safe to wait, #123" },
+ignore = []

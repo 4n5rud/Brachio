@@ -3,11 +3,13 @@
 //! Output is short on purpose, because an agent reads it as context: one line per message and a
 //! 200 character preview of the body unless `--full` is given.
 
+use std::io::Read;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use brachio_runtime::approval::{ENDPOINT_VARIABLE, KEY_VARIABLE};
 use brachio_runtime::mailbox::{self, MailMessage, MailRequest, MailResponse, SendMail};
+use brachio_runtime::wire::MAX_MESSAGE;
 use clap::Args;
 
 const PREVIEW_CHARS: usize = 200;
@@ -161,9 +163,7 @@ fn send_message(
 ) -> Result<()> {
     let (endpoint, from) = endpoint_and_key()?;
     let body = if args.body == "-" {
-        let mut text = String::new();
-        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
-        text
+        read_body(std::io::stdin().lock(), MAX_MESSAGE)?
     } else {
         args.body
     };
@@ -187,6 +187,22 @@ fn send_message(
     let note = if duplicate { " (already sent)" } else { "" };
     println!("sent {id} to {to}{note}");
     Ok(())
+}
+
+/// Reads a body from `input`, stopping after `limit` bytes: a larger body could not be sent in
+/// one request anyway, so the rest is never buffered.
+fn read_body(input: impl Read, limit: u64) -> Result<String> {
+    let mut bytes = Vec::new();
+    input
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        bail!(
+            "The body from standard input is larger than {limit} bytes. Put the details in a file and send its path."
+        );
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| anyhow!("The body from standard input is not valid UTF-8."))
 }
 
 pub fn check(args: &CheckArgs) -> Result<()> {
@@ -355,6 +371,25 @@ mod tests {
             created_at_ms: 0,
             read: false,
         }
+    }
+
+    #[test]
+    fn a_body_from_input_is_read_up_to_the_limit_and_refused_past_it() {
+        let exact = "x".repeat(16);
+        assert_eq!(read_body(exact.as_bytes(), 16).expect("fits"), exact);
+        let error = read_body("x".repeat(17).as_bytes(), 16).expect_err("too large");
+        assert!(
+            error.to_string().contains("larger than 16 bytes"),
+            "{error}"
+        );
+        // An endless input still ends: only one byte past the limit is read.
+        assert!(read_body(std::io::repeat(b'x'), 16).is_err());
+    }
+
+    #[test]
+    fn a_body_from_input_that_is_not_utf8_is_refused() {
+        let error = read_body(&[b'o', b'k', 0xff][..], 16).expect_err("invalid");
+        assert!(error.to_string().contains("not valid UTF-8"), "{error}");
     }
 
     #[test]

@@ -10,6 +10,8 @@ Please do not report a security problem in a public issue or pull request.
 
 Use GitHub's private reporting: open the repository's **Security** tab and choose **Report a vulnerability**. Include what you found, how to reproduce it, and which version it affects. Do not include working exploits for other people's systems.
 
+A published advisory for one of Brachio's dependencies does not need a private report: CI checks advisories for Rust crates and UI packages every week (see [Dependency checks](CONTRIBUTING.md#dependency-checks)). Report it privately only if you found a way to exploit it through Brachio.
+
 ## Trust model
 
 - Brachio runs on your own machine with your own agent accounts. Agents and the shells you open run with your user's permissions. They can read and change anything your user can, including files outside the task's worktree.

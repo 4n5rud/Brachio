@@ -19,6 +19,7 @@ afterEach(() => {
 
 test("switching an account reads that account's authentication and quota", async () => {
   invoke.mockImplementation(async (command: string, args?: { accountId?: string | null }) => {
+    if (command === "agents_detect") return [{ kind: "codex", path: "/bin/codex", version: "1" }];
     if (command === "agent_accounts_list") return [
       { id: null, name: "Built-in", isDefault: true },
       { id: "work", name: "Work", isDefault: false },
@@ -30,6 +31,7 @@ test("switching an account reads that account's authentication and quota", async
   const root = document.createElement("div");
   document.body.append(root);
   dispose = render(() => <AgentSettings />, root);
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("codex_usage", { accountId: null, includeAccount: true, force: false }));
   await vi.waitFor(() => expect(root.textContent).toContain("personal@example.com"));
   const select = root.querySelector("select")!;
   expect(select.options[0]?.textContent).toContain(t("settings.accountBuiltin"));
@@ -38,6 +40,6 @@ test("switching an account reads that account's authentication and quota", async
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await vi.waitFor(() => expect(root.textContent).toContain("work@example.com"));
   await vi.waitFor(() => expect(root.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("75"));
-  expect(invoke).toHaveBeenCalledWith("agent_auth_status", { kind: "codex", accountId: "work" });
-  expect(invoke).toHaveBeenCalledWith("codex_usage", { accountId: "work", includeAccount: true });
+  expect(invoke).toHaveBeenCalledWith("agent_auth_status", { kind: "codex", accountId: "work", force: false });
+  expect(invoke).toHaveBeenCalledWith("codex_usage", { accountId: "work", includeAccount: true, force: false });
 });
