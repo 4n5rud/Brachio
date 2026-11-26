@@ -3,7 +3,7 @@
 //! It starts a real runtime with 1, 5 and 10 shell sessions that have each printed enough to
 //! fill part of their output history, reads every session the way the app does, and compares the
 //! working set of the runtime's process tree and of this process with the bounds in
-//! `docs/windows-memory-benchmark.md`. It is ignored by default; run it with
+//! `docs/memory-benchmark.md`. It is ignored by default; run it with
 //! `cargo test -p brachio-runtime --test memory_bound -- --ignored --nocapture`.
 //!
 //! This process stands in for the app side: it holds the client library and the output pages the
@@ -87,7 +87,7 @@ fn tree(system: &System, root: Pid) -> HashSet<Pid> {
 
 /// Highest working set seen over a few samples, as bytes.
 fn peak_working_sets(runtime: Pid) -> (u64, u64) {
-    let mut system = System::new();
+    let mut system = System::new().expect("initialize process monitoring");
     let own = Pid::from_u32(std::process::id());
     let (mut runtime_peak, mut app_peak) = (0, 0);
     for _ in 0..SAMPLES {

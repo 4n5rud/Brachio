@@ -29,7 +29,7 @@ One version, in two files that must match: `[workspace.package] version` in `Car
    ```
 
 3. The **Release** workflow checks that the tag matches both version files and is on `main`, drafts a GitHub release with generated notes, builds the Windows and macOS installers and attaches them.
-4. Open the draft. Read the notes, install the build on a real machine, and publish. A draft that should not ship is deleted together with its tag.
+4. Open the draft. Read the notes, install the build on a real machine, and publish. Before publishing, compare the installer sizes and dependency counts with the last release and write both in the draft, for example "Windows setup 8.81 MiB (+0.05), macOS disk image 10.06 MiB (+0.06)" and the same for each crate and package count. Take the sizes from `gh release view <tag> --json assets` for the draft and for the last release, and the counts from `node scripts/size-baseline.mjs` at the tagged commit, with the last release's figures in [`docs/memory-benchmark.md`](../docs/memory-benchmark.md#size-and-dependency-baseline). Add the new figures to that table in the README pull request below. A jump without a matching change in the notes needs an explanation before you publish. A draft that should not ship is deleted together with its tag.
 5. After you publish, update the download links in `README.md` and `docs/readme/README.*.md` to the new version in a small pull request. Never point the README at a draft or a release that does not exist yet; `node scripts/check-public-docs.mjs --links` checks this.
 
 ## Release notes
