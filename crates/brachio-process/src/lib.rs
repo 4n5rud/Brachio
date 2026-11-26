@@ -327,7 +327,9 @@ pub struct Streamed {
 }
 
 /// Runs `command` and hands its standard output to `on_chunk` piece by piece, so a huge result
-/// is never held in memory. The program is killed once `limit` passes.
+/// is never held in memory. The program is killed once `limit` passes. A call to `on_chunk`
+/// that is already running cannot be interrupted, so the limit can be exceeded by at most one
+/// call.
 ///
 /// # Errors
 /// Fails when the program cannot start, or with `ErrorKind::TimedOut` after the child was killed
@@ -371,7 +373,15 @@ pub fn stream_stdout(
             }
         });
         loop {
-            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            // A waiting chunk is returned even with a zero timeout, so a full queue alone would
+            // never time out: check the deadline before every receive.
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(timed_out());
+            }
+            match receiver.recv_timeout(left) {
                 Ok(chunk) => on_chunk(&chunk),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let _ = child.kill();
@@ -585,6 +595,24 @@ mod tests {
             .err()
             .expect("must time out");
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn a_streamed_command_is_stopped_on_time_while_its_output_keeps_the_queue_full() {
+        // Output that takes far longer than the limit to consume, so a chunk is always waiting.
+        let script = if cfg!(windows) {
+            "for /L %i in (1,1,400000) do @echo line %i"
+        } else {
+            "yes line | head -c 8000000"
+        };
+        let started = Instant::now();
+        let error = stream_stdout(&mut shell(script), Duration::from_millis(300), |_| {
+            thread::sleep(Duration::from_millis(30));
+        })
+        .err()
+        .expect("must time out");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
