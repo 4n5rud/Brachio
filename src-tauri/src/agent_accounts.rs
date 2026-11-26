@@ -23,6 +23,7 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const QUOTA_TIMEOUT: Duration = Duration::from_secs(15);
 const CACHE_TTL: Duration = Duration::from_secs(60);
+const CODEX_ACCOUNT_TIMEOUT: Duration = Duration::from_millis(500);
 const PROTOCOL_LIMIT: u64 = 512 * 1024;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -42,15 +43,23 @@ fn cli(
     environment: &[(String, String)],
 ) -> Result<Command, String> {
     let resolved = resolved_cli(kind, args)?;
-    let mut command = Command::new(resolved.program);
+    let mut command = Command::from(configured_cli(resolved, environment));
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
+    command.kill_on_drop(true);
+    Ok(command)
+}
+
+fn configured_cli(
+    resolved: ResolvedCommand,
+    environment: &[(String, String)],
+) -> std::process::Command {
+    let mut command = std::process::Command::new(resolved.program);
     command
         .args(resolved.args)
         .envs(resolved.env)
-        .envs(environment.iter().cloned())
-        .kill_on_drop(true);
-    Ok(command)
+        .envs(environment.iter().cloned());
+    command
 }
 
 /// A completed read is shared with callers that arrived while it was running.
@@ -234,8 +243,65 @@ pub struct AgentAuthStatus {
     account: Option<String>,
 }
 
-/// Reads sign-in status through the installed CLI; a reading under a minute old is reused unless
-/// `force` is set.
+/// The login pinned to a task, without credential or provider metadata.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAccountInfo {
+    agent: AgentKind,
+    name: Option<String>,
+    source: TaskAccountSource,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TaskAccountSource {
+    Shared,
+    Isolated,
+    Removed,
+}
+
+fn account_info(
+    db: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Option<TaskAccountInfo>, String> {
+    use brachio_store::{StoreError, TaskRecord};
+
+    let task = TaskRecord::get(db, task_id).map_err(|error| error.to_string())?;
+    let agent = match task.agent_kind.as_deref() {
+        Some("codex") => AgentKind::Codex,
+        Some("claude_code") => AgentKind::ClaudeCode,
+        _ => return Ok(None),
+    };
+    let (name, source) = if let Some(id) =
+        brachio_store::task_agent_account(db, task_id).map_err(|error| error.to_string())?
+    {
+        match brachio_store::agent_account(db, &id) {
+            Ok(account) if account.agent == agent.spec().id => {
+                (Some(account.name), TaskAccountSource::Isolated)
+            }
+            Ok(_) | Err(StoreError::NotFound { .. }) => (None, TaskAccountSource::Removed),
+            Err(error) => return Err(error.to_string()),
+        }
+    } else {
+        (None, TaskAccountSource::Shared)
+    };
+    Ok(Some(TaskAccountInfo {
+        agent,
+        name,
+        source,
+    }))
+}
+
+/// Reports the account a saved task uses.
+#[tauri::command]
+pub fn task_agent_account_info(
+    task_id: String,
+    database: State<'_, Database>,
+) -> Result<Option<TaskAccountInfo>, String> {
+    account_info(&*database.lock()?, &task_id)
+}
+
+/// Reads sign-in status through the installed CLI.
 #[tauri::command]
 pub async fn agent_auth_status(
     kind: AgentKind,
@@ -261,6 +327,20 @@ pub async fn agent_auth_status(
             read_auth_status(kind, &[]),
         )
         .await
+}
+
+/// Requires an authenticated isolated login before a new agent process starts.
+pub async fn check_isolated_login(
+    kind: Option<AgentKind>,
+    environment: &[(String, String)],
+) -> Result<(), String> {
+    let Some(kind) = kind.filter(|_| !environment.is_empty()) else {
+        return Ok(());
+    };
+    if matches!(read_auth_status(kind, environment).await, Ok(status) if status.signed_in) {
+        return Ok(());
+    }
+    Err("ISOLATED_LOGIN_REQUIRED: Sign in to this Brachio-only account in Settings > Agents, then retry.".to_owned())
 }
 
 async fn read_auth_status(
@@ -422,11 +502,7 @@ async fn agent_sign_in(
     run: &SignInRun,
 ) -> Result<bool, String> {
     let resolved = resolved_cli(kind, args)?;
-    let mut command = std::process::Command::new(resolved.program);
-    command
-        .args(resolved.args)
-        .envs(resolved.env)
-        .envs(environment);
+    let mut command = configured_cli(resolved, &environment);
     // A Windows console lets the user also see the CLI's fallback instructions.
     if !cfg!(windows) {
         command
@@ -472,6 +548,8 @@ pub struct QuotaWindow {
 /// Usage windows for the active Codex account.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CodexQuota {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
     #[serde(default, rename = "planType")]
     plan_type: Option<String>,
     primary: Option<QuotaWindow>,
@@ -484,27 +562,35 @@ pub async fn codex_usage(
     account_id: Option<String>,
     force: Option<bool>,
     readings: State<'_, AgentReadings>,
+    include_account: Option<bool>,
     database: State<'_, Database>,
     folder: State<'_, AccountsFolder>,
 ) -> Result<CodexQuota, String> {
     let environment =
         selected_environment(&database, &folder, AgentKind::Codex, account_id.as_deref())?;
-    if account_id.is_some() {
-        return timeout(QUOTA_TIMEOUT, read_codex_usage(&environment))
-            .await
-            .map_err(|_| "Codex usage lookup timed out.".to_owned())?;
+    let include_account = include_account.unwrap_or(false);
+    if account_id.is_some() || include_account {
+        return timeout(
+            QUOTA_TIMEOUT,
+            read_codex_usage(&environment, include_account),
+        )
+        .await
+        .map_err(|_| "Codex usage lookup timed out.".to_owned())?;
     }
     readings
         .codex_usage
         .get(force.unwrap_or(false), CACHE_TTL, async {
-            timeout(QUOTA_TIMEOUT, read_codex_usage(&environment))
+            timeout(QUOTA_TIMEOUT, read_codex_usage(&environment, false))
                 .await
                 .map_err(|_| "Codex usage lookup timed out.".to_owned())?
         })
         .await
 }
 
-async fn read_codex_usage(environment: &[(String, String)]) -> Result<CodexQuota, String> {
+async fn read_codex_usage(
+    environment: &[(String, String)],
+    include_account: bool,
+) -> Result<CodexQuota, String> {
     let unavailable = || "Codex did not return usage for this login.".to_owned();
     let mut child = cli(AgentKind::Codex, &["app-server"], environment)?
         .stdin(Stdio::piped())
@@ -526,17 +612,49 @@ async fn read_codex_usage(environment: &[(String, String)]) -> Result<CodexQuota
     .await?;
     receive(&mut lines, 1).await?;
     send(&mut input, &json!({ "method": "initialized" })).await?;
+    let account = if include_account {
+        let read = async {
+            send(
+                &mut input,
+                &json!({ "id": 2, "method": "account/read", "params": { "refreshToken": false } }),
+            )
+            .await?;
+            receive(&mut lines, 2).await
+        };
+        timeout(CODEX_ACCOUNT_TIMEOUT, read)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .and_then(|metadata| metadata["account"]["email"].as_str().map(str::to_owned))
+    } else {
+        None
+    };
+
     send(
         &mut input,
-        &json!({ "id": 2, "method": "account/rateLimits/read", "params": null }),
+        &json!({ "id": 3, "method": "account/rateLimits/read", "params": null }),
     )
     .await?;
-    let mut usage = receive(&mut lines, 2).await?;
+    let usage = receive(&mut lines, 3).await;
     // Closing stdio first lets npm's Windows launcher and its child exit together.
     drop(input);
     drop(lines);
     let _ = timeout(Duration::from_millis(500), child.wait()).await;
-    serde_json::from_value(usage["rateLimits"].take()).map_err(|_| unavailable())
+    match usage.and_then(|mut reply| {
+        serde_json::from_value::<CodexQuota>(reply["rateLimits"].take()).map_err(|_| unavailable())
+    }) {
+        Ok(mut quota) => {
+            quota.account = account;
+            Ok(quota)
+        }
+        Err(_) if account.is_some() => Ok(CodexQuota {
+            account,
+            plan_type: None,
+            primary: None,
+            secondary: None,
+        }),
+        Err(error) => Err(error),
+    }
 }
 
 async fn send(input: &mut tokio::process::ChildStdin, message: &Value) -> Result<(), String> {
@@ -742,5 +860,121 @@ mod tests {
             Ok(9)
         );
         assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolated_cli_login_status_and_logout_leave_other_logins_untouched() {
+        use crate::agent_account_env::account_environment;
+
+        let folders = tempfile::tempdir().expect("temporary accounts");
+        let script = folders.path().join("fake-cli.sh");
+        std::fs::write(
+            &script,
+            r#"set -eu
+variable="$1"
+action="$2"
+fallback="$3"
+case "$variable" in
+  CODEX_HOME) config="${CODEX_HOME:-$fallback}" ;;
+  CLAUDE_CONFIG_DIR) config="${CLAUDE_CONFIG_DIR:-$fallback}" ;;
+esac
+case "$action" in
+  login) printf 'signed-in' > "$config/login-marker" ;;
+  status) test -f "$config/login-marker" ;;
+  logout) rm -f "$config/login-marker" ;;
+esac
+"#,
+        )
+        .expect("fake CLI script");
+        let db = brachio_store::open_in_memory().expect("database");
+        for (kind, variable) in [
+            (AgentKind::Codex, "CODEX_HOME"),
+            (AgentKind::ClaudeCode, "CLAUDE_CONFIG_DIR"),
+        ] {
+            let agent = kind.spec().id;
+            let id_prefix = agent.replace('_', "-");
+            let builtin = folders.path().join(format!("{agent}-builtin"));
+            std::fs::create_dir(&builtin).expect("built-in config");
+            let chosen = brachio_store::add_agent_account(
+                &db,
+                &format!("{id_prefix}-chosen"),
+                agent,
+                "Chosen",
+                1,
+            )
+            .expect("chosen account");
+            let other = brachio_store::add_agent_account(
+                &db,
+                &format!("{id_prefix}-other"),
+                agent,
+                "Other",
+                2,
+            )
+            .expect("other account");
+            let chosen_env =
+                account_environment(folders.path(), kind, &chosen).expect("chosen environment");
+            let other_env =
+                account_environment(folders.path(), kind, &other).expect("other environment");
+            let run = |action: &str, environment: &[(String, String)]| {
+                // The inherited home deliberately points at the built-in account. The selected
+                // account must override it for every status and authentication operation.
+                let resolved = ResolvedCommand {
+                    program: "/bin/sh".into(),
+                    args: vec![
+                        script.to_string_lossy().into_owned(),
+                        variable.to_owned(),
+                        action.to_owned(),
+                        builtin.to_string_lossy().into_owned(),
+                    ],
+                    env: vec![(variable.to_owned(), builtin.to_string_lossy().into_owned())],
+                };
+                configured_cli(resolved, environment)
+                    .status()
+                    .expect("run fake CLI")
+                    .success()
+            };
+            assert!(run("login", &[]));
+            assert!(run("login", &other_env));
+            assert!(
+                !run("status", &chosen_env),
+                "a fresh isolated home must not inherit built-in login"
+            );
+            assert!(run("login", &chosen_env));
+            assert!(run("status", &chosen_env));
+            assert!(run("logout", &chosen_env));
+            assert!(!run("status", &chosen_env));
+            assert!(run("status", &other_env), "another isolated login survives");
+            assert!(run("status", &[]), "built-in login survives");
+            assert_eq!(
+                std::fs::read_to_string(builtin.join("login-marker")).expect("built-in marker"),
+                "signed-in"
+            );
+        }
+    }
+
+    #[test]
+    fn a_task_reports_its_saved_login_source_even_after_removal() {
+        let db = brachio_store::open_in_memory().expect("database");
+        db.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', '/x', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, agent_kind)
+             VALUES ('t', 'r', 'T', 'p', 'b', '/w', 'new', 0, 'codex');",
+        )
+        .expect("task");
+
+        let read = || {
+            account_info(&db, "t")
+                .expect("info")
+                .expect("Codex account")
+        };
+        assert!(matches!(read().source, TaskAccountSource::Shared));
+        brachio_store::add_agent_account(&db, "x", "codex", "Work", 1).expect("add account");
+        brachio_store::set_task_agent_account(&db, "t", "x").expect("set task account");
+        let info = read();
+        assert!(matches!(info.source, TaskAccountSource::Isolated));
+        assert_eq!(info.name.as_deref(), Some("Work"));
+        brachio_store::remove_agent_account(&db, "x").expect("remove account");
+        assert!(matches!(read().source, TaskAccountSource::Removed));
     }
 }

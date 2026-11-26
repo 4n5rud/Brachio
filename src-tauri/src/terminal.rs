@@ -78,7 +78,7 @@ impl SessionKeys {
 }
 
 /// What to run in a new terminal.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRequest {
     /// `None` opens the user's shell.
@@ -241,9 +241,9 @@ pub async fn terminal_open(
 ) -> CommandResult<Opened> {
     let key = request
         .key
-        .as_deref()
+        .clone()
         .ok_or_else(|| "A registered task terminal is required.".to_owned())?;
-    let owner = terminal_authorization::resolve(&*database.lock()?, key)?;
+    let owner = terminal_authorization::resolve(&*database.lock()?, &key)?;
     let worktree =
         owner.task.worktree_path.canonicalize().map_err(|error| {
             crate::folder_access::tag(&owner.task.worktree_path, error.to_string())
@@ -270,10 +270,88 @@ pub async fn terminal_open(
     {
         return Err("A Codex conversation can only be resumed in a Codex tab.".to_owned());
     }
+    let first_prompt = request.prompt.clone();
+    let prepare = || {
+        prepare_terminal(
+            &request,
+            &owner.task,
+            shell_id.as_deref(),
+            &database,
+            &hook,
+            &accounts,
+        )
+    };
+    let mut fresh_launch = None;
+    let launch = async {
+        let (spec, delivery, resumed) = prepare().await.map_err(anyhow::Error::msg)?;
+        fresh_launch = Some((delivery, resumed));
+        Ok(Launch {
+            cwd: spec.cwd,
+            program: spec.program,
+            args: spec.args,
+            env: spec
+                .env
+                .into_iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect(),
+            rows: spec.rows,
+            cols: spec.cols,
+        })
+    };
+    if let Some((id, attached)) = hosted
+        .open(
+            key.to_owned(),
+            launch,
+            on_event.clone(),
+            request.agent.is_some(),
+        )
+        .await
+        .map_err(|error| to_message(&error))?
+    {
+        // Recovered pending launches already ran their original prompt and setup path.
+        let (prompt_delivery, resumed) = fresh_launch.unwrap_or((PromptDelivery::None, true));
+        return Ok(Opened {
+            id,
+            first_prompt,
+            prompt_delivery,
+            resumed,
+            attached,
+            hosted: true,
+        });
+    }
+    let (spec, prompt_delivery, resumed) = prepare().await?;
+    let manager = Arc::clone(&terminals.0);
+    let sink = sink_for(on_event, request.agent.is_some());
+    let spawned = tauri::async_runtime::spawn_blocking(move || manager.spawn(&spec, sink))
+        .await
+        .map_err(|error| error.to_string())?;
+    let id =
+        spawned.map_err(|error| crate::folder_access::tag(&request.cwd, to_message(&error)))?;
+    if let Some(key) = request.key.clone() {
+        terminals.1.record(id, key);
+    }
+    Ok(Opened {
+        id,
+        first_prompt,
+        prompt_delivery,
+        resumed,
+        attached: false,
+        hosted: false,
+    })
+}
+
+async fn prepare_terminal(
+    request: &OpenRequest,
+    task: &brachio_store::TaskRecord,
+    shell_id: Option<&str>,
+    database: &Database,
+    hook: &HookSetup,
+    accounts: &crate::agent_account_env::AccountsFolder,
+) -> CommandResult<(SpawnSpec, PromptDelivery, bool)> {
     // Claude Code can ask the app instead of the terminal when a hook is available.
     let mut environment = terminal_env();
     if let Some(key) = request.key.as_deref() {
-        match task_ports::port_for_terminal(&database, key, &request.cwd) {
+        match task_ports::port_for_terminal(database, key, &request.cwd) {
             Ok(Some(port)) => environment.push(("BRACHIO_PORT".to_owned(), port.to_string())),
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "could not assign a development port"),
@@ -283,7 +361,7 @@ pub async fn terminal_open(
         Some(kind) => crate::agent_account_env::launch_environment(
             &*database.lock()?,
             &accounts.0,
-            &owner.task.id,
+            &task.id,
             kind,
         )?,
         None => Vec::new(),
@@ -306,70 +384,30 @@ pub async fn terminal_open(
         environment.extend(hook.mail_environment(key));
     }
     if let Some(kind) = request.agent {
-        let repo = brachio_store::RepoRecord::get(&*database.lock()?, &owner.task.repo_id)
+        let repo = brachio_store::RepoRecord::get(&*database.lock()?, &task.repo_id)
             .map_err(|error| error.to_string())?;
-        let added = crate::agent_profiles::launch_additions(
-            &*database.lock()?,
-            &owner.task.id,
-            &repo,
-            kind,
-        )?;
+        let added =
+            crate::agent_profiles::launch_additions(&*database.lock()?, &task.id, &repo, kind)?;
         if let Some(added) = added {
             options.extend(added.arguments);
             environment.extend(added.environment);
         }
     }
-    let first_prompt = request.prompt.clone();
+    crate::agent_accounts::check_isolated_login(request.agent, &account_environment).await?;
     let (command, prompt_delivery, resumed) = match request.agent {
         Some(kind) => {
-            let (prepared, returned_request) = tauri::async_runtime::spawn_blocking(move || {
-                let result = agent_command(kind, &request, options, codex_home.as_deref());
-                (result, request)
+            let request = request.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                agent_command(kind, &request, options, codex_home.as_deref())
             })
             .await
-            .map_err(|error| error.to_string())?;
-            request = returned_request;
-            prepared?
+            .map_err(|error| error.to_string())??
         }
-        None => (
-            shell_command(shell_id.as_deref()),
-            PromptDelivery::None,
-            false,
-        ),
+        None => (shell_command(shell_id), PromptDelivery::None, false),
     };
     environment.extend(command.env);
     // A task's saved account remains authoritative after profile and adapter additions.
     environment.extend(account_environment);
-    if let Some(key) = request.key.clone() {
-        let launch = Launch {
-            cwd: request.cwd.clone(),
-            program: command.program.to_string_lossy().into_owned(),
-            args: command.args.clone(),
-            env: environment
-                .iter()
-                .map(|(name, value)| format!("{name}={value}"))
-                .collect(),
-            rows: request.rows.max(1),
-            cols: request.cols.max(1),
-        };
-        let opened = hosted
-            .open(key, launch, on_event.clone(), request.agent.is_some())
-            .await;
-        if let Some((id, attached)) = opened.map_err(|error| to_message(&error))? {
-            return Ok(Opened {
-                id,
-                first_prompt,
-                prompt_delivery: if attached {
-                    PromptDelivery::None
-                } else {
-                    prompt_delivery
-                },
-                resumed: resumed || attached,
-                attached,
-                hosted: true,
-            });
-        }
-    }
     let spec = SpawnSpec {
         program: command.program.to_string_lossy().into_owned(),
         args: command.args,
@@ -378,24 +416,7 @@ pub async fn terminal_open(
         rows: request.rows.max(1),
         cols: request.cols.max(1),
     };
-    let manager = Arc::clone(&terminals.0);
-    let sink = sink_for(on_event, request.agent.is_some());
-    let spawned = tauri::async_runtime::spawn_blocking(move || manager.spawn(&spec, sink))
-        .await
-        .map_err(|error| error.to_string())?;
-    let id =
-        spawned.map_err(|error| crate::folder_access::tag(&request.cwd, to_message(&error)))?;
-    if let Some(key) = request.key.clone() {
-        terminals.1.record(id, key);
-    }
-    Ok(Opened {
-        id,
-        first_prompt,
-        prompt_delivery,
-        resumed,
-        attached: false,
-        hosted: false,
-    })
+    Ok((spec, prompt_delivery, resumed))
 }
 
 /// Sends keyboard input to a terminal.

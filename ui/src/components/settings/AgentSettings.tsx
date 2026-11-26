@@ -10,7 +10,7 @@ import { confirmDialog } from "../ui/ConfirmDialog";
 import { Notice } from "../ui/Notice";
 import { agentLimit, MAX_AGENT_LIMIT, updateAgentLimit } from "../../lib/agent-limit";
 import { Select, Input } from "../ui/Input";
-import { accountSelection, listAgentAccounts, type AgentAccount as SavedAgentAccount } from "../../lib/agent-accounts";
+import { accountLabel, accountSelection, listAgentAccounts, type AgentAccount as SavedAgentAccount } from "../../lib/agent-accounts";
 import { SettingRow } from "./SettingRow";
 import { AgentCard, type AccountState, type UsageRow } from "./AgentCard";
 
@@ -26,6 +26,7 @@ interface QuotaWindow {
 }
 
 interface CodexQuota {
+  account?: string;
   primary: QuotaWindow | null;
   secondary: QuotaWindow | null;
 }
@@ -59,18 +60,28 @@ function AgentAccount(props: { agent: InstalledAgent; savedAccount?: SavedAgentA
       return { state: "error", message: String(error) };
     }
   }, { initialValue: lastAccount ? asAccount(lastAccount) : undefined });
-  const toRows = (quota: CodexQuota) => [quota.primary, quota.secondary]
-    .filter((entry): entry is QuotaWindow => entry !== null).map(usageRow);
-  const quotaArgs = () => ({ accountId: accountId() });
+  const quotaArgs = () => ({ accountId: accountId(), includeAccount: true });
   const lastQuota = cachedAgentReading<CodexQuota>("codex_usage", quotaArgs());
-  const [usage, { refetch: refetchUsage }] = createResource(async (_, info): Promise<UsageRow[] | undefined> => {
+  const [usage, { refetch: refetchUsage }] = createResource(async (_, info): Promise<CodexQuota | undefined> => {
     if (kind !== "codex") return undefined;
     try {
-      return toRows(await readAgentReading<CodexQuota>("codex_usage", quotaArgs(), info.refetching === true));
+      return await readAgentReading<CodexQuota>("codex_usage", quotaArgs(), info.refetching === true);
     } catch {
       return undefined;
     }
-  }, { initialValue: lastQuota ? toRows(lastQuota) : undefined });
+  }, { initialValue: lastQuota });
+  const visibleAccount = (): AccountState => {
+    if (account.loading || reload.pending()) return { state: "checking" };
+    const state = account();
+    return state?.state === "signedIn" && kind === "codex"
+      ? { ...state, account: usage()?.account ?? state.account }
+      : state ?? { state: "checking" };
+  };
+  const usageRows = () => {
+    const quota = usage();
+    return quota && [quota.primary, quota.secondary]
+      .filter((entry): entry is QuotaWindow => entry !== null && entry !== undefined).map(usageRow);
+  };
   const [busy, setBusy] = createSignal(false);
   const [signingIn, setSigningIn] = createSignal(false);
   const [error, setError] = createSignal("");
@@ -107,8 +118,8 @@ function AgentAccount(props: { agent: InstalledAgent; savedAccount?: SavedAgentA
   });
   return (
     <AgentCard kind={kind} version={props.agent.version} path={props.agent.path}
-      account={account() ?? { state: "checking" }}
-      signingIn={signingIn()} busy={busy()} usage={account()?.state === "signedIn" ? usage() : undefined} error={error()}
+      account={visibleAccount()}
+      signingIn={signingIn()} busy={busy()} usage={kind === "claude_code" && accountId() ? [] : usage.loading ? undefined : usageRows()} error={error()}
       usageUnavailable={kind === "claude_code" && accountId() ? t("settings.claudeAccountUsage") : undefined}
       onRefresh={() => void reload.run()}
       onSignIn={() => void changeAuth(true)} onSignOut={() => void changeAuth(false)}
@@ -159,13 +170,14 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
       <Select label={t("settings.account")} value={selected()} disabled={busy()}
         onChange={(event) => { setSelected(event.currentTarget.value); setName(""); }}>
         <For each={accountChoices() ?? []}>{(account) =>
-          <option value={accountSelection(account)}>{account.id === null ? t("settings.accountBuiltin") : account.name}{account.isDefault ? ` · ${t("settings.accountDefault")}` : ""}</option>
+          <option value={accountSelection(account)}>{accountLabel(account)}{account.isDefault ? ` · ${t("settings.accountDefault")}` : ""}</option>
         }</For>
       </Select>
       <Show when={accounts.error}>
         <p class="form-error" role="alert">{String(accounts.error)}</p>
         <Button size="sm" onClick={() => void refetch()}>{t("settings.agentRefresh")}</Button>
       </Show>
+      <p class="form-hint">{t("settings.accountScopeHint")}</p>
       <Input label={t("settings.accountName")} value={name()} disabled={busy()}
         onInput={(event) => setName(event.currentTarget.value)} />
       <div class="agent-card-actions">

@@ -162,6 +162,7 @@ export function TerminalPane(props: {
   onInsertPrompt?: () => Promise<boolean>;
   /** Opens the problem report with the error text. */
   onReport?: (message: string) => void;
+  onAgentSettings?: () => void;
 }) {
   let host!: HTMLDivElement;
   const [canReopen, setCanReopen] = createSignal(false);
@@ -400,7 +401,8 @@ export function TerminalPane(props: {
           if (disposed || launch !== generation) return;
           const uncertain = /BRACHIO_LAUNCH_UNCERTAIN:([0-9a-f-]{36})/i.exec(String(error));
           setUncertainOperation(uncertain?.[1]);
-          term.writeln(`\r\n${t("terminal.startFailed")}: ${uncertain ? t("terminal.launchUncertain") : String(error)}`);
+          const detail = String(error).startsWith("ISOLATED_LOGIN_REQUIRED:") ? t("settings.accountSignInRequired") : String(error);
+          term.writeln(`\r\n${t("terminal.startFailed")}: ${uncertain ? t("terminal.launchUncertain") : detail}`);
           setCanReopen(true);
           if (!uncertain) setEnded({ kind: "failed", reason: String(error) });
           props.onStatus?.({ state: "error" }, null);
@@ -900,15 +902,20 @@ export function TerminalPane(props: {
           if (e.kind === "detached") {
             return <Notice tone="error" lead={t("terminal.detached")} actions={reopenAction(true)} />;
           }
+          const isolatedLogin = e.reason.startsWith("ISOLATED_LOGIN_REQUIRED:");
+          const reason = isolatedLogin ? t("settings.accountSignInRequired") : e.reason;
           const blocked = blockedFolder(e.reason);
           if (blocked !== null) return <FolderAccessNotice path={blocked} onRetry={() => reopen()} />;
           return (
             <Notice tone="error" lead={t("terminal.startFailed")}
               actions={<>{reopenAction(false)}
+                <Show when={isolatedLogin && props.onAgentSettings}>
+                  <Button size="sm" onClick={() => props.onAgentSettings?.()}>{t("settings.accountManage")}</Button>
+                </Show>
                 <Show when={props.onReport}>
                   <Button size="sm" onClick={() => props.onReport?.(e.reason)}>{t("error.report")}</Button>
                 </Show></>}>
-              {t("terminal.failureDetail").replace("{detail}", () => e.reason)}
+              {t("terminal.failureDetail").replace("{detail}", () => reason)}
             </Notice>
           );
         }}

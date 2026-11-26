@@ -28,7 +28,11 @@ pub const fn config_variable(kind: AgentKind) -> Option<&'static str> {
 
 /// The config folder of an account, created private to the user when it is first needed.
 fn config_folder(root: &Path, account: &AgentAccount) -> Result<PathBuf, String> {
-    let folder = root.join(&account.id);
+    let id = Path::new(&account.id);
+    if id.file_name() != Some(id.as_os_str()) {
+        return Err("The isolated account has an invalid folder name.".to_owned());
+    }
+    let folder = root.join(id);
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -37,6 +41,14 @@ fn config_folder(root: &Path, account: &AgentAccount) -> Result<PathBuf, String>
         builder.mode(0o700);
     }
     builder.create(&folder).map_err(|error| error.to_string())?;
+    let expected = root
+        .canonicalize()
+        .map_err(|error| error.to_string())?
+        .join(id);
+    let actual = folder.canonicalize().map_err(|error| error.to_string())?;
+    if actual != expected {
+        return Err("A Brachio-only account requires a separate configuration folder.".to_owned());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -72,7 +84,12 @@ pub fn account_environment(
             "ANTHROPIC_AUTH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN",
         ],
-        AgentKind::Codex => &["OPENAI_API_KEY", "CODEX_API_KEY"],
+        AgentKind::Codex => &[
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY",
+            "CODEX_ACCESS_TOKEN",
+            "OPENAI_IDENTITY_TOKEN_FILE",
+        ],
         AgentKind::Grok => &[],
     };
     let mut environment = vec![(variable.to_owned(), folder.to_string_lossy().into_owned())];
@@ -174,6 +191,22 @@ mod tests {
         assert!(env.contains(&("OPENAI_API_KEY".to_owned(), String::new())));
         assert!(account_environment(root.path(), AgentKind::Codex, &claude).is_err());
         assert!(account_environment(root.path(), AgentKind::Grok, &claude).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_another_login_is_not_an_isolated_account_folder() {
+        let root = tempfile::tempdir().expect("isolated root");
+        let shared = tempfile::tempdir().expect("shared config");
+        let db = db();
+        let account =
+            brachio_store::add_agent_account(&db, "x1", "codex", "Work", 1).expect("add account");
+        std::os::unix::fs::symlink(shared.path(), root.path().join(&account.id))
+            .expect("link to shared configuration");
+
+        let error = account_environment(root.path(), AgentKind::Codex, &account)
+            .expect_err("a linked configuration can change another login");
+        assert!(error.contains("separate"), "{error}");
     }
 
     #[test]

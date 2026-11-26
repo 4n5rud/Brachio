@@ -1607,6 +1607,7 @@ export function App() {
           {(task) => (
             <TaskView
               task={task()}
+              onAgentSettings={() => openSettings("agents")}
               visible={view() === "tasks" && !!selected()}
               theme={dataTheme()}
               openIds={openIds()}

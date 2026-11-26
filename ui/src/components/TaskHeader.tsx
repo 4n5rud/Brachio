@@ -16,6 +16,7 @@ export function TaskHeader(props: {
   additions?: number;
   deletions?: number;
   actions?: JSX.Element;
+  account?: JSX.Element;
   /** Tokens the agent session has used; omitted when its log is not available. */
   tokens?: TokenUsage;
 }) {
@@ -30,6 +31,7 @@ export function TaskHeader(props: {
             <Icon name="ghBranch" class="icon-sm" />
             {props.branch}
           </button>
+          {props.account}
           <DiffStat additions={props.additions} deletions={props.deletions} />
           <Show when={props.tokens}>{(usage) => <span title={tokenDetail(usage())}>{tokenLabel(usage())}</span>}</Show>
         </div>
