@@ -16,12 +16,15 @@ static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// How often a rename is tried when another process briefly holds the target open (Windows).
 const REPLACE_ATTEMPTS: u32 = 5;
 
+/// How many scratch names are tried when earlier ones are already taken.
+const SCRATCH_ATTEMPTS: u32 = 32;
+
 /// Replaces `path` with `bytes` so that a reader or a crash sees the old or the new content only.
 ///
 /// # Errors
 ///
 /// Fails when the scratch file cannot be written or the rename fails. The target is left as it was
-/// and the scratch file is removed.
+/// and the scratch file this call created is removed; files it did not create are left alone.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_scratch_then_replace(path, bytes, false, || Ok(()))
 }
@@ -52,11 +55,12 @@ fn write_scratch_then_replace<E: From<io::Error>>(
         .filter(|dir| !dir.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let name = file_name(path)?;
-    let counter = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let scratch = directory.join(format!(".{name}.{}-{counter}.tmp", std::process::id()));
+    // Only a scratch file this call created is removed on failure; one that already existed
+    // under the same name belongs to someone else.
+    let (scratch, file) = create_scratch(directory, &name)?;
 
     let result = (|| -> Result<(), E> {
-        write_scratch(&scratch, bytes)?;
+        write_scratch(file, bytes)?;
         if keep_permissions {
             match fs::metadata(path) {
                 Ok(existing) => fs::set_permissions(&scratch, existing.permissions())?,
@@ -81,8 +85,26 @@ fn file_name(path: &Path) -> io::Result<String> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))
 }
 
-fn write_scratch(scratch: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = File::options().write(true).create_new(true).open(scratch)?;
+/// Creates a scratch file next to the target under a name no one else holds. A name that is
+/// already taken, for example by a crashed process whose PID was reused, is skipped.
+fn create_scratch(directory: &Path, name: &str) -> io::Result<(PathBuf, File)> {
+    let mut attempt = 1;
+    loop {
+        let counter = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let scratch = directory.join(format!(".{name}.{}-{counter}.tmp", std::process::id()));
+        match File::options().write(true).create_new(true).open(&scratch) {
+            Ok(file) => return Ok((scratch, file)),
+            Err(error)
+                if error.kind() == io::ErrorKind::AlreadyExists && attempt < SCRATCH_ATTEMPTS =>
+            {
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn write_scratch(mut file: File, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)?;
     file.sync_all()
 }
@@ -225,6 +247,30 @@ mod tests {
         fs::write(dir.path().join(".state.json.1-0.tmp"), b"{incomplete").expect("leftover");
         write_atomic(&path, b"better").expect("write again");
         assert_eq!(fs::read(&path).expect("read"), b"better");
+    }
+
+    #[test]
+    fn a_scratch_name_that_is_already_taken_is_left_alone_and_another_is_used() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("taken.json");
+        fs::write(&path, b"old").expect("write");
+        // Take the next few scratch names, as a crashed process whose PID was reused would.
+        let next = SCRATCH_COUNTER.load(Ordering::Relaxed);
+        let taken: Vec<PathBuf> = (next..next + 8)
+            .map(|counter| {
+                let scratch = dir
+                    .path()
+                    .join(format!(".taken.json.{}-{counter}.tmp", std::process::id()));
+                fs::write(&scratch, b"evidence").expect("leftover");
+                scratch
+            })
+            .collect();
+        write_atomic(&path, b"new").expect("write with another scratch name");
+        assert_eq!(fs::read(&path).expect("read"), b"new");
+        for scratch in &taken {
+            assert_eq!(fs::read(scratch).expect("leftover kept"), b"evidence");
+        }
+        assert_eq!(entries(dir.path()).len(), taken.len() + 1);
     }
 
     #[test]
