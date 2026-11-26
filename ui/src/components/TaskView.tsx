@@ -35,12 +35,14 @@ import { installedShells, loadShells } from "../lib/shells";
 import { loadRecentSpec, saveRecentSpec, sameSpec, tabKey, tabLabels, type TabSpec,
   type TaskTab } from "../lib/task-tabs";
 import { agentOfKind, agentOfTab, hasTerminal, isAgentTab, isTabKind, type AgentTabKind } from "../lib/tab-kinds";
-import { TabSurfacePlaceholder } from "./TabSurface";
+import { TabContentHost } from "./TabSurface";
+import { findContentTab, forgetTabState, isContentKind, tabToEvict } from "../lib/tab-content";
+import { confirmDialog } from "./ui/ConfirmDialog";
 import { RenameDialog } from "./RenameDialog";
 import { HandoffSummaryDialog } from "./HandoffSummaryDialog";
 import { createReorder, placeInOrder } from "../lib/drag-reorder";
 import "./ui/Reorder.css";
-import { onNewTabRequest } from "../lib/tab-request";
+import { onContentTabRequest, onNewTabRequest, type ContentTabRequest } from "../lib/tab-request";
 import { registerGoToSource } from "../lib/actions";
 import { CueMenu } from "./CueMenu";
 import { PromptQueue } from "./PromptQueue";
@@ -148,7 +150,7 @@ export function TaskView(props: {
     const legacy = Object.fromEntries(loadSecondaryAgents());
     void invoke<Record<string, TaskTab[]>>("task_open_tabs", { legacy }).then((stored) => {
       if (disposed) return;
-      // A kind this window does not draw yet (a browser or file tab) is left out rather than breaking the bar.
+      // A kind this build does not know is left out rather than breaking the bar.
       const tabs = Object.fromEntries(Object.entries(stored).map(([id, list]) => [id, list.filter((tab) => isTabKind(tab.kind))]));
       for (const list of Object.values(tabs)) for (const tab of list) restoredTabs.add(tab.id);
       setTabsByTask(new Map(Object.entries(tabs)));
@@ -158,6 +160,17 @@ export function TaskView(props: {
   const [selectedSecondary, setSelectedSecondary] =
     createSignal<ReadonlyMap<string, string>>(loadSelectedSecondaryAgents());
   const tabsOf = (id: string): readonly TaskTab[] => tabsByTask().get(id) ?? [];
+  // When each tab was last shown in this run, so the tab limit closes the one left longest.
+  const lastUsed = new Map<string, number>();
+  let useClock = 0;
+  // Content tabs whose view reported edits that closing would lose.
+  const [dirtyTabs, setDirtyTabs] = createSignal<ReadonlySet<string>>(new Set());
+  const setTabDirty = (tabId: string, dirty: boolean) => setDirtyTabs((current) => {
+    if (current.has(tabId) === dirty) return current;
+    const next = new Set(current);
+    if (dirty) next.add(tabId); else next.delete(tabId);
+    return next;
+  });
   const selectedTab = (id: string): TaskTab | undefined => {
     const wanted = selectedSecondary().get(id);
     return tabsOf(id).find((tab) => tab.id === wanted);
@@ -187,6 +200,7 @@ export function TaskView(props: {
       [id, list.filter(isAgentTab).map((tab) => tabKey(id, tab))])));
   });
   const selectTab = (id: string, tab: TaskTab | undefined) => {
+    if (tab) lastUsed.set(tab.id, ++useClock);
     setSelectedSecondary((current) => {
       const next = new Map(current);
       if (tab) next.set(id, tab.id);
@@ -200,18 +214,24 @@ export function TaskView(props: {
     const first = agentTabs(id)[0];
     selectTab(id, extra ? first : undefined);
   };
-  const openTab = async (spec: TabSpec) => {
+  const openTab = async (spec: TabSpec, target?: string) => {
     const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
-    const tab: TaskTab = { id: crypto.randomUUID(), kind: spec.kind, shell: spec.shell };
+    const tabId = crypto.randomUUID();
     setTabsSaving(true);
     setTabError("");
     try {
-      await invoke("task_add_tab", { taskId: id, tabId: tab.id, kind: tab.kind, shell: tab.shell });
+      // The target is kept as the backend stored it, so a later lookup and a restart agree.
+      const stored = await invoke<string | null>("task_add_tab",
+        { taskId: id, tabId, kind: spec.kind, shell: spec.shell, target: target ?? null });
       if (disposed) return;
+      const tab: TaskTab = { id: tabId, kind: spec.kind, shell: spec.shell, target: stored ?? null };
       setTabsByTask((current) => new Map(current).set(id, [...tabsOf(id), tab]));
-      setRecentSpec(spec);
-      saveRecentSpec(spec);
+      // The shortcut reopens a terminal kind; a file or page is always opened from where it is listed.
+      if (!isContentKind(spec.kind)) {
+        setRecentSpec(spec);
+        saveRecentSpec(spec);
+      }
       selectTab(id, tab);
     } catch (failure) {
       setTabError(String(failure));
@@ -219,9 +239,10 @@ export function TaskView(props: {
       setTabsSaving(false);
     }
   };
-  const closeTab = async (tab: TaskTab) => {
+  const closeTab = async (tab: TaskTab, asked = false) => {
     const id = props.task.id;
     if (!tabsReady() || tabsSaving()) return;
+    if (!asked && dirtyTabs().has(tab.id) && !(await confirmUnsaved(tab))) return;
     if (tabsOf(id).length === 1 && props.confirmCloseLastTab && !(await props.confirmCloseLastTab(id))) return;
     setTabsSaving(true);
     setTabError("");
@@ -230,6 +251,9 @@ export function TaskView(props: {
       if (disposed) return;
       const wasSelected = isTabSelected(id, tab);
       setTabsByTask((current) => new Map(current).set(id, tabsOf(id).filter((other) => other.id !== tab.id)));
+      forgetTabState(tabKey(id, tab));
+      setTabDirty(tab.id, false);
+      lastUsed.delete(tab.id);
       props.onSecondaryClosed?.(id, tabKey(id, tab));
       if (wasSelected) selectTab(id, undefined);
     } catch (failure) {
@@ -238,6 +262,44 @@ export function TaskView(props: {
       setTabsSaving(false);
     }
   };
+  const confirmUnsaved = (tab: TaskTab) => confirmDialog({
+    title: t("tab.unsavedTitle").replace("{name}", () => labels().get(tab.id) ?? ""),
+    body: t("tab.unsavedBody"),
+    confirmLabel: t("tab.unsavedClose"),
+    cancelLabel: t("tab.unsavedKeep"),
+  });
+  // Shows a file or page in a tab: the tab that already shows it, else a new one. At the limit the
+  // tab left longest closes first, after asking when it has unsaved edits. The target is checked
+  // and written the stored way before anything closes, so a refused one costs no tab.
+  const openContent = async (request: ContentTabRequest) => {
+    const id = props.task.id;
+    const stillHere = () => !disposed && props.task.id === id && tabsReady() && !tabsSaving();
+    if (request.taskId !== id || !props.task.worktreePath || !stillHere()) return;
+    let target: string;
+    try {
+      target = await invoke<string>("task_tab_target", { kind: request.kind, target: request.target });
+    } catch (failure) {
+      setTabError(String(failure));
+      return;
+    }
+    if (!stillHere()) return;
+    const open = findContentTab(tabsOf(id), request.kind, target);
+    if (open) {
+      selectTab(id, open);
+      return;
+    }
+    // Restored tabs can be over the limit, so close until there is room.
+    for (;;) {
+      const evict = tabToEvict(tabsOf(id), request.kind, lastUsed, selectedTab(id)?.id);
+      if (!evict) break;
+      if (dirtyTabs().has(evict.id) && !(await confirmUnsaved(evict))) return;
+      if (!stillHere()) return;
+      await closeTab(evict, true);
+      if (!stillHere() || tabsOf(id).some((tab) => tab.id === evict.id)) return;
+    }
+    await openTab({ kind: request.kind, shell: null }, target);
+  };
+  onCleanup(onContentTabRequest((request) => void openContent(request)));
   const [tabActions, setTabActions] = createSignal<{ anchor: HTMLElement; tab: TaskTab }>();
   const [renamingTab, setRenamingTab] = createSignal<TaskTab>();
   const renameTab = (tab: TaskTab, name: string) => {
@@ -584,10 +646,14 @@ export function TaskView(props: {
           {(current) => (
             <Menu anchor={current().anchor} label={t("tabMenu.label")} onClose={() => setTabActions(undefined)}>
               <MenuItem onSelect={() => { setTabActions(undefined); setRenamingTab(current().tab); }}>{t("tabMenu.rename")}</MenuItem>
-              <MenuItem disabled={!tabsReady() || tabsSaving()}
-                onSelect={() => { setTabActions(undefined); void openTab({ kind: current().tab.kind, shell: current().tab.shell }); }}>
-                {t("tabMenu.duplicate")}
-              </MenuItem>
+              {/* A file or page is shown once per task: two tabs editing one file would each keep their own
+                  unsaved text, and a copy would skip the tab limit. Terminal tabs copy their kind and shell. */}
+              <Show when={!isContentKind(current().tab.kind)}>
+                <MenuItem disabled={!tabsReady() || tabsSaving()}
+                  onSelect={() => { setTabActions(undefined); void openTab({ kind: current().tab.kind, shell: current().tab.shell }); }}>
+                  {t("tabMenu.duplicate")}
+                </MenuItem>
+              </Show>
               <MenuSeparator />
               <MenuItem disabled={tabsSaving()} onSelect={() => { setTabActions(undefined); void closeTab(current().tab); }}>{t("tabMenu.close")}</MenuItem>
               <MenuItem disabled={tabsSaving() || tabsOf(props.task.id).length < 2}
@@ -790,7 +856,9 @@ export function TaskView(props: {
                         if (!hasTerminal(tab.kind)) {
                           return (
                             <div class="terminal-cell" hidden={!tabSelected()}>
-                              <TabSurfacePlaceholder kind={tab.kind} name={labels().get(tab.id)} />
+                              <TabContentHost taskId={id} root={cwd} tab={tab} tabKey={key} name={labels().get(tab.id)}
+                                shown={selected() && mode() !== "shell" && tabSelected()} theme={props.theme}
+                                onDirty={(dirty) => setTabDirty(tab.id, dirty)} />
                             </div>
                           );
                         }

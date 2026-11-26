@@ -142,6 +142,7 @@ fn register_scratch(
         title: title.to_owned(),
         prompt: request.prompt.clone(),
         agent: request.agent,
+        account_id: None,
         base: None,
         codex_conversation_id: None,
         compare_group: None,

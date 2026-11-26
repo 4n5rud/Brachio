@@ -64,6 +64,21 @@ pub fn task_open_tabs(
         .collect())
 }
 
+/// Checks what a new file or browser tab would point at and returns it in the form a stored tab
+/// keeps, so the window can find a tab already showing it and refuse a bad one before anything
+/// closes. The same rule as `task_add_tab`, kept in one place.
+#[tauri::command]
+pub fn task_tab_target(kind: String, target: String) -> Result<String, String> {
+    let kind = TabKind::parse(&kind).ok_or_else(|| "Unknown tab kind.".to_owned())?;
+    if !matches!(kind, TabKind::Browser | TabKind::File) {
+        return Err("Only a file or browser tab has a target.".to_owned());
+    }
+    checked_target(kind, None, Some(target), |_| false)?
+        .ok_or_else(|| "This tab needs a target.".to_owned())
+}
+
+/// Stores a new tab and returns its target as stored, which may be written differently from the
+/// one asked for (a cleaned path or a trimmed address).
 #[tauri::command]
 pub fn task_add_tab(
     database: State<'_, Database>,
@@ -72,7 +87,7 @@ pub fn task_add_tab(
     kind: String,
     shell: Option<String>,
     target: Option<String>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     if uuid::Uuid::parse_str(&tab_id).is_err() {
         return Err("Invalid tab ID.".to_owned());
     }
@@ -87,10 +102,12 @@ pub fn task_add_tab(
         &TaskTab {
             tab_id,
             kind,
-            target,
+            target: target.clone(),
         },
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    // A shell tab's target is its shell, which the window already knows as `shell`.
+    Ok(target.filter(|_| matches!(kind, TabKind::Browser | TabKind::File)))
 }
 
 /// The longest address a browser tab keeps.
@@ -198,7 +215,22 @@ pub fn task_reorder_tabs(
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_target, web_address, TabKind};
+    use super::{checked_target, task_tab_target, web_address, TabKind};
+
+    #[test]
+    fn a_content_target_comes_back_as_it_is_stored() {
+        assert_eq!(
+            task_tab_target("file".into(), "./docs/./a.md".into()),
+            Ok("docs/a.md".to_owned())
+        );
+        assert_eq!(
+            task_tab_target("browser".into(), "  https://a.dev/ ".into()),
+            Ok("https://a.dev/".to_owned())
+        );
+        assert!(task_tab_target("file".into(), "../x".into()).is_err());
+        assert!(task_tab_target("shell".into(), "zsh".into()).is_err());
+        assert!(task_tab_target("nope".into(), "a".into()).is_err());
+    }
 
     fn known(id: &str) -> bool {
         id == "zsh"

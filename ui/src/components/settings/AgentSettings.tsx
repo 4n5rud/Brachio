@@ -9,7 +9,8 @@ import { Button } from "../ui/Button";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { Notice } from "../ui/Notice";
 import { agentLimit, MAX_AGENT_LIMIT, updateAgentLimit } from "../../lib/agent-limit";
-import { Input } from "../ui/Input";
+import { Select, Input } from "../ui/Input";
+import { accountSelection, listAgentAccounts, type AgentAccount as SavedAgentAccount } from "../../lib/agent-accounts";
 import { SettingRow } from "./SettingRow";
 import { AgentCard, type AccountState, type UsageRow } from "./AgentCard";
 
@@ -43,26 +44,29 @@ function usageRow(window: QuotaWindow): UsageRow {
 }
 
 /** Reads one agent's account, and Codex usage, from the vendor CLI. */
-function AgentAccount(props: { agent: InstalledAgent }) {
+function AgentAccount(props: { agent: InstalledAgent; savedAccount?: SavedAgentAccount }) {
   const kind = props.agent.kind;
+  const accountId = () => props.savedAccount?.id ?? null;
+  const accountArgs = () => ({ kind, accountId: accountId() });
   const asAccount = (status: AuthStatus): AccountState => status.signedIn
     ? { state: "signedIn", account: status.account } : { state: "signedOut" };
-  const lastAccount = cachedAgentReading<AuthStatus>("agent_auth_status", { kind });
+  const lastAccount = cachedAgentReading<AuthStatus>("agent_auth_status", accountArgs());
   const [account, { refetch }] = createResource(async (_, info): Promise<AccountState> => {
     if (kind === "grok") return { state: "ownTerminal" };
     try {
-      return asAccount(await readAgentReading<AuthStatus>("agent_auth_status", { kind }, info.refetching === true));
+      return asAccount(await readAgentReading<AuthStatus>("agent_auth_status", accountArgs(), info.refetching === true));
     } catch (error) {
       return { state: "error", message: String(error) };
     }
   }, { initialValue: lastAccount ? asAccount(lastAccount) : undefined });
   const toRows = (quota: CodexQuota) => [quota.primary, quota.secondary]
     .filter((entry): entry is QuotaWindow => entry !== null).map(usageRow);
-  const lastQuota = cachedAgentReading<CodexQuota>("codex_usage");
+  const quotaArgs = () => ({ accountId: accountId() });
+  const lastQuota = cachedAgentReading<CodexQuota>("codex_usage", quotaArgs());
   const [usage, { refetch: refetchUsage }] = createResource(async (_, info): Promise<UsageRow[] | undefined> => {
     if (kind !== "codex") return undefined;
     try {
-      return toRows(await readAgentReading<CodexQuota>("codex_usage", {}, info.refetching === true));
+      return toRows(await readAgentReading<CodexQuota>("codex_usage", quotaArgs(), info.refetching === true));
     } catch {
       return undefined;
     }
@@ -94,7 +98,7 @@ function AgentAccount(props: { agent: InstalledAgent }) {
     invalidateAgentReadings();
     setSigningIn(signIn);
     try {
-      await invoke<boolean>("codex_auth_action", { action: signIn ? "sign_in" : "sign_out" });
+      await invoke<boolean>("codex_auth_action", { kind, accountId: accountId(), action: signIn ? "sign_in" : "sign_out" });
     } finally {
       setSigningIn(false);
       invalidateAgentReadings();
@@ -105,11 +109,80 @@ function AgentAccount(props: { agent: InstalledAgent }) {
     <AgentCard kind={kind} version={props.agent.version} path={props.agent.path}
       account={account() ?? { state: "checking" }}
       signingIn={signingIn()} busy={busy()} usage={account()?.state === "signedIn" ? usage() : undefined} error={error()}
+      usageUnavailable={kind === "claude_code" && accountId() ? t("settings.claudeAccountUsage") : undefined}
       onRefresh={() => void reload.run()}
       onSignIn={() => void changeAuth(true)} onSignOut={() => void changeAuth(false)}
-      onCancelSignIn={() => void invoke("codex_auth_cancel").catch((failure) => setError(String(failure)))}
-      onClaudeUsage={() => void run(() => invoke("open_claude_usage"))} />
+      onCancelSignIn={() => void invoke("codex_auth_cancel", { kind, accountId: accountId() }).catch((failure) => setError(String(failure)))}
+      onClaudeUsage={accountId() ? undefined : () => void run(() => invoke("open_claude_usage"))} />
   );
+}
+
+function AgentAccounts(props: { agent: InstalledAgent }) {
+  const kind = props.agent.kind;
+  const [accounts, { refetch }] = createResource(
+    () => kind !== "grok",
+    async () => listAgentAccounts(kind),
+  );
+  const accountChoices = () => accounts.error ? undefined : accounts();
+  const [selected, setSelected] = createSignal("builtin");
+  const [name, setName] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal("");
+  const current = () => accountChoices()?.find((account) => accountSelection(account) === selected());
+  const change = async (command: string) => {
+    if (busy()) return;
+    if (command === "agent_account_remove" && !(await confirmDialog({
+      title: t("settings.accountRemove"), body: t("settings.accountRemoveConfirm"),
+      confirmLabel: t("settings.accountRemove"), tone: "danger",
+    }))) return;
+    setBusy(true);
+    setError("");
+    try {
+      const adding = command === "agent_account_add";
+      const previousIds = new Set(accountChoices()?.map((account) => account.id));
+      await invoke(command, { agent: kind, accountId: current()?.id ?? null, name: name().trim() });
+      const refreshed = await refetch();
+      if (adding) {
+        const added = refreshed?.find((account) => !previousIds.has(account.id));
+        if (added) setSelected(accountSelection(added));
+      }
+      if (command === "agent_account_remove") setSelected("builtin");
+      setName("");
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <Show when={kind !== "grok"}>
+      <Select label={t("settings.account")} value={selected()} disabled={busy()}
+        onChange={(event) => { setSelected(event.currentTarget.value); setName(""); }}>
+        <For each={accountChoices() ?? []}>{(account) =>
+          <option value={accountSelection(account)}>{account.id === null ? t("settings.accountBuiltin") : account.name}{account.isDefault ? ` · ${t("settings.accountDefault")}` : ""}</option>
+        }</For>
+      </Select>
+      <Show when={accounts.error}>
+        <p class="form-error" role="alert">{String(accounts.error)}</p>
+        <Button size="sm" onClick={() => void refetch()}>{t("settings.agentRefresh")}</Button>
+      </Show>
+      <Input label={t("settings.accountName")} value={name()} disabled={busy()}
+        onInput={(event) => setName(event.currentTarget.value)} />
+      <div class="agent-card-actions">
+        <Button size="sm" disabled={busy() || !name().trim()} onClick={() => void change("agent_account_add")}>{t("settings.accountAdd")}</Button>
+        <Show when={current()?.id}>
+          <Button size="sm" disabled={busy() || !name().trim()} onClick={() => void change("agent_account_rename")}>{t("settings.accountRename")}</Button>
+          <Button size="sm" disabled={busy()} onClick={() => void change("agent_account_remove")}>{t("settings.accountRemove")}</Button>
+        </Show>
+        <Button size="sm" disabled={busy() || !current() || current()?.isDefault}
+          onClick={() => void change("agent_account_set_default")}>{t("settings.accountMakeDefault")}</Button>
+      </div>
+      <Show when={error()}><p class="form-error" role="alert">{error()}</p></Show>
+    </Show>
+    <Show when={kind === "grok" ? { id: null, name: "", isDefault: true } : current()} keyed>{(account) =>
+      <AgentAccount agent={props.agent} savedAccount={account} />
+    }</Show>
+  </>;
 }
 
 /** The list around the cards: found, none found, or could not be read. */
@@ -148,7 +221,7 @@ export function AgentSettings() {
           value={agentLimit() === 0 ? "" : String(agentLimit())} onChange={(event) => updateAgentLimit(event.currentTarget.value)} />
       </SettingRow>
       <AgentList agents={agents.error ? [] : agents()} error={agents.error ? String(agents.error) : undefined}
-        onRefresh={() => void refetch(true)} card={(agent) => <AgentAccount agent={agent} />} />
+        onRefresh={() => void refetch()} card={(agent) => <AgentAccounts agent={agent} />} />
     </>
   );
 }

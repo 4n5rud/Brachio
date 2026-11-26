@@ -39,6 +39,14 @@ pub enum GitError {
         /// The repository folder.
         path: PathBuf,
     },
+    /// The selected branch has no commit from which to create a worktree.
+    #[error("The base branch {branch:?} needs an initial commit before a task can be created. Make the first commit in {}, then try again.", .path.display())]
+    InitialCommitRequired {
+        /// The repository folder.
+        path: PathBuf,
+        /// The unborn branch selected as the task base.
+        branch: String,
+    },
     /// git succeeded but printed something that cannot be trusted.
     #[error("{0}")]
     UnexpectedOutput(String),

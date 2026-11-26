@@ -32,6 +32,7 @@ export interface AgentCardProps {
   busy?: boolean;
   /** Codex only; an empty list means the account reports none. */
   usage?: readonly UsageRow[];
+  usageUnavailable?: string;
   error?: string;
   onRefresh: () => void;
   onSignIn?: () => void;
@@ -75,9 +76,8 @@ export function AgentCard(props: AgentCardProps) {
       <Show when={accountError()}>{(message) => <p class="form-error" role="alert">{message()}</p>}</Show>
       <Show when={props.account.state === "ownTerminal"}><p class="form-hint">{t("settings.agentOwnTerminal")}</p></Show>
       <Show when={props.signingIn}><p class="form-hint" role="status">{t("settings.agentLoginPending")}</p></Show>
-      <Show when={props.kind === "claude_code"}><p class="form-hint">{t("settings.claudeSwitchAccount")}</p></Show>
       <Show when={props.usage}>{(rows) => (
-        <Show when={rows().length > 0} fallback={<p class="form-hint">{t("settings.agentUsageUnavailable")}</p>}>
+        <Show when={rows().length > 0} fallback={<p class="form-hint">{props.usageUnavailable ?? t("settings.agentUsageUnavailable")}</p>}>
           <div class="usage-list">
             <For each={rows()}>{(row) => (
               <div class="usage-row">
@@ -93,17 +93,17 @@ export function AgentCard(props: AgentCardProps) {
       )}</Show>
       <Show when={props.error}><p class="form-error" role="alert">{props.error}</p></Show>
       <div class="agent-card-actions">
-        <Show when={props.kind === "claude_code"}>
+        <Show when={props.kind === "claude_code" && props.onClaudeUsage}>
           <Button size="sm" disabled={props.busy} onClick={() => props.onClaudeUsage?.()}>{t("settings.claudeUsage")}</Button>
         </Show>
-        <Show when={props.kind === "codex" && props.account.state === "signedOut"}>
+        <Show when={props.kind !== "grok" && props.account.state === "signedOut"}>
           <Button size="sm" loading={props.signingIn} loadingLabel={t("settings.agentSigningIn")} disabled={props.busy && !props.signingIn}
             onClick={() => props.onSignIn?.()}>{t("settings.agentSignIn")}</Button>
         </Show>
-        <Show when={props.kind === "codex" && props.signingIn}>
+        <Show when={props.kind !== "grok" && props.signingIn}>
           <Button size="sm" onClick={() => props.onCancelSignIn?.()}>{t("settings.agentCancelSignIn")}</Button>
         </Show>
-        <Show when={props.kind === "codex" && props.account.state === "signedIn"}>
+        <Show when={props.kind !== "grok" && props.account.state === "signedIn"}>
           <Button size="sm" disabled={props.busy} onClick={() => props.onSignOut?.()}>{t("settings.agentSignOut")}</Button>
         </Show>
         <Button size="sm" variant="ghost" busy={checking()} disabled={props.busy} onClick={() => props.onRefresh()}>{t("settings.agentRefresh")}</Button>

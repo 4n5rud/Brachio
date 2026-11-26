@@ -941,6 +941,7 @@ export function App() {
       codexConversationId: input.codexConversationId ?? null,
       compareGroup: compareGroup ?? null,
       profile: input.profile ?? null,
+      accountId: agent === input.agent ? input.accountId ?? null : null,
     }, input.requestId && `${input.requestId}:${agent}`);
     createdThisRun.add(record.id);
     const setupCopyError = record.setupCopyError;

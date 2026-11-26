@@ -1,3 +1,4 @@
+import { accountSelection, listAgentAccounts } from "../lib/agent-accounts";
 import { Button } from "./ui/Button";
 import { For, Show, createEffect, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import { confirmDialog } from "./ui/ConfirmDialog";
@@ -40,6 +41,7 @@ export interface NewTaskInput {
   compare?: boolean;
   /** A profile from the project's `brachio.toml`. */
   profile?: string;
+  accountId?: string;
   /** Create the task and start its agent without switching to it. */
   background?: boolean;
   /** One per dialog, so a repeated submit returns the task the first one created. */
@@ -80,10 +82,21 @@ export function NewTaskDialog(props: {
   const [prompt, setPrompt] = createSignal("");
   const [title, setTitle] = createSignal("");
   const [agent, setAgent] = createSignal<AgentKind>("claude");
+  const [accountId, setAccountId] = createSignal("builtin");
+  const [accounts, { refetch: refetchAccounts }] = createResource(
+    () => agent() === "grok" ? false : CORE_AGENT[agent()],
+    (kind) => listAgentAccounts(kind),
+  );
+  const accountChoices = () => accounts.error ? undefined : accounts();
+  createEffect(() => {
+    const choices = accountChoices();
+    if (!accounts.loading) setAccountId(accountSelection(choices?.find((account) => account.isDefault) ?? { id: null, name: "", isDefault: true }));
+  });
   const [base, setBase] = createSignal("");
   const [projectText, setProjectText] = createSignal(props.repoName);
   const [parentTaskId, setParentTaskId] = createSignal("");
   const [conversationId, setConversationId] = createSignal("");
+  createEffect(() => { accountId(); setConversationId(""); });
   const [compare, setCompare] = createSignal(false);
   const [profile, setProfile] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -112,7 +125,7 @@ export function NewTaskDialog(props: {
   );
   const [profiles] = createResource(() => props.repoId, (id) => repoProfiles(id).catch(() => []));
   const profileChoices = () => (compare() ? [] : profilesFor(profiles() ?? [], agent()));
-  const conversationChoices = () => (agent() === "codex" && !compare() ? conversations() ?? [] : []);
+  const conversationChoices = () => (agent() === "codex" && accountId() === "builtin" && !compare() ? conversations() ?? [] : []);
   const agentInfo = (kind: AgentKind) => {
     const found = installed();
     if (!found) return { missing: false, version: null };
@@ -168,7 +181,8 @@ export function NewTaskDialog(props: {
     }));
 
   const finalTitle = () => title().trim() || titleFromPrompt(prompt());
-  const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "";
+  const canCreate = () => !busy() && !confirmingClose() && finalTitle() !== "" &&
+    (agent() === "grok" || (!accounts.loading && !accounts.error));
   const requestClose = async () => {
     if (busy() || confirmingClose()) return;
     if (!prompt().trim() && !title().trim() && !base().trim() && agent() === "claude" && !conversationId() && !compare()) {
@@ -206,6 +220,7 @@ export function NewTaskDialog(props: {
         codexConversationId: agent() === "codex" && conversationId() && !comparing() ? conversationId() : undefined,
         compare: comparing() || undefined, requestId,
         background: background || undefined,
+        accountId: agent() === "grok" ? undefined : accountId(),
         profile: profileChoices().some((item) => item.name === profile()) ? profile() : undefined });
     } catch (failure) {
       setError(String(failure));
@@ -330,6 +345,15 @@ export function NewTaskDialog(props: {
           <p class="form-hint">{t("newTask.agentOwnTerminal").replace("{name}", () => AGENT_NAME[agent()])}</p>
         </Show>
       </fieldset>
+      <Show when={accounts.error}>
+        <p class="form-error" role="alert">{String(accounts.error)}</p>
+        <Button size="sm" onClick={() => void refetchAccounts()}>{t("settings.agentRefresh")}</Button>
+      </Show>
+      <Show when={(accountChoices()?.length ?? 0) > 1}>
+        <Select label={t("newTask.agentAccount").replace("{agent}", AGENT_NAME[agent()])} value={accountId()} onChange={(event) => setAccountId(event.currentTarget.value)}>
+          <For each={accountChoices() ?? []}>{(account) => <option value={accountSelection(account)}>{account.id === null ? t("settings.accountBuiltin") : account.name}</option>}</For>
+        </Select>
+      </Show>
       <Show when={profileChoices().length > 0}>
         <Select label={t("newTask.profile")} hint={t("newTask.profileHint")} value={profile()}
           onChange={(event) => setProfile(event.currentTarget.value)}>
@@ -357,7 +381,6 @@ export function NewTaskDialog(props: {
           <div class="create-failed" role="alert">
             <strong>{t("newTask.createFailed")}</strong>
             <pre class="create-log">{message()}</pre>
-            <p class="form-hint">{t("newTask.createFailedNote")}</p>
           </div>
         )}
       </Show>

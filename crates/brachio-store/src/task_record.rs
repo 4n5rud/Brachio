@@ -156,6 +156,20 @@ impl TaskRecord {
         max_open_children: i64,
         after: &[String],
     ) -> Result<Self, ChildInsertError> {
+        Self::insert_child_after_with_account(connection, task, max_open_children, after, None)
+    }
+
+    /// Inserts a child and its selected account in the same transaction.
+    ///
+    /// # Errors
+    /// Fails when the child or selected account is invalid or the database fails.
+    pub fn insert_child_after_with_account(
+        connection: &mut Connection,
+        task: &NewTask<'_>,
+        max_open_children: i64,
+        after: &[String],
+        account_id: Option<&str>,
+    ) -> Result<Self, ChildInsertError> {
         let parent_id = task.parent_task_id.ok_or(ChildInsertError::ParentClosed)?;
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -185,6 +199,16 @@ impl TaskRecord {
         }
         check_predecessors(&transaction, parent_id, after)?;
         let record = Self::insert(&transaction, task)?;
+        if let Some(id) = account_id {
+            let account = crate::agent_account(&transaction, id)?;
+            if Some(account.agent.as_str()) != task.agent_kind {
+                return Err(StoreError::Invalid(
+                    "The account belongs to another agent.".to_owned(),
+                )
+                .into());
+            }
+            crate::set_task_agent_account(&transaction, task.id, id)?;
+        }
         record_activity(
             &transaction,
             parent_id,
@@ -723,6 +747,39 @@ mod tests {
             TaskRecord::insert(&connection, &child(&id, "lead")).expect("insert child");
         }
         connection
+    }
+
+    #[test]
+    fn a_child_account_is_saved_atomically_and_invalid_accounts_roll_back() {
+        let mut connection = lead_with_children(0);
+        crate::add_agent_account(&connection, "work", "codex", "Work", 1).expect("account");
+        let mut selected = child("selected", "lead");
+        selected.agent_kind = Some("codex");
+        TaskRecord::insert_child_after_with_account(
+            &mut connection,
+            &selected,
+            4,
+            &[],
+            Some("work"),
+        )
+        .expect("child");
+        assert_eq!(
+            crate::task_agent_account(&connection, "selected")
+                .expect("saved")
+                .as_deref(),
+            Some("work"),
+        );
+        let mut missing = child("missing", "lead");
+        missing.agent_kind = Some("codex");
+        assert!(TaskRecord::insert_child_after_with_account(
+            &mut connection,
+            &missing,
+            4,
+            &[],
+            Some("gone"),
+        )
+        .is_err());
+        assert!(TaskRecord::get(&connection, "missing").is_err());
     }
 
     #[test]
