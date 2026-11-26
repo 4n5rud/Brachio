@@ -49,6 +49,9 @@ export interface FileCheck {
   version?: FileVersion;
 }
 
-/** Compares the file with the version a tab last read; the backend hashes only when size or time differ. */
-export const checkEditableFile = (id: string, path: string, expected: FileVersion) =>
-  invoke<FileCheck>("task_file_check", { id, path, expected });
+/**
+ * Compares the file with the version a tab last read. The backend hashes it when size or time
+ * differ, when it is small, or when `verify` is set, so a same-length edit within one clock tick is seen.
+ */
+export const checkEditableFile = (id: string, path: string, expected: FileVersion, verify = false) =>
+  invoke<FileCheck>("task_file_check", { id, path, expected, verify });

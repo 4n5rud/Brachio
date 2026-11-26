@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createOpenFileWatch } from "./open-file-watch";
+import { createOpenFileWatch, FILE_VERIFY_EVERY } from "./open-file-watch";
 import type { FileCheck, FileVersion } from "./file-edit";
 
 const v = (hash: string, modifiedMs = 1): FileVersion => ({ size: 1, modifiedMs, hash });
 
 function setup(answer: (expected: FileVersion) => FileCheck) {
-  const check = vi.fn(async (_id: string, _path: string, expected: FileVersion) => answer(expected));
+  const check = vi.fn(async (_id: string, _path: string, expected: FileVersion, _verify?: boolean) => answer(expected));
   const stop = vi.fn();
   const interval = vi.fn((_callback: () => void, _ms: number) => stop);
   return { check, interval, stop, watch: createOpenFileWatch({ check, interval }) };
@@ -23,7 +23,7 @@ describe("open file watch", () => {
     watch.recheck("t1");
     await flush();
     expect(check).toHaveBeenCalledTimes(1);
-    expect(check).toHaveBeenCalledWith("t1", "a.txt", v("a"));
+    expect(check).toHaveBeenCalledWith("t1", "a.txt", v("a"), true);
     expect(onChange).toHaveBeenCalledWith(changed);
   });
 
@@ -49,6 +49,24 @@ describe("open file watch", () => {
     expect(stop).not.toHaveBeenCalled();
     stopB();
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for a full hash on agent events and on every few interval checks", async () => {
+    const { watch, interval, check } = setup(() => ({ status: "unchanged" }));
+    watch.watch("t1", "a", v("a"), vi.fn());
+    watch.recheck("t1");
+    await flush();
+    expect(check.mock.calls[0]?.[3]).toBe(true);
+    const tick = interval.mock.calls[0]?.[0];
+    const verified: boolean[] = [];
+    for (let i = 0; i < FILE_VERIFY_EVERY * 2; i += 1) {
+      tick?.();
+      await flush();
+      verified.push(check.mock.calls.at(-1)?.[3] === true);
+    }
+    expect(verified.filter(Boolean)).toHaveLength(2);
+    expect(verified[FILE_VERIFY_EVERY - 1]).toBe(true);
+    expect(verified[0]).toBe(false);
   });
 
   it("checks every watched file when the visible-only interval fires", async () => {
