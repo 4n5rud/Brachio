@@ -6,6 +6,8 @@
 
 use std::collections::HashSet;
 use std::io::{self, BufRead, Read, Write};
+use std::sync::{mpsc, Mutex, MutexGuard, PoisonError};
+use std::thread;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -207,12 +209,18 @@ fn tools() -> Value {
     ])
 }
 
-/// `Err` is a protocol error (unknown tool or invalid arguments); `Ok(Err)` is a tool error.
-fn call_tool(
-    name: &str,
-    arguments: Value,
-    backend: &mut impl Backend,
-) -> Result<Result<Value, String>, &'static str> {
+/// A tool call whose arguments were checked, ready for the backend.
+enum Tool {
+    ListChildren,
+    Spawn(SpawnTask),
+    Result(u64),
+    Review(ReviewRequest),
+    Gate(DecisionGate),
+}
+
+/// Checks a tool call without reaching the backend. `Err` is a protocol error (unknown tool or
+/// invalid arguments).
+fn parse_tool(name: &str, arguments: Value) -> Result<Tool, &'static str> {
     let arguments = if arguments.is_null() {
         json!({})
     } else {
@@ -223,7 +231,7 @@ fn call_tool(
             if arguments.as_object().is_none_or(|map| !map.is_empty()) {
                 return Err(BAD_ARGUMENTS);
             }
-            backend.list_children()
+            Tool::ListChildren
         }
         "spawn_task" => {
             let request: SpawnTask =
@@ -244,7 +252,7 @@ fn call_tool(
             {
                 return Err(BAD_ARGUMENTS);
             }
-            backend.spawn_task(request)
+            Tool::Spawn(request)
         }
         "get_task_result" => {
             let ResultArguments { wait_secs } =
@@ -252,7 +260,7 @@ fn call_tool(
             if wait_secs > MAX_WAIT_SECS {
                 return Err(BAD_ARGUMENTS);
             }
-            backend.task_result(wait_secs)
+            Tool::Result(wait_secs)
         }
         "request_review" => {
             let request: ReviewRequest =
@@ -263,7 +271,7 @@ fn call_tool(
             {
                 return Err(BAD_ARGUMENTS);
             }
-            backend.request_review(request)
+            Tool::Review(request)
         }
         "raise_decision_gate" => {
             let request: DecisionGate =
@@ -275,41 +283,82 @@ fn call_tool(
             {
                 return Err(BAD_ARGUMENTS);
             }
-            backend.raise_decision_gate(request)
+            Tool::Gate(request)
         }
         _ => return Err("Unknown tool"),
     })
 }
 
+impl Tool {
+    /// Runs the call; `Err` is a tool error the agent can read.
+    fn run(self, backend: &mut impl Backend) -> Result<Value, String> {
+        match self {
+            Self::ListChildren => backend.list_children(),
+            Self::Spawn(request) => backend.spawn_task(request),
+            Self::Result(wait_secs) => backend.task_result(wait_secs),
+            Self::Review(request) => backend.request_review(request),
+            Self::Gate(request) => backend.raise_decision_gate(request),
+        }
+    }
+}
+
+fn tool_reply(id: &Value, outcome: Result<Value, String>) -> Value {
+    let result = match outcome {
+        Ok(value) => json!({"content":[{"type":"text","text":value.to_string()}]}),
+        Err(message) => json!({"isError":true,"content":[{"type":"text","text":message}]}),
+    };
+    json!({"jsonrpc":"2.0","id":id,"result":result})
+}
+
+/// What one message asks of the server.
+enum Step {
+    /// Answer now.
+    Reply(Value),
+    /// Run a tool; it may take minutes, so it runs apart from reading.
+    Call(Value, Tool),
+    /// `notifications/cancelled` for this request id.
+    Cancel(Value),
+    /// A notification that needs no answer.
+    Nothing,
+}
+
 impl Session {
-    fn respond(&mut self, request: &Value, backend: &mut impl Backend) -> Option<Value> {
+    fn respond(&mut self, request: &Value) -> Step {
         let id = request.get("id");
         let method = request.get("method").and_then(Value::as_str);
-        if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") || method.is_none() {
-            return Some(error(&Value::Null, -32600, "Invalid request"));
+        if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+            return Step::Reply(error(&Value::Null, -32600, "Invalid request"));
         }
-        let method = method?;
+        let Some(method) = method else {
+            return Step::Reply(error(&Value::Null, -32600, "Invalid request"));
+        };
+        let params = request.get("params").unwrap_or(&Value::Null);
         let Some(id) = id else {
-            if method == "notifications/initialized" && self.version.is_some() {
-                self.ready = true;
+            match method {
+                "notifications/initialized" if self.version.is_some() => self.ready = true,
+                "notifications/cancelled" => {
+                    if let Some(cancelled) = params.get("requestId") {
+                        return Step::Cancel(cancelled.clone());
+                    }
+                }
+                _ => {}
             }
-            return None;
+            return Step::Nothing;
         };
         if id.as_str().is_none_or(|text| text.len() > 256) && !id.is_i64() && !id.is_u64() {
-            return Some(error(&Value::Null, -32600, "Invalid request ID"));
+            return Step::Reply(error(&Value::Null, -32600, "Invalid request ID"));
         }
         if !self.ids.insert(id.clone()) {
-            return Some(error(id, -32600, "Duplicate request ID"));
+            return Step::Reply(error(id, -32600, "Duplicate request ID"));
         }
-        let params = request.get("params").unwrap_or(&Value::Null);
         let result = match method {
             "ping" => json!({}),
             "initialize" if self.version.is_none() => {
                 let Ok(init) = serde_json::from_value::<Initialize>(params.clone()) else {
-                    return Some(error(id, -32602, "Invalid initialize parameters"));
+                    return Step::Reply(error(id, -32602, "Invalid initialize parameters"));
                 };
                 if init.client_info.name.is_empty() || init.client_info.version.is_empty() {
-                    return Some(error(id, -32602, "Invalid client info"));
+                    return Step::Reply(error(id, -32602, "Invalid client info"));
                 }
                 let _client_capabilities = init.capabilities;
                 let version = if VERSIONS.contains(&init.protocol_version.as_str()) {
@@ -323,42 +372,100 @@ impl Session {
                     "serverInfo":{"name":"brachio","version":env!("CARGO_PKG_VERSION")}
                 })
             }
-            "initialize" => return Some(error(id, -32600, "Already initialized")),
-            _ if !self.ready => return Some(error(id, -32002, "Server not initialized")),
+            "initialize" => return Step::Reply(error(id, -32600, "Already initialized")),
+            _ if !self.ready => return Step::Reply(error(id, -32002, "Server not initialized")),
             "tools/list" => json!({"tools":tools()}),
             "tools/call" => {
                 let Ok(call) = serde_json::from_value::<ToolCall>(params.clone()) else {
-                    return Some(error(id, -32602, BAD_ARGUMENTS));
+                    return Step::Reply(error(id, -32602, BAD_ARGUMENTS));
                 };
-                match call_tool(&call.name, call.arguments, backend) {
-                    Ok(Ok(value)) => json!({"content":[{"type":"text","text":value.to_string()}]}),
-                    Ok(Err(message)) => {
-                        json!({"isError":true,"content":[{"type":"text","text":message}]})
-                    }
-                    Err(message) => return Some(error(id, -32602, message)),
-                }
+                return match parse_tool(&call.name, call.arguments) {
+                    Ok(tool) => Step::Call(id.clone(), tool),
+                    Err(message) => Step::Reply(error(id, -32602, message)),
+                };
             }
-            _ => return Some(error(id, -32601, "Method not found")),
+            _ => return Step::Reply(error(id, -32601, "Method not found")),
         };
-        Some(json!({"jsonrpc":"2.0","id":id,"result":result}))
+        Step::Reply(json!({"jsonrpc":"2.0","id":id,"result":result}))
     }
+}
+
+/// Tool calls handed to the backend and not answered yet, and which of them were cancelled.
+#[derive(Default)]
+struct InFlight {
+    waiting: HashSet<Value>,
+    cancelled: HashSet<Value>,
+}
+
+fn lock(in_flight: &Mutex<InFlight>) -> MutexGuard<'_, InFlight> {
+    in_flight.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Serve MCP requests until EOF, calling tools through the caller's existing identity and
 /// approval flow. Stdout is reserved for protocol messages.
 ///
+/// Reading and answering control messages (`ping`, `initialize`, `tools/list`, cancellation)
+/// never waits for a tool call: tool calls run one at a time on their own thread, in the order
+/// they arrived. `notifications/cancelled` for a call that has not started removes it, so the
+/// backend is never asked. A call that is already running is not interrupted, because the
+/// backend may be waiting for the user's approval and an approved effect cannot be undone; its
+/// result is dropped instead of sent, as MCP asks. At EOF, calls already received still run
+/// before this returns.
+///
 /// # Errors
 /// Returns an I/O error if stdin or stdout fails.
 pub fn serve(
     mut input: impl BufRead,
-    mut output: impl Write,
-    mut backend: impl Backend,
+    output: impl Write + Send,
+    mut backend: impl Backend + Send,
+) -> io::Result<()> {
+    let in_flight = Mutex::new(InFlight::default());
+    let (replies, outbox) = mpsc::channel::<Value>();
+    let (jobs, queue) = mpsc::channel::<(Value, Tool)>();
+    thread::scope(|scope| {
+        let writer = scope.spawn(move || write_replies(output, &outbox));
+        let tool_replies = replies.clone();
+        let in_flight = &in_flight;
+        scope.spawn(move || {
+            for (id, tool) in queue {
+                if lock(in_flight).cancelled.remove(&id) {
+                    lock(in_flight).waiting.remove(&id);
+                    continue;
+                }
+                let outcome = tool.run(&mut backend);
+                let dropped = {
+                    let mut state = lock(in_flight);
+                    state.waiting.remove(&id);
+                    state.cancelled.remove(&id)
+                };
+                if !dropped && tool_replies.send(tool_reply(&id, outcome)).is_err() {
+                    return;
+                }
+            }
+        });
+        let read = read_requests(&mut input, &replies, &jobs, in_flight);
+        drop(jobs);
+        drop(replies);
+        let written = writer
+            .join()
+            .unwrap_or_else(|_| Err(io::Error::other("the MCP reply writer stopped")));
+        read.and(written)
+    })
+}
+
+/// Reads messages until EOF or until replies can no longer be written.
+fn read_requests(
+    input: &mut impl BufRead,
+    replies: &mpsc::Sender<Value>,
+    jobs: &mpsc::Sender<(Value, Tool)>,
+    in_flight: &Mutex<InFlight>,
 ) -> io::Result<()> {
     let mut session = Session::default();
     let mut line = Vec::new();
     loop {
         line.clear();
-        if (&mut input)
+        if input
+            .by_ref()
             .take((MAX_LINE + 1) as u64)
             .read_until(b'\n', &mut line)?
             == 0
@@ -366,20 +473,39 @@ pub fn serve(
             return Ok(());
         }
         if line.len() > MAX_LINE || session.ids.len() >= MAX_REQUEST_IDS {
-            write_response(
-                &mut output,
-                &error(&Value::Null, -32600, "Session limit exceeded"),
-            )?;
+            let _ = replies.send(error(&Value::Null, -32600, "Session limit exceeded"));
             return Ok(());
         }
-        let reply = match serde_json::from_slice(&line) {
-            Ok(request) => session.respond(&request, &mut backend),
-            Err(_) => Some(error(&Value::Null, -32700, "Parse error")),
+        let step = match serde_json::from_slice(&line) {
+            Ok(request) => session.respond(&request),
+            Err(_) => Step::Reply(error(&Value::Null, -32700, "Parse error")),
         };
-        if let Some(reply) = reply {
-            write_response(&mut output, &reply)?;
+        let open = match step {
+            Step::Reply(reply) => replies.send(reply).is_ok(),
+            Step::Call(id, tool) => {
+                lock(in_flight).waiting.insert(id.clone());
+                jobs.send((id, tool)).is_ok()
+            }
+            Step::Cancel(id) => {
+                let mut state = lock(in_flight);
+                if state.waiting.contains(&id) {
+                    state.cancelled.insert(id);
+                }
+                true
+            }
+            Step::Nothing => true,
+        };
+        if !open {
+            return Ok(());
         }
     }
+}
+
+fn write_replies(mut output: impl Write, outbox: &mpsc::Receiver<Value>) -> io::Result<()> {
+    for reply in outbox {
+        write_response(&mut output, &reply)?;
+    }
+    Ok(())
 }
 
 fn write_response(output: &mut impl Write, reply: &Value) -> io::Result<()> {
@@ -391,6 +517,8 @@ fn write_response(output: &mut impl Write, reply: &Value) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     #[derive(Default)]
     struct Recorder {
@@ -546,5 +674,194 @@ mod tests {
         let reply: Value = serde_json::from_slice(&output).expect("JSON reply");
         assert_eq!(reply["error"]["code"], -32600);
         assert!(recorder.calls.is_empty());
+    }
+
+    /// Input the test writes line by line while `serve` runs.
+    struct Pipe {
+        lines: mpsc::Receiver<Vec<u8>>,
+        buffer: Vec<u8>,
+        at: usize,
+    }
+
+    impl Read for Pipe {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            let available = self.fill_buf()?;
+            let count = available.len().min(out.len());
+            out[..count].copy_from_slice(&available[..count]);
+            self.consume(count);
+            Ok(count)
+        }
+    }
+
+    impl BufRead for Pipe {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            if self.at == self.buffer.len() {
+                match self.lines.recv() {
+                    Ok(line) => {
+                        self.buffer = line;
+                        self.at = 0;
+                    }
+                    Err(_) => return Ok(&[]),
+                }
+            }
+            Ok(&self.buffer[self.at..])
+        }
+        fn consume(&mut self, amount: usize) {
+            self.at += amount;
+        }
+    }
+
+    /// Output that hands each reply to the test as soon as it is written.
+    struct Replies {
+        sink: mpsc::Sender<Value>,
+        pending: Vec<u8>,
+    }
+
+    impl Write for Replies {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.pending.extend_from_slice(bytes);
+            while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = self.pending.drain(..=end).collect();
+                let reply = serde_json::from_slice(&line).map_err(io::Error::other)?;
+                let _ = self.sink.send(reply);
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A backend whose `spawn_task` waits until the test releases it, as a pending approval does.
+    struct Blocking {
+        started: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+        calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl Blocking {
+        fn record(&self, call: &str) {
+            self.calls.lock().expect("calls").push(call.to_owned());
+        }
+    }
+
+    impl Backend for Blocking {
+        fn list_children(&mut self) -> Result<Value, String> {
+            self.record("list");
+            Ok(json!([]))
+        }
+        fn spawn_task(&mut self, request: SpawnTask) -> Result<Value, String> {
+            self.record(&format!("spawn {}", request.title));
+            let _ = self.started.send(());
+            let _ = self.release.recv();
+            Ok(json!({"key":"child"}))
+        }
+        fn task_result(&mut self, _wait_secs: u64) -> Result<Value, String> {
+            self.record("result");
+            Ok(json!({}))
+        }
+        fn request_review(&mut self, _request: ReviewRequest) -> Result<Value, String> {
+            self.record("review");
+            Ok(json!({}))
+        }
+        fn raise_decision_gate(&mut self, _request: DecisionGate) -> Result<Value, String> {
+            self.record("gate");
+            Ok(json!({}))
+        }
+    }
+
+    const PATIENCE: Duration = Duration::from_secs(10);
+
+    fn reply_to(replies: &mpsc::Receiver<Value>, id: u32) -> Value {
+        let reply = replies
+            .recv_timeout(PATIENCE)
+            .unwrap_or_else(|_| panic!("no reply to request {id} while a tool call is pending"));
+        assert_eq!(reply["id"], id, "{reply}");
+        reply
+    }
+
+    #[test]
+    fn a_pending_tool_call_still_answers_ping_and_honors_cancellation() {
+        let (send_line, lines) = mpsc::channel::<Vec<u8>>();
+        let (sink, replies) = mpsc::channel();
+        let (started, backend_started) = mpsc::channel();
+        let (release_backend, release) = mpsc::channel();
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let backend = Blocking {
+            started,
+            release,
+            calls: calls.clone(),
+        };
+        let server = std::thread::spawn(move || {
+            let input = Pipe {
+                lines,
+                buffer: Vec::new(),
+                at: 0,
+            };
+            let output = Replies {
+                sink,
+                pending: Vec::new(),
+            };
+            serve(input, output, backend)
+        });
+        let send = |text: String| send_line.send(text.into_bytes()).expect("send line");
+        let ping = |id: u32| format!("{}\n", json!({"jsonrpc":"2.0","id":id,"method":"ping"}));
+        let cancel = |id: u32| {
+            format!(
+                "{}\n",
+                json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":id,"reason":"test"}})
+            )
+        };
+
+        send(HANDSHAKE.to_owned());
+        reply_to(&replies, 1);
+        send(call(
+            2,
+            "spawn_task",
+            &json!({"title":"Docs","prompt":"Write"}),
+        ));
+        backend_started
+            .recv_timeout(PATIENCE)
+            .expect("the tool call reached the backend");
+
+        send(ping(3));
+        assert_eq!(reply_to(&replies, 3)["result"], json!({}));
+
+        // A call queued behind the pending one, cancelled before it starts, never runs.
+        send(call(4, "list_child_tasks", &json!({})));
+        send(cancel(4));
+        // The running call cannot be withdrawn; its result is dropped instead of sent.
+        send(cancel(2));
+        send(ping(5));
+        reply_to(&replies, 5);
+
+        release_backend.send(()).expect("release");
+        send(call(6, "get_task_result", &json!({})));
+        reply_to(&replies, 6);
+        drop(send_line);
+        server.join().expect("server thread").expect("serve");
+
+        assert!(
+            replies.try_recv().is_err(),
+            "a cancelled request was answered"
+        );
+        assert_eq!(*calls.lock().expect("calls"), ["spawn Docs", "result"]);
+    }
+
+    #[test]
+    fn cancelling_an_unknown_request_changes_nothing() {
+        let requests = [
+            call(2, "list_child_tasks", &json!({})),
+            format!(
+                "{}\n",
+                json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":99}})
+            ),
+            call(3, "list_child_tasks", &json!({})),
+        ]
+        .concat();
+        let (replies, recorder) = run(&requests);
+        let ids: Vec<&Value> = replies.iter().map(|reply| &reply["id"]).collect();
+        assert_eq!(ids, [&json!(2), &json!(3)]);
+        assert_eq!(recorder.calls, ["list", "list"]);
     }
 }
