@@ -23,9 +23,8 @@ use crate::workspace::Database;
 const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_millis(500);
 const RUNTIME_PIDS_TTL: Duration = Duration::from_secs(30);
 
-#[derive(Default)]
 pub struct ResourceMonitor {
-    system: Mutex<System>,
+    system: Mutex<Result<System, String>>,
     runtime_pids: Mutex<Option<(Instant, Vec<Pid>)>>,
 }
 
@@ -80,6 +79,15 @@ async fn answering_runtime_pids() -> Vec<Pid> {
     pids
 }
 
+impl Default for ResourceMonitor {
+    fn default() -> Self {
+        Self {
+            system: Mutex::new(System::new().map_err(|error| error.to_string())),
+            runtime_pids: Mutex::new(None),
+        }
+    }
+}
+
 impl ResourceMonitor {
     async fn runtime_pids(&self) -> Vec<Pid> {
         let cached = self.runtime_pids.lock().ok().and_then(|cache| {
@@ -109,6 +117,9 @@ pub async fn resource_usage(
         .system
         .lock()
         .map_err(|_| "resource monitor is poisoned".to_string())?;
+    let system = system
+        .as_mut()
+        .map_err(|error| format!("could not initialize resource monitoring: {error}"))?;
     system.refresh_processes(ProcessesToUpdate::All, true);
     let processes: Vec<ProcessRow> = system
         .processes()
@@ -184,6 +195,9 @@ pub async fn task_processes(
         .system
         .lock()
         .map_err(|_| "resource monitor is poisoned".to_string())?;
+    let system = system
+        .as_mut()
+        .map_err(|error| format!("could not initialize resource monitoring: {error}"))?;
     system.refresh_processes(ProcessesToUpdate::All, true);
     let rows: Vec<ProcessRow> = system
         .processes()
@@ -228,6 +242,9 @@ pub async fn task_process_kill(
         .system
         .lock()
         .map_err(|_| "resource monitor is poisoned".to_string())?;
+    let system = system
+        .as_mut()
+        .map_err(|error| format!("could not initialize resource monitoring: {error}"))?;
     system.refresh_processes(ProcessesToUpdate::All, true);
     let rows: Vec<ProcessRow> = system
         .processes()

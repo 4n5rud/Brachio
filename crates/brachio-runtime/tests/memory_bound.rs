@@ -87,7 +87,7 @@ fn tree(system: &System, root: Pid) -> HashSet<Pid> {
 
 /// Highest working set seen over a few samples, as bytes.
 fn peak_working_sets(runtime: Pid) -> (u64, u64) {
-    let mut system = System::new();
+    let mut system = System::new().expect("initialize process monitoring");
     let own = Pid::from_u32(std::process::id());
     let (mut runtime_peak, mut app_peak) = (0, 0);
     for _ in 0..SAMPLES {
