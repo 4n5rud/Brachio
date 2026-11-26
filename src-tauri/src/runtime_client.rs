@@ -332,7 +332,6 @@ mod tests {
     #[test]
     fn conpty_upgrade_keeps_each_running_version_with_its_own_helpers() -> anyhow::Result<()> {
         use std::fs;
-        use std::io::Read;
 
         let dir = tempfile::tempdir()?;
         let source = dir.path().join("runtime.exe");
