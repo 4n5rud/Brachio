@@ -413,6 +413,7 @@ pub fn run() {
             workspace::task_files,
             task_attachments::task_attach_images,
             task_file_edit::task_file_read,
+            task_file_edit::task_file_read_head,
             task_file_edit::task_file_check,
             task_file_edit::task_file_write,
             task_file_media::task_file_media,

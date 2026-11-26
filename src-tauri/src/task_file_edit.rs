@@ -125,6 +125,52 @@ pub fn read_editable(root: &Path, path: &str) -> Result<EditableFile, String> {
     })
 }
 
+/// The start of a file the editor cannot edit, shown read-only.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileHead {
+    /// Up to the first 2 MiB as UTF-8, line ends as they are on disk, without a byte order mark.
+    text: String,
+    /// The file is longer than `text`.
+    truncated: bool,
+    size: u64,
+}
+
+/// Reads the start of a text file for a read-only view: one too large to edit, or one whose lines
+/// do not all end the same way. A cut that falls inside a character ends before it.
+///
+/// # Errors
+/// Refuses a path outside the task, and a file that is not UTF-8 text (`not_text`).
+pub fn read_head(root: &Path, path: &str) -> Result<FileHead, String> {
+    use std::io::Read;
+
+    let file = resolve_preview_path(root, path)?;
+    let size = fs::metadata(&file).map_err(to_text)?.len();
+    let mut bytes = Vec::new();
+    fs::File::open(&file)
+        .and_then(|opened| opened.take(EDIT_MAX_BYTES).read_to_end(&mut bytes))
+        .map_err(to_text)?;
+    let truncated = size > bytes.len() as u64;
+    let body = bytes.strip_prefix(BOM).unwrap_or(&bytes);
+    let not_text = || refuse("not_text", "The file is not UTF-8 text.");
+    if body.contains(&0) {
+        return Err(not_text());
+    }
+    let text = match std::str::from_utf8(body) {
+        Ok(text) => text,
+        // Only a character cut in two at the end of a truncated read is allowed.
+        Err(error) if truncated && error.error_len().is_none() => {
+            std::str::from_utf8(&body[..error.valid_up_to()]).map_err(|_| not_text())?
+        }
+        Err(_) => return Err(not_text()),
+    };
+    Ok(FileHead {
+        text: text.to_owned(),
+        truncated,
+        size,
+    })
+}
+
 /// Why a save stopped, as the message the interface shows.
 struct SaveFailure(String);
 
@@ -277,6 +323,19 @@ pub async fn task_file_read(
 ) -> Result<EditableFile, String> {
     let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
     tauri::async_runtime::spawn_blocking(move || read_editable(&task.worktree_path, &path))
+        .await
+        .map_err(to_text)?
+}
+
+/// Reads the start of a task's file for a read-only view.
+#[tauri::command]
+pub async fn task_file_read_head(
+    database: State<'_, Database>,
+    id: String,
+    path: String,
+) -> Result<FileHead, String> {
+    let task = TaskRecord::get(&*database.lock()?, &id).map_err(to_text)?;
+    tauri::async_runtime::spawn_blocking(move || read_head(&task.worktree_path, &path))
         .await
         .map_err(to_text)?
 }
@@ -519,6 +578,34 @@ mod tests {
                 .expect_err(name);
             assert_eq!(code(&error), wanted, "{name}: {error}");
         }
+    }
+
+    #[test]
+    fn a_file_the_editor_refuses_can_still_be_read_from_the_start() {
+        let folder = tempfile::tempdir().expect("folder");
+        let put =
+            |name: &str, bytes: &[u8]| fs::write(folder.path().join(name), bytes).expect("file");
+        // A two-byte character straddles the 2 MiB cut.
+        let mut big = vec![b'x'; 2 * 1024 * 1024 - 1];
+        big.extend_from_slice("\u{e9}tail".as_bytes());
+        put("big.txt", &big);
+        put("mixed.txt", b"\xEF\xBB\xBFa\r\nb\nc");
+        put("binary.bin", b"ab\0cd");
+        put("latin1.txt", b"caf\xE9");
+
+        let head = read_head(folder.path(), "big.txt").expect("big");
+        assert!(head.truncated);
+        assert_eq!(head.size, big.len() as u64);
+        assert_eq!(head.text.len(), 2 * 1024 * 1024 - 1);
+
+        let head = read_head(folder.path(), "mixed.txt").expect("mixed");
+        assert_eq!((head.text.as_str(), head.truncated), ("a\r\nb\nc", false));
+
+        for name in ["binary.bin", "latin1.txt"] {
+            let error = read_head(folder.path(), name).map(|_| ()).expect_err(name);
+            assert_eq!(code(&error), "not_text", "{name}");
+        }
+        assert!(read_head(folder.path(), "../big.txt").is_err());
     }
 
     #[test]
