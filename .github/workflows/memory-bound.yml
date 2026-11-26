@@ -1,6 +1,6 @@
 name: Memory bound
 
-# Opt-in smoke check of memory against the bounds in docs/windows-memory-benchmark.md.
+# Opt-in smoke check of memory against the bounds in docs/memory-benchmark.md.
 # It does not block other jobs: it is a separate workflow, and the job continues on error.
 on:
   workflow_dispatch:

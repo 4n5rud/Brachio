@@ -1,8 +1,8 @@
 # Memory benchmark methodology
 
-This page describes how to measure Brachio's memory use on Windows, and records the size and dependency baseline. App memory results are not published yet: they will be added here, with their methodology and environment, after the runs are done. Until then, make no memory claims from this page.
+This page describes how to measure Brachio's memory use on Windows and macOS, and records the results so far, the size and dependency baseline, and the tab area budget. Only the results in [App memory baseline](#app-memory-baseline) are measured; make no other memory claims from this page.
 
-Use a release build on a single Windows machine and start the sampler from a separate PowerShell window. Use one disposable repository and the same app build, terminal runtime mode, agent versions and configuration, task fixture, window size, scrollback settings, and warm-up for every run. Record the Windows build, CPU and logical processor count, RAM, app commit and build type, WebView2 version, runtime mode, and enabled agent tool versions.
+Use a release build on a single machine and start the sampler from a separate terminal window (PowerShell on Windows). Use one disposable repository and the same app build, terminal runtime mode, agent versions and configuration, task fixture, window size, scrollback settings, and warm-up for every run. Record the Windows or macOS version, CPU and logical processor count, RAM, app commit and build type, WebView2 version on Windows, runtime mode, and enabled agent tool versions.
 
 ## Scenarios
 
@@ -24,7 +24,18 @@ Use a release build on a single Windows machine and start the sampler from a sep
 
 Repeat each scenario at least three times. Keep the order and idle warm-up consistent, and close unrelated workloads that could add machine-level noise.
 
-## Capture
+On macOS, use the same steps with this shell workload in place of the PowerShell one. It prints the same 256 lines of 255 characters about every 50 ms for 90 seconds.
+
+```sh
+line=$(printf '%255s' | tr ' ' x)
+end=$(($(date +%s) + 90))
+while [ "$(date +%s)" -lt "$end" ]; do
+  yes "$line" | head -n 256
+  sleep 0.05
+done
+```
+
+## Capture on Windows
 
 Identify the measured app's PID in Task Manager or Process Explorer. For detached mode, inspect runtime candidates locally with `Get-CimInstance Win32_Process` and match their executable and `--pipe` endpoint to the Brachio instance under test. If several owned runtime generations host sessions, include all of their PIDs. Identify the launch root for each agent session in the process tree. For a CLI launched via a shell wrapper, supply the wrapper PID so its child processes land in the agent group.
 
@@ -39,6 +50,23 @@ Replace the example PIDs with the observed values. Omit `-RuntimePid` for in-app
 
 For an ownership check, run a separate Brachio instance with its own `BRACHIO_RUNTIME_ENDPOINT` and keep its PIDs out of the command above. Check that its app, runtime and agent PIDs are absent from `processes.csv`. The script includes the explicit app and runtime trees and counts each PID once.
 
+## Capture on macOS
+
+On macOS the web view is not part of the app process. WebKit runs the page in separate helper processes (`com.apple.WebKit.WebContent`, `GPU` and `Networking`) that launchd starts for the app, so their parent is not the app and Activity Monitor lists them apart. The web content process usually holds most of the memory, so always include the helpers. `launchctl print pid/<app pid>` lists them under `services`.
+
+Find the app PID with `pgrep -x brachio-app`, and the runtime with `pgrep -fl brachio-runtime`, matching its `--pipe` endpoint to the instance under test. From the repository root, run:
+
+```sh
+scripts/measure-memory-macos.sh 1234 60 1 2345
+```
+
+The arguments are the app PID, the number of samples, the pause between samples in seconds, and any runtime PIDs. The script finds the WebKit helpers at each sample and adds every descendant of a runtime PID, so agents and shells started by the runtime count in the runtime group. It prints one CSV row per sample and then the median and peak of each group. Each sample takes one to two seconds, because `footprint` is slow, so state the actual spacing from the `elapsed_s` column.
+
+- Footprint is `phys_footprint` from `footprint(1)`: the process's dirty memory, including memory compressed or swapped out. It is what Activity Monitor shows as Memory, and the closest macOS figure to Windows private bytes.
+- RSS is the resident size from `ps`, the closest figure to the working set. On macOS it is often much lower than the footprint, because idle pages are compressed. Pages shared between processes count in each.
+
+A second instance on the same Mac needs its own bundle identifier, because a single-instance lock keyed on the identifier sends a second launch to the first one. To measure a build beside an installed Brachio, build it with `--config` pointing at a file that sets another `identifier`, start it with its own `BRACHIO_RUNTIME_ENDPOINT` and `HOME`, and leave the installed app's PIDs out of the command. The installed app's tasks and settings are then not loaded and not touched. WebKit ignores `HOME` and keeps its data and cache in the real `~/Library/WebKit` and `~/Library/Caches`, under the other identifier; delete those two folders after the runs.
+
 ## Report
 
 - `samples.csv` records elapsed seconds, private bytes per group and in total, process counts, and CPU usage as a percentage of total logical processor capacity. CPU uses consecutive process-time deltas, so the first sample and a process's first appearance lack a CPU delta. Short-lived processes between samples are outside the observation window.
@@ -46,6 +74,26 @@ For an ownership check, run a separate Brachio instance with its own `BRACHIO_RU
 - Private bytes measure committed memory private to each process. Sum these values across the owned processes. The app status bar uses working set on Windows, so publish the private-bytes figure with its metric label. Samples where `ExpectedProcesses` and `MeasuredProcesses` differ can undercount memory, so report how many samples were affected and repeat steady runs with missing measurements.
 - For each run, report the sample median and the highest observed `TotalPrivateBytes`, along with CPU median and peak. For each scenario, report the median of the run medians, the range across runs and the highest observed peak. State the sample interval with the results.
 - Before committing baseline results, remove account names, private paths, sensitive executable names and machine-identifying details. Keep the aggregate results, versions, settings and a command with placeholder PIDs.
+
+## App memory baseline
+
+The app process and its web view, in the three states that a change is judged against: just started, one task open with one agent tab, and ten tasks open. No bound exists for these yet.
+
+| State | macOS footprint | macOS RSS | Windows |
+| --- | --- | --- | --- |
+| Just started | 104.0 MiB (runs 100.8 to 105.6, peak 121.4) | 142.5 MiB (runs 99.6 to 145.2, peak 176.0) | not measured yet |
+| One task, one agent tab | not measured yet | not measured yet | not measured yet |
+| Ten tasks | not measured yet | not measured yet | not measured yet |
+
+Each figure is the median of three run medians, the range of the run medians, and the highest sample of any run. Of the 104.0 MiB just started, the app process is 30.7 MiB (runs 30.3 to 33.1) and the WebKit helpers 72.5 MiB (runs 70.1 to 73.5). One sample split the helpers into about 45 MiB for web content, 21 MiB for GPU and 7 MiB for networking. The runtime had not started in any run, so no runtime memory is included.
+
+How the macOS figures were taken:
+
+- Machine: Mac with Apple M2, 16 GB RAM, macOS 26.6 (25G72).
+- Build: the local, unsigned release build of commit `f4313f5` described in [Release binary, macOS](#release-binary-macos), built a second time with the bundle identifier changed so it could run beside an installed Brachio. Started from its binary with an empty `HOME` and its own `BRACHIO_RUNTIME_ENDPOINT`, so with no projects, tasks or settings.
+- Capture: for each run a fresh instance, 30 seconds after launch, `scripts/measure-memory-macos.sh <app pid> 60 1`, 60 samples over about 70 seconds; three runs. The installed Brachio and other apps kept running on the same Mac.
+
+The other two states need a project, tasks and a signed-in agent, set up through the app's window, and were not reached from the command line. On Windows, all three states are still to be measured with `scripts/measure-memory.ps1`.
 
 ## Automated upper bound
 
@@ -74,25 +122,44 @@ It is ignored by default, so `cargo test --workspace` skips it. The `Memory boun
 
 Installer sizes are the release assets as published. A MiB is 1,048,576 bytes.
 
-| Asset | 0.1.0 | 0.2.0-rc.2 |
-| --- | --- | --- |
-| Windows setup (`x64-setup.exe`) | 8.02 MiB | 8.76 MiB |
-| Windows `.msi` | 10.79 MiB | not published |
-| macOS disk image (`aarch64.dmg`) | 9.23 MiB | 10.00 MiB |
-| macOS `app.tar.gz` | 9.16 MiB | 9.92 MiB |
+| Asset | 0.1.0 | 0.2.0-rc.2 | 0.2.0-rc.3 |
+| --- | --- | --- | --- |
+| Windows setup (`x64-setup.exe`) | 8.02 MiB | 8.76 MiB | 8.81 MiB |
+| Windows `.msi` | 10.79 MiB | not published | not published |
+| macOS disk image (`aarch64.dmg`) | 9.23 MiB | 10.00 MiB | 10.06 MiB |
+| macOS `app.tar.gz` | 9.16 MiB | 9.92 MiB | 9.98 MiB |
 
-Dependency counts at the commit that added this section, from `node scripts/size-baseline.mjs`:
+Read them with `gh release view v0.2.0-rc.3 --json assets --jq '.assets[] | "\(.name) \(.size)"'` and divide the bytes by 1,048,576.
+
+### Release binary, macOS
+
+From a local, unsigned release build of commit `f4313f5` on `main`, a few commits after 0.2.0-rc.3, built the way the release workflow builds it: `pnpm --dir ui install --frozen-lockfile`, then `pnpm dlx @tauri-apps/cli@2.12.4 build --config src-tauri/tauri.release.conf.json --bundles app,dmg` with Rust 1.95.0 on Apple silicon.
+
+| File | Size |
+| --- | --- |
+| App binary (`Contents/MacOS/brachio-app`) | 17.18 MiB |
+| Runtime sidecar (`Contents/MacOS/brachio-runtime`) | 1.78 MiB |
+| Helper sidecar (`Contents/MacOS/brachio`) | 1.35 MiB |
+| `Brachio.app`, all files | 20.39 MiB |
+| Disk image (`aarch64.dmg`) | 10.14 MiB |
+
+The disk image is 0.08 MiB larger than the published 0.2.0-rc.3 one. The commits since the tag or differences between this Mac and the CI runner could explain it; which one was not checked. Compare releases with the published assets above, not with local builds. The Windows release binary is not measured yet.
+
+### Dependencies
+
+Dependency counts at commit `f4313f5`, from `node scripts/size-baseline.mjs`:
 
 | Measure | Value |
 | --- | --- |
-| Rust crates in the app's normal and build graph, Windows (`x86_64-pc-windows-msvc`) | 342 |
-| Rust crates in the app's normal and build graph, macOS (`aarch64-apple-darwin`) | 340 |
-| Packages in `Cargo.lock` | 605 |
+| Rust crates in the app's normal and build graph, Windows (`x86_64-pc-windows-msvc`) | 345 |
+| Rust crates in the app's normal and build graph, macOS (`aarch64-apple-darwin`) | 336 |
+| Rust crates in the app's normal and build graph, Linux (`x86_64-unknown-linux-gnu`) | 425 |
+| Packages in `Cargo.lock` | 606 |
 | Packages in `ui/pnpm-lock.yaml` | 351 |
+| UI packages reachable from `dependencies` (production) | 14 |
+| UI packages reachable only from `devDependencies` | 337 |
 
-The crate count is the unique crates `cargo tree --locked -p brachio-app -e normal,build` lists for the target, including the app and workspace crates and excluding dev dependencies. A pull request that adds a dependency or a periodic job should state these figures before and after. The "Version files agree" job in CI prints the same table in its summary on every run. It only reports and never fails the check.
-
-Not recorded yet: the app process's working set and private bytes just started, with one task and one agent tab open, and with ten tasks open, on Windows and macOS, and the release binary size. They need the procedure above on an installed release build, and no bound for the app process exists yet.
+The crate count is the unique crates `cargo tree --locked -p brachio-app --target <target> -e normal,build --prefix none` lists for the target, including the app and workspace crates and excluding dev dependencies. It needs no installed target or cross toolchain. The Linux graph is larger because the web view there is WebKitGTK, reached through the GTK bindings; Brachio publishes no Linux build. The UI counts walk the `snapshots` section of the lock file from the `dependencies` and `devDependencies` of `ui/package.json`; a package is its name and version, so one resolved with different peers counts once, and the two UI counts add up to the lock file total. Only the production packages ship in the app, bundled into the UI scripts. A pull request that adds a dependency or a periodic job should state these figures before and after. The "Version files agree" job in CI prints the same table in its summary on every run. It only reports and never fails the check.
 
 ## Tab area budget
 
