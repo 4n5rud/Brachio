@@ -35,7 +35,7 @@ rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
-sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 tokio.workspace = true
 tracing.workspace = true
 trash = "5"
