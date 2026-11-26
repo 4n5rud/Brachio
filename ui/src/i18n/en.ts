@@ -988,7 +988,6 @@ export const en = {
   "newTask.agentOwnTerminal": "{name} asks for approval in its own terminal, not in Brachio.",
   "newTask.baseMissing": "No branch named {name}. Pick one from the list.",
   "newTask.createFailed": "Could not create the worktree",
-  "newTask.createFailedNote": "Nothing was created. Change the task name to get a new branch, or try again.",
   "newTask.retry": "Try again",
   "newTask.codexConversation": "Continue a Codex conversation",
   "newTask.codexNewConversation": "Start a new conversation",
