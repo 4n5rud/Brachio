@@ -747,8 +747,10 @@ async fn open_frame(client: &Client, key: &str) -> Result<(Vec<Reply>, Following
             .await
         {
             Err(ClientError::Refused(_)) => {
-                // Waiting does not help a full screen on an older runtime, so it is drawn at once.
-                if attempt == 0 {
+                // A newer runtime refuses only in the middle of an escape sequence, so asking
+                // again soon gets a settled frame. An older one refuses for as long as a program
+                // is on the full screen, so waiting does not help and the screen is drawn at once.
+                if attempt == 0 && !offers_full_screen_frames(client).await {
                     if let Some(opened) = follow_full_screen(client, key).await {
                         return Ok(opened);
                     }
@@ -766,6 +768,26 @@ async fn open_frame(client: &Client, key: &str) -> Result<(Vec<Reply>, Following
         })
         .await?;
     Ok((vec![first], following))
+}
+
+/// Lets the flow tests stand in for a runtime older than this app.
+#[cfg(test)]
+pub(crate) static PRETEND_OLD_RUNTIME: AtomicBool = AtomicBool::new(false);
+
+/// Whether the runtime offers frames of a full-screen program, judged by the protocol version it
+/// speaks. One that cannot be asked is taken as an older one, whose fallback is only tried.
+async fn offers_full_screen_frames(client: &Client) -> bool {
+    #[cfg(test)]
+    if PRETEND_OLD_RUNTIME.load(Ordering::Relaxed) {
+        return false;
+    }
+    match client.call(Action::Hello).await {
+        Ok(Reply {
+            result: ResponseResult::Hello { runtime },
+            ..
+        }) => runtime.current_version >= brachio_runtime::protocol::FULL_SCREEN_FRAMES,
+        _ => false,
+    }
 }
 
 /// A runtime older than this app never offers a frame of a full-screen program such as Codex.

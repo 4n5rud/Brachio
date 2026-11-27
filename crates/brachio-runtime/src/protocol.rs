@@ -1,7 +1,11 @@
 //! Protocol versions the runtime answers, so a runtime can outlive the app that started it.
 
 /// The newest version this build speaks.
-pub const CURRENT: u8 = 7;
+pub const CURRENT: u8 = 8;
+/// The first version that offers a frame to follow from while a program is on the alternate
+/// screen. An older runtime refuses `follow-frame` for as long as a full-screen program runs,
+/// while a newer one refuses it only briefly, in the middle of an escape sequence.
+pub const FULL_SCREEN_FRAMES: u8 = 8;
 /// The oldest version this build still answers, so an older client keeps working.
 pub const OLDEST: u8 = 1;
 
@@ -47,7 +51,7 @@ mod tests {
     fn rejection_names_the_supported_range() {
         assert_eq!(
             rejection(9),
-            "unsupported protocol version 9; this runtime speaks 1 through 7"
+            "unsupported protocol version 9; this runtime speaks 1 through 8"
         );
     }
 

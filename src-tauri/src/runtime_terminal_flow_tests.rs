@@ -321,18 +321,35 @@ async fn a_detached_terminal_keeps_running_and_shows_its_screen_when_reattached(
     second_window.shows_eventually(MARKER).await;
 }
 
+/// How the output of [`full_screen_launch`] ends.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum Ending {
+    /// Settled: the runtime offers a frame at once.
+    Settled,
+    /// In the middle of an escape sequence for good, so the runtime never offers a frame.
+    Unfinished,
+    /// In the middle of an escape sequence until a line is typed, then the sequence is finished
+    /// and `brachio-colored` is drawn in red.
+    PausedMidSequence,
+}
+
 /// A program like Codex: it draws on the full screen, then keeps redrawing one line until it has
 /// written far more than the runtime keeps, so the first line is no longer in the kept output.
 /// Then it waits for input, which the terminal echoes.
-/// With `unfinished`, the output ends in the middle of an escape sequence, so the runtime never
-/// offers a frame to follow from, as a runtime older than this app does for any full screen.
 #[cfg(unix)]
-fn full_screen_launch(world: &World, unfinished: bool) -> Launch {
-    let ending = if unfinished { "\\033[" } else { "" };
+fn full_screen_launch(world: &World, ending: Ending) -> Launch {
+    let ending = match ending {
+        Ending::Settled => "'",
+        Ending::Unfinished => "\\033['",
+        Ending::PausedMidSequence => {
+            "\\033['; stty -echo; read line; stty echo; printf '31mbrachio-colored\\033[0m'"
+        }
+    };
     let script = format!(
         "printf '\\033[?1049h\\033[H\\033[2Jbrachio-full-screen-ready'; i=0; \
          while [ $i -lt 400 ]; do printf '\\033[2;1H%01000d' $i; i=$((i+1)); done; \
-         printf '\\033[3;1Hbrachio-drawn{ending}'; exec cat"
+         printf '\\033[3;1Hbrachio-drawn{ending}; exec cat"
     );
     Launch {
         args: vec!["-c".to_owned(), script],
@@ -344,26 +361,111 @@ fn full_screen_launch(world: &World, unfinished: bool) -> Launch {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_full_screen_program_with_long_output_is_redrawn_when_reattached() {
-    reattach_full_screen("fullscreen1:agent", false).await;
+    let world = World::start().await;
+    reattach_full_screen(&world, "fullscreen1:agent", Ending::Settled).await;
 }
 
-/// The whole open goes through the fallback for a runtime that never offers a full-screen frame.
+/// Puts back what a test pretended about the runtime, even when the test fails.
+struct OldRuntime;
+
+impl OldRuntime {
+    fn pretend() -> Self {
+        super::PRETEND_OLD_RUNTIME.store(true, std::sync::atomic::Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for OldRuntime {
+    fn drop(&mut self) {
+        super::PRETEND_OLD_RUNTIME.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The whole open goes through the fallback for a runtime older than this app, which never
+/// offers a full-screen frame.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_full_screen_without_a_frame_to_follow_is_still_redrawn_when_reattached() {
-    reattach_full_screen("fullscreen3:agent", true).await;
+async fn an_older_runtime_full_screen_is_still_redrawn_when_reattached() {
+    let world = World::start().await;
+    let _old = OldRuntime::pretend();
+    reattach_full_screen(&world, "fullscreen3:agent", Ending::Unfinished).await;
+}
+
+/// A runtime that offers full-screen frames but refuses one for a moment, in the middle of an
+/// escape sequence: the app asks again and draws the settled frame. Following from the byte the
+/// refused frame was taken at would draw the rest of the sequence as text.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_frame_refused_for_a_moment_is_asked_for_again_not_replaced() {
+    let world = World::start().await;
+    let key = "fullscreen4:agent";
+    let terminals = RuntimeTerminals::default();
+    let (first_window, second_window) = (Window::default(), Window::default());
+    let (id, _) = terminals
+        .open(
+            key.to_owned(),
+            std::future::ready(Ok(full_screen_launch(&world, Ending::PausedMidSequence))),
+            first_window.channel(),
+            true,
+        )
+        .await
+        .expect("open")
+        .expect("the runtime is used");
+    first_window.shows_eventually("brachio-drawn").await;
+    terminals.detach(id).expect("hosted").expect("detached");
+
+    let client = world.client();
+    let refused = client
+        .follow(Action::FollowFrame {
+            key: key.to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(super::ClientError::Refused(_))),
+        "the frame is refused while the sequence is open"
+    );
+    // Finishes the sequence while the app is still asking for a frame.
+    let finish = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        client
+            .call(Action::Write {
+                key: "fullscreen4:agent".to_owned(),
+                text: "\n".to_owned(),
+            })
+            .await
+            .expect("write");
+    });
+    terminals
+        .open(
+            key.to_owned(),
+            std::future::ready(Err(anyhow::anyhow!("a live program is not started again"))),
+            second_window.channel(),
+            true,
+        )
+        .await
+        .expect("reattach")
+        .expect("the runtime is used");
+    finish.await.expect("finish the sequence");
+    second_window.shows_eventually("brachio-colored").await;
+    second_window
+        .shows_eventually("brachio-full-screen-ready")
+        .await;
+    let entries = second_window.entries();
+    assert!(
+        !entries.iter().any(|entry| entry.starts_with("31m")),
+        "the rest of the sequence is drawn as text: {entries:?}"
+    );
 }
 
 #[cfg(unix)]
-async fn reattach_full_screen(key: &str, unfinished: bool) {
-    let world = World::start().await;
+async fn reattach_full_screen(world: &World, key: &str, ending: Ending) {
     let terminals = RuntimeTerminals::default();
     let (first_window, second_window) = (Window::default(), Window::default());
 
     let (id, _) = terminals
         .open(
             key.to_owned(),
-            std::future::ready(Ok(full_screen_launch(&world, unfinished))),
+            std::future::ready(Ok(full_screen_launch(world, ending))),
             first_window.channel(),
             true,
         )
@@ -407,7 +509,7 @@ async fn a_full_screen_frame_is_followed_from_the_byte_it_was_taken_at() {
     let (id, _) = terminals
         .open(
             key.to_owned(),
-            std::future::ready(Ok(full_screen_launch(&world, true))),
+            std::future::ready(Ok(full_screen_launch(&world, Ending::Unfinished))),
             window.channel(),
             true,
         )
