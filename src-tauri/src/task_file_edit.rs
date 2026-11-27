@@ -63,7 +63,7 @@ fn version_of(bytes: &[u8], modified_ms: i64) -> FileVersion {
     FileVersion {
         size: bytes.len() as u64,
         modified_ms,
-        hash: format!("{:x}", Sha256::digest(bytes)),
+        hash: crate::sha256::hex(&Sha256::digest(bytes)),
     }
 }
 

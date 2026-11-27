@@ -2,6 +2,7 @@
 
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -254,7 +255,10 @@ fn stage_runtime(source: &Path, folder: &Path) -> Result<PathBuf> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let destination = folder.join(format!("brachio-runtime-{:x}", bundle_digest.finalize()));
+    let destination = folder.join(format!(
+        "brachio-runtime-{}",
+        crate::sha256::hex(&bundle_digest.finalize())
+    ));
     let complete = || {
         files
             .iter()
@@ -291,8 +295,16 @@ fn stage_runtime(source: &Path, folder: &Path) -> Result<PathBuf> {
 fn file_digest(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path).with_context(|| format!("read {}", path.display()))?;
     let mut digest = Sha256::new();
-    std::io::copy(&mut file, &mut digest)?;
-    Ok(format!("{:x}", digest.finalize()))
+    let mut buffer = [0; 8192];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => digest.update(&buffer[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(crate::sha256::hex(&digest.finalize()))
 }
 
 /// Keep the runtime alive when the app exits: no console, its own process group.
