@@ -11,9 +11,11 @@ use brachio_runtime::wire::ResponseResult;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tokio::sync::MutexGuard;
 
+#[cfg(unix)]
+use super::follow_full_screen;
 use super::{
-    follow_full_screen, launch_action, pending_launch, save_pending_launch, Action, Client, Launch,
-    PendingLaunch, RuntimeTerminals, Uuid,
+    launch_action, pending_launch, save_pending_launch, Action, Client, Launch, PendingLaunch,
+    RuntimeTerminals, Uuid,
 };
 
 use crate::runtime_client::TEST_ENVIRONMENT as ENVIRONMENT;
@@ -365,17 +367,24 @@ async fn a_full_screen_program_with_long_output_is_redrawn_when_reattached() {
     reattach_full_screen(&world, "fullscreen1:agent", Ending::Settled).await;
 }
 
-/// Puts back what a test pretended about the runtime, even when the test fails.
-struct OldRuntime;
+/// Makes the app take the runtime for an older one, and puts that back when dropped, even when the
+/// test fails. The flag is shared by the whole test process, so it can only be set while the
+/// test holds a [`World`], whose lock keeps every other test with a runtime waiting.
+#[cfg(unix)]
+struct OldRuntime<'a> {
+    _world: &'a World,
+}
 
-impl OldRuntime {
-    fn pretend() -> Self {
+#[cfg(unix)]
+impl<'a> OldRuntime<'a> {
+    fn pretend(world: &'a World) -> Self {
         super::PRETEND_OLD_RUNTIME.store(true, std::sync::atomic::Ordering::Relaxed);
-        Self
+        Self { _world: world }
     }
 }
 
-impl Drop for OldRuntime {
+#[cfg(unix)]
+impl Drop for OldRuntime<'_> {
     fn drop(&mut self) {
         super::PRETEND_OLD_RUNTIME.store(false, std::sync::atomic::Ordering::Relaxed);
     }
@@ -387,7 +396,7 @@ impl Drop for OldRuntime {
 #[tokio::test]
 async fn an_older_runtime_full_screen_is_still_redrawn_when_reattached() {
     let world = World::start().await;
-    let _old = OldRuntime::pretend();
+    let _old = OldRuntime::pretend(&world);
     reattach_full_screen(&world, "fullscreen3:agent", Ending::Unfinished).await;
 }
 
