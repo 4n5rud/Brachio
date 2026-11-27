@@ -79,17 +79,34 @@
 /* Not .agent-card: the new-task dialog's picker uses that name with a different layout. */
 .agent-account-card {
   display: grid;
-  gap: 6px;
+  gap: 0;
   justify-items: stretch;
   min-width: 0;
-  padding: 10px 0;
+  margin-top: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+}
+.agent-account-card > .agent-card-head,
+.agent-account-card > .path-link,
+.agent-account-card > .form-hint,
+.agent-account-card > .form-error {
+  margin: 0;
+  padding-inline: var(--space-4);
+}
+.agent-account-card > .agent-card-head {
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-1);
+}
+.agent-account-card > .path-link {
+  padding-bottom: var(--space-3);
 }
 .agent-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 0;
-  font: var(--text-label);
+  font: var(--text-heading);
 }
 .agent-card-spacer {
   flex: 1;
@@ -107,17 +124,137 @@
   white-space: nowrap;
   font: var(--text-caption);
 }
-.agent-card-actions {
+.agent-card-section {
+  border-top: 1px solid var(--color-line);
+  padding: var(--space-3) var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.agent-card-section-head {
   display: flex;
-  justify-content: flex-start;
-  gap: 6px;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.agent-card-section-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.agent-card-section-title h4 {
+  margin: 0;
+  font: var(--text-label);
+}
+.agent-card-section-title .form-hint {
+  margin: 0;
+}
+.agent-card-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+.agent-card-retry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.account-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.account-list > li + li {
+  border-top: 1px solid var(--color-line);
+}
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: 10px var(--space-3);
+  transition: background var(--duration-fast);
+}
+.account-row:not([data-current]):hover {
+  background: var(--color-hover);
+  cursor: pointer;
+}
+.account-row[data-current] {
+  background: var(--color-raised);
+}
+.account-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.account-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--size-row);
+  font: var(--text-body);
+  font-weight: 500;
+}
+.account-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-xs);
+  font: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-2);
+}
+.account-rename-input {
+  width: 220px;
+  max-width: 100%;
+}
+.account-meta {
+  display: flex;
   flex-wrap: wrap;
-  margin-top: var(--space-2);
+  align-items: center;
+  gap: 2px var(--space-3);
+  font: var(--text-caption);
+  color: var(--color-text-3);
+}
+.account-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-2);
+}
+.account-email {
+  font-family: var(--font-mono);
+}
+.account-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+.account-add {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-raised);
+}
+.account-add-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 .usage-list {
   display: grid;
   gap: 6px;
-  margin-top: var(--space-2);
   align-self: stretch;
 }
 .usage-row {
@@ -127,7 +264,7 @@
   font: var(--text-caption);
 }
 .usage-label {
-  width: 112px;
+  width: 96px;
   flex: none;
 }
 .usage-bar {
@@ -145,4 +282,8 @@
 .usage-figure {
   font: var(--text-meta);
   color: var(--color-text-3);
+}
+.usage-reset {
+  min-width: 128px;
+  text-align: right;
 }

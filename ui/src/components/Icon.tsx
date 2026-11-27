@@ -41,6 +41,10 @@ const PATHS = {
   pin: () => <path d="M6 2.5h4l-.5 4 2 2H4.5l2-2zM8 8.5V14" />,
   keyboard: () => <><rect x="2" y="4" width="12" height="8" rx="1.5" /><path d="M5 7h.01M8 7h.01M11 7h.01M5.5 9.5h5" /></>,
   refresh: () => <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13 2.5v2.8h-2.8" /></>,
+  edit: () => <path d="m10.5 3.5 2 2L6 12l-2.8.8L4 10z" />,
+  trash: () => <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8" />,
+  signIn: () => <path d="M9 3h3.5a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9M2.5 8H10M7.5 5.5 10 8l-2.5 2.5" />,
+  signOut: () => <path d="M7 3H3.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1H7M6 8h7.5M11 5.5 13.5 8 11 10.5" />,
   bot: () => <><rect x="3" y="5" width="10" height="8" rx="2" /><path d="M8 2.5V5M6 9h.01M10 9h.01" /></>,
   // GitHub Primer Octicons 19.42.0 (MIT, see assets/brand-icons/LICENSE-octicons): filled glyphs for pull request, issue and CI state.
   ghPr: () => <><path fill="currentColor" stroke="none" d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" /></>,
