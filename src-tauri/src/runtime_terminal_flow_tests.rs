@@ -324,13 +324,18 @@ async fn a_detached_terminal_keeps_running_and_shows_its_screen_when_reattached(
 /// A program like Codex: it draws on the full screen, then keeps redrawing one line until it has
 /// written far more than the runtime keeps, so the first line is no longer in the kept output.
 /// Then it waits for input, which the terminal echoes.
+/// With `unfinished`, the output ends in the middle of an escape sequence, so the runtime never
+/// offers a frame to follow from, as a runtime older than this app does for any full screen.
 #[cfg(unix)]
-fn full_screen_launch(world: &World) -> Launch {
-    let script = "printf '\\033[?1049h\\033[H\\033[2Jbrachio-full-screen-ready'; i=0; \
-                  while [ $i -lt 400 ]; do printf '\\033[2;1H%01000d' $i; i=$((i+1)); done; \
-                  printf '\\033[3;1Hbrachio-drawn'; exec cat";
+fn full_screen_launch(world: &World, unfinished: bool) -> Launch {
+    let ending = if unfinished { "\\033[" } else { "" };
+    let script = format!(
+        "printf '\\033[?1049h\\033[H\\033[2Jbrachio-full-screen-ready'; i=0; \
+         while [ $i -lt 400 ]; do printf '\\033[2;1H%01000d' $i; i=$((i+1)); done; \
+         printf '\\033[3;1Hbrachio-drawn{ending}'; exec cat"
+    );
     Launch {
-        args: vec!["-c".to_owned(), script.to_owned()],
+        args: vec!["-c".to_owned(), script],
         program: "sh".to_owned(),
         ..world.launch()
     }
@@ -339,15 +344,26 @@ fn full_screen_launch(world: &World) -> Launch {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_full_screen_program_with_long_output_is_redrawn_when_reattached() {
+    reattach_full_screen("fullscreen1:agent", false).await;
+}
+
+/// The whole open goes through the fallback for a runtime that never offers a full-screen frame.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_screen_without_a_frame_to_follow_is_still_redrawn_when_reattached() {
+    reattach_full_screen("fullscreen3:agent", true).await;
+}
+
+#[cfg(unix)]
+async fn reattach_full_screen(key: &str, unfinished: bool) {
     let world = World::start().await;
     let terminals = RuntimeTerminals::default();
     let (first_window, second_window) = (Window::default(), Window::default());
-    let key = "fullscreen1:agent";
 
     let (id, _) = terminals
         .open(
             key.to_owned(),
-            std::future::ready(Ok(full_screen_launch(&world))),
+            std::future::ready(Ok(full_screen_launch(&world, unfinished))),
             first_window.channel(),
             true,
         )
@@ -391,7 +407,7 @@ async fn a_full_screen_frame_is_followed_from_the_byte_it_was_taken_at() {
     let (id, _) = terminals
         .open(
             key.to_owned(),
-            std::future::ready(Ok(full_screen_launch(&world))),
+            std::future::ready(Ok(full_screen_launch(&world, true))),
             window.channel(),
             true,
         )
@@ -410,6 +426,7 @@ async fn a_full_screen_frame_is_followed_from_the_byte_it_was_taken_at() {
     };
     assert!(screen.alternate_screen);
     assert!(screen.ansi.contains("brachio-full-screen-ready"));
+    assert_eq!(screen.resume_offset, None, "no frame to follow from");
     let ResponseResult::Success {
         output: Some(page), ..
     } = page.result

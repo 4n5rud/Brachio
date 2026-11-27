@@ -739,20 +739,25 @@ async fn show_last_screen(client: &Client, key: &str, channel: &Channel<InvokeRe
 /// Follow from the settled frame, or from the retained history when no frame settles. The replies
 /// to show first come in order, before the ones `Following` yields.
 async fn open_frame(client: &Client, key: &str) -> Result<(Vec<Reply>, Following), ClientError> {
-    for _ in 0..FRAME_ATTEMPTS {
+    for attempt in 0..FRAME_ATTEMPTS {
         match client
             .follow(Action::FollowFrame {
                 key: key.to_owned(),
             })
             .await
         {
-            Err(ClientError::Refused(_)) => tokio::time::sleep(FRAME_RETRY).await,
+            Err(ClientError::Refused(_)) => {
+                // Waiting does not help a full screen on an older runtime, so it is drawn at once.
+                if attempt == 0 {
+                    if let Some(opened) = follow_full_screen(client, key).await {
+                        return Ok(opened);
+                    }
+                }
+                tokio::time::sleep(FRAME_RETRY).await;
+            }
             Ok((first, following)) => return Ok((vec![first], following)),
             Err(error) => return Err(error),
         }
-    }
-    if let Some(opened) = follow_full_screen(client, key).await {
-        return Ok(opened);
     }
     let (first, following) = client
         .follow(Action::Follow {
