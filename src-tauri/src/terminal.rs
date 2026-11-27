@@ -366,10 +366,16 @@ async fn prepare_terminal(
         )?,
         None => Vec::new(),
     };
-    let codex_home = account_environment
-        .iter()
-        .find(|(name, _)| name == "CODEX_HOME")
-        .map(|(_, value)| PathBuf::from(value));
+    // The account's config folder, where the agent keeps its conversations.
+    let config_home = request
+        .agent
+        .and_then(crate::agent_account_env::config_variable)
+        .and_then(|variable| {
+            account_environment
+                .iter()
+                .find(|(name, _)| name == variable)
+                .map(|(_, value)| PathBuf::from(value))
+        });
     let mut options = Vec::new();
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
         if !hook.environment(key).is_empty() {
@@ -398,7 +404,7 @@ async fn prepare_terminal(
         Some(kind) => {
             let request = request.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                agent_command(kind, &request, options, codex_home.as_deref())
+                agent_command(kind, &request, options, config_home.as_deref())
             })
             .await
             .map_err(|error| error.to_string())??
@@ -490,14 +496,16 @@ pub fn terminal_park(hosted: State<'_, RuntimeTerminals>, id: SessionId) -> Comm
 }
 
 /// The command for an agent: its earlier conversation when asked to resume
-/// and one exists, otherwise a new one.
+/// and one exists, otherwise a new one. `config_home` is the account's config folder, `None` for
+/// the CLI's own.
 fn agent_command(
     kind: AgentKind,
     request: &OpenRequest,
     mut options: Vec<String>,
-    codex_home: Option<&Path>,
+    config_home: Option<&Path>,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let installed = installed(kind)?;
+    let codex_home = config_home.filter(|_| kind == AgentKind::Codex);
     let conversations = |cwd: &Path| account_codex_conversations(codex_home, cwd);
     let from_project = kind == AgentKind::Codex
         && request.codex_conversation_id.is_none()
@@ -520,7 +528,11 @@ fn agent_command(
     } else if from_project {
         request.session_id.clone()
     } else if request.resume {
-        earlier_conversation(kind, request.session_id.as_deref())
+        earlier_conversation(kind, request.session_id.as_deref()).filter(|id| {
+            conversation_may_exist(kind, id, &|id| {
+                brachio_agent::claude_conversation_recorded(config_home, id)
+            })
+        })
     } else {
         None
     };
@@ -588,6 +600,18 @@ fn earlier_conversation(kind: AgentKind, session_id: Option<&str>) -> Option<Str
         // The Codex tab UUID identifies the PTY, not a Codex conversation.
         AgentKind::Codex | AgentKind::Grok => None,
     }
+}
+
+/// Whether resuming `id` can find a conversation. Claude Code is given its conversation id before
+/// it starts, but writes nothing under it until the first message, so a tab whose agent never
+/// started or was never spoken to has nothing to resume: it starts a new conversation under the
+/// same id instead of failing. When that cannot be told, resuming is tried.
+fn conversation_may_exist(
+    kind: AgentKind,
+    id: &str,
+    claude_recorded: &dyn Fn(&str) -> Option<bool>,
+) -> bool {
+    kind != AgentKind::ClaudeCode || claude_recorded(id) != Some(false)
 }
 
 fn installed(kind: AgentKind) -> CommandResult<Installed> {
@@ -750,6 +774,31 @@ mod tests {
             &request,
             Some("not-a-uuid"),
             &lookup
+        ));
+    }
+
+    #[test]
+    fn a_claude_tab_without_a_kept_conversation_starts_a_new_one() {
+        const ID: &str = "11111111-2222-4333-8444-555555555555";
+        let kept = |answer: Option<bool>| move |_: &str| answer;
+        assert!(conversation_may_exist(
+            AgentKind::ClaudeCode,
+            ID,
+            &kept(Some(true))
+        ));
+        assert!(!conversation_may_exist(
+            AgentKind::ClaudeCode,
+            ID,
+            &kept(Some(false))
+        ));
+        assert!(
+            conversation_may_exist(AgentKind::ClaudeCode, ID, &kept(None)),
+            "resuming is tried when the folder cannot be read"
+        );
+        assert!(conversation_may_exist(
+            AgentKind::Codex,
+            ID,
+            &kept(Some(false))
         ));
     }
 
