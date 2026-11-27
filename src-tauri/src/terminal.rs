@@ -935,6 +935,15 @@ mod tests {
         ));
     }
 
+    /// An absolute folder that does not exist, on every platform.
+    fn fake_folder(name: &str) -> String {
+        if cfg!(windows) {
+            format!("C:/fake-home/{name}")
+        } else {
+            format!("/fake-home/{name}")
+        }
+    }
+
     fn variable(name: &str, value: &str) -> (String, String) {
         (name.to_owned(), value.to_owned())
     }
@@ -965,7 +974,10 @@ mod tests {
         let profile = || {
             Some(crate::agent_profiles::LaunchAdditions {
                 arguments: vec!["--model".to_owned(), "x".to_owned()],
-                environment: vec![variable("CLAUDE_CONFIG_DIR", "/fake-home/profile-claude")],
+                environment: vec![variable(
+                    "CLAUDE_CONFIG_DIR",
+                    &fake_folder("profile-claude"),
+                )],
             })
         };
         let setups = [
@@ -975,10 +987,13 @@ mod tests {
             },
             AgentSetup {
                 profile: profile(),
-                account: vec![variable("CLAUDE_CONFIG_DIR", "/fake-home/account-claude")],
+                account: vec![variable(
+                    "CLAUDE_CONFIG_DIR",
+                    &fake_folder("account-claude"),
+                )],
             },
         ];
-        let expected = ["/fake-home/profile-claude", "/fake-home/account-claude"];
+        let expected = [fake_folder("profile-claude"), fake_folder("account-claude")];
         for (setup, expected) in setups.into_iter().zip(expected) {
             let mut options = Vec::new();
             let environment = assemble_environment(
@@ -1032,14 +1047,14 @@ mod tests {
             AgentSetup {
                 profile: Some(crate::agent_profiles::LaunchAdditions {
                     arguments: Vec::new(),
-                    environment: vec![variable("CODEX_HOME", "/fake-home/profile-codex")],
+                    environment: vec![variable("CODEX_HOME", &fake_folder("profile-codex"))],
                 }),
                 account: Vec::new(),
             },
             &mut Vec::new(),
         );
         let codex_lookup = |folder: Option<&Path>, _: &Path| {
-            if folder == Some(Path::new("/fake-home/profile-codex")) {
+            if folder == Some(Path::new(&fake_folder("profile-codex"))) {
                 vec![brachio_agent::CodexConversation {
                     id: ID.to_owned(),
                     timestamp: None,
@@ -1076,26 +1091,26 @@ mod tests {
             ConfigHome::Unknown
         );
         assert_eq!(
-            given("/fake-home/claude").config_home_with(claude, &none),
-            ConfigHome::Folder(PathBuf::from("/fake-home/claude"))
+            given(&fake_folder("claude")).config_home_with(claude, &none),
+            ConfigHome::Folder(PathBuf::from(fake_folder("claude")))
         );
         let unset = LaunchEnvironment {
             base: Vec::new(),
             account: Vec::new(),
         };
         assert_eq!(unset.config_home_with(claude, &none), ConfigHome::Default);
-        let app = |value: &'static str| move |_: &str| Some(std::ffi::OsString::from(value));
+        let app = |value: String| move |_: &str| Some(std::ffi::OsString::from(&value));
         assert_eq!(
-            unset.config_home_with(claude, &app("/fake-home/app")),
-            ConfigHome::Folder(PathBuf::from("/fake-home/app"))
+            unset.config_home_with(claude, &app(fake_folder("app"))),
+            ConfigHome::Folder(PathBuf::from(fake_folder("app")))
         );
         assert_eq!(
-            unset.config_home_with(claude, &app("")),
+            unset.config_home_with(claude, &app(String::new())),
             ConfigHome::Unknown,
             "an empty folder the app passes on is not guessed either"
         );
         assert_eq!(
-            unset.config_home_with(AgentKind::Grok, &app("/fake-home/app")),
+            unset.config_home_with(AgentKind::Grok, &app(fake_folder("app"))),
             ConfigHome::Default
         );
     }
