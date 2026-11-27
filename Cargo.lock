@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-agent"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "brachio-process",
  "serde",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-app"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "anyhow",
  "brachio-agent",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-cli"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "anyhow",
  "brachio-fs",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-core"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-fs"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "tempfile",
  "thiserror 2.0.21",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-git"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "brachio-process",
  "serde",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-mcp"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -491,14 +491,14 @@ dependencies = [
 
 [[package]]
 name = "brachio-power"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "keepawake",
 ]
 
 [[package]]
 name = "brachio-process"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "process-wrap",
  "windows",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-pty"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "anyhow",
  "brachio-core",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-qa"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "brachio-git",
  "brachio-process",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-runtime"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "anyhow",
  "brachio-core",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "brachio-store"
-version = "0.2.0-rc.3"
+version = "0.2.0-rc.4"
 dependencies = [
  "brachio-core",
  "rusqlite",
