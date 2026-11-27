@@ -269,12 +269,12 @@ pub fn task_tab_conversation(
     Ok(found.flatten().filter(|id| !id.is_empty()))
 }
 
-/// Records the conversation a tab started, unless one is already recorded. Returns whether it
-/// was recorded.
+/// Records the conversation a tab is to resume, in place of any recorded before. Returns whether
+/// the tab is open.
 ///
 /// # Errors
 /// Fails when the database cannot be written.
-pub fn remember_task_tab_conversation(
+pub fn set_task_tab_conversation(
     connection: &Connection,
     task_id: &str,
     tab_id: &str,
@@ -282,7 +282,7 @@ pub fn remember_task_tab_conversation(
 ) -> Result<bool, StoreError> {
     let changed = connection.execute(
         "UPDATE task_tabs SET conversation_id = ?3
-         WHERE task_id = ?1 AND tab_id = ?2 AND (conversation_id IS NULL OR conversation_id = '')",
+         WHERE task_id = ?1 AND tab_id = ?2",
         params![task_id, tab_id, conversation_id],
     )?;
     Ok(changed > 0)
@@ -370,7 +370,7 @@ mod tests {
 
     use super::{
         add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
-        remember_task_tab_conversation, rename_task_tab, reorder_task_tabs, retired_secondary_tabs,
+        rename_task_tab, reorder_task_tabs, retired_secondary_tabs, set_task_tab_conversation,
         task_tab, task_tab_conversation, task_tab_names, task_tabs, TabKind, TaskTab,
     };
     use crate::database::open_in_memory;
@@ -478,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tab_keeps_the_first_conversation_recorded_for_it() {
+    fn a_tab_keeps_the_conversation_recorded_last() {
         let connection = connection_with_task();
         add_task_tab(&connection, "t1", &tab("a", TabKind::Codex)).expect("tab");
         add_task_tab(&connection, "t1", &tab("b", TabKind::Codex)).expect("tab");
@@ -486,14 +486,14 @@ mod tests {
             task_tab_conversation(&connection, "t1", "a").expect("read"),
             None
         );
-        assert!(remember_task_tab_conversation(&connection, "t1", "a", "first").expect("write"));
-        assert!(!remember_task_tab_conversation(&connection, "t1", "a", "second").expect("write"));
-        assert!(!remember_task_tab_conversation(&connection, "t1", "gone", "x").expect("write"));
+        assert!(set_task_tab_conversation(&connection, "t1", "a", "first").expect("write"));
+        assert!(set_task_tab_conversation(&connection, "t1", "a", "second").expect("write"));
+        assert!(!set_task_tab_conversation(&connection, "t1", "gone", "x").expect("write"));
         assert_eq!(
             task_tab_conversation(&connection, "t1", "a")
                 .expect("read")
                 .as_deref(),
-            Some("first")
+            Some("second")
         );
         assert_eq!(
             task_tab_conversation(&connection, "t1", "b").expect("read"),

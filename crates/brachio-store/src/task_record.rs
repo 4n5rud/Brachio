@@ -403,20 +403,19 @@ impl TaskRecord {
         Self::get(connection, id)
     }
 
-    /// Records the conversation the task's agent started, unless the task already has one, such
-    /// as a conversation id given before the agent started or the conversation it was created
-    /// from. Returns whether it was recorded.
+    /// Records the conversation the task's agent is to resume, in place of any recorded before.
+    /// Only for a conversation confirmed to be the task's, such as the Codex conversation its
+    /// first tab started. Returns whether the task exists.
     ///
     /// # Errors
     /// Fails when the record cannot be updated.
-    pub fn remember_agent_session(
+    pub fn set_agent_session(
         connection: &Connection,
         id: &str,
         session_id: &str,
     ) -> Result<bool, StoreError> {
         let changed = connection.execute(
-            "UPDATE tasks SET agent_session_id = ?2
-              WHERE id = ?1 AND (agent_session_id IS NULL OR agent_session_id = '')",
+            "UPDATE tasks SET agent_session_id = ?2 WHERE id = ?1",
             params![id, session_id],
         )?;
         Ok(changed > 0)
@@ -576,24 +575,16 @@ mod tests {
     }
 
     #[test]
-    fn a_found_conversation_never_replaces_the_one_a_task_already_has() {
+    fn a_confirmed_conversation_replaces_the_recorded_one() {
         let connection = connection_with_repo();
         TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert");
-        let given = NewTask {
-            agent_session_id: Some("given"),
-            ..sample("t2", 2)
-        };
-        TaskRecord::insert(&connection, &given).expect("insert");
-        assert!(TaskRecord::remember_agent_session(&connection, "t1", "found").expect("write"));
-        assert!(!TaskRecord::remember_agent_session(&connection, "t1", "later").expect("write"));
-        assert!(!TaskRecord::remember_agent_session(&connection, "t2", "found").expect("write"));
-        let session = |id| {
-            TaskRecord::get(&connection, id)
-                .expect("get")
-                .agent_session_id
-        };
-        assert_eq!(session("t1").as_deref(), Some("found"));
-        assert_eq!(session("t2").as_deref(), Some("given"));
+        assert!(TaskRecord::set_agent_session(&connection, "t1", "found").expect("write"));
+        assert!(TaskRecord::set_agent_session(&connection, "t1", "newer").expect("write"));
+        assert!(!TaskRecord::set_agent_session(&connection, "gone", "x").expect("write"));
+        let session = TaskRecord::get(&connection, "t1")
+            .expect("get")
+            .agent_session_id;
+        assert_eq!(session.as_deref(), Some("newer"));
     }
 
     fn add_second_repo(connection: &Connection) {
