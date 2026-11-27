@@ -403,6 +403,24 @@ impl TaskRecord {
         Self::get(connection, id)
     }
 
+    /// Records the conversation the task's agent is to resume, in place of any recorded before.
+    /// Only for a conversation confirmed to be the task's, such as the Codex conversation its
+    /// first tab started. Returns whether the task exists.
+    ///
+    /// # Errors
+    /// Fails when the record cannot be updated.
+    pub fn set_agent_session(
+        connection: &Connection,
+        id: &str,
+        session_id: &str,
+    ) -> Result<bool, StoreError> {
+        let changed = connection.execute(
+            "UPDATE tasks SET agent_session_id = ?2 WHERE id = ?1",
+            params![id, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     fn set_archived_at(
         connection: &Connection,
         id: &str,
@@ -554,6 +572,19 @@ mod tests {
             compare_group: None,
             created_at_ms,
         }
+    }
+
+    #[test]
+    fn a_confirmed_conversation_replaces_the_recorded_one() {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert");
+        assert!(TaskRecord::set_agent_session(&connection, "t1", "found").expect("write"));
+        assert!(TaskRecord::set_agent_session(&connection, "t1", "newer").expect("write"));
+        assert!(!TaskRecord::set_agent_session(&connection, "gone", "x").expect("write"));
+        let session = TaskRecord::get(&connection, "t1")
+            .expect("get")
+            .agent_session_id;
+        assert_eq!(session.as_deref(), Some("newer"));
     }
 
     fn add_second_repo(connection: &Connection) {

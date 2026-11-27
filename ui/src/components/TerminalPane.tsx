@@ -22,7 +22,7 @@ import { previewIfRegistered } from "../lib/local-preview";
 import { isMac } from "../lib/shortcut";
 import { findTerminalLinks, joinCells, taskRelativePath, type CellText } from "../lib/terminal-links";
 import { releaseTerminal } from "../lib/terminal-release";
-import { codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
+import { asksToChooseCodexConversation, codexConversations, forgetUncertainLaunch, openTerminal, savedScreen, type AgentKind, type CodexConversation, type TerminalHandle } from "../lib/terminal";
 import { takeDraftProblem, type DraftProblem } from "../lib/draft-problem";
 import { bracketedPaste, isCopyKey, isNativePasteKey, pastedImage, pasteText, terminalClipboardText } from "../lib/terminal-paste";
 import { registerShellDropTarget } from "../lib/terminal-drop";
@@ -399,6 +399,10 @@ export function TerminalPane(props: {
         })
         .catch((error: unknown) => {
           if (disposed || launch !== generation) return;
+          if (session.agent === "codex" && session.key && asksToChooseCodexConversation(error)) {
+            void offerCodexConversations(session.key);
+            return;
+          }
           const uncertain = /BRACHIO_LAUNCH_UNCERTAIN:([0-9a-f-]{36})/i.exec(String(error));
           setUncertainOperation(uncertain?.[1]);
           const detail = String(error).startsWith("ISOLATED_LOGIN_REQUIRED:") ? t("settings.accountSignInRequired") : String(error);
@@ -408,23 +412,20 @@ export function TerminalPane(props: {
           props.onStatus?.({ state: "error" }, null);
         });
     };
-    const prepareOpen = async (resume: boolean, initialPrompt: string | null) => {
-      if (resume && session?.agent === "codex" && session.key) {
-        setCanReopen(false);
-        setEnded(undefined);
-        setCheckingConversations(true);
-        setConversationCheckFailed(false);
-        const candidates = await codexConversations(session.key).catch(() => undefined);
-        if (disposed) return;
-        setCheckingConversations(false);
-        if (!candidates || candidates.length > 0) {
-          setConversationCheckFailed(!candidates);
-          setChoices(candidates ?? []);
-          return;
-        }
-      }
-      start(resume, initialPrompt);
+    // The app decides which conversation a Codex tab continues when it starts. Only when nothing
+    // confirms the tab's own conversation is the person asked to choose one.
+    const offerCodexConversations = async (key: string) => {
+      setCanReopen(false);
+      setEnded(undefined);
+      setCheckingConversations(true);
+      setConversationCheckFailed(false);
+      const candidates = await codexConversations(key).catch(() => undefined);
+      if (disposed) return;
+      setCheckingConversations(false);
+      setConversationCheckFailed(!candidates);
+      setChoices(candidates ?? []);
     };
+    const prepareOpen = (resume: boolean, initialPrompt: string | null) => start(resume, initialPrompt);
     chooseConversation = (id) => {
       if (!choices()) return;
       setChoices(undefined);

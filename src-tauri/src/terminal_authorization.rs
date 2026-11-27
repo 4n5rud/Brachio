@@ -45,7 +45,12 @@ pub(crate) fn resolve(connection: &Connection, key: &str) -> Result<TerminalOwne
                     Some(requested.to_owned()),
                     None,
                 ),
-                (true, TabKind::Codex) => (Some(AgentKind::Codex), None, None),
+                (true, TabKind::Codex) => (
+                    Some(AgentKind::Codex),
+                    brachio_store::task_tab_conversation(connection, task_id, requested)
+                        .map_err(|error| error.to_string())?,
+                    None,
+                ),
                 (false, TabKind::Shell) => (None, None, tab.target),
                 _ => return Err("The tab does not match its terminal.".to_owned()),
             }
@@ -57,6 +62,42 @@ pub(crate) fn resolve(connection: &Connection, key: &str) -> Result<TerminalOwne
         conversation,
         shell,
     })
+}
+
+/// The name of an agent terminal in the note its Codex launch carries, see
+/// [`brachio_agent::codex_tab_note`]: the key with `:` turned into `-`, such as
+/// `<task id>-agent-<tab id>`. `None` for a key that cannot name a tab.
+pub(crate) fn tab_marker(key: &str) -> Option<String> {
+    let marker = key.replacen(':', "-", 1);
+    brachio_agent::is_tab_marker(&marker).then_some(marker)
+}
+
+/// Records the Codex conversation the Codex terminal `key` is to resume, in place of any recorded
+/// before. Only for a conversation confirmed to be the tab's. Fails for any other terminal, so a
+/// Claude Code tab's conversation id is never replaced.
+pub(crate) fn record_codex_conversation(
+    connection: &Connection,
+    key: &str,
+    conversation: &str,
+) -> Result<(), String> {
+    if resolve(connection, key)?.agent != Some(AgentKind::Codex) {
+        return Err("Only a Codex tab records a Codex conversation.".to_owned());
+    }
+    let (task_id, pane) = key
+        .split_once(':')
+        .ok_or_else(|| "A registered task terminal is required.".to_owned())?;
+    let recorded = match (pane, pane.strip_prefix("agent-")) {
+        ("agent", _) => TaskRecord::set_agent_session(connection, task_id, conversation),
+        (_, Some(tab)) => {
+            brachio_store::set_task_tab_conversation(connection, task_id, tab, conversation)
+        }
+        _ => return Err("Only an agent terminal has a conversation.".to_owned()),
+    };
+    match recorded {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("The tab is closed.".to_owned()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -88,6 +129,63 @@ mod tests {
         assert_eq!(owner.conversation.as_deref(), Some(tab));
         brachio_store::close_task_tab(&db, "task", tab).expect("close tab");
         assert!(resolve(&db, &key).is_err());
+    }
+
+    #[test]
+    fn a_found_codex_conversation_is_kept_by_its_own_tab_only() {
+        let db = brachio_store::open_in_memory().expect("test database");
+        db.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, agent_kind)
+             VALUES ('task', 'r', 'Task', '', 'task', 'worktree', 'active', 1, 'codex');",
+        ).expect("test task");
+        let first = "11111111-1111-4111-8111-111111111111";
+        let second = "22222222-2222-4222-8222-222222222222";
+        for id in [first, second] {
+            let tab = brachio_store::TaskTab {
+                tab_id: id.to_owned(),
+                kind: TabKind::Codex,
+                target: None,
+            };
+            brachio_store::add_task_tab(&db, "task", &tab).expect("register tab");
+        }
+        let conversation = |key: &str| resolve(&db, key).expect("resolve").conversation;
+        assert_eq!(conversation("task:agent"), None);
+        assert_eq!(conversation(&format!("task:agent-{first}")), None);
+
+        record_codex_conversation(&db, "task:agent", "old-chat").expect("record");
+        record_codex_conversation(&db, "task:agent", "main-chat").expect("replace");
+        record_codex_conversation(&db, &format!("task:agent-{first}"), "first-chat")
+            .expect("record");
+        assert!(record_codex_conversation(&db, "task:shell", "x").is_err());
+        let claude = "33333333-3333-4333-8333-333333333333";
+        brachio_store::add_task_tab(
+            &db,
+            "task",
+            &brachio_store::TaskTab {
+                tab_id: claude.to_owned(),
+                kind: TabKind::ClaudeCode,
+                target: None,
+            },
+        )
+        .expect("register tab");
+        assert!(
+            record_codex_conversation(&db, &format!("task:agent-{claude}"), "x").is_err(),
+            "a Claude Code tab keeps its own id"
+        );
+        assert_eq!(conversation("task:agent").as_deref(), Some("main-chat"));
+        assert_eq!(
+            conversation(&format!("task:agent-{first}")).as_deref(),
+            Some("first-chat")
+        );
+        assert_eq!(conversation(&format!("task:agent-{second}")), None);
+
+        assert_eq!(tab_marker("task:agent").as_deref(), Some("task-agent"));
+        assert_eq!(
+            tab_marker(&format!("task:agent-{first}")),
+            Some(format!("task-agent-{first}"))
+        );
+        assert_eq!(tab_marker("task:agent:x"), None);
     }
 
     #[test]

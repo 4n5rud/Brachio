@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { decodeMessage } from "./terminal";
+import { describe, expect, it, test, vi } from "vitest";
+import { asksToChooseCodexConversation, decodeMessage } from "./terminal";
 
 const invoke = vi.hoisted(() =>
   vi.fn(async (command: string) =>
@@ -53,4 +53,11 @@ describe("decodeMessage", () => {
   it("ignores anything else", () => {
     expect(decodeMessage("noise")).toBeNull();
   });
+});
+
+test("only the launch error that asks for a choice opens the Codex conversation list", () => {
+  expect(asksToChooseCodexConversation("BRACHIO_CODEX_CHOOSE_CONVERSATION: choose which Codex conversation to continue.")).toBe(true);
+  expect(asksToChooseCodexConversation(new Error("terminal launch failed: BRACHIO_CODEX_CHOOSE_CONVERSATION: x"))).toBe(true);
+  expect(asksToChooseCodexConversation("codex is not installed or not on PATH")).toBe(false);
+  expect(asksToChooseCodexConversation(undefined)).toBe(false);
 });
