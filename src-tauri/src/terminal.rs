@@ -179,16 +179,31 @@ pub async fn terminal_codex_conversations(
     {
         return Ok(Vec::new());
     }
-    let environment = crate::agent_account_env::launch_environment(
-        &*database.lock()?,
-        &accounts.0,
-        &owner.task.id,
-        AgentKind::Codex,
-    )?;
-    let home = environment
-        .iter()
-        .find(|(name, _)| name == "CODEX_HOME")
-        .map(|(_, value)| PathBuf::from(value));
+    let home = {
+        let connection = database.lock()?;
+        let repo = brachio_store::RepoRecord::get(&connection, &owner.task.repo_id)
+            .map_err(|error| error.to_string())?;
+        let profile = crate::agent_profiles::launch_additions(
+            &connection,
+            &owner.task.id,
+            &repo,
+            AgentKind::Codex,
+        )?
+        .map(|added| added.environment)
+        .unwrap_or_default();
+        let account = crate::agent_account_env::launch_environment(
+            &connection,
+            &accounts.0,
+            &owner.task.id,
+            AgentKind::Codex,
+        )?;
+        // The folder the Codex terminal would be given, profile and account together.
+        LaunchEnvironment {
+            base: profile,
+            account,
+        }
+        .config_home(AgentKind::Codex)
+    };
     tauri::async_runtime::spawn_blocking(move || {
         account_codex_conversations(home.as_deref(), &owner.task.worktree_path)
             .into_iter()
@@ -366,16 +381,6 @@ async fn prepare_terminal(
         )?,
         None => Vec::new(),
     };
-    // The account's config folder, where the agent keeps its conversations.
-    let config_home = request
-        .agent
-        .and_then(crate::agent_account_env::config_variable)
-        .and_then(|variable| {
-            account_environment
-                .iter()
-                .find(|(name, _)| name == variable)
-                .map(|(_, value)| PathBuf::from(value))
-        });
     let mut options = Vec::new();
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
         if !hook.environment(key).is_empty() {
@@ -400,20 +405,28 @@ async fn prepare_terminal(
         }
     }
     crate::agent_accounts::check_isolated_login(request.agent, &account_environment).await?;
-    let (command, prompt_delivery, resumed) = match request.agent {
+    let environment = LaunchEnvironment {
+        base: environment,
+        account: account_environment,
+    };
+    let (command, prompt_delivery, resumed, environment) = match request.agent {
         Some(kind) => {
             let request = request.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                agent_command(kind, &request, options, config_home.as_deref())
+                agent_command(kind, &request, options, &environment)
+                    .map(|(command, delivery, resumed)| (command, delivery, resumed, environment))
             })
             .await
             .map_err(|error| error.to_string())??
         }
-        None => (shell_command(shell_id), PromptDelivery::None, false),
+        None => (
+            shell_command(shell_id),
+            PromptDelivery::None,
+            false,
+            environment,
+        ),
     };
-    environment.extend(command.env);
-    // A task's saved account remains authoritative after profile and adapter additions.
-    environment.extend(account_environment);
+    let environment = environment.finish(command.env);
     let spec = SpawnSpec {
         program: command.program.to_string_lossy().into_owned(),
         args: command.args,
@@ -495,18 +508,79 @@ pub fn terminal_park(hosted: State<'_, RuntimeTerminals>, id: SessionId) -> Comm
     }
 }
 
+/// What an agent's terminal gets as its environment. Later entries win, so the task's account
+/// stays authoritative over the app's own variables, the profile's and the adapter's.
+pub(crate) struct LaunchEnvironment {
+    /// The app's variables and the profile's.
+    pub base: Vec<(String, String)>,
+    /// The task's account, applied last.
+    pub account: Vec<(String, String)>,
+}
+
+impl LaunchEnvironment {
+    /// The config folder the agent will use, where it keeps its conversations: the value of its
+    /// variable that the terminal ends up with. `None` leaves the CLI to its own lookup, which sees
+    /// the same app environment the conversation lookups read.
+    pub fn config_home(&self, kind: AgentKind) -> Option<PathBuf> {
+        let variable = crate::agent_account_env::config_variable(kind)?;
+        self.base
+            .iter()
+            .chain(&self.account)
+            .rev()
+            .find(|(name, _)| name == variable)
+            .map(|(_, value)| PathBuf::from(value))
+    }
+
+    /// The finished environment, with the adapter's variables placed before the account's.
+    pub fn finish(self, adapter: Vec<(String, String)>) -> Vec<(String, String)> {
+        let mut all = self.base;
+        all.extend(adapter);
+        all.extend(self.account);
+        all
+    }
+}
+
+/// Where the agent keeps its conversations, read from the folder the terminal will be given.
+pub(crate) struct ConversationLookups<'a> {
+    /// Whether Claude Code kept a conversation id under a config folder.
+    pub claude: &'a dyn Fn(Option<&Path>, &str) -> Option<bool>,
+    /// The Codex conversations started in a folder, under a config folder.
+    pub codex: &'a dyn Fn(Option<&Path>, &Path) -> Vec<brachio_agent::CodexConversation>,
+}
+
+const DISK_LOOKUPS: ConversationLookups<'static> = ConversationLookups {
+    claude: &brachio_agent::claude_conversation_recorded,
+    codex: &account_codex_conversations,
+};
+
 /// The command for an agent: its earlier conversation when asked to resume
-/// and one exists, otherwise a new one. `config_home` is the account's config folder, `None` for
-/// the CLI's own.
+/// and one exists, otherwise a new one.
 fn agent_command(
     kind: AgentKind,
     request: &OpenRequest,
-    mut options: Vec<String>,
-    config_home: Option<&Path>,
+    options: Vec<String>,
+    environment: &LaunchEnvironment,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
-    let installed = installed(kind)?;
-    let codex_home = config_home.filter(|_| kind == AgentKind::Codex);
-    let conversations = |cwd: &Path| account_codex_conversations(codex_home, cwd);
+    agent_launch(
+        &installed(kind)?,
+        request,
+        options,
+        environment,
+        &DISK_LOOKUPS,
+    )
+}
+
+fn agent_launch(
+    installed: &Installed,
+    request: &OpenRequest,
+    mut options: Vec<String>,
+    environment: &LaunchEnvironment,
+    lookups: &ConversationLookups<'_>,
+) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
+    let kind = installed.kind;
+    let config_home = environment.config_home(kind);
+    let config_home = config_home.as_deref();
+    let conversations = |cwd: &Path| (lookups.codex)(config_home, cwd);
     let from_project = kind == AgentKind::Codex
         && request.codex_conversation_id.is_none()
         && request.session_id.as_deref().is_some_and(|chosen| {
@@ -528,11 +602,8 @@ fn agent_command(
     } else if from_project {
         request.session_id.clone()
     } else if request.resume {
-        earlier_conversation(kind, request.session_id.as_deref()).filter(|id| {
-            conversation_may_exist(kind, id, &|id| {
-                brachio_agent::claude_conversation_recorded(config_home, id)
-            })
-        })
+        earlier_conversation(kind, request.session_id.as_deref())
+            .filter(|id| conversation_may_exist(kind, id, &|id| (lookups.claude)(config_home, id)))
     } else {
         None
     };
@@ -720,6 +791,8 @@ fn terminal_env() -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
 
     #[test]
@@ -800,6 +873,109 @@ mod tests {
             ID,
             &kept(Some(false))
         ));
+    }
+
+    fn variable(name: &str, value: &str) -> (String, String) {
+        (name.to_owned(), value.to_owned())
+    }
+
+    /// The value of `name` the terminal ends up with.
+    fn last_value(environment: &[(String, String)], name: &str) -> Option<String> {
+        environment
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    }
+
+    #[test]
+    fn conversations_are_looked_up_in_the_config_folder_the_agent_is_given() {
+        const ID: &str = "11111111-2222-4333-8444-555555555555";
+        let claude = Installed {
+            kind: AgentKind::ClaudeCode,
+            path: PathBuf::from("/fake-home/bin/claude"),
+            version: None,
+        };
+        let request = OpenRequest {
+            agent: Some(AgentKind::ClaudeCode),
+            resume: true,
+            session_id: Some(ID.to_owned()),
+            ..open_request("worktree", None)
+        };
+        let profile_only = || LaunchEnvironment {
+            base: vec![
+                variable("TERM", "xterm-256color"),
+                variable("CLAUDE_CONFIG_DIR", "/fake-home/profile-claude"),
+            ],
+            account: Vec::new(),
+        };
+        let with_account = || LaunchEnvironment {
+            account: vec![variable("CLAUDE_CONFIG_DIR", "/fake-home/account-claude")],
+            ..profile_only()
+        };
+        for environment in [profile_only(), with_account()] {
+            let asked = Mutex::new(Vec::new());
+            let claude_lookup = |folder: Option<&Path>, id: &str| {
+                asked
+                    .lock()
+                    .expect("lock")
+                    .push((folder.map(Path::to_path_buf), id.to_owned()));
+                Some(true)
+            };
+            let lookups = ConversationLookups {
+                claude: &claude_lookup,
+                codex: &|_, _| Vec::new(),
+            };
+            let (command, _, resumed) =
+                agent_launch(&claude, &request, Vec::new(), &environment, &lookups)
+                    .expect("launch");
+            assert!(resumed);
+            assert!(command.args.contains(&"--resume".to_owned()), "{command:?}");
+            let given = last_value(&environment.finish(command.env), "CLAUDE_CONFIG_DIR")
+                .expect("the terminal is given a config folder");
+            assert_eq!(
+                asked.into_inner().expect("lock"),
+                [(Some(PathBuf::from(given)), ID.to_owned())]
+            );
+        }
+    }
+
+    #[test]
+    fn a_codex_conversation_is_checked_in_the_folder_codex_is_given() {
+        const ID: &str = "11111111-2222-4333-8444-555555555555";
+        let codex = Installed {
+            kind: AgentKind::Codex,
+            path: PathBuf::from("/fake-home/bin/codex"),
+            version: None,
+        };
+        let request = OpenRequest {
+            resume: true,
+            codex_conversation_id: Some(ID.to_owned()),
+            ..open_request("worktree", None)
+        };
+        let environment = LaunchEnvironment {
+            base: vec![variable("CODEX_HOME", "/fake-home/profile-codex")],
+            account: Vec::new(),
+        };
+        let codex_lookup = |folder: Option<&Path>, _: &Path| {
+            if folder == Some(Path::new("/fake-home/profile-codex")) {
+                vec![brachio_agent::CodexConversation {
+                    id: ID.to_owned(),
+                    timestamp: None,
+                }]
+            } else {
+                Vec::new()
+            }
+        };
+        let lookups = ConversationLookups {
+            claude: &|_, _| None,
+            codex: &codex_lookup,
+        };
+        let (command, _, resumed) =
+            agent_launch(&codex, &request, Vec::new(), &environment, &lookups)
+                .expect("the conversation is found in the profile's folder");
+        assert!(resumed);
+        assert!(command.args.contains(&ID.to_owned()), "{command:?}");
     }
 
     #[test]
