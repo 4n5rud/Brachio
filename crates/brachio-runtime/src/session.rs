@@ -174,11 +174,11 @@ impl StartupOutput {
 
     /// The screen to draw and the output offset live output continues from, read together so no
     /// byte falls between them or is drawn twice. `None` when the screen cannot be continued
-    /// from here: mid-sequence, or on the alternate screen.
+    /// from here, in the middle of a sequence. A frame on the alternate screen carries the normal
+    /// screen behind it, so a full-screen program such as Codex can be continued too.
     pub(crate) fn frame_with_resume_offset(&self) -> (Frame, Option<u64>) {
         let frame = self.screen.frame();
-        let resume_offset =
-            (frame.at_boundary && !frame.alternate_screen).then(|| self.history.end());
+        let resume_offset = frame.at_boundary.then(|| self.history.end());
         (frame, resume_offset)
     }
 
@@ -315,6 +315,27 @@ delta
             state.screen.frame().ansi,
             "the reconnected screen must equal the live one"
         );
+    }
+
+    #[test]
+    fn a_full_screen_program_can_be_continued_from_its_frame() {
+        let mut state = StartupOutput::default();
+        state.record(b"prompt$ codex\r\n\x1b[?1049h\x1b[H\x1b[2Jcodex ready");
+        let (frame, offset) = state.frame_with_resume_offset();
+        assert!(frame.alternate_screen);
+        let offset = offset.expect("a settled full-screen frame can be continued");
+        assert_eq!(offset, state.history.end());
+
+        state.record(b"\x1b[2;1Hworking");
+        assert_eq!(
+            reconnected(&state, &frame, offset),
+            state.screen.frame().ansi,
+            "the reconnected full screen must equal the live one"
+        );
+        state.record(b"\x1b[?1049lprompt$ ");
+        let back = reconnected(&state, &frame, offset);
+        assert_eq!(back, state.screen.frame().ansi);
+        assert!(back.contains("prompt$ codex"), "{back:?}");
     }
 
     #[test]

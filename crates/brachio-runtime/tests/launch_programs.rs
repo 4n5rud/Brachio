@@ -190,3 +190,50 @@ async fn status_reports_from_the_program_reach_followers() {
     }
     assert_eq!(states, ["working", "idle"]);
 }
+
+/// A full-screen program such as Codex that has written more than the runtime keeps can still be
+/// reattached: the frame redraws its screen, where replaying the kept output would leave it blank.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_screen_program_with_long_output_is_reattached_from_its_frame() {
+    let (_host, client) = start();
+    ready(&client).await;
+    let script = "printf '\\033[?1049h'; i=0; while [ $i -lt 400 ]; do \
+                  printf '\\033[H%01000d' 0; i=$((i+1)); done; \
+                  printf '\\033[H\\033[2Jbrachio-full-screen-ready'; sleep 20";
+    client
+        .call(launch("sh", &["-c", script], &[]))
+        .await
+        .expect("launch");
+
+    let mut frame = None;
+    for _ in 0..200 {
+        match client
+            .follow(Action::FollowFrame {
+                key: "agent".to_owned(),
+            })
+            .await
+        {
+            Ok((first, _following)) => {
+                if let ResponseResult::Snapshot { screen, .. } = first.result {
+                    if screen.ansi.contains("brachio-full-screen-ready") {
+                        frame = Some(screen);
+                        break;
+                    }
+                }
+            }
+            Err(brachio_runtime::client::ClientError::Refused(_)) => {}
+            Err(error) => panic!("{error}"),
+        }
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+    let frame = frame.expect("a frame of the full screen to follow from");
+    assert!(frame.alternate_screen);
+    assert!(frame.resume_offset.expect("resume offset") > 256 * 1024);
+    client
+        .call(Action::Stop {
+            key: "agent".to_owned(),
+        })
+        .await
+        .expect("stop");
+}

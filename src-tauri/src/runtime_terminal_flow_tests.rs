@@ -12,8 +12,8 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tokio::sync::MutexGuard;
 
 use super::{
-    launch_action, pending_launch, save_pending_launch, Action, Client, Launch, PendingLaunch,
-    RuntimeTerminals, Uuid,
+    follow_full_screen, launch_action, pending_launch, save_pending_launch, Action, Client, Launch,
+    PendingLaunch, RuntimeTerminals, Uuid,
 };
 
 use crate::runtime_client::TEST_ENVIRONMENT as ENVIRONMENT;
@@ -319,6 +319,127 @@ async fn a_detached_terminal_keeps_running_and_shows_its_screen_when_reattached(
     assert!(attached);
     assert_eq!(world.pid_of(key).await, Some(pid));
     second_window.shows_eventually(MARKER).await;
+}
+
+/// A program like Codex: it draws on the full screen, then keeps redrawing one line until it has
+/// written far more than the runtime keeps, so the first line is no longer in the kept output.
+/// Then it waits for input, which the terminal echoes.
+#[cfg(unix)]
+fn full_screen_launch(world: &World) -> Launch {
+    let script = "printf '\\033[?1049h\\033[H\\033[2Jbrachio-full-screen-ready'; i=0; \
+                  while [ $i -lt 400 ]; do printf '\\033[2;1H%01000d' $i; i=$((i+1)); done; \
+                  printf '\\033[3;1Hbrachio-drawn'; exec cat";
+    Launch {
+        args: vec!["-c".to_owned(), script.to_owned()],
+        program: "sh".to_owned(),
+        ..world.launch()
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_screen_program_with_long_output_is_redrawn_when_reattached() {
+    let world = World::start().await;
+    let terminals = RuntimeTerminals::default();
+    let (first_window, second_window) = (Window::default(), Window::default());
+    let key = "fullscreen1:agent";
+
+    let (id, _) = terminals
+        .open(
+            key.to_owned(),
+            std::future::ready(Ok(full_screen_launch(&world))),
+            first_window.channel(),
+            true,
+        )
+        .await
+        .expect("open")
+        .expect("the runtime is used");
+    first_window.shows_eventually("brachio-drawn").await;
+    terminals.detach(id).expect("hosted").expect("detached");
+
+    let (again, attached) = terminals
+        .open(
+            key.to_owned(),
+            std::future::ready(Err(anyhow::anyhow!("a live program is not started again"))),
+            second_window.channel(),
+            true,
+        )
+        .await
+        .expect("reattach")
+        .expect("the runtime is used");
+    assert!(attached);
+    second_window
+        .shows_eventually("brachio-full-screen-ready")
+        .await;
+    terminals
+        .write(again, "brachio-typed-after\n".to_owned())
+        .await
+        .expect("hosted")
+        .expect("write");
+    second_window.shows_eventually("brachio-typed-after").await;
+}
+
+/// What an app does with a runtime that never offers a frame of a full screen: it draws the
+/// current frame and goes on from the byte the frame was taken at.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_screen_frame_is_followed_from_the_byte_it_was_taken_at() {
+    let world = World::start().await;
+    let terminals = RuntimeTerminals::default();
+    let window = Window::default();
+    let key = "fullscreen2:agent";
+    let (id, _) = terminals
+        .open(
+            key.to_owned(),
+            std::future::ready(Ok(full_screen_launch(&world))),
+            window.channel(),
+            true,
+        )
+        .await
+        .expect("open")
+        .expect("the runtime is used");
+    window.shows_eventually("brachio-drawn").await;
+
+    let client = world.client();
+    let (replies, mut following) = follow_full_screen(&client, key)
+        .await
+        .expect("a full screen is followed from its frame");
+    let [frame, page] = <[_; 2]>::try_from(replies).expect("a frame, then the output after it");
+    let ResponseResult::Snapshot { session, screen } = frame.result else {
+        panic!("the frame comes first");
+    };
+    assert!(screen.alternate_screen);
+    assert!(screen.ansi.contains("brachio-full-screen-ready"));
+    let ResponseResult::Success {
+        output: Some(page), ..
+    } = page.result
+    else {
+        panic!("the output follows the frame");
+    };
+    assert_eq!(page.start, session.output_bytes);
+    assert!(!page.truncated);
+    assert!(page.start > 256 * 1024, "the kept output starts later");
+
+    terminals
+        .write(id, "brachio-typed-after\n".to_owned())
+        .await
+        .expect("hosted")
+        .expect("write");
+    let mut seen = page.bytes;
+    while !String::from_utf8_lossy(&seen).contains("brachio-typed-after") {
+        let reply = tokio::time::timeout(Duration::from_secs(8), following.next())
+            .await
+            .expect("output arrived in time")
+            .expect("follow reply")
+            .expect("connection open");
+        if let ResponseResult::Success {
+            output: Some(page), ..
+        } = reply.result
+        {
+            seen.extend(page.bytes);
+        }
+    }
+    assert!(!String::from_utf8_lossy(&seen).contains("brachio-full-screen-ready"));
 }
 
 #[tokio::test]

@@ -142,7 +142,7 @@ pub enum Action {
         /// Name the caller chose for the shell.
         key: String,
     },
-    /// Send a settled normal-screen frame, then follow future output.
+    /// Send a settled frame, then follow future output.
     FollowFrame {
         /// Name the caller chose for the shell.
         key: String,

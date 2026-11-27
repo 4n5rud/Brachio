@@ -1,6 +1,6 @@
 //! Terminals hosted by the independent runtime: they outlive the window and can be re-attached.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -313,12 +313,13 @@ impl RuntimeTerminals {
         let (first, following) = if attached {
             open_frame(&client, &key).await?
         } else {
-            client
+            let (first, following) = client
                 .follow(Action::Follow {
                     key: key.clone(),
                     after: 0,
                 })
-                .await?
+                .await?;
+            (vec![first], following)
         };
         let id = self.new_handle();
         let session_id = session
@@ -735,8 +736,9 @@ async fn show_last_screen(client: &Client, key: &str, channel: &Channel<InvokeRe
     }
 }
 
-/// Follow from the settled frame, or from the retained history when no frame settles.
-async fn open_frame(client: &Client, key: &str) -> Result<(Reply, Following), ClientError> {
+/// Follow from the settled frame, or from the retained history when no frame settles. The replies
+/// to show first come in order, before the ones `Following` yields.
+async fn open_frame(client: &Client, key: &str) -> Result<(Vec<Reply>, Following), ClientError> {
     for _ in 0..FRAME_ATTEMPTS {
         match client
             .follow(Action::FollowFrame {
@@ -745,21 +747,55 @@ async fn open_frame(client: &Client, key: &str) -> Result<(Reply, Following), Cl
             .await
         {
             Err(ClientError::Refused(_)) => tokio::time::sleep(FRAME_RETRY).await,
-            other => return other,
+            Ok((first, following)) => return Ok((vec![first], following)),
+            Err(error) => return Err(error),
         }
     }
-    client
+    if let Some(opened) = follow_full_screen(client, key).await {
+        return Ok(opened);
+    }
+    let (first, following) = client
         .follow(Action::Follow {
             key: key.to_owned(),
             after: 0,
         })
+        .await?;
+    Ok((vec![first], following))
+}
+
+/// A runtime older than this app never offers a frame of a full-screen program such as Codex.
+/// Replaying the output it kept would then start in the middle of the program's drawing, after
+/// the switch to the full screen, and leave the pane blank. Its current frame is drawn instead and
+/// output continues from the byte the frame was taken at, which the runtime reads together with
+/// the frame. `None` for a normal screen, which the retained history redraws as before.
+async fn follow_full_screen(client: &Client, key: &str) -> Option<(Vec<Reply>, Following)> {
+    let snapshot = client
+        .call(Action::Snapshot {
+            key: key.to_owned(),
+        })
         .await
+        .ok()?;
+    let ResponseResult::Snapshot { session, screen } = &snapshot.result else {
+        return None;
+    };
+    if !screen.alternate_screen {
+        return None;
+    }
+    let after = screen.resume_offset.unwrap_or(session.output_bytes);
+    let (first, following) = client
+        .follow(Action::Follow {
+            key: key.to_owned(),
+            after,
+        })
+        .await
+        .ok()?;
+    Some((vec![snapshot, first], following))
 }
 
 /// Forward everything the runtime reports to the web view until the program ends.
 async fn pump(
     (client, key): (Client, String),
-    first: Reply,
+    first: Vec<Reply>,
     mut following: Following,
     channel: Channel<InvokeResponseBody>,
     agent: bool,
@@ -768,16 +804,21 @@ async fn pump(
     let mut last_status = None;
     let status = agent.then(|| TerminalStatus::new(channel.clone()));
     let mut live = false;
-    let mut next = Some(first);
+    let mut next: VecDeque<Reply> = first.into();
     loop {
-        if let Some(mut reply) = next.take() {
+        while let Some(mut reply) = next.pop_front() {
             let forward = forwarding.load(Ordering::Relaxed);
             if live && forward && skipped_output(&reply) {
                 // The runtime dropped output this pane never received. Redraw from a fresh frame
                 // instead of showing a screen with a hole in it.
                 send_message(&channel, &ChannelMessage::Reset { reset: true });
                 match open_frame(&client, &key).await {
-                    Ok((frame, resumed)) => {
+                    Ok((frames, resumed)) => {
+                        next = frames.into();
+                        let Some(frame) = next.pop_front() else {
+                            send_message(&channel, &ChannelMessage::Detached { detached: true });
+                            return;
+                        };
                         reply = frame;
                         following = resumed;
                     }
@@ -800,7 +841,7 @@ async fn pump(
             live = true;
         }
         match following.next().await {
-            Ok(Some(reply)) => next = Some(reply),
+            Ok(Some(reply)) => next.push_back(reply),
             Ok(None) | Err(_) => {
                 send_message(&channel, &ChannelMessage::Detached { detached: true });
                 return;
