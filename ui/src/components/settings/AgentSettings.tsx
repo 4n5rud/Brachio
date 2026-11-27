@@ -100,6 +100,13 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
       return undefined;
     }
   });
+  // Codex reports the signed-in address with its usage. Keep it per account, so choosing another usage account does not hide it.
+  const [addresses, setAddresses] = createSignal<Record<string, string>>({});
+  createEffect(() => {
+    const key = usageKey();
+    const address = usage.loading ? undefined : usage()?.account;
+    if (key && address) setAddresses((current) => current[key] === address ? current : { ...current, [key]: address });
+  });
   const usageRows = () => {
     const quota = usage();
     return quota && [quota.primary, quota.secondary]
@@ -117,8 +124,7 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
   const rows = (): AccountRowData[] | undefined => list()?.map((account) => {
     const key = accountSelection(account);
     let state: AccountState = reload.pending() ? { state: "checking" } : states()[key] ?? { state: "checking" };
-    // Codex reports the signed-in address with its usage, so the account whose usage is shown can show it.
-    const address = key === usageKey() ? usage()?.account : undefined;
+    const address = addresses()[key];
     if (state.state === "signedIn" && address) state = { ...state, account: address };
     return { id: account.id, name: accountName(account), system: account.id === null, isDefault: account === defaultAccount(), state, signingIn: signingIn() === key };
   });

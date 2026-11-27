@@ -33,7 +33,7 @@ export interface AgentCardProps {
   path: string;
   /** The default account's state, shown in the header. */
   account: AccountState;
-  /** The saved accounts, system default first. Undefined while they are read, and for agents without accounts. */
+  /** The saved accounts, system login first. Undefined while they are read, and for agents without accounts. */
   accounts?: readonly AccountRowData[];
   /** Why the accounts could not be read. */
   accountsError?: string;

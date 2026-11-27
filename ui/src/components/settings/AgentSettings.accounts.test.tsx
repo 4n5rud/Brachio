@@ -65,7 +65,7 @@ afterEach(() => {
   confirmDialog.mockReset();
 });
 
-test("lists the system default first with the default badge, and reads each account's sign-in", async () => {
+test("lists the system login first with the default badge, and reads each account's sign-in", async () => {
   const root = await open();
   const rows = [...root.querySelectorAll<HTMLElement>(".account-row")];
   expect(rows.map((row) => row.querySelector(".account-name-text")?.textContent)).toEqual([t("settings.accountBuiltin"), "Work"]);
@@ -157,7 +157,7 @@ test("a signed-out account offers sign in as text, a signed-in one offers sign o
   expect(confirmDialog).toHaveBeenCalledTimes(1);
 });
 
-test("the system default cannot be renamed or removed, and the icon buttons carry names", async () => {
+test("the system login cannot be renamed or removed, and the icon buttons carry names", async () => {
   const root = await open();
   const system = rowOf(root, t("settings.accountBuiltin"));
   expect(system.querySelector('[data-action="rename"]')).toBeNull();
@@ -219,6 +219,17 @@ test("the usage account is chosen apart from the default, and shows that account
   expect(rowOf(root, t("settings.accountBuiltin")).hasAttribute("data-current")).toBe(true);
   expect(rowOf(root, "Work").hasAttribute("data-current")).toBe(false);
   await vi.waitFor(() => expect(rowOf(root, "Work").textContent).toContain("work@example.com"));
+});
+
+test("choosing another usage account keeps the default row's address", async () => {
+  const root = await open();
+  await vi.waitFor(() => expect(rowOf(root, t("settings.accountBuiltin")).textContent).toContain("me@example.com"));
+  const select = root.querySelector<HTMLSelectElement>(".usage-account-select")!;
+  select.value = "work";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await vi.waitFor(() => expect(rowOf(root, "Work").textContent).toContain("work@example.com"));
+  expect(rowOf(root, t("settings.accountBuiltin")).textContent).toContain("me@example.com");
+  expect(rowOf(root, t("settings.accountBuiltin")).hasAttribute("data-current")).toBe(true);
 });
 
 test("removing the default account says new tasks fall back to the system login, other accounts do not", async () => {
