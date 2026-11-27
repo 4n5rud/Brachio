@@ -122,14 +122,14 @@ It is ignored by default, so `cargo test --workspace` skips it. The `Memory boun
 
 Installer sizes are the release assets as published. A MiB is 1,048,576 bytes.
 
-| Asset | 0.1.0 | 0.2.0-rc.2 | 0.2.0-rc.3 |
-| --- | --- | --- | --- |
-| Windows setup (`x64-setup.exe`) | 8.02 MiB | 8.76 MiB | 8.81 MiB |
-| Windows `.msi` | 10.79 MiB | not published | not published |
-| macOS disk image (`aarch64.dmg`) | 9.23 MiB | 10.00 MiB | 10.06 MiB |
-| macOS `app.tar.gz` | 9.16 MiB | 9.92 MiB | 9.98 MiB |
+| Asset | 0.1.0 | 0.2.0-rc.2 | 0.2.0-rc.3 | 0.2.0-rc.4 |
+| --- | --- | --- | --- | --- |
+| Windows setup (`x64-setup.exe`) | 8.02 MiB | 8.76 MiB | 8.81 MiB | 9.20 MiB |
+| Windows `.msi` | 10.79 MiB | not published | not published | not published |
+| macOS disk image (`aarch64.dmg`) | 9.23 MiB | 10.00 MiB | 10.06 MiB | 10.49 MiB |
+| macOS `app.tar.gz` | 9.16 MiB | 9.92 MiB | 9.98 MiB | 10.41 MiB |
 
-Read them with `gh release view v0.2.0-rc.3 --json assets --jq '.assets[] | "\(.name) \(.size)"'` and divide the bytes by 1,048,576.
+Read them with `gh release view v0.2.0-rc.4 --json assets --jq '.assets[] | "\(.name) \(.size)"'` and divide the bytes by 1,048,576.
 
 ### Release binary, macOS
 

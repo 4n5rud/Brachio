@@ -48,8 +48,8 @@ Brachio s'exécute sur votre machine sous licence MIT. Il utilise votre compte C
 
 | Plateforme | Installateur |
 |---|---|
-| Windows 10/11 (x64) | [Brachio_0.2.0-rc.3_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.3/Brachio_0.2.0-rc.3_x64-setup.exe) |
-| macOS (Apple silicon, expérimental) | [Brachio_0.2.0-rc.3_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.3/Brachio_0.2.0-rc.3_aarch64.dmg) |
+| Windows 10/11 (x64) | [Brachio_0.2.0-rc.4_x64-setup.exe](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.4/Brachio_0.2.0-rc.4_x64-setup.exe) |
+| macOS (Apple silicon, expérimental) | [Brachio_0.2.0-rc.4_aarch64.dmg](https://github.com/4n5rud/Brachio/releases/download/v0.2.0-rc.4/Brachio_0.2.0-rc.4_aarch64.dmg) |
 
 Toutes les versions et notes de version sont sur la [page des releases](https://github.com/4n5rud/Brachio/releases). Chaque release liste les sommes SHA-256 dans `SHA256SUMS.txt`.
 
