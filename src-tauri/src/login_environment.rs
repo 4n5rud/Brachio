@@ -95,7 +95,7 @@ fn merge_paths(paths: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_path, install_folders, merge_paths, read_path, shell_command};
+    use super::{extract_path, install_folders, merge_paths};
     use std::path::Path;
 
     #[test]
@@ -145,9 +145,9 @@ mod tests {
         let rc = home.path().join("rc");
         std::fs::write(&rc, "PATH=/from/rc:$PATH\n").expect("write rc file");
         let read = |flags: &[&str]| {
-            let mut command = shell_command("/bin/sh", flags);
+            let mut command = super::shell_command("/bin/sh", flags);
             command.env("ENV", &rc);
-            read_path(command).expect("shell PATH")
+            super::read_path(command).expect("shell PATH")
         };
         let interactive = read(&["-i", "-c"]);
         let plain = read(&["-c"]);
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn a_shell_that_cannot_start_gives_no_path() {
         assert_eq!(
-            read_path(shell_command("/nonexistent/shell", &["-c"])),
+            super::read_path(super::shell_command("/nonexistent/shell", &["-c"])),
             None
         );
     }
