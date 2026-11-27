@@ -68,9 +68,9 @@ pub use task_pin_record::{pinned_task_ids, set_task_pinned};
 pub use task_profile_record::{join_compare_group, set_task_profile, task_profile};
 pub use task_record::{ChildInsertError, NewTask, TaskRecord};
 pub use task_tabs::{
-    add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs, rename_task_tab,
-    reorder_task_tabs, retired_secondary_tabs, task_tab, task_tab_names, task_tabs, TabKind,
-    TaskTab,
+    add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
+    remember_task_tab_conversation, rename_task_tab, reorder_task_tabs, retired_secondary_tabs,
+    task_tab, task_tab_conversation, task_tab_names, task_tabs, TabKind, TaskTab,
 };
 pub use usage_record::{
     limit_history, record_limit_snapshot, usage_apply, usage_file_state, usage_reset, usage_rows,

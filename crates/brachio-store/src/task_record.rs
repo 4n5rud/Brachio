@@ -403,6 +403,25 @@ impl TaskRecord {
         Self::get(connection, id)
     }
 
+    /// Records the conversation the task's agent started, unless the task already has one, such
+    /// as a conversation id given before the agent started or the conversation it was created
+    /// from. Returns whether it was recorded.
+    ///
+    /// # Errors
+    /// Fails when the record cannot be updated.
+    pub fn remember_agent_session(
+        connection: &Connection,
+        id: &str,
+        session_id: &str,
+    ) -> Result<bool, StoreError> {
+        let changed = connection.execute(
+            "UPDATE tasks SET agent_session_id = ?2
+              WHERE id = ?1 AND (agent_session_id IS NULL OR agent_session_id = '')",
+            params![id, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     fn set_archived_at(
         connection: &Connection,
         id: &str,
@@ -554,6 +573,27 @@ mod tests {
             compare_group: None,
             created_at_ms,
         }
+    }
+
+    #[test]
+    fn a_found_conversation_never_replaces_the_one_a_task_already_has() {
+        let connection = connection_with_repo();
+        TaskRecord::insert(&connection, &sample("t1", 1)).expect("insert");
+        let given = NewTask {
+            agent_session_id: Some("given"),
+            ..sample("t2", 2)
+        };
+        TaskRecord::insert(&connection, &given).expect("insert");
+        assert!(TaskRecord::remember_agent_session(&connection, "t1", "found").expect("write"));
+        assert!(!TaskRecord::remember_agent_session(&connection, "t1", "later").expect("write"));
+        assert!(!TaskRecord::remember_agent_session(&connection, "t2", "found").expect("write"));
+        let session = |id| {
+            TaskRecord::get(&connection, id)
+                .expect("get")
+                .agent_session_id
+        };
+        assert_eq!(session("t1").as_deref(), Some("found"));
+        assert_eq!(session("t2").as_deref(), Some("given"));
     }
 
     fn add_second_repo(connection: &Connection) {

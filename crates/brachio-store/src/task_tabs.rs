@@ -250,6 +250,44 @@ pub fn task_tab(
     Ok(tab.flatten())
 }
 
+/// The agent conversation recorded for a tab, such as the Codex conversation it started.
+///
+/// # Errors
+/// Fails when the database cannot be read.
+pub fn task_tab_conversation(
+    connection: &Connection,
+    task_id: &str,
+    tab_id: &str,
+) -> Result<Option<String>, StoreError> {
+    let found: Option<Option<String>> = connection
+        .query_row(
+            "SELECT conversation_id FROM task_tabs WHERE task_id = ?1 AND tab_id = ?2",
+            params![task_id, tab_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.flatten().filter(|id| !id.is_empty()))
+}
+
+/// Records the conversation a tab started, unless one is already recorded. Returns whether it
+/// was recorded.
+///
+/// # Errors
+/// Fails when the database cannot be written.
+pub fn remember_task_tab_conversation(
+    connection: &Connection,
+    task_id: &str,
+    tab_id: &str,
+    conversation_id: &str,
+) -> Result<bool, StoreError> {
+    let changed = connection.execute(
+        "UPDATE task_tabs SET conversation_id = ?3
+         WHERE task_id = ?1 AND tab_id = ?2 AND (conversation_id IS NULL OR conversation_id = '')",
+        params![task_id, tab_id, conversation_id],
+    )?;
+    Ok(changed > 0)
+}
+
 /// Opens one more tab. The same agent or shell can be added again; every tab has its own id.
 ///
 /// # Errors
@@ -332,8 +370,8 @@ mod tests {
 
     use super::{
         add_task_tab, close_task_tab, forget_retired_secondary_tab, load_task_tabs,
-        rename_task_tab, reorder_task_tabs, retired_secondary_tabs, task_tab, task_tab_names,
-        task_tabs, TabKind, TaskTab,
+        remember_task_tab_conversation, rename_task_tab, reorder_task_tabs, retired_secondary_tabs,
+        task_tab, task_tab_conversation, task_tab_names, task_tabs, TabKind, TaskTab,
     };
     use crate::database::open_in_memory;
     use crate::{NewRepo, NewTask, RepoRecord, TaskRecord};
@@ -437,6 +475,35 @@ mod tests {
         assert_eq!(open_ids(&connection), ["a", "b", "c"]);
         assert!(reorder_task_tabs(&mut connection, "t1", &ids(&["c", "gone"])).is_err());
         assert_eq!(open_ids(&connection), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_tab_keeps_the_first_conversation_recorded_for_it() {
+        let connection = connection_with_task();
+        add_task_tab(&connection, "t1", &tab("a", TabKind::Codex)).expect("tab");
+        add_task_tab(&connection, "t1", &tab("b", TabKind::Codex)).expect("tab");
+        assert_eq!(
+            task_tab_conversation(&connection, "t1", "a").expect("read"),
+            None
+        );
+        assert!(remember_task_tab_conversation(&connection, "t1", "a", "first").expect("write"));
+        assert!(!remember_task_tab_conversation(&connection, "t1", "a", "second").expect("write"));
+        assert!(!remember_task_tab_conversation(&connection, "t1", "gone", "x").expect("write"));
+        assert_eq!(
+            task_tab_conversation(&connection, "t1", "a")
+                .expect("read")
+                .as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            task_tab_conversation(&connection, "t1", "b").expect("read"),
+            None
+        );
+        close_task_tab(&connection, "t1", "a").expect("close");
+        assert_eq!(
+            task_tab_conversation(&connection, "t1", "a").expect("read"),
+            None
+        );
     }
 
     #[test]
