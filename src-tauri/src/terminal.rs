@@ -179,33 +179,15 @@ pub async fn terminal_codex_conversations(
     {
         return Ok(Vec::new());
     }
-    let home = {
-        let connection = database.lock()?;
-        let repo = brachio_store::RepoRecord::get(&connection, &owner.task.repo_id)
-            .map_err(|error| error.to_string())?;
-        let profile = crate::agent_profiles::launch_additions(
-            &connection,
-            &owner.task.id,
-            &repo,
-            AgentKind::Codex,
-        )?
-        .map(|added| added.environment)
-        .unwrap_or_default();
-        let account = crate::agent_account_env::launch_environment(
-            &connection,
-            &accounts.0,
-            &owner.task.id,
-            AgentKind::Codex,
-        )?;
-        // The folder the Codex terminal would be given, profile and account together.
-        LaunchEnvironment {
-            base: profile,
-            account,
-        }
-        .config_home(AgentKind::Codex)
-    };
+    // The folder the Codex terminal would be given, assembled as for the launch.
+    let setup = agent_setup(&*database.lock()?, &accounts, &owner.task, AgentKind::Codex)?;
+    let home =
+        assemble_environment(Vec::new(), setup, &mut Vec::new()).config_home(AgentKind::Codex);
     tauri::async_runtime::spawn_blocking(move || {
-        account_codex_conversations(home.as_deref(), &owner.task.worktree_path)
+        if home == ConfigHome::Unknown {
+            return Vec::new();
+        }
+        account_codex_conversations(home.folder(), &owner.task.worktree_path)
             .into_iter()
             .filter(|candidate| uuid::Uuid::parse_str(&candidate.id).is_ok())
             .collect()
@@ -372,14 +354,9 @@ async fn prepare_terminal(
             Err(error) => tracing::warn!(%error, "could not assign a development port"),
         }
     }
-    let account_environment = match request.agent {
-        Some(kind) => crate::agent_account_env::launch_environment(
-            &*database.lock()?,
-            &accounts.0,
-            &task.id,
-            kind,
-        )?,
-        None => Vec::new(),
+    let setup = match request.agent {
+        Some(kind) => agent_setup(&*database.lock()?, accounts, task, kind)?,
+        None => AgentSetup::default(),
     };
     let mut options = Vec::new();
     if let (Some(AgentKind::ClaudeCode), Some(key)) = (request.agent, request.key.as_deref()) {
@@ -394,21 +371,8 @@ async fn prepare_terminal(
     if let (Some(_), Some(key)) = (request.agent, request.key.as_deref()) {
         environment.extend(hook.mail_environment(key));
     }
-    if let Some(kind) = request.agent {
-        let repo = brachio_store::RepoRecord::get(&*database.lock()?, &task.repo_id)
-            .map_err(|error| error.to_string())?;
-        let added =
-            crate::agent_profiles::launch_additions(&*database.lock()?, &task.id, &repo, kind)?;
-        if let Some(added) = added {
-            options.extend(added.arguments);
-            environment.extend(added.environment);
-        }
-    }
-    crate::agent_accounts::check_isolated_login(request.agent, &account_environment).await?;
-    let environment = LaunchEnvironment {
-        base: environment,
-        account: account_environment,
-    };
+    crate::agent_accounts::check_isolated_login(request.agent, &setup.account).await?;
+    let environment = assemble_environment(environment, setup, &mut options);
     let (command, prompt_delivery, resumed, environment) = match request.agent {
         Some(kind) => {
             let request = request.clone();
@@ -518,17 +482,40 @@ pub(crate) struct LaunchEnvironment {
 }
 
 impl LaunchEnvironment {
-    /// The config folder the agent will use, where it keeps its conversations: the value of its
-    /// variable that the terminal ends up with. `None` leaves the CLI to its own lookup, which sees
-    /// the same app environment the conversation lookups read.
-    pub fn config_home(&self, kind: AgentKind) -> Option<PathBuf> {
-        let variable = crate::agent_account_env::config_variable(kind)?;
-        self.base
+    /// The config folder the agent will use, where it keeps its conversations.
+    pub fn config_home(&self, kind: AgentKind) -> ConfigHome {
+        self.config_home_with(kind, &|name| env::var_os(name))
+    }
+
+    /// Same as [`Self::config_home`], reading the app's own environment through `app`: the value of
+    /// the agent's variable that the terminal ends up with, given or inherited from the app.
+    fn config_home_with(
+        &self,
+        kind: AgentKind,
+        app: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+    ) -> ConfigHome {
+        let Some(variable) = crate::agent_account_env::config_variable(kind) else {
+            return ConfigHome::Default;
+        };
+        let given = self
+            .base
             .iter()
             .chain(&self.account)
             .rev()
             .find(|(name, _)| name == variable)
-            .map(|(_, value)| PathBuf::from(value))
+            .map(|(_, value)| std::ffi::OsString::from(value));
+        match given.or_else(|| app(variable)) {
+            None => ConfigHome::Default,
+            Some(value) => {
+                let folder = PathBuf::from(value);
+                // An empty or relative folder depends on how the CLI reads it, so it is not guessed.
+                if folder.as_os_str().is_empty() || !folder.is_absolute() {
+                    ConfigHome::Unknown
+                } else {
+                    ConfigHome::Folder(folder)
+                }
+            }
+        }
     }
 
     /// The finished environment, with the adapter's variables placed before the account's.
@@ -537,6 +524,71 @@ impl LaunchEnvironment {
         all.extend(adapter);
         all.extend(self.account);
         all
+    }
+}
+
+/// The config folder an agent will use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConfigHome {
+    /// No folder is set, so the CLI uses its default one.
+    Default,
+    /// This folder.
+    Folder(PathBuf),
+    /// A folder is set but cannot be told for sure, such as an empty or relative one.
+    Unknown,
+}
+
+impl ConfigHome {
+    /// The folder for lookups that take `None` as the CLI's default folder.
+    pub fn folder(&self) -> Option<&Path> {
+        match self {
+            Self::Folder(folder) => Some(folder),
+            Self::Default | Self::Unknown => None,
+        }
+    }
+}
+
+/// What a task's agent launch takes from the database: the task profile's additions and the
+/// environment of the task's account.
+#[derive(Default)]
+pub(crate) struct AgentSetup {
+    pub profile: Option<crate::agent_profiles::LaunchAdditions>,
+    pub account: Vec<(String, String)>,
+}
+
+fn agent_setup(
+    connection: &rusqlite::Connection,
+    accounts: &crate::agent_account_env::AccountsFolder,
+    task: &brachio_store::TaskRecord,
+    kind: AgentKind,
+) -> CommandResult<AgentSetup> {
+    let repo = brachio_store::RepoRecord::get(connection, &task.repo_id)
+        .map_err(|error| error.to_string())?;
+    Ok(AgentSetup {
+        profile: crate::agent_profiles::launch_additions(connection, &task.id, &repo, kind)?,
+        account: crate::agent_account_env::launch_environment(
+            connection,
+            &accounts.0,
+            &task.id,
+            kind,
+        )?,
+    })
+}
+
+/// The terminal's environment: `base` (the app's variables), then the profile's, then the
+/// account's last. The profile's arguments are added to `options`.
+fn assemble_environment(
+    mut base: Vec<(String, String)>,
+    setup: AgentSetup,
+    options: &mut Vec<String>,
+) -> LaunchEnvironment {
+    if let Some(added) = setup.profile {
+        options.extend(added.arguments);
+        base.extend(added.environment);
+    }
+    LaunchEnvironment {
+        base,
+        account: setup.account,
     }
 }
 
@@ -578,9 +630,12 @@ fn agent_launch(
     lookups: &ConversationLookups<'_>,
 ) -> CommandResult<(ResolvedCommand, PromptDelivery, bool)> {
     let kind = installed.kind;
-    let config_home = environment.config_home(kind);
-    let config_home = config_home.as_deref();
-    let conversations = |cwd: &Path| (lookups.codex)(config_home, cwd);
+    let home = environment.config_home(kind);
+    let config_home = home.folder();
+    let conversations = |cwd: &Path| match home {
+        ConfigHome::Unknown => Vec::new(),
+        ConfigHome::Default | ConfigHome::Folder(_) => (lookups.codex)(config_home, cwd),
+    };
     let from_project = kind == AgentKind::Codex
         && request.codex_conversation_id.is_none()
         && request.session_id.as_deref().is_some_and(|chosen| {
@@ -602,8 +657,13 @@ fn agent_launch(
     } else if from_project {
         request.session_id.clone()
     } else if request.resume {
-        earlier_conversation(kind, request.session_id.as_deref())
-            .filter(|id| conversation_may_exist(kind, id, &|id| (lookups.claude)(config_home, id)))
+        earlier_conversation(kind, request.session_id.as_deref()).filter(|id| {
+            conversation_may_exist(kind, id, &|id| match home {
+                // Resuming is tried, as when the folder cannot be read.
+                ConfigHome::Unknown => None,
+                ConfigHome::Default | ConfigHome::Folder(_) => (lookups.claude)(config_home, id),
+            })
+        })
     } else {
         None
     };
@@ -902,18 +962,31 @@ mod tests {
             session_id: Some(ID.to_owned()),
             ..open_request("worktree", None)
         };
-        let profile_only = || LaunchEnvironment {
-            base: vec![
-                variable("TERM", "xterm-256color"),
-                variable("CLAUDE_CONFIG_DIR", "/fake-home/profile-claude"),
-            ],
-            account: Vec::new(),
+        let profile = || {
+            Some(crate::agent_profiles::LaunchAdditions {
+                arguments: vec!["--model".to_owned(), "x".to_owned()],
+                environment: vec![variable("CLAUDE_CONFIG_DIR", "/fake-home/profile-claude")],
+            })
         };
-        let with_account = || LaunchEnvironment {
-            account: vec![variable("CLAUDE_CONFIG_DIR", "/fake-home/account-claude")],
-            ..profile_only()
-        };
-        for environment in [profile_only(), with_account()] {
+        let setups = [
+            AgentSetup {
+                profile: profile(),
+                account: Vec::new(),
+            },
+            AgentSetup {
+                profile: profile(),
+                account: vec![variable("CLAUDE_CONFIG_DIR", "/fake-home/account-claude")],
+            },
+        ];
+        let expected = ["/fake-home/profile-claude", "/fake-home/account-claude"];
+        for (setup, expected) in setups.into_iter().zip(expected) {
+            let mut options = Vec::new();
+            let environment = assemble_environment(
+                vec![variable("TERM", "xterm-256color")],
+                setup,
+                &mut options,
+            );
+            assert_eq!(options, ["--model", "x"]);
             let asked = Mutex::new(Vec::new());
             let claude_lookup = |folder: Option<&Path>, id: &str| {
                 asked
@@ -933,6 +1006,7 @@ mod tests {
             assert!(command.args.contains(&"--resume".to_owned()), "{command:?}");
             let given = last_value(&environment.finish(command.env), "CLAUDE_CONFIG_DIR")
                 .expect("the terminal is given a config folder");
+            assert_eq!(given, expected);
             assert_eq!(
                 asked.into_inner().expect("lock"),
                 [(Some(PathBuf::from(given)), ID.to_owned())]
@@ -953,10 +1027,17 @@ mod tests {
             codex_conversation_id: Some(ID.to_owned()),
             ..open_request("worktree", None)
         };
-        let environment = LaunchEnvironment {
-            base: vec![variable("CODEX_HOME", "/fake-home/profile-codex")],
-            account: Vec::new(),
-        };
+        let environment = assemble_environment(
+            Vec::new(),
+            AgentSetup {
+                profile: Some(crate::agent_profiles::LaunchAdditions {
+                    arguments: Vec::new(),
+                    environment: vec![variable("CODEX_HOME", "/fake-home/profile-codex")],
+                }),
+                account: Vec::new(),
+            },
+            &mut Vec::new(),
+        );
         let codex_lookup = |folder: Option<&Path>, _: &Path| {
             if folder == Some(Path::new("/fake-home/profile-codex")) {
                 vec![brachio_agent::CodexConversation {
@@ -976,6 +1057,78 @@ mod tests {
                 .expect("the conversation is found in the profile's folder");
         assert!(resumed);
         assert!(command.args.contains(&ID.to_owned()), "{command:?}");
+    }
+
+    #[test]
+    fn an_empty_or_relative_config_folder_is_not_guessed() {
+        let given = |value: &str| LaunchEnvironment {
+            base: Vec::new(),
+            account: vec![variable("CLAUDE_CONFIG_DIR", value)],
+        };
+        let none = |_: &str| None;
+        let claude = AgentKind::ClaudeCode;
+        assert_eq!(
+            given("").config_home_with(claude, &none),
+            ConfigHome::Unknown
+        );
+        assert_eq!(
+            given("relative/claude").config_home_with(claude, &none),
+            ConfigHome::Unknown
+        );
+        assert_eq!(
+            given("/fake-home/claude").config_home_with(claude, &none),
+            ConfigHome::Folder(PathBuf::from("/fake-home/claude"))
+        );
+        let unset = LaunchEnvironment {
+            base: Vec::new(),
+            account: Vec::new(),
+        };
+        assert_eq!(unset.config_home_with(claude, &none), ConfigHome::Default);
+        let app = |value: &'static str| move |_: &str| Some(std::ffi::OsString::from(value));
+        assert_eq!(
+            unset.config_home_with(claude, &app("/fake-home/app")),
+            ConfigHome::Folder(PathBuf::from("/fake-home/app"))
+        );
+        assert_eq!(
+            unset.config_home_with(claude, &app("")),
+            ConfigHome::Unknown,
+            "an empty folder the app passes on is not guessed either"
+        );
+        assert_eq!(
+            unset.config_home_with(AgentKind::Grok, &app("/fake-home/app")),
+            ConfigHome::Default
+        );
+    }
+
+    #[test]
+    fn a_claude_tab_with_an_unknown_config_folder_still_resumes() {
+        const ID: &str = "11111111-2222-4333-8444-555555555555";
+        let claude = Installed {
+            kind: AgentKind::ClaudeCode,
+            path: PathBuf::from("/fake-home/bin/claude"),
+            version: None,
+        };
+        let request = OpenRequest {
+            agent: Some(AgentKind::ClaudeCode),
+            resume: true,
+            session_id: Some(ID.to_owned()),
+            ..open_request("worktree", None)
+        };
+        for folder in ["", "relative/claude"] {
+            let environment = LaunchEnvironment {
+                base: Vec::new(),
+                account: vec![variable("CLAUDE_CONFIG_DIR", folder)],
+            };
+            let lookups = ConversationLookups {
+                claude: &|_, _| panic!("an unknown folder is not searched"),
+                codex: &|_, _| Vec::new(),
+            };
+            let (command, _, resumed) =
+                agent_launch(&claude, &request, Vec::new(), &environment, &lookups)
+                    .expect("launch");
+            assert!(resumed);
+            assert!(command.args.contains(&"--resume".to_owned()), "{command:?}");
+        }
     }
 
     #[test]
