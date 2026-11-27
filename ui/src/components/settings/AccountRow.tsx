@@ -7,10 +7,10 @@ import { StatusGlyph } from "../ui/StatusBadge";
 import type { AccountState } from "./AgentCard";
 
 export interface AccountRowData {
-  /** Null for the shared system CLI login. */
+  /** Null for the system login, the CLI login other apps share. */
   id: string | null;
   name: string;
-  /** The shared system CLI login: it cannot be renamed or removed. */
+  /** The system login: it cannot be renamed or removed. */
   system: boolean;
   /** New tasks use the default account. */
   isDefault: boolean;
@@ -39,7 +39,10 @@ const STATE_WORD = {
 /** One account of an agent: who it is, whether it is signed in, and what the person can do with it.
  * The main action (sign in, use by default) is a text button; the rest are icon buttons with a name. */
 export function AccountRow(props: AccountRowProps) {
+  let row: HTMLLIElement | undefined;
   const [editing, setEditing] = createSignal(false);
+  /** Puts the focus back on the button that opened the name field, once it is drawn again. */
+  const closeEditing = () => { setEditing(false); queueMicrotask(() => row?.querySelector<HTMLElement>('[data-action="rename"]')?.focus()); };
   const [name, setName] = createSignal("");
   const state = () => props.account.state;
   // The list reuses a row by position, so a different account closes the name field.
@@ -47,6 +50,7 @@ export function AccountRow(props: AccountRowProps) {
   const tone = () => props.account.signingIn || state().state === "checking" ? "working"
     : state().state === "signedIn" ? "ready" : state().state === "error" ? "error" : "unknown";
   const email = () => { const current = state(); return current.state === "signedIn" ? current.account : null; };
+  const labelFor = (action: string) => `${props.account.name} ${action}`;
   const stateWord = () => {
     if (props.account.signingIn) return t("settings.agentSigningIn");
     const current = state();
@@ -56,15 +60,16 @@ export function AccountRow(props: AccountRowProps) {
   const saveRename = async () => {
     const next = name().trim();
     if (!next) return;
-    if (next === props.account.name || await props.onRename(next)) setEditing(false);
+    if (next === props.account.name || await props.onRename(next)) closeEditing();
   };
   const pick = (event: MouseEvent) => {
     if (editing() || props.busy || props.account.isDefault) return;
     if ((event.target as HTMLElement).closest("button, input, a")) return;
+    if (window.getSelection()?.toString()) return;
     props.onMakeDefault();
   };
   return (
-    <li class="account-row" data-current={props.account.isDefault ? "" : undefined} onClick={pick}>
+    <li ref={row} class="account-row" data-current={props.account.isDefault ? "" : undefined} onClick={pick}>
       <div class="account-main">
         <div class="account-name">
           <Show when={!editing()} fallback={
@@ -73,7 +78,7 @@ export function AccountRow(props: AccountRowProps) {
               onInput={(event) => setName(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") { event.preventDefault(); void saveRename(); }
-                if (event.key === "Escape") { event.stopPropagation(); setEditing(false); }
+                if (event.key === "Escape") { event.stopPropagation(); closeEditing(); }
               }} />
           }>
             <span class="account-name-text">{props.account.name}</span>
@@ -89,6 +94,7 @@ export function AccountRow(props: AccountRowProps) {
             </span>
             <Show when={props.account.signingIn}><span>{t("settings.agentLoginPending")}</span></Show>
             <Show when={email()}>{(address) => <span class="account-email">{address()}</span>}</Show>
+            <Show when={props.account.system}><span>{t("settings.accountBuiltinHint")}</span></Show>
           </Show>
         </div>
       </div>
@@ -102,18 +108,18 @@ export function AccountRow(props: AccountRowProps) {
               <Button size="sm" icon="signIn" disabled={props.busy} onClick={() => props.onSignIn()}>{t("settings.agentSignIn")}</Button>
             </Show>
             <Show when={!props.account.system}>
-              <IconButton size="sm" icon="edit" label={t("settings.accountRename")} disabled={props.busy} onClick={startRename} />
+              <IconButton size="sm" icon="edit" data-action="rename" label={labelFor(t("settings.accountRename"))} disabled={props.busy} onClick={startRename} />
             </Show>
             <Show when={state().state === "signedIn" || state().state === "checking"}>
-              <IconButton size="sm" icon="signOut" label={t("settings.agentSignOut")} disabled={props.busy || state().state === "checking"} onClick={() => props.onSignOut()} />
+              <IconButton size="sm" icon="signOut" label={labelFor(t("settings.agentSignOut"))} disabled={props.busy || state().state === "checking"} onClick={() => props.onSignOut()} />
             </Show>
             <Show when={!props.account.system}>
-              <IconButton size="sm" icon="trash" label={t("settings.accountRemove")} disabled={props.busy} onClick={() => props.onRemove()} />
+              <IconButton size="sm" icon="trash" label={labelFor(t("settings.accountRemove"))} disabled={props.busy} onClick={() => props.onRemove()} />
             </Show>
           </Show>
         }>
           <Button size="sm" disabled={props.busy || !name().trim()} onClick={() => void saveRename()}>{t("rename.save")}</Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>{t("confirm.cancel")}</Button>
+          <Button size="sm" variant="ghost" onClick={closeEditing}>{t("confirm.cancel")}</Button>
         </Show>
       </div>
     </li>

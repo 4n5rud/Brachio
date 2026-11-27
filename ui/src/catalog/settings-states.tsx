@@ -13,15 +13,27 @@ const ARCHIVED = sampleTasks(NOW).slice(0, 2).map((task, index) => ({ ...task, r
 const REPOS = [{ id: "app", name: "brachio" }];
 
 const signedIn = (account: string): AccountState => ({ state: "signedIn", account });
-const SYSTEM: AccountRowData = { id: null, name: "System default", system: true, isDefault: true, state: signedIn("me@example.com") };
-const WORK: AccountRowData = { id: "work", name: "Work", system: false, isDefault: false, state: signedIn("work@example.com") };
-const TEAM: AccountRowData = { id: "team", name: "Team", system: false, isDefault: false, state: { state: "signedOut" } };
-const handlers = { onRefresh: none, onAdd: async () => true, onRename: async () => true, onMakeDefault: none, onSignIn: none, onSignOut: none, onRemove: none, onCancelSignIn: none };
+/** Getters keep the system login's name and the usage labels in the language the catalog is switched to. */
+const NAMES: Record<string, string> = { work: "Work", team: "Team" };
+const accountRow = (id: string | null, over: Partial<AccountRowData> = {}): AccountRowData => ({
+  id, system: id === null, isDefault: false, state: signedIn(`${id ?? "me"}@example.com`),
+  get name() { return id === null ? t("settings.accountBuiltin") : NAMES[id] ?? id; },
+  ...over,
+});
+const SYSTEM = accountRow(null, { isDefault: true });
+const WORK = accountRow("work");
+const TEAM = accountRow("team", { state: { state: "signedOut" } });
+const withState = (rows: readonly AccountRowData[] | undefined, state: AccountState) =>
+  rows?.map((row) => accountRow(row.id, { isDefault: row.isDefault, state }));
+const handlers = { onRefresh: none, onAdd: async () => true, onRename: async () => true, onMakeDefault: none, onSignIn: none, onSignOut: none, onRemove: none, onCancelSignIn: none, onUsageChoice: none, onRetryAccounts: none };
 const CLAUDE: AgentCardProps = { kind: "claude_code", version: "2.1.330", path: "/usr/local/bin/claude", account: signedIn("me@example.com"),
   accounts: [SYSTEM, WORK, TEAM], onClaudeUsage: none, ...handlers };
 const CODEX: AgentCardProps = { kind: "codex", version: "0.171.0", path: "/Users/you/.local/bin/codex", account: signedIn("work@example.com"),
-  accounts: [{ ...SYSTEM, isDefault: false }, { ...WORK, isDefault: true }], usageAccount: "Work", ...handlers,
-  usage: [{ label: "5 h window", percent: 62, reset: "Fri 17:40" }, { label: "Weekly window", percent: 18, reset: "Mon 09:00" }] };
+  accounts: [accountRow(null), accountRow("work", { isDefault: true })], usageChoice: "work", ...handlers,
+  usage: [
+    { get label() { return t("settings.usageHours").replace("{n}", "5"); }, percent: 62, reset: "Fri 17:40" },
+    { get label() { return t("settings.usageWeek"); }, percent: 18, reset: "Mon 09:00" },
+  ] };
 const updates = (over: Partial<UpdateSettingsProps>): UpdateSettingsProps =>
   ({ enabled: true, status: "idle", version: null, current: "0.4.0", onEnabled: none, onCheck: none, onDownload: none, ...over });
 
@@ -55,15 +67,15 @@ export function SettingsStates() {
       <Cell cap="Agents, signed in with usage" width={820}><Frame page="agents" agents={agentList(CLAUDE, CODEX)} /></Cell>
       <Cell cap="Agents, checking" width={820}>
         <Frame page="agents" agents={agentList(
-          { ...CLAUDE, account: { state: "checking" }, accounts: CLAUDE.accounts?.map((row) => ({ ...row, state: { state: "checking" } })) },
-          { ...CODEX, account: { state: "checking" }, accounts: CODEX.accounts?.map((row) => ({ ...row, state: { state: "checking" } })), usage: undefined })} />
+          { ...CLAUDE, account: { state: "checking" }, accounts: withState(CLAUDE.accounts, { state: "checking" }) },
+          { ...CODEX, account: { state: "checking" }, accounts: withState(CODEX.accounts, { state: "checking" }), usage: undefined })} />
       </Cell>
       <Cell cap="Agents, signing in to Codex in the browser" width={820}>
-        <Frame page="agents" agents={agentList(CLAUDE, { ...CODEX, account: { state: "signedOut" }, accounts: [{ ...SYSTEM, isDefault: false }, { ...WORK, isDefault: true, state: { state: "signedOut" }, signingIn: true }], usage: undefined, busy: true })} />
+        <Frame page="agents" agents={agentList(CLAUDE, { ...CODEX, account: { state: "signedOut" }, accounts: [accountRow(null), accountRow("work", { isDefault: true, state: { state: "signedOut" }, signingIn: true })], usage: undefined, busy: true })} />
       </Cell>
       <Cell cap="Agents, an account signed out and one that failed to read" width={820}>
         <Frame page="agents" agents={agentList(
-          { ...CLAUDE, accounts: [SYSTEM, TEAM, { ...WORK, state: { state: "error", message: "The CLI did not answer." } }] }, CODEX)} />
+          { ...CLAUDE, accounts: [SYSTEM, TEAM, accountRow("work", { state: { state: "error", message: "The CLI did not answer." } })] }, CODEX)} />
       </Cell>
       <Cell cap="Agents, none found" width={820}><Frame page="agents" agents={<AgentList agents={[]} onRefresh={none} card={() => null} />} /></Cell>
       <Cell cap="Agents, the list could not be read" width={820}>

@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { For, Show, createEffect, createResource, createSignal, untrack, type JSX } from "solid-js";
-import { locale, t } from "../../i18n";
+import { locale, t, type MessageKey } from "../../i18n";
 import { cachedAgentReading, invalidateAgentReadings, readAgentReading } from "../../lib/agent-readings";
 import { refreshAgentUsage } from "../../lib/agent-usage";
 import { useAsyncAction } from "../../lib/async-action";
+import { createLatestRequests } from "../../lib/latest-request";
+import { enqueueAccountRead } from "../../lib/read-queue";
 import { type InstalledAgent } from "../../lib/terminal";
 import { Button } from "../ui/Button";
 import { confirmDialog } from "../ui/ConfirmDialog";
@@ -45,7 +47,7 @@ function usageRow(window: QuotaWindow): UsageRow {
   return { label, percent: window.usedPercent, reset };
 }
 
-/** One agent's accounts: each account's sign-in, the default account's Codex usage, and the actions on them. */
+/** One agent's accounts: each account's sign-in, the Codex usage of the chosen account, and the actions on them. */
 function AgentAccounts(props: { agent: InstalledAgent }) {
   const kind = props.agent.kind;
   const [accounts, { refetch: refetchAccounts }] = createResource(
@@ -61,11 +63,14 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
     ? { state: "signedIn", account: status.account } : { state: "signedOut" };
 
   const [states, setStates] = createSignal<Record<string, AccountState>>({});
+  const beginRead = createLatestRequests();
   const loadStatus = async (account: SavedAgentAccount, force = false) => {
     const key = accountSelection(account);
-    const next = await readAgentReading<AuthStatus>("agent_auth_status", { kind, accountId: account.id }, force)
+    const isLatest = beginRead(key);
+    const next = await enqueueAccountRead(() => readAgentReading<AuthStatus>("agent_auth_status", { kind, accountId: account.id }, force))
       .then(asAccount, (error): AccountState => ({ state: "error", message: String(error) }));
-    setStates((current) => ({ ...current, [key]: next }));
+    // A reading that started before a sign-in change must not undo what a later one found.
+    if (isLatest()) setStates((current) => ({ ...current, [key]: next }));
   };
   // Every saved account reads its own sign-in once it appears, so the whole list shows its state at a glance.
   createEffect(() => {
@@ -78,11 +83,17 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
     }
   });
 
-  const usageSource = () => {
-    const account = kind === "codex" ? defaultAccount() : undefined;
+  // Usage can be read for any account, and the choice does not change which account new tasks use.
+  const [usagePick, setUsagePick] = createSignal<string | null>(null);
+  const usageKey = (): string | undefined => {
+    if (kind !== "codex") return undefined;
+    const saved = list();
+    const picked = usagePick();
+    if (saved && picked !== null && saved.some((account) => accountSelection(account) === picked)) return picked;
+    const account = defaultAccount();
     return account ? accountSelection(account) : undefined;
   };
-  const [usage, { refetch: refetchUsage }] = createResource<CodexQuota | undefined, string>(usageSource, async (key, info) => {
+  const [usage, { refetch: refetchUsage }] = createResource<CodexQuota | undefined, string>(usageKey, async (key, info) => {
     try {
       return await readAgentReading<CodexQuota>("codex_usage", { accountId: key === "builtin" ? null : key, includeAccount: true }, info.refetching === true);
     } catch {
@@ -102,46 +113,29 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
     await Promise.all([...(list() ?? []).map((account) => loadStatus(account, true)), kind === "codex" ? refetchUsage() : undefined]);
   });
 
+  const accountName = (account: SavedAgentAccount) => account.id === null ? t("settings.accountBuiltin") : account.name;
   const rows = (): AccountRowData[] | undefined => list()?.map((account) => {
     const key = accountSelection(account);
-    const isDefault = account === defaultAccount();
     let state: AccountState = reload.pending() ? { state: "checking" } : states()[key] ?? { state: "checking" };
-    // Codex reports the signed-in address with its usage, so the default account can show it.
-    const address = isDefault ? usage()?.account : undefined;
+    // Codex reports the signed-in address with its usage, so the account whose usage is shown can show it.
+    const address = key === usageKey() ? usage()?.account : undefined;
     if (state.state === "signedIn" && address) state = { ...state, account: address };
-    return {
-      id: account.id, name: account.id === null ? t("settings.accountSystemDefault") : account.name, system: account.id === null,
-      isDefault, state, signingIn: signingIn() === key,
-    };
+    return { id: account.id, name: accountName(account), system: account.id === null, isDefault: account === defaultAccount(), state, signingIn: signingIn() === key };
   });
   const headerState = (): AccountState => {
     if (kind === "grok") return { state: "ownTerminal" };
-    const current = rows()?.find((row) => row.isDefault);
-    return current?.state ?? { state: "checking" };
+    if (accounts.error) return { state: "error", message: String(accounts.error) };
+    return rows()?.find((row) => row.isDefault)?.state ?? { state: "checking" };
   };
   const savedAccount = (id: string | null) => list()?.find((account) => account.id === id);
 
-  const run = async (action: () => Promise<void>) => {
-    if (busy()) return;
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-    } catch (failure) {
-      setError(String(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
-  /** Changes the saved accounts, then reads the list again. Returns whether it worked. */
-  const change = async (command: string, accountId: string | null, name: string, done: string): Promise<boolean> => {
+  /** Runs one action with the card locked and its failure shown on the card. Returns whether it worked. */
+  const run = async (action: () => Promise<void>): Promise<boolean> => {
     if (busy()) return false;
     setBusy(true);
     setError("");
     try {
-      await invoke(command, { agent: kind, accountId, name });
-      await refetchAccounts();
-      pushToast({ tone: "success", message: t(done as "settings.accountAdded") });
+      await action();
       return true;
     } catch (failure) {
       setError(String(failure));
@@ -150,39 +144,48 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
       setBusy(false);
     }
   };
+  /** Changes the saved accounts, reads the list again and confirms with a toast. */
+  const change = (command: string, accountId: string | null, name: string, done: MessageKey) => run(async () => {
+    await invoke(command, { agent: kind, accountId, name });
+    await refetchAccounts();
+    pushToast({ tone: "success", message: t(done) });
+  });
   const remove = async (accountId: string) => {
-    if (!(await confirmDialog({
-      title: t("settings.accountRemove"), body: t("settings.accountRemoveConfirm"),
-      confirmLabel: t("settings.accountRemove"), tone: "danger",
-    }))) return;
+    const account = savedAccount(accountId);
+    const body = account && account === defaultAccount()
+      ? `${t("settings.accountRemoveConfirm")}\n\n${t("settings.accountRemoveDefaultNote")}` : t("settings.accountRemoveConfirm");
+    if (!(await confirmDialog({ title: t("settings.accountRemove"), body, confirmLabel: t("settings.accountRemove"), tone: "danger" }))) return;
     await change("agent_account_remove", accountId, "", "settings.accountRemovedToast");
   };
-  const changeAuth = (accountId: string | null, signIn: boolean) => run(async () => {
+  const changeAuth = (accountId: string | null, signIn: boolean) => {
     const account = savedAccount(accountId);
-    if (!account) return;
-    if (!signIn && !(await confirmDialog({
-      title: t("settings.agentSignOutTitle"),
-      body: t("settings.agentSignOutConfirm"),
-      confirmLabel: t("settings.agentSignOut"),
-      tone: "danger",
-    }))) return;
-    invalidateAgentReadings();
-    setSigningIn(signIn ? accountSelection(account) : null);
-    try {
-      await invoke<boolean>("codex_auth_action", { kind, accountId, action: signIn ? "sign_in" : "sign_out" });
-    } finally {
-      setSigningIn(null);
+    if (!account) return Promise.resolve(false);
+    return run(async () => {
+      if (!signIn && !(await confirmDialog({
+        title: t("settings.agentSignOutTitle"),
+        body: t("settings.agentSignOutConfirm"),
+        confirmLabel: t("settings.agentSignOut"),
+        tone: "danger",
+      }))) return;
       invalidateAgentReadings();
-      await Promise.all([loadStatus(account, true), refetchUsage(), refreshAgentUsage(true)]);
-    }
-  });
-  const claudeUsageAvailable = () => kind === "claude_code" && defaultAccount()?.id === null;
+      setSigningIn(signIn ? accountSelection(account) : null);
+      try {
+        await invoke<boolean>("codex_auth_action", { kind, accountId, action: signIn ? "sign_in" : "sign_out" });
+      } finally {
+        setSigningIn(null);
+        invalidateAgentReadings();
+        await Promise.all([loadStatus(account, true), refetchUsage(), refreshAgentUsage(true)]);
+      }
+    });
+  };
   return (
     <AgentCard kind={kind} version={props.agent.version} path={props.agent.path}
-      account={headerState()} accounts={kind === "grok" ? undefined : rows()} accountsError={accounts.error ? String(accounts.error) : undefined}
-      busy={busy()} error={error()} usageAccount={rows()?.find((row) => row.isDefault)?.name}
+      account={headerState()}
+      accounts={kind === "grok" ? undefined : rows()} accountsError={accounts.error ? String(accounts.error) : undefined}
+      busy={busy()} error={error()}
+      usageChoice={usageKey()} onUsageChoice={setUsagePick}
       usage={kind === "codex" ? (usage.loading ? undefined : usageRows()) : undefined}
-      usageUnavailable={kind === "claude_code" && !claudeUsageAvailable() ? t("settings.claudeAccountUsage") : undefined}
+      usageUnavailable={kind === "claude_code" && defaultAccount()?.id ? t("settings.claudeAccountUsage") : undefined}
       onRefresh={() => void reload.run()} onRetryAccounts={() => void refetchAccounts()}
       onAdd={(name) => change("agent_account_add", null, name, "settings.accountAdded")}
       onRename={(accountId, name) => change("agent_account_rename", accountId, name, "settings.accountRenamed")}
@@ -190,7 +193,7 @@ function AgentAccounts(props: { agent: InstalledAgent }) {
       onSignIn={(accountId) => void changeAuth(accountId, true)} onSignOut={(accountId) => void changeAuth(accountId, false)}
       onCancelSignIn={(accountId) => void invoke("codex_auth_cancel", { kind, accountId }).catch((failure) => setError(String(failure)))}
       onRemove={(accountId) => void remove(accountId)}
-      onClaudeUsage={claudeUsageAvailable() ? () => void run(() => invoke("open_claude_usage")) : undefined} />
+      onClaudeUsage={kind === "claude_code" ? () => void run(() => invoke("open_claude_usage")) : undefined} />
   );
 }
 

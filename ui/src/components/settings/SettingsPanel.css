@@ -165,7 +165,7 @@
   margin: 0;
   padding: 0;
   border: 1px solid var(--color-line);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 .account-list > li + li {
@@ -286,4 +286,7 @@
 .usage-reset {
   min-width: 128px;
   text-align: right;
+}
+.agent-card-section .select-shell {
+  max-width: 240px;
 }
