@@ -60,6 +60,13 @@ export interface CodexConversation {
 export const codexConversations = (key: string) =>
   invoke<CodexConversation[]>("terminal_codex_conversations", { key });
 
+/**
+ * Whether opening a Codex tab failed only because nothing confirms which conversation is the
+ * tab's own, so the person should choose one from `codexConversations`.
+ */
+export const asksToChooseCodexConversation = (error: unknown) =>
+  String(error).includes("BRACHIO_CODEX_CHOOSE_CONVERSATION");
+
 /** How the first prompt reaches the agent, as the core reports it. */
 export type PromptDelivery = "none" | "argument" | "type_in";
 

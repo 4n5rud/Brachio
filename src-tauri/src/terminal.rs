@@ -92,6 +92,9 @@ pub struct OpenRequest {
     pub session_id: Option<String>,
     /// A Codex conversation picked explicitly from the worktree's history.
     pub codex_conversation_id: Option<String>,
+    /// The Codex conversation confirmed to be this tab's, filled in by the app, never by the window.
+    #[serde(skip)]
+    pub own_codex_conversation: Option<String>,
     /// The project folder of the task, filled in by the app, never by the window.
     #[serde(skip)]
     pub project_root: Option<PathBuf>,
@@ -183,71 +186,149 @@ pub async fn terminal_codex_conversations(
     let setup = agent_setup(&*database.lock()?, &accounts, &owner.task, AgentKind::Codex)?;
     let home =
         assemble_environment(Vec::new(), setup, &mut Vec::new()).config_home(AgentKind::Codex);
-    let marker = terminal_authorization::tab_marker(&key);
-    let (own, listed) = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         if home == ConfigHome::Unknown {
-            return (None, Vec::new());
+            return Vec::new();
         }
-        let cwd = &owner.task.worktree_path;
-        let own = marker.as_deref().and_then(|marker| {
-            own_codex_conversation(
-                owner.conversation.as_deref(),
-                home.folder(),
-                cwd,
-                marker,
-                &DISK_LOOKUPS,
-            )
-        });
-        if own.is_some() {
-            return (own, Vec::new());
-        }
-        let listed = account_codex_conversations(home.folder(), cwd)
-            .into_iter()
-            .filter(|candidate| uuid::Uuid::parse_str(&candidate.id).is_ok())
-            .collect();
-        (None, listed)
+        choosable(account_codex_conversations(
+            home.folder(),
+            &owner.task.worktree_path,
+        ))
     })
     .await
-    .map_err(|error| error.to_string())?;
-    match own {
-        // The tab resumes its own conversation, so there is nothing to choose.
-        Some(OwnConversation { id, recorded }) => {
-            if !recorded {
-                terminal_authorization::remember_conversation(&*database.lock()?, &key, &id)?;
-            }
-            Ok(Vec::new())
-        }
-        None => Ok(listed),
-    }
+    .map_err(|error| error.to_string())
 }
 
-/// A Codex conversation confirmed to be the one a tab started.
+/// The conversations a person may choose from: only ids in Codex's own form.
+fn choosable(
+    listed: Vec<brachio_agent::CodexConversation>,
+) -> Vec<brachio_agent::CodexConversation> {
+    listed
+        .into_iter()
+        .filter(|candidate| uuid::Uuid::parse_str(&candidate.id).is_ok())
+        .collect()
+}
+
+/// Starts the launch error that asks the window to let the person choose a Codex conversation.
+pub(crate) const CODEX_CHOOSE: &str = "BRACHIO_CODEX_CHOOSE_CONVERSATION";
+
+/// What a Codex tab asked to continue its conversation does.
 #[derive(Debug, PartialEq, Eq)]
-struct OwnConversation {
-    id: String,
-    /// Whether the task or tab already records it.
-    recorded: bool,
+enum CodexResume {
+    /// Resume this conversation of the tab. `record` when the task or tab records another one.
+    Own { id: String, record: bool },
+    /// Nothing confirms the tab's conversation, but the worktree has some to choose from.
+    Choose,
+    /// The worktree has no conversation to continue, so a new one starts.
+    Fresh,
 }
 
-/// The conversation the Codex tab `marker` started, when its file confirms it: the recorded one,
-/// else the newest one in `cwd` whose developer instructions carry the tab's note.
-fn own_codex_conversation(
+/// What was found about a Codex tab's conversations, in one pass over the newest files.
+#[derive(Debug, Default)]
+struct CodexFacts {
+    found: brachio_agent::WorktreeConversations,
+    /// Whether the recorded conversation is still the tab's: its file still names the tab, or it
+    /// is the project conversation the task was created from.
+    recorded_is_own: bool,
+}
+
+/// Reads what [`decide_codex_resume`] needs. `accepted` are the exact developer instructions a
+/// launch for this tab passes, see [`codex_instructions`].
+fn codex_facts(
+    home: &ConfigHome,
+    request: &OpenRequest,
     recorded: Option<&str>,
-    home: Option<&Path>,
-    cwd: &Path,
-    marker: &str,
-    lookups: &ConversationLookups<'_>,
-) -> Option<OwnConversation> {
-    if let Some(id) = recorded.filter(|id| (lookups.codex_tab)(home, cwd, marker, id)) {
-        return Some(OwnConversation {
-            id: id.to_owned(),
-            recorded: true,
-        });
+    accepted: &[String],
+) -> CodexFacts {
+    if *home == ConfigHome::Unknown {
+        return CodexFacts::default();
     }
-    (lookups.codex_for_tab)(home, cwd, marker).map(|id| OwnConversation {
-        recorded: recorded == Some(id.as_str()),
-        id,
-    })
+    let folder = home.folder();
+    let found = brachio_agent::codex_worktree_conversations(folder, &request.cwd, accepted);
+    let recorded_is_own = found.own.is_none()
+        && recorded.is_some_and(|id| {
+            brachio_agent::codex_conversation_started_with(folder, &request.cwd, accepted, id)
+                || codex_conversation_allowed(id, request, Some(id), &|cwd: &Path| {
+                    if cwd == request.cwd {
+                        found.listed.clone()
+                    } else {
+                        account_codex_conversations(folder, cwd)
+                    }
+                })
+        });
+    CodexFacts {
+        found,
+        recorded_is_own,
+    }
+}
+
+/// The tab's newest confirmed conversation wins; then the recorded one while it is still the
+/// tab's. With neither, the person chooses, or a new conversation starts when there is nothing
+/// to choose. A conversation started with `/new` in the same tab continues when Codex writes the
+/// launch's developer instructions into it too, which was not confirmed with a real Codex; when
+/// it does not, nothing names the tab in it and the tab's earlier conversation continues.
+fn decide_codex_resume(recorded: Option<&str>, facts: CodexFacts) -> CodexResume {
+    if let Some(id) = facts.found.own {
+        return CodexResume::Own {
+            record: recorded != Some(id.as_str()),
+            id,
+        };
+    }
+    match recorded.filter(|_| facts.recorded_is_own) {
+        Some(id) => CodexResume::Own {
+            id: id.to_owned(),
+            record: false,
+        },
+        None if !choosable(facts.found.listed).is_empty() => CodexResume::Choose,
+        None => CodexResume::Fresh,
+    }
+}
+
+/// Carries out the decision for the Codex terminal `key`: records the tab's conversation, or
+/// returns the error that asks the window to let the person choose. The conversation to resume
+/// comes back.
+fn apply_codex_resume(
+    connection: &rusqlite::Connection,
+    key: &str,
+    decision: CodexResume,
+) -> CommandResult<Option<String>> {
+    match decision {
+        CodexResume::Own { id, record } => {
+            if record {
+                terminal_authorization::record_codex_conversation(connection, key, &id)?;
+            }
+            Ok(Some(id))
+        }
+        CodexResume::Choose => Err(format!(
+            "{CODEX_CHOOSE}: choose which Codex conversation to continue."
+        )),
+        CodexResume::Fresh => Ok(None),
+    }
+}
+
+/// The `developer_instructions` a Codex launch for `key` passes, and every value an earlier
+/// launch for the same tab may have passed: Brachio's part alone, and after the user's own
+/// instructions as they are now. `None` when Brachio adds nothing, so the user's own setting
+/// applies unchanged.
+fn codex_instructions(
+    hook: &HookSetup,
+    key: &str,
+    home: &ConfigHome,
+) -> Option<(String, Vec<String>)> {
+    let brachio =
+        hook.codex_brachio_instructions(terminal_authorization::tab_marker(key).as_deref())?;
+    let user = match home {
+        ConfigHome::Unknown => None,
+        ConfigHome::Default | ConfigHome::Folder(_) => {
+            brachio_agent::codex_user_instructions(home.folder())
+        }
+    };
+    let passed = brachio_agent::codex_developer_instructions(user.as_deref(), &brachio);
+    let mut accepted = vec![brachio_agent::codex_developer_instructions(None, &brachio)];
+    if !accepted.contains(&passed) {
+        accepted.push(passed.clone());
+    }
+    Some((passed, accepted))
 }
 
 /// Clear a specific uncertain launch after the user has confirmed the risk.
@@ -418,15 +499,38 @@ async fn prepare_terminal(
             options = hook.claude_arguments();
         }
     }
-    if let (Some(AgentKind::Codex), Some(key)) = (request.agent, request.key.as_deref()) {
-        options = hook.codex_arguments(terminal_authorization::tab_marker(key).as_deref());
-    }
     // Every agent, not only Claude Code, can send and read messages.
     if let (Some(_), Some(key)) = (request.agent, request.key.as_deref()) {
         environment.extend(hook.mail_environment(key));
     }
     crate::agent_accounts::check_isolated_login(request.agent, &setup.account).await?;
     let environment = assemble_environment(environment, setup, &mut options);
+    let mut request = request.clone();
+    if let (Some(AgentKind::Codex), Some(key)) = (request.agent, request.key.clone()) {
+        let home = environment.config_home(AgentKind::Codex);
+        let instructions = codex_instructions(hook, &key, &home);
+        if let Some((passed, _)) = &instructions {
+            options.splice(0..0, HookSetup::codex_arguments(passed));
+        }
+        // Which conversation a Codex tab continues is decided here, just before it starts.
+        if request.resume && request.codex_conversation_id.is_none() {
+            let accepted = instructions
+                .map(|(_, accepted)| accepted)
+                .unwrap_or_default();
+            let recorded = request.session_id.clone();
+            let facts = {
+                let request = request.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    codex_facts(&home, &request, recorded.as_deref(), &accepted)
+                })
+                .await
+                .map_err(|error| error.to_string())?
+            };
+            let decision = decide_codex_resume(request.session_id.as_deref(), facts);
+            request.own_codex_conversation =
+                apply_codex_resume(&*database.lock()?, &key, decision)?;
+        }
+    }
     let (command, prompt_delivery, resumed, environment) = match request.agent {
         Some(kind) => {
             let request = request.clone();
@@ -646,30 +750,17 @@ fn assemble_environment(
     }
 }
 
-/// Whether the conversation `id` in the folder `cwd`, under a config folder, was started by the
-/// tab with a marker: `(config folder, cwd, marker, id)`.
-type StartedByTab<'a> = dyn Fn(Option<&Path>, &Path, &str, &str) -> bool + 'a;
-/// The newest conversation in `cwd` that the tab with a marker started:
-/// `(config folder, cwd, marker)`.
-type FoundForTab<'a> = dyn Fn(Option<&Path>, &Path, &str) -> Option<String> + 'a;
-
 /// Where the agent keeps its conversations, read from the folder the terminal will be given.
 pub(crate) struct ConversationLookups<'a> {
     /// Whether Claude Code kept a conversation id under a config folder.
     pub claude: &'a dyn Fn(Option<&Path>, &str) -> Option<bool>,
     /// The Codex conversations started in a folder, under a config folder.
     pub codex: &'a dyn Fn(Option<&Path>, &Path) -> Vec<brachio_agent::CodexConversation>,
-    /// Whether a Codex conversation in a folder was started by the tab with a marker.
-    pub codex_tab: &'a StartedByTab<'a>,
-    /// The newest Codex conversation in a folder that the tab with a marker started.
-    pub codex_for_tab: &'a FoundForTab<'a>,
 }
 
 const DISK_LOOKUPS: ConversationLookups<'static> = ConversationLookups {
     claude: &brachio_agent::claude_conversation_recorded,
     codex: &account_codex_conversations,
-    codex_tab: &brachio_agent::codex_conversation_started_by_tab,
-    codex_for_tab: &brachio_agent::codex_conversation_for_tab,
 };
 
 /// The command for an agent: its earlier conversation when asked to resume
@@ -703,19 +794,12 @@ fn agent_launch(
         ConfigHome::Unknown => Vec::new(),
         ConfigHome::Default | ConfigHome::Folder(_) => (lookups.codex)(config_home, cwd),
     };
-    let marker = request
-        .key
-        .as_deref()
-        .and_then(terminal_authorization::tab_marker);
-    // The task's own conversation: the one it was created from, or the one this tab started.
-    let own_conversation = kind == AgentKind::Codex
+    // A task created from a project conversation continues it.
+    let from_project = kind == AgentKind::Codex
         && request.codex_conversation_id.is_none()
+        && request.own_codex_conversation.is_none()
         && request.session_id.as_deref().is_some_and(|chosen| {
             codex_conversation_allowed(chosen, request, Some(chosen), &conversations)
-                || home != ConfigHome::Unknown
-                    && marker.as_deref().is_some_and(|marker| {
-                        (lookups.codex_tab)(config_home, &request.cwd, marker, chosen)
-                    })
         });
     let earlier = if let Some(chosen) = &request.codex_conversation_id {
         if !codex_conversation_allowed(
@@ -730,7 +814,13 @@ fn agent_launch(
             );
         }
         Some(chosen.clone())
-    } else if own_conversation {
+    } else if let Some(own) = request
+        .own_codex_conversation
+        .as_ref()
+        .filter(|_| kind == AgentKind::Codex)
+    {
+        Some(own.clone())
+    } else if from_project {
         request.session_id.clone()
     } else if request.resume {
         earlier_conversation(kind, request.session_id.as_deref()).filter(|id| {
@@ -751,7 +841,7 @@ fn agent_launch(
             .resolve(&launch)
             .map_err(|error| error.to_string())?;
         // A task created from a project conversation still owes the user's first prompt.
-        let delivery = if own_conversation
+        let delivery = if from_project
             && !request.resume
             && request
                 .prompt
@@ -948,6 +1038,7 @@ mod tests {
             resume: false,
             session_id: None,
             codex_conversation_id: None,
+            own_codex_conversation: None,
             project_root: root.map(PathBuf::from),
             cwd: PathBuf::from(cwd),
             rows: 24,
@@ -1089,8 +1180,6 @@ mod tests {
             let lookups = ConversationLookups {
                 claude: &claude_lookup,
                 codex: &|_, _| Vec::new(),
-                codex_tab: &|_, _, _, _| false,
-                codex_for_tab: &|_, _, _| None,
             };
             let (command, _, resumed) =
                 agent_launch(&claude, &request, Vec::new(), &environment, &lookups)
@@ -1144,8 +1233,6 @@ mod tests {
         let lookups = ConversationLookups {
             claude: &|_, _| None,
             codex: &codex_lookup,
-            codex_tab: &|_, _, _, _| false,
-            codex_for_tab: &|_, _, _| None,
         };
         let (command, _, resumed) =
             agent_launch(&codex, &request, Vec::new(), &environment, &lookups)
@@ -1154,128 +1241,238 @@ mod tests {
         assert!(command.args.contains(&ID.to_owned()), "{command:?}");
     }
 
-    const TASK: &str = "0123456789abcdef0123456789abcdef";
-    const CHAT: &str = "01a21a52-c651-7292-8c49-079b37d166dd";
-
-    /// A Codex folder where only `CHAT` exists, started by the tab `owner`, and too old to be
-    /// listed among the newest conversations. It notes which tabs were checked.
-    struct OneCodexChat {
-        owner: &'static str,
-        asked: Mutex<Vec<String>>,
+    /// A task with a Codex first tab in `worktree`, recording `recorded` as its conversation.
+    fn codex_task(worktree: &Path, recorded: Option<&str>) -> rusqlite::Connection {
+        let db = brachio_store::open_in_memory().expect("test database");
+        db.execute(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main')",
+            [],
+        )
+        .expect("repo");
+        db.execute(
+            "INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state,
+                                created_at_ms, agent_kind, agent_session_id)
+             VALUES ('task', 'r', 'Task', '', 'task', ?1, 'active', 1, 'codex', ?2)",
+            rusqlite::params![worktree.to_string_lossy(), recorded],
+        )
+        .expect("task");
+        db
     }
 
-    impl OneCodexChat {
-        fn started_by(&self, marker: &str, id: &str) -> bool {
-            self.asked.lock().expect("lock").push(marker.to_owned());
-            marker == self.owner && id == CHAT
-        }
+    /// Writes a Codex conversation started in `cwd` whose developer instructions are `passed`.
+    fn write_codex_conversation(home: &Path, name: &str, id: &str, cwd: &Path, passed: &str) {
+        let folder = home.join("sessions/2026/11/27");
+        std::fs::create_dir_all(&folder).expect("day folder");
+        let meta = serde_json::json!({"type": "session_meta", "payload": {
+            "id": id, "cwd": cwd.to_string_lossy(), "source": "cli"}});
+        let developer = serde_json::json!({"type": "response_item", "payload": {
+            "type": "message", "role": "developer",
+            "content": [{"type": "input_text", "text": passed}]}});
+        let user = serde_json::json!({"type": "response_item", "payload": {
+            "type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]}});
+        std::fs::write(
+            folder.join(format!("rollout-{name}-{id}.jsonl")),
+            format!("{meta}\n{developer}\n{user}\n"),
+        )
+        .expect("write conversation");
+    }
 
-        fn found_for(&self, marker: &str) -> Option<String> {
-            (marker == self.owner).then(|| CHAT.to_owned())
+    struct CodexWorld {
+        _folder: tempfile::TempDir,
+        home: PathBuf,
+        worktree: PathBuf,
+        hook: HookSetup,
+    }
+
+    fn codex_world() -> CodexWorld {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let home = folder.path().join("codex-home");
+        let worktree = folder.path().join("worktree");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+        std::fs::create_dir_all(&home).expect("codex home");
+        let hook = HookSetup::prepare(&folder.path().join("hook"), "endpoint".to_owned());
+        CodexWorld {
+            _folder: folder,
+            home,
+            worktree,
+            hook,
         }
     }
 
-    #[test]
-    fn a_codex_tab_resumes_the_conversation_it_started_and_no_other() {
+    /// From the decision before the launch to the command that starts Codex, as the launch does.
+    fn launch_codex_tab(
+        world: &CodexWorld,
+        db: &rusqlite::Connection,
+        key: &str,
+    ) -> CommandResult<ResolvedCommand> {
+        let owner = terminal_authorization::resolve(db, key)?;
+        let mut request = OpenRequest {
+            resume: true,
+            session_id: owner.conversation,
+            key: Some(key.to_owned()),
+            cwd: world.worktree.clone(),
+            ..open_request("unused", None)
+        };
+        let environment = LaunchEnvironment {
+            base: Vec::new(),
+            account: vec![variable("CODEX_HOME", &world.home.to_string_lossy())],
+        };
+        let home = environment.config_home(AgentKind::Codex);
+        let (passed, accepted) = codex_instructions(&world.hook, key, &home).expect("a tab note");
+        let facts = codex_facts(&home, &request, request.session_id.as_deref(), &accepted);
+        let decision = decide_codex_resume(request.session_id.as_deref(), facts);
+        request.own_codex_conversation = apply_codex_resume(db, key, decision)?;
         let codex = Installed {
             kind: AgentKind::Codex,
             path: PathBuf::from("/fake-home/bin/codex"),
             version: None,
         };
-        let first = format!("{TASK}:agent");
-        let second = format!("{TASK}:agent-22222222-2222-4222-8222-222222222222");
-        let request = |key: &str| OpenRequest {
-            resume: true,
-            session_id: Some(CHAT.to_owned()),
-            key: Some(key.to_owned()),
-            ..open_request("worktree", None)
-        };
-        let environment = LaunchEnvironment {
-            base: Vec::new(),
-            account: Vec::new(),
-        };
-        let chat = OneCodexChat {
-            owner: "0123456789abcdef0123456789abcdef-agent",
-            asked: Mutex::new(Vec::new()),
-        };
-        let started =
-            |_: Option<&Path>, _: &Path, marker: &str, id: &str| chat.started_by(marker, id);
-        let lookups = ConversationLookups {
-            claude: &|_, _| None,
-            codex: &|_, _| Vec::new(),
-            codex_tab: &started,
-            codex_for_tab: &|_, _, _| None,
-        };
-        let (command, _, resumed) =
-            agent_launch(&codex, &request(&first), Vec::new(), &environment, &lookups)
-                .expect("launch");
-        assert!(resumed);
-        assert_eq!(command.args, ["resume", CHAT]);
+        let options = HookSetup::codex_arguments(&passed);
+        agent_launch(&codex, &request, options, &environment, &DISK_LOOKUPS)
+            .map(|(command, ..)| command)
+    }
 
-        // Another tab holding the same id is not allowed to resume it.
-        let (command, _, resumed) = agent_launch(
-            &codex,
-            &request(&second),
-            Vec::new(),
-            &environment,
-            &lookups,
-        )
-        .expect("launch");
-        assert!(!resumed);
-        assert!(!command.args.contains(&CHAT.to_owned()), "{command:?}");
-        assert_eq!(
-            chat.asked.into_inner().expect("lock"),
-            [
-                "0123456789abcdef0123456789abcdef-agent".to_owned(),
-                format!("{TASK}-agent-22222222-2222-4222-8222-222222222222"),
-            ]
+    const CHAT_Y: &str = "01a21a52-c651-7292-8c49-079b37d166dd";
+    const CHAT_Z: &str = "01a21a53-0000-7000-8000-000000000003";
+
+    #[test]
+    fn a_stale_recorded_conversation_gives_way_to_the_one_the_tab_started() {
+        let world = codex_world();
+        let db = codex_task(
+            &world.worktree,
+            Some("01a21a00-0000-7000-8000-00000000dead"),
         );
+        let (passed, _) = codex_instructions(
+            &world.hook,
+            "task:agent",
+            &ConfigHome::Folder(world.home.clone()),
+        )
+        .expect("a tab note");
+        write_codex_conversation(&world.home, "01", CHAT_Y, &world.worktree, &passed);
+        let command = launch_codex_tab(&world, &db, "task:agent").expect("launch");
+        assert!(
+            command
+                .args
+                .ends_with(&["resume".to_owned(), CHAT_Y.to_owned()]),
+            "{command:?}"
+        );
+        assert!(command
+            .args
+            .iter()
+            .any(|arg| arg.contains("Brachio tab task-agent.")));
+        let recorded = terminal_authorization::resolve(&db, "task:agent")
+            .expect("resolve")
+            .conversation;
+        assert_eq!(
+            recorded.as_deref(),
+            Some(CHAT_Y),
+            "the stale id is replaced"
+        );
+
+        // A conversation started later with `/new` in the same tab is the one that continues.
+        write_codex_conversation(&world.home, "02", CHAT_Z, &world.worktree, &passed);
+        let command = launch_codex_tab(&world, &db, "task:agent").expect("launch");
+        assert!(command
+            .args
+            .ends_with(&["resume".to_owned(), CHAT_Z.to_owned()]));
     }
 
     #[test]
-    fn a_codex_tab_finds_its_own_conversation_or_none() {
-        let owner = "0123456789abcdef0123456789abcdef-agent";
-        let chat = OneCodexChat {
-            owner,
-            asked: Mutex::new(Vec::new()),
-        };
-        let started =
-            |_: Option<&Path>, _: &Path, marker: &str, id: &str| chat.started_by(marker, id);
-        let found = |_: Option<&Path>, _: &Path, marker: &str| chat.found_for(marker);
-        let lookups = ConversationLookups {
-            claude: &|_, _| None,
-            codex: &|_, _| Vec::new(),
-            codex_tab: &started,
-            codex_for_tab: &found,
-        };
-        let own = |recorded, marker| {
-            own_codex_conversation(recorded, None, Path::new("worktree"), marker, &lookups)
+    fn without_a_conversation_of_its_own_a_codex_tab_asks_or_starts_new() {
+        let world = codex_world();
+        let stale = "01a21a00-0000-7000-8000-00000000dead";
+        let db = codex_task(&world.worktree, Some(stale));
+        let command = launch_codex_tab(&world, &db, "task:agent").expect("launch");
+        assert!(
+            !command.args.contains(&"resume".to_owned()),
+            "a new conversation: {command:?}"
+        );
+
+        // Another tab's and a shell's conversations are there to choose from, never taken.
+        let other_tab = codex_instructions(
+            &world.hook,
+            "task:agent-22222222-2222-4222-8222-222222222222",
+            &ConfigHome::Folder(world.home.clone()),
+        )
+        .expect("a tab note")
+        .0;
+        write_codex_conversation(&world.home, "01", CHAT_Y, &world.worktree, &other_tab);
+        write_codex_conversation(&world.home, "02", CHAT_Z, &world.worktree, "from a shell");
+        let refused = launch_codex_tab(&world, &db, "task:agent").expect_err("the person chooses");
+        assert!(refused.starts_with(CODEX_CHOOSE), "{refused}");
+        let recorded = terminal_authorization::resolve(&db, "task:agent")
+            .expect("resolve")
+            .conversation;
+        assert_eq!(recorded.as_deref(), Some(stale), "nothing is recorded");
+    }
+
+    #[test]
+    fn the_users_own_developer_instructions_go_first_and_still_name_the_tab() {
+        let world = codex_world();
+        std::fs::write(
+            world.home.join("config.toml"),
+            "developer_instructions = \"Answer in Korean.\"\n",
+        )
+        .expect("config");
+        let home = ConfigHome::Folder(world.home.clone());
+        let (passed, accepted) =
+            codex_instructions(&world.hook, "task:agent", &home).expect("note");
+        assert!(passed.starts_with("Answer in Korean."), "{passed:?}");
+        assert!(passed.ends_with("This conversation belongs to Brachio tab task-agent."));
+        assert_eq!(accepted.len(), 2, "with and without the user's text");
+        assert!(accepted.contains(&passed));
+        let db = codex_task(&world.worktree, None);
+        write_codex_conversation(&world.home, "01", CHAT_Y, &world.worktree, &passed);
+        let command = launch_codex_tab(&world, &db, "task:agent").expect("launch");
+        assert!(command
+            .args
+            .ends_with(&["resume".to_owned(), CHAT_Y.to_owned()]));
+        assert!(command
+            .args
+            .contains(&format!("developer_instructions={passed}")));
+    }
+
+    #[test]
+    fn an_explicitly_chosen_or_project_conversation_is_not_overridden() {
+        let decide = |recorded, own: Option<&str>, recorded_is_own, listed: &[&str]| {
+            decide_codex_resume(
+                recorded,
+                CodexFacts {
+                    found: brachio_agent::WorktreeConversations {
+                        own: own.map(str::to_owned),
+                        listed: listed
+                            .iter()
+                            .map(|id| brachio_agent::CodexConversation {
+                                id: (*id).to_owned(),
+                                timestamp: None,
+                            })
+                            .collect(),
+                    },
+                    recorded_is_own,
+                },
+            )
         };
         assert_eq!(
-            own(Some(CHAT), owner),
-            Some(OwnConversation {
-                id: CHAT.to_owned(),
-                recorded: true
-            })
+            decide(Some(CHAT_Y), None, true, &[CHAT_Z]),
+            CodexResume::Own {
+                id: CHAT_Y.to_owned(),
+                record: false
+            }
         );
         assert_eq!(
-            own(None, owner),
-            Some(OwnConversation {
-                id: CHAT.to_owned(),
-                recorded: false
-            })
+            decide(Some(CHAT_Y), Some(CHAT_Y), false, &[]),
+            CodexResume::Own {
+                id: CHAT_Y.to_owned(),
+                record: false
+            }
         );
         assert_eq!(
-            own(Some("gone"), owner),
-            Some(OwnConversation {
-                id: CHAT.to_owned(),
-                recorded: false
-            })
+            decide(None, None, false, &["not-a-uuid"]),
+            CodexResume::Fresh
         );
-        assert_eq!(own(None, "0123456789abcdef0123456789abcdef-agent-x"), None);
         assert_eq!(
-            own(Some(CHAT), "0123456789abcdef0123456789abcdef-agent-x"),
-            None
+            decide(Some(CHAT_Y), None, false, &[CHAT_Z]),
+            CodexResume::Choose
         );
     }
 
@@ -1342,8 +1539,6 @@ mod tests {
             let lookups = ConversationLookups {
                 claude: &|_, _| panic!("an unknown folder is not searched"),
                 codex: &|_, _| Vec::new(),
-                codex_tab: &|_, _, _, _| false,
-                codex_for_tab: &|_, _, _| None,
             };
             let (command, _, resumed) =
                 agent_launch(&claude, &request, Vec::new(), &environment, &lookups)
