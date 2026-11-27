@@ -306,17 +306,22 @@ fn apply_codex_resume(
     }
 }
 
-/// The `developer_instructions` a Codex launch for `key` passes, and every value an earlier
-/// launch for the same tab may have passed: Brachio's part alone, and after the user's own
-/// instructions as they are now. `None` when Brachio adds nothing, so the user's own setting
-/// applies unchanged.
+/// The `developer_instructions` a Codex launch for `key` passes, if any, and every value an
+/// earlier launch for the same tab may have passed: Brachio's part alone, and after the user's own
+/// instructions as they are now. Nothing is passed when Brachio adds nothing, or when the user's
+/// own instructions cannot be passed along with Brachio's (see
+/// [`brachio_agent::codex_developer_instructions`]): the user's setting then applies unchanged and
+/// the person chooses the conversation to continue, as before tabs were named.
 fn codex_instructions(
     hook: &HookSetup,
     key: &str,
     home: &ConfigHome,
-) -> Option<(String, Vec<String>)> {
-    let brachio =
-        hook.codex_brachio_instructions(terminal_authorization::tab_marker(key).as_deref())?;
+) -> (Option<String>, Vec<String>) {
+    let Some(brachio) =
+        hook.codex_brachio_instructions(terminal_authorization::tab_marker(key).as_deref())
+    else {
+        return (None, Vec::new());
+    };
     let user = match home {
         ConfigHome::Unknown => None,
         ConfigHome::Default | ConfigHome::Folder(_) => {
@@ -324,11 +329,13 @@ fn codex_instructions(
         }
     };
     let passed = brachio_agent::codex_developer_instructions(user.as_deref(), &brachio);
-    let mut accepted = vec![brachio_agent::codex_developer_instructions(None, &brachio)];
-    if !accepted.contains(&passed) {
+    let mut accepted: Vec<String> = brachio_agent::codex_developer_instructions(None, &brachio)
+        .into_iter()
+        .collect();
+    if let Some(passed) = passed.as_ref().filter(|passed| !accepted.contains(passed)) {
         accepted.push(passed.clone());
     }
-    Some((passed, accepted))
+    (passed, accepted)
 }
 
 /// Clear a specific uncertain launch after the user has confirmed the risk.
@@ -508,15 +515,12 @@ async fn prepare_terminal(
     let mut request = request.clone();
     if let (Some(AgentKind::Codex), Some(key)) = (request.agent, request.key.clone()) {
         let home = environment.config_home(AgentKind::Codex);
-        let instructions = codex_instructions(hook, &key, &home);
-        if let Some((passed, _)) = &instructions {
+        let (passed, accepted) = codex_instructions(hook, &key, &home);
+        if let Some(passed) = &passed {
             options.splice(0..0, HookSetup::codex_arguments(passed));
         }
         // Which conversation a Codex tab continues is decided here, just before it starts.
         if request.resume && request.codex_conversation_id.is_none() {
-            let accepted = instructions
-                .map(|(_, accepted)| accepted)
-                .unwrap_or_default();
             let recorded = request.session_id.clone();
             let facts = {
                 let request = request.clone();
@@ -1318,7 +1322,7 @@ mod tests {
             account: vec![variable("CODEX_HOME", &world.home.to_string_lossy())],
         };
         let home = environment.config_home(AgentKind::Codex);
-        let (passed, accepted) = codex_instructions(&world.hook, key, &home).expect("a tab note");
+        let (passed, accepted) = codex_instructions(&world.hook, key, &home);
         let facts = codex_facts(&home, &request, request.session_id.as_deref(), &accepted);
         let decision = decide_codex_resume(request.session_id.as_deref(), facts);
         request.own_codex_conversation = apply_codex_resume(db, key, decision)?;
@@ -1327,7 +1331,10 @@ mod tests {
             path: PathBuf::from("/fake-home/bin/codex"),
             version: None,
         };
-        let options = HookSetup::codex_arguments(&passed);
+        let options = passed
+            .as_deref()
+            .map(HookSetup::codex_arguments)
+            .unwrap_or_default();
         agent_launch(&codex, &request, options, &environment, &DISK_LOOKUPS)
             .map(|(command, ..)| command)
     }
@@ -1342,11 +1349,12 @@ mod tests {
             &world.worktree,
             Some("01a21a00-0000-7000-8000-00000000dead"),
         );
-        let (passed, _) = codex_instructions(
+        let passed = codex_instructions(
             &world.hook,
             "task:agent",
             &ConfigHome::Folder(world.home.clone()),
         )
+        .0
         .expect("a tab note");
         write_codex_conversation(&world.home, "01", CHAT_Y, &world.worktree, &passed);
         let command = launch_codex_tab(&world, &db, "task:agent").expect("launch");
@@ -1394,8 +1402,8 @@ mod tests {
             "task:agent-22222222-2222-4222-8222-222222222222",
             &ConfigHome::Folder(world.home.clone()),
         )
-        .expect("a tab note")
-        .0;
+        .0
+        .expect("a tab note");
         write_codex_conversation(&world.home, "01", CHAT_Y, &world.worktree, &other_tab);
         write_codex_conversation(&world.home, "02", CHAT_Z, &world.worktree, "from a shell");
         let refused = launch_codex_tab(&world, &db, "task:agent").expect_err("the person chooses");
@@ -1415,8 +1423,8 @@ mod tests {
         )
         .expect("config");
         let home = ConfigHome::Folder(world.home.clone());
-        let (passed, accepted) =
-            codex_instructions(&world.hook, "task:agent", &home).expect("note");
+        let (passed, accepted) = codex_instructions(&world.hook, "task:agent", &home);
+        let passed = passed.expect("note");
         assert!(passed.starts_with("Answer in Korean."), "{passed:?}");
         assert!(passed.ends_with("This conversation belongs to Brachio tab task-agent."));
         assert_eq!(accepted.len(), 2, "with and without the user's text");
@@ -1430,6 +1438,40 @@ mod tests {
         assert!(command
             .args
             .contains(&format!("developer_instructions={passed}")));
+    }
+
+    #[test]
+    fn user_instructions_that_cannot_go_with_brachios_are_left_alone() {
+        let world = codex_world();
+        // Too long to pass with Brachio's sentence on any platform.
+        let long = "x".repeat(brachio_agent::MAX_INSTRUCTIONS);
+        std::fs::write(
+            world.home.join("config.toml"),
+            format!("developer_instructions = \"{long}\"\n"),
+        )
+        .expect("config");
+        let home = ConfigHome::Folder(world.home.clone());
+        let (passed, accepted) = codex_instructions(&world.hook, "task:agent", &home);
+        assert_eq!(passed, None, "the user's own setting applies unchanged");
+        assert_eq!(
+            accepted.len(),
+            1,
+            "a conversation named before still counts"
+        );
+
+        let db = codex_task(&world.worktree, None);
+        write_codex_conversation(&world.home, "01", CHAT_Y, &world.worktree, "from a shell");
+        let refused = launch_codex_tab(&world, &db, "task:agent").expect_err("the person chooses");
+        assert!(refused.starts_with(CODEX_CHOOSE), "{refused}");
+        std::fs::remove_dir_all(world.home.join("sessions")).expect("forget the conversations");
+        let command = launch_codex_tab(&world, &db, "task:agent").expect("launch");
+        assert!(
+            !command
+                .args
+                .iter()
+                .any(|arg| arg.contains("developer_instructions")),
+            "nothing replaces the user's setting: {command:?}"
+        );
     }
 
     #[test]

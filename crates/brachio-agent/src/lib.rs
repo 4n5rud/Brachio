@@ -17,7 +17,8 @@ pub use codex_sessions::{
     codex_brachio_instructions, codex_conversation_started_with, codex_conversations,
     codex_conversations_in, codex_developer_instructions, codex_rollout_path,
     codex_user_instructions, codex_worktree_conversations, is_tab_marker, latest_codex_session,
-    latest_session_in, rollout_in, CodexConversation, WorktreeConversations,
+    latest_session_in, rollout_in, CodexConversation, WorktreeConversations, MAX_INSTRUCTIONS,
+    MAX_WINDOWS_INSTRUCTIONS,
 };
 pub use installed::{
     detect, detect_all, find_on_path, is_safe_for_cmd, locate, Installed, PromptDelivery,

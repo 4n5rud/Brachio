@@ -197,20 +197,37 @@ pub fn codex_brachio_instructions(
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
+/// The longest `developer_instructions` a launch passes on Windows, where npm installs run through
+/// `cmd.exe`, whose command line holds 8191 characters: the rest is left for the program and its
+/// other arguments.
+pub const MAX_WINDOWS_INSTRUCTIONS: usize = 4 * 1024;
+/// The longest `developer_instructions` a launch passes elsewhere.
+pub const MAX_INSTRUCTIONS: usize = 32 * 1024;
+
 /// The `developer_instructions` a Codex launch passes: the user's own, from their Codex settings,
-/// then Brachio's. A launch setting replaces the user's value, so it is kept this way. The user's
-/// text is left out on Windows when it cannot pass through `cmd.exe`, which npm installs use.
+/// then Brachio's. A launch setting replaces the user's value, so it is kept this way.
+///
+/// `None` when the user's value cannot be passed with Brachio's: on Windows when it cannot pass
+/// through `cmd.exe`, such as text with quotes or line breaks, or when the whole is too long. The
+/// launch then passes no `developer_instructions`, so the user's setting applies unchanged and
+/// the tab is not named in its conversations.
 #[must_use]
-pub fn codex_developer_instructions(user: Option<&str>, brachio: &str) -> String {
-    let separator = if cfg!(windows) { " " } else { "\n\n" };
-    match user
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .filter(|text| !cfg!(windows) || crate::is_safe_for_cmd(text))
-    {
+pub fn codex_developer_instructions(user: Option<&str>, brachio: &str) -> Option<String> {
+    developer_instructions_for(user, brachio, cfg!(windows))
+}
+
+fn developer_instructions_for(user: Option<&str>, brachio: &str, windows: bool) -> Option<String> {
+    let (separator, limit) = if windows {
+        (" ", MAX_WINDOWS_INSTRUCTIONS)
+    } else {
+        ("\n\n", MAX_INSTRUCTIONS)
+    };
+    let joined = match user.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(user) if windows && !crate::is_safe_for_cmd(user) => return None,
         Some(user) => format!("{user}{separator}{brachio}"),
         None => brachio.to_owned(),
-    }
+    };
+    (joined.len() <= limit).then_some(joined)
 }
 
 /// The user's own `developer_instructions` in `config.toml` of the Codex config folder `home`, or
@@ -728,9 +745,9 @@ mod tests {
     fn accepted(marker: &str, user: Option<&str>) -> Vec<String> {
         let brachio =
             codex_brachio_instructions(Some("/fake-home/x.md"), Some(marker)).expect("text");
-        let mut accepted = vec![codex_developer_instructions(None, &brachio)];
+        let mut accepted = vec![codex_developer_instructions(None, &brachio).expect("short")];
         if user.is_some() {
-            accepted.push(codex_developer_instructions(user, &brachio));
+            accepted.push(codex_developer_instructions(user, &brachio).expect("passable"));
         }
         accepted
     }
@@ -890,7 +907,7 @@ mod tests {
         assert_eq!(user.as_deref(), Some("Answer in Korean."));
         let brachio =
             codex_brachio_instructions(Some("/fake-home/x.md"), Some(TAB_A)).expect("text");
-        let both = codex_developer_instructions(user.as_deref(), &brachio);
+        let both = codex_developer_instructions(user.as_deref(), &brachio).expect("passable");
         assert!(both.starts_with("Answer in Korean."));
         assert!(both.ends_with(&brachio));
         write_conversation(
@@ -922,7 +939,10 @@ mod tests {
                 "{broken:?}"
             );
         }
-        assert_eq!(codex_developer_instructions(Some("  "), &brachio), brachio);
+        assert_eq!(
+            codex_developer_instructions(Some("  "), &brachio).as_deref(),
+            Some(brachio.as_str())
+        );
         assert_eq!(codex_brachio_instructions(None, Some("bad marker")), None);
         assert_eq!(
             codex_brachio_instructions(None, Some(TAB_A)).as_deref(),
@@ -930,6 +950,35 @@ mod tests {
                 "This conversation belongs to Brachio tab 0123456789abcdef0123456789abcdef-agent."
             )
         );
+    }
+
+    #[test]
+    fn user_instructions_that_cannot_be_passed_with_brachios_are_left_to_codex() {
+        let brachio = codex_brachio_instructions(None, Some(TAB_A)).expect("text");
+        for windows in [false, true] {
+            let pass = |user: &str| developer_instructions_for(Some(user), &brachio, windows);
+            assert!(pass("Answer in Korean.").is_some_and(|text| text.ends_with(&brachio)));
+            let limit = if windows {
+                MAX_WINDOWS_INSTRUCTIONS
+            } else {
+                MAX_INSTRUCTIONS
+            };
+            let room = limit - brachio.len() - if windows { 1 } else { 2 };
+            assert!(pass(&"x".repeat(room)).is_some_and(|text| text.len() == limit));
+            assert_eq!(pass(&"x".repeat(room + 1)), None, "too long");
+            assert_eq!(
+                developer_instructions_for(None, &brachio, windows).as_deref(),
+                Some(brachio.as_str())
+            );
+        }
+        for quoted in ["Say \"hi\".", "line one\nline two", "100% sure"] {
+            assert_eq!(
+                developer_instructions_for(Some(quoted), &brachio, true),
+                None,
+                "{quoted:?} cannot pass through cmd.exe"
+            );
+            assert!(developer_instructions_for(Some(quoted), &brachio, false).is_some());
+        }
     }
 
     #[test]
