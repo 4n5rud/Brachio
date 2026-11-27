@@ -103,24 +103,33 @@ impl HookSetup {
         arguments
     }
 
-    /// Arguments that point a Codex session at the skills file. `model_instructions_file` would
-    /// replace Codex's own base instructions, so a one-line `developer_instructions` that names
-    /// the file is used instead: it adds to them, needs no multi-line argument and passes through
-    /// `cmd.exe` for npm shims. The value is not valid TOML on purpose, so Codex takes it as a
-    /// literal. Empty when the helper is not installed or the path is unsafe for `cmd.exe`.
-    pub fn codex_arguments(&self) -> Vec<String> {
-        let Some(path) = &self.codex_instructions else {
-            return Vec::new();
-        };
-        let path = path.to_string_lossy().replace('\\', "/");
-        if !brachio_agent::is_safe_for_cmd(&path) {
+    /// Arguments that point a Codex session at the skills file and name the tab that launched it.
+    /// `model_instructions_file` would replace Codex's own base instructions, so a one-line
+    /// `developer_instructions` that names the file is used instead: it adds to them, needs no
+    /// multi-line argument and passes through `cmd.exe` for npm shims. The value is not valid TOML
+    /// on purpose, so Codex takes it as a literal. The skills part is left out when the helper is
+    /// not installed or the path is unsafe for `cmd.exe`; the tab note, see
+    /// [`brachio_agent::codex_tab_note`], is left out for a marker that cannot name a tab. Empty
+    /// when both are left out.
+    pub fn codex_arguments(&self, tab_marker: Option<&str>) -> Vec<String> {
+        let mut parts = Vec::new();
+        if let Some(path) = &self.codex_instructions {
+            let path = path.to_string_lossy().replace('\\', "/");
+            if brachio_agent::is_safe_for_cmd(&path) {
+                parts.push(format!(
+                    "Before using Brachio, read and follow the instructions in {path}."
+                ));
+            }
+        }
+        if let Some(marker) = tab_marker.filter(|marker| brachio_agent::is_tab_marker(marker)) {
+            parts.push(brachio_agent::codex_tab_note(marker));
+        }
+        if parts.is_empty() {
             return Vec::new();
         }
         vec![
             "-c".to_owned(),
-            format!(
-                "developer_instructions=Before using Brachio, read and follow the instructions in {path}"
-            ),
+            format!("developer_instructions={}", parts.join(" ")),
         ]
     }
 
@@ -291,13 +300,14 @@ mod tests {
             plugin: None,
             codex_instructions: Some(file.clone()),
         };
-        let arguments = setup.codex_arguments();
+        let arguments = setup.codex_arguments(None);
         assert_eq!(arguments[0], "-c");
         assert!(!arguments[1].contains('\n'));
         let named = arguments[1]
             .strip_prefix(
                 "developer_instructions=Before using Brachio, read and follow the instructions in ",
             )
+            .and_then(|rest| rest.strip_suffix('.'))
             .expect("key");
         assert_eq!(named, file.to_string_lossy().replace('\\', "/"));
         let text = std::fs::read_to_string(&file).expect("file");
@@ -314,7 +324,42 @@ mod tests {
             codex_instructions: Some(Path::new("C:/100%/x.md").to_path_buf()),
             ..setup
         };
-        assert!(unsafe_path.codex_arguments().is_empty());
+        assert!(unsafe_path.codex_arguments(None).is_empty());
+    }
+
+    #[test]
+    fn codex_is_told_which_tab_launched_it_with_or_without_the_helper() {
+        const MARKER: &str = "0123456789abcdef0123456789abcdef-agent";
+        let folder = tempfile::tempdir().expect("tempdir");
+        let file = super::write_codex_instructions(folder.path()).expect("write");
+        let with_skills = HookSetup {
+            endpoint: String::new(),
+            settings: None,
+            helper_folder: Some(Path::new("helper").to_path_buf()),
+            plugin: None,
+            codex_instructions: Some(file),
+        };
+        let note = brachio_agent::codex_tab_note(MARKER);
+        let arguments = with_skills.codex_arguments(Some(MARKER));
+        assert_eq!(arguments.len(), 2);
+        assert!(arguments[1].starts_with("developer_instructions=Before using Brachio"));
+        assert!(arguments[1].ends_with(&format!(" {note}")), "{arguments:?}");
+        for program in ["C:/npm/codex.cmd", "C:/bin/codex.exe"] {
+            brachio_agent::ResolvedCommand::new(Path::new(program), &arguments)
+                .unwrap_or_else(|error| panic!("{program}: {error}"));
+        }
+        let without_helper = HookSetup {
+            codex_instructions: None,
+            ..with_skills
+        };
+        assert_eq!(
+            without_helper.codex_arguments(Some(MARKER)),
+            ["-c".to_owned(), format!("developer_instructions={note}")]
+        );
+        assert!(without_helper
+            .codex_arguments(Some("task:agent"))
+            .is_empty());
+        assert!(without_helper.codex_arguments(None).is_empty());
     }
 
     #[test]
@@ -352,7 +397,7 @@ mod tests {
             ),
         };
         let mut all: Vec<String> = setup.claude_arguments();
-        all.extend(setup.codex_arguments());
+        all.extend(setup.codex_arguments(Some("task-agent")));
         for kind in AgentKind::ALL {
             let launches = [
                 kind.interactive(),

@@ -4,6 +4,7 @@
 //! `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`. The first
 //! line is a `session_meta` record with the id and the working directory.
 
+use std::cell::Cell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::env;
@@ -19,6 +20,11 @@ use serde::{Deserialize, Serialize};
 const MAX_FILES_CHECKED: usize = 500;
 const MAX_HEADER_BYTES: u64 = 128 * 1024;
 const MAX_CANDIDATES: usize = 10;
+/// How many conversations in the folder are checked for a tab's note.
+const MAX_TAB_CANDIDATES: usize = 50;
+/// How much of a conversation file is read to find a tab's note. The note is in the developer
+/// instructions, which Codex writes before the first user message, within the first 200 KiB or so.
+const MAX_TAB_NOTE_BYTES: u64 = 1024 * 1024;
 
 /// A conversation started in the current working directory.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -134,6 +140,170 @@ struct Meta {
     timestamp: Option<String>,
     /// Set for helper conversations Codex starts on its own.
     thread_source: Option<String>,
+    /// What started the conversation: `"cli"` for the interactive Codex a tab runs.
+    #[serde(default)]
+    source: Option<serde_json::Value>,
+    /// Set when the conversation was copied from another one.
+    #[serde(default)]
+    forked_from_id: Option<serde_json::Value>,
+    /// Set when another conversation started this one.
+    #[serde(default)]
+    parent_thread_id: Option<serde_json::Value>,
+}
+
+impl Meta {
+    /// Started fresh by an interactive Codex: not copied from or started by another conversation.
+    fn is_fresh_interactive(&self) -> bool {
+        self.source.as_ref().and_then(serde_json::Value::as_str) == Some("cli")
+            && self.forked_from_id.is_none()
+            && self.parent_thread_id.is_none()
+    }
+}
+
+/// The sentence Brachio adds to the developer instructions of a Codex launch, naming the tab that
+/// launched it, so the conversation file records which tab it belongs to.
+#[must_use]
+pub fn codex_tab_note(marker: &str) -> String {
+    format!("This conversation belongs to Brachio tab {marker}.")
+}
+
+/// Whether `marker` can name a tab in a note: letters, digits and inner hyphens only, so it passes
+/// through `cmd.exe` and no marker is a note-ending prefix of another.
+#[must_use]
+pub fn is_tab_marker(marker: &str) -> bool {
+    !marker.is_empty()
+        && marker.len() <= 128
+        && !marker.starts_with('-')
+        && !marker.ends_with('-')
+        && marker
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// The newest Codex conversation started in `cwd` by a launch for the tab `marker`, from the
+/// config folder `home`, or the default one when `None`.
+///
+/// Only a conversation an interactive Codex started fresh counts: not a copy or a helper of
+/// another conversation, and only when the tab's note is in a developer message before the first
+/// message of the user or the model. A conversation another tab or a shell started has no such
+/// note, so it is never returned. `None` when no conversation can be confirmed.
+#[must_use]
+pub fn codex_conversation_for_tab(home: Option<&Path>, cwd: &Path, marker: &str) -> Option<String> {
+    if !is_tab_marker(marker) {
+        return None;
+    }
+    let sessions = match home {
+        Some(home) => home.join("sessions"),
+        None => codex_home()?.join("sessions"),
+    };
+    let note = codex_tab_note(marker);
+    let wanted = normalize(cwd);
+    let mut budget = MAX_FILES_CHECKED;
+    let candidates = Cell::new(MAX_TAB_CANDIDATES);
+    let path = find_rollout(&sessions, 0, &mut budget, &|path| {
+        found_in(path, &wanted, &note, &candidates)
+    })?;
+    read_meta(&path).map(|meta| meta.id)
+}
+
+/// Whether the Codex conversation `id`, from the config folder `home` or the default one, was
+/// started in `cwd` by a launch for the tab `marker`, by the same rules as
+/// [`codex_conversation_for_tab`]. A recorded id is checked again before it is resumed.
+#[must_use]
+pub fn codex_conversation_started_by_tab(
+    home: Option<&Path>,
+    cwd: &Path,
+    marker: &str,
+    id: &str,
+) -> bool {
+    if !is_tab_marker(marker)
+        || id.is_empty()
+        || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return false;
+    }
+    let Some(sessions) = home
+        .map(|home| home.join("sessions"))
+        .or_else(|| Some(codex_home()?.join("sessions")))
+    else {
+        return false;
+    };
+    let suffix = format!("-{id}.jsonl");
+    let mut budget = MAX_FILES_CHECKED;
+    let Some(path) = find_rollout(&sessions, 0, &mut budget, &|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(&suffix))
+    }) else {
+        return false;
+    };
+    let one_candidate = Cell::new(1);
+    read_meta(&path).is_some_and(|meta| meta.id == id)
+        && found_in(
+            &path,
+            &normalize(cwd),
+            &codex_tab_note(marker),
+            &one_candidate,
+        )
+}
+
+/// Whether the file at `path` is a conversation in `wanted` that the tab with `note` started.
+/// `candidates` counts the conversations in `wanted` still allowed to be read.
+fn found_in(path: &Path, wanted: &str, note: &str, candidates: &Cell<usize>) -> bool {
+    let Some(meta) = read_meta(path) else {
+        return false;
+    };
+    if candidates.get() == 0 || normalize(Path::new(&meta.cwd)) != wanted {
+        return false;
+    }
+    candidates.set(candidates.get() - 1);
+    meta.is_fresh_interactive() && carries_note(path, note)
+}
+
+/// Whether a developer message before the first other message contains `note`.
+fn carries_note(path: &Path, note: &str) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut reader = BufReader::new(file.take(MAX_TAB_NOTE_BYTES));
+    let mut line = String::new();
+    let mut first = true;
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return false,
+            Ok(_) => {}
+        }
+        // A line cut off by the read limit is not trusted.
+        if !line.ends_with('\n') {
+            return false;
+        }
+        if std::mem::take(&mut first) {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) else {
+            return false;
+        };
+        if record["type"] != "response_item" || record["payload"]["type"] != "message" {
+            continue;
+        }
+        match record["payload"]["role"].as_str() {
+            Some("developer") => {
+                let noted = record["payload"]["content"]
+                    .as_array()
+                    .is_some_and(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item["text"].as_str())
+                            .any(|text| text.contains(note))
+                    });
+                if noted {
+                    return true;
+                }
+            }
+            _ => return false,
+        }
+    }
 }
 
 fn codex_home() -> Option<PathBuf> {
@@ -393,6 +563,186 @@ mod tests {
             latest_session_in(root, task.path()).as_deref(),
             Some("2026-11-18T9999-new")
         );
+    }
+
+    /// Writes a conversation as Codex does: its metadata, then the given messages as
+    /// `(role, text)`.
+    fn write_conversation(
+        sessions: &Path,
+        name: &str,
+        cwd: &Path,
+        meta: serde_json::Value,
+        messages: &[(&str, &str)],
+    ) {
+        let folder = sessions.join("2026/11/27");
+        fs::create_dir_all(&folder).expect("day folder");
+        let id = name.trim_start_matches("rollout-");
+        let mut payload = serde_json::json!({
+            "id": id,
+            "cwd": cwd.to_string_lossy(),
+            "source": "cli",
+            "originator": "codex-tui",
+        });
+        for (key, value) in meta.as_object().expect("object") {
+            payload[key] = value.clone();
+        }
+        let mut text = serde_json::json!({"type": "session_meta", "payload": payload}).to_string();
+        text.push('\n');
+        text.push_str(r#"{"type":"event_msg","payload":{"type":"task_started"}}"#);
+        text.push('\n');
+        for (role, body) in messages {
+            let record = serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": role,
+                    "content": [{"type": "input_text", "text": body}],
+                },
+            });
+            text.push_str(&record.to_string());
+            text.push('\n');
+        }
+        fs::write(folder.join(format!("{name}.jsonl")), text).expect("write conversation");
+    }
+
+    fn instructions(marker: &str) -> String {
+        format!(
+            "Before using Brachio, read and follow the instructions in /fake-home/x.md. {}",
+            codex_tab_note(marker)
+        )
+    }
+
+    const TAB_A: &str = "0123456789abcdef0123456789abcdef-agent";
+    const TAB_B: &str =
+        "0123456789abcdef0123456789abcdef-agent-22222222-2222-4222-8222-222222222222";
+
+    #[test]
+    fn a_tab_finds_only_the_conversation_its_own_launch_started() {
+        let home = tempfile::tempdir().expect("codex home");
+        let task = tempfile::tempdir().expect("worktree");
+        let other = tempfile::tempdir().expect("other worktree");
+        let sessions = home.path().join("sessions");
+        let none = serde_json::json!({});
+        let (a, b) = (instructions(TAB_A), instructions(TAB_B));
+        write_conversation(
+            &sessions,
+            "rollout-01-tab-a",
+            task.path(),
+            none.clone(),
+            &[("developer", "base"), ("developer", &a), ("user", "fix it")],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-02-tab-b",
+            task.path(),
+            none.clone(),
+            &[("developer", &b), ("user", "fix it")],
+        );
+        // Newer than both, in the same worktree, but started some other way.
+        write_conversation(
+            &sessions,
+            "rollout-03-shell",
+            task.path(),
+            none.clone(),
+            &[("developer", "base"), ("user", "hello")],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-04-typed",
+            task.path(),
+            none.clone(),
+            &[("user", &a)],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-05-late",
+            task.path(),
+            none.clone(),
+            &[("developer", "base"), ("user", "hi"), ("developer", &a)],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-06-fork",
+            task.path(),
+            serde_json::json!({"forked_from_id": "01-tab-a"}),
+            &[("developer", &a), ("user", "x")],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-07-helper",
+            task.path(),
+            serde_json::json!({"thread_source": "subagent", "parent_thread_id": "01-tab-a"}),
+            &[("developer", &a)],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-08-exec",
+            task.path(),
+            serde_json::json!({"source": "exec"}),
+            &[("developer", &a)],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-09-elsewhere",
+            other.path(),
+            none,
+            &[("developer", &a)],
+        );
+
+        let find = |marker| codex_conversation_for_tab(Some(home.path()), task.path(), marker);
+        assert_eq!(find(TAB_A).as_deref(), Some("01-tab-a"));
+        assert_eq!(find(TAB_B).as_deref(), Some("02-tab-b"));
+        assert_eq!(find("0123456789abcdef0123456789abcdef-agent-3"), None);
+        assert_eq!(find("bad marker"), None);
+        assert_eq!(find(""), None);
+        assert_eq!(
+            codex_conversation_for_tab(Some(home.path()), other.path(), TAB_B),
+            None
+        );
+    }
+
+    #[test]
+    fn a_recorded_id_is_resumed_only_while_its_file_still_names_the_tab() {
+        let home = tempfile::tempdir().expect("codex home");
+        let task = tempfile::tempdir().expect("worktree");
+        let sessions = home.path().join("sessions");
+        let a = instructions(TAB_A);
+        write_conversation(
+            &sessions,
+            "rollout-2026-11-27T01-00-00-01a2",
+            task.path(),
+            serde_json::json!({}),
+            &[("developer", &a), ("user", "go")],
+        );
+        write_conversation(
+            &sessions,
+            "rollout-2026-11-27T02-00-00-02b3",
+            task.path(),
+            serde_json::json!({}),
+            &[("developer", "base"), ("user", "go")],
+        );
+        let started =
+            |id| codex_conversation_started_by_tab(Some(home.path()), task.path(), TAB_A, id);
+        assert!(started("2026-11-27T01-00-00-01a2"));
+        assert!(!started("2026-11-27T02-00-00-02b3"), "no note");
+        assert!(!started("01a2"), "the id must be the conversation's own");
+        assert!(!started("missing"));
+        assert!(!started("../x"));
+        assert!(!codex_conversation_started_by_tab(
+            Some(home.path()),
+            task.path(),
+            TAB_B,
+            "2026-11-27T01-00-00-01a2"
+        ));
+    }
+
+    #[test]
+    fn a_tab_marker_is_plain_and_never_a_prefix_inside_a_note() {
+        assert!(is_tab_marker(TAB_A) && is_tab_marker(TAB_B));
+        for bad in ["", "-a", "a-", "a b", "a:agent", "a.b", "a%b"] {
+            assert!(!is_tab_marker(bad), "{bad:?}");
+        }
+        assert!(!codex_tab_note(TAB_B).contains(&codex_tab_note(TAB_A)));
     }
 
     #[test]

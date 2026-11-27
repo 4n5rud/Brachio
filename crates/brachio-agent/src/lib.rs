@@ -14,8 +14,9 @@ mod usage_scan;
 pub use agent_kind::{AgentKind, Launch};
 pub use catalog::{AgentSpec, ResumeSupport, StatusChannel};
 pub use codex_sessions::{
-    codex_conversations, codex_conversations_in, codex_rollout_path, latest_codex_session,
-    latest_session_in, rollout_in, CodexConversation,
+    codex_conversation_for_tab, codex_conversation_started_by_tab, codex_conversations,
+    codex_conversations_in, codex_rollout_path, codex_tab_note, is_tab_marker,
+    latest_codex_session, latest_session_in, rollout_in, CodexConversation,
 };
 pub use installed::{
     detect, detect_all, find_on_path, is_safe_for_cmd, locate, Installed, PromptDelivery,

@@ -45,7 +45,12 @@ pub(crate) fn resolve(connection: &Connection, key: &str) -> Result<TerminalOwne
                     Some(requested.to_owned()),
                     None,
                 ),
-                (true, TabKind::Codex) => (Some(AgentKind::Codex), None, None),
+                (true, TabKind::Codex) => (
+                    Some(AgentKind::Codex),
+                    brachio_store::task_tab_conversation(connection, task_id, requested)
+                        .map_err(|error| error.to_string())?,
+                    None,
+                ),
                 (false, TabKind::Shell) => (None, None, tab.target),
                 _ => return Err("The tab does not match its terminal.".to_owned()),
             }
@@ -57,6 +62,39 @@ pub(crate) fn resolve(connection: &Connection, key: &str) -> Result<TerminalOwne
         conversation,
         shell,
     })
+}
+
+/// The name of an agent terminal in the note its Codex launch carries, see
+/// [`brachio_agent::codex_tab_note`]: the key with `:` turned into `-`, such as
+/// `<task id>-agent-<tab id>`. `None` for a key that cannot name a tab.
+pub(crate) fn tab_marker(key: &str) -> Option<String> {
+    let marker = key.replacen(':', "-", 1);
+    brachio_agent::is_tab_marker(&marker).then_some(marker)
+}
+
+/// Records the Codex conversation that the agent terminal `key` started, unless the task or tab
+/// already has one. Returns whether it was recorded.
+pub(crate) fn remember_conversation(
+    connection: &Connection,
+    key: &str,
+    conversation: &str,
+) -> Result<bool, String> {
+    let (task_id, pane) = key
+        .split_once(':')
+        .ok_or_else(|| "A registered task terminal is required.".to_owned())?;
+    let recorded = match pane {
+        "agent" => TaskRecord::remember_agent_session(connection, task_id, conversation),
+        _ => match pane.strip_prefix("agent-") {
+            Some(tab) => brachio_store::remember_task_tab_conversation(
+                connection,
+                task_id,
+                tab,
+                conversation,
+            ),
+            None => return Err("Only an agent terminal has a conversation.".to_owned()),
+        },
+    };
+    recorded.map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -88,6 +126,52 @@ mod tests {
         assert_eq!(owner.conversation.as_deref(), Some(tab));
         brachio_store::close_task_tab(&db, "task", tab).expect("close tab");
         assert!(resolve(&db, &key).is_err());
+    }
+
+    #[test]
+    fn a_found_codex_conversation_is_kept_by_its_own_tab_only() {
+        let db = brachio_store::open_in_memory().expect("test database");
+        db.execute_batch(
+            "INSERT INTO repos (id, path, default_branch) VALUES ('r', 'repo', 'main');
+             INSERT INTO tasks (id, repo_id, title, prompt, branch, worktree_path, state, created_at_ms, agent_kind)
+             VALUES ('task', 'r', 'Task', '', 'task', 'worktree', 'active', 1, 'codex');",
+        ).expect("test task");
+        let first = "11111111-1111-4111-8111-111111111111";
+        let second = "22222222-2222-4222-8222-222222222222";
+        for id in [first, second] {
+            let tab = brachio_store::TaskTab {
+                tab_id: id.to_owned(),
+                kind: TabKind::Codex,
+                target: None,
+            };
+            brachio_store::add_task_tab(&db, "task", &tab).expect("register tab");
+        }
+        let conversation = |key: &str| resolve(&db, key).expect("resolve").conversation;
+        assert_eq!(conversation("task:agent"), None);
+        assert_eq!(conversation(&format!("task:agent-{first}")), None);
+
+        assert!(remember_conversation(&db, "task:agent", "main-chat").expect("record"));
+        assert!(
+            remember_conversation(&db, &format!("task:agent-{first}"), "first-chat")
+                .expect("record")
+        );
+        assert!(
+            !remember_conversation(&db, &format!("task:agent-{first}"), "other").expect("record")
+        );
+        assert!(remember_conversation(&db, "task:shell", "x").is_err());
+        assert_eq!(conversation("task:agent").as_deref(), Some("main-chat"));
+        assert_eq!(
+            conversation(&format!("task:agent-{first}")).as_deref(),
+            Some("first-chat")
+        );
+        assert_eq!(conversation(&format!("task:agent-{second}")), None);
+
+        assert_eq!(tab_marker("task:agent").as_deref(), Some("task-agent"));
+        assert_eq!(
+            tab_marker(&format!("task:agent-{first}")),
+            Some(format!("task-agent-{first}"))
+        );
+        assert_eq!(tab_marker("task:agent:x"), None);
     }
 
     #[test]
