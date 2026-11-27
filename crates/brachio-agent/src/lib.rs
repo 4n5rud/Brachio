@@ -27,7 +27,8 @@ pub use profile::{
     BYPASS_WORDS,
 };
 pub use session_tokens::{
-    claude_log_in, claude_log_path, encode_claude_cwd, LogFormat, TokenUsage, UsageTracker,
+    claude_conversation_recorded, claude_log_in, claude_log_path, encode_claude_cwd, LogFormat,
+    TokenUsage, UsageTracker,
 };
 pub use usage_scan::{
     claude_logs_in, codex_logs_in, providers, Bucket, ClaudeProvider, CodexProvider, FileState,

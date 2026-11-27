@@ -239,6 +239,45 @@ pub fn claude_log_in(projects: &Path, cwd: &Path, session_id: Option<&str>) -> O
     newest_jsonl(&folder)
 }
 
+/// Whether Claude Code kept the conversation `session_id` in any project folder under `config`,
+/// or under its default config folder when `config` is `None`. Every project folder is checked
+/// because the folder name Claude Code derives from a long working directory cannot be predicted.
+/// `None` when it cannot be told, such as when a folder cannot be read, so the caller can keep
+/// trying to resume.
+#[must_use]
+pub fn claude_conversation_recorded(config: Option<&Path>, session_id: &str) -> Option<bool> {
+    if session_id.is_empty()
+        || !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return None;
+    }
+    let projects = match config {
+        Some(folder) => folder.join("projects"),
+        None => claude_config_dir()?.join("projects"),
+    };
+    let folders = match fs::read_dir(&projects) {
+        Ok(folders) => folders,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Some(false),
+        Err(_) => return None,
+    };
+    let name = format!("{session_id}.jsonl");
+    for folder in folders {
+        let folder = folder.ok()?;
+        if !folder.file_type().ok()?.is_dir() {
+            continue;
+        }
+        match fs::metadata(folder.path().join(&name)) {
+            Ok(found) if found.is_file() => return Some(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    Some(false)
+}
+
 fn newest_jsonl(folder: &Path) -> Option<PathBuf> {
     let mut newest: Option<(SystemTime, PathBuf)> = None;
     for entry in fs::read_dir(folder).ok()?.flatten() {
@@ -272,6 +311,41 @@ mod tests {
             .open(path)
             .expect("open");
         file.write_all(text.as_bytes()).expect("write");
+    }
+
+    #[test]
+    fn a_claude_conversation_is_found_in_any_project_folder_or_reported_missing() {
+        const ID: &str = "11111111-2222-4333-8444-555555555555";
+        let config = tempfile::tempdir().expect("config");
+        assert_eq!(
+            claude_conversation_recorded(Some(config.path()), ID),
+            Some(false),
+            "no projects folder yet"
+        );
+        let projects = config.path().join("projects");
+        fs::create_dir_all(projects.join("-fake-home-other")).expect("folder");
+        fs::write(projects.join(".DS_Store"), "").expect("stray file");
+        fs::write(
+            projects.join("-fake-home-other").join("other.jsonl"),
+            "{}\n",
+        )
+        .expect("log");
+        assert_eq!(
+            claude_conversation_recorded(Some(config.path()), ID),
+            Some(false)
+        );
+        let folder = projects.join("-fake-home-a-very-long-worktree-name-123abc");
+        fs::create_dir_all(&folder).expect("folder");
+        fs::write(folder.join(format!("{ID}.jsonl")), "{}\n").expect("log");
+        assert_eq!(
+            claude_conversation_recorded(Some(config.path()), ID),
+            Some(true)
+        );
+        assert_eq!(
+            claude_conversation_recorded(Some(config.path()), "../escape"),
+            None
+        );
+        assert_eq!(claude_conversation_recorded(Some(config.path()), ""), None);
     }
 
     #[test]

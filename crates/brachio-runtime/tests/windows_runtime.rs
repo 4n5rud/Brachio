@@ -312,7 +312,7 @@ fn versions_are_negotiated_per_request() {
     assert_eq!(old["error"], "no active terminal for missing");
 
     let future = refusal(send(&name, &["--protocol", "9", "hello"]));
-    assert!(future.contains("speaks 1 through 7"), "{future}");
+    assert!(future.contains("speaks 1 through 8"), "{future}");
     let early = refusal(send(&name, &["--protocol", "1", "hello"]));
     assert!(early.contains("needs protocol version 2"), "{early}");
 }
